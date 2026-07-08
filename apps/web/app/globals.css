@@ -1,0 +1,306 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ------------------------------------------------------------------ */
+/* Design tokens (triplas RGB — consumidas pelo tailwind.config.ts)    */
+/* Dark de verdade: grafite/carvão com leve tom frio, nunca preto puro */
+/* ------------------------------------------------------------------ */
+:root {
+  --c-bg: 20 20 23; /* #141417 — centro do chat */
+  --c-sidebar: 15 15 18; /* #0f0f12 — barras laterais */
+  --c-surface: 26 26 30; /* #1a1a1e — cards, menus, bolhas */
+  --c-surface2: 35 35 41; /* #232329 — elementos acima da surface */
+  --c-hover: 30 30 35; /* #1e1e23 — estados de hover */
+  --c-border: 39 39 45; /* #27272d */
+  --c-accent: 124 107 255; /* #7c6bff — violeta, usar com moderação */
+  --c-accent-hover: 141 126 255; /* #8d7eff */
+  --c-muted: 157 157 168; /* #9d9da8 — texto secundário */
+  --c-ink: 236 236 240; /* #ececf0 — texto principal */
+  --c-ink-soft: 201 201 209; /* #c9c9d1 */
+
+  --font-mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo,
+    Consolas, monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  @apply bg-bg font-sans text-ink antialiased;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11"; /* Inter: formas alternativas mais limpas */
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgb(var(--c-accent) / 0.35);
+  color: rgb(var(--c-ink));
+}
+
+/* foco visível só para navegação por teclado (botões/links) */
+:focus-visible {
+  outline: 2px solid rgb(var(--c-accent) / 0.7);
+  outline-offset: 1px;
+  border-radius: 6px;
+}
+/* campos de texto já sinalizam foco pelo caret/borda — sem anel em volta */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--c-border)) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgb(var(--c-border));
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--c-muted) / 0.5);
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ------------------------------------------------------------------ */
+/* Animações                                                           */
+/* ------------------------------------------------------------------ */
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-pop {
+  animation: pop 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-up {
+  animation: fade-up 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Cada linha de mensagem: o navegador pula render/layout do que está fora da
+ * viewport (content-visibility), então conversas enormes — "uma Wikipédia
+ * escrita no chat" — não travam a rolagem nem a digitação. */
+.msg-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
+}
+
+/* indicador de "pensando" (três pontos) */
+@keyframes typing-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+.typing-dot {
+  @apply inline-block h-1.5 w-1.5 rounded-full bg-muted;
+  animation: typing-dot 1.2s infinite ease-in-out;
+}
+.typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* cursor de streaming no fim do texto */
+@keyframes caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+.stream-caret > :last-child::after,
+.stream-caret:empty::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 2px;
+  background: rgb(var(--c-muted));
+  animation: caret-blink 1s steps(1) infinite;
+}
+
+/* ------------------------------------------------------------------ */
+/* Markdown das mensagens (.md) — tipografia p/ leitura de texto longo */
+/* ------------------------------------------------------------------ */
+.md {
+  @apply text-[15px] leading-7 text-ink;
+  word-break: break-word;
+}
+.md > :first-child {
+  margin-top: 0;
+}
+.md > :last-child {
+  margin-bottom: 0;
+}
+.md p {
+  @apply my-3;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  @apply mb-2 mt-6 font-semibold text-ink;
+}
+.md h1 {
+  @apply text-xl;
+}
+.md h2 {
+  @apply text-lg;
+}
+.md h3 {
+  @apply text-base;
+}
+.md ul,
+.md ol {
+  @apply my-3 space-y-1.5 pl-6;
+}
+.md ul {
+  list-style: disc;
+}
+.md ol {
+  list-style: decimal;
+}
+.md li::marker {
+  color: rgb(var(--c-muted));
+}
+.md a {
+  @apply text-accent-hover underline decoration-accent/40 underline-offset-2 transition-colors hover:decoration-accent;
+}
+.md blockquote {
+  @apply my-3 border-l-2 border-accent/50 pl-4 text-ink-soft;
+}
+.md hr {
+  @apply my-5 border-border;
+}
+.md strong {
+  @apply font-semibold text-ink;
+}
+.md code:not(pre code) {
+  @apply rounded-md bg-surface2 px-1.5 py-0.5 font-mono text-[0.85em] text-ink;
+  border: 1px solid rgb(var(--c-border) / 0.8);
+}
+.md table {
+  @apply my-3 w-full border-collapse text-sm;
+}
+.md .md-table-wrap {
+  @apply my-3 overflow-x-auto rounded-xl border border-border;
+}
+.md .md-table-wrap table {
+  @apply my-0;
+}
+.md th {
+  @apply border-b border-border bg-surface px-3 py-2 text-left font-medium text-ink-soft;
+}
+.md td {
+  @apply border-b border-border/60 px-3 py-2 align-top;
+}
+.md tr:last-child td {
+  border-bottom: 0;
+}
+
+/* bloco de código (o wrapper com header é montado no componente Markdown) */
+.md pre {
+  @apply overflow-x-auto p-4 font-mono text-[13px] leading-6;
+  background: rgb(var(--c-sidebar) / 0.7);
+}
+.md pre code {
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Syntax highlight (highlight.js) — tema próprio, casado com a paleta */
+/* ------------------------------------------------------------------ */
+.hljs {
+  color: rgb(var(--c-ink-soft));
+}
+.hljs-comment,
+.hljs-quote {
+  color: #6f6f7c;
+  font-style: italic;
+}
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-tag,
+.hljs-name {
+  color: #c39af5;
+}
+.hljs-string,
+.hljs-regexp,
+.hljs-addition {
+  color: #99d19c;
+}
+.hljs-number,
+.hljs-literal,
+.hljs-deletion {
+  color: #f0997a;
+}
+.hljs-title,
+.hljs-title.function_,
+.hljs-section {
+  color: #86aaff;
+}
+.hljs-attr,
+.hljs-attribute,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-selector-attr {
+  color: #ffd58f;
+}
+.hljs-built_in,
+.hljs-type,
+.hljs-symbol,
+.hljs-selector-class,
+.hljs-selector-id {
+  color: #8fd8e8;
+}
+.hljs-meta,
+.hljs-doctag {
+  color: rgb(var(--c-muted));
+}
+.hljs-emphasis {
+  font-style: italic;
+}
+.hljs-strong {
+  font-weight: 600;
+}

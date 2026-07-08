@@ -1,0 +1,68 @@
+[project]
+name = "aiworkspace-server"
+version = "0.1.0"
+description = "AI Workspace — backend FastAPI (chat, SIFT tools, mem0 memory, OpenRouter)"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "sqlalchemy[asyncio]>=2.0.36",
+    "asyncpg>=0.30",
+    "psycopg2-binary>=2.9",
+    "alembic>=1.14",
+    "argon2-cffi>=23.1",
+    "pyjwt>=2.10",
+    "cryptography>=44.0",
+    "httpx>=0.28",
+    "python-multipart>=0.0.12",
+    "ddgs>=6.0",
+    # extração de texto de anexos (integração "Extração de Texto")
+    "pypdf>=5.1",
+    "python-docx>=1.1",
+    "openpyxl>=3.1",
+    "python-pptx>=1.0",
+    # OCR (imagens e PDFs escaneados): tesseract via pytesseract + rasterização
+    "pytesseract>=0.3.13",
+    "pdf2image>=1.17",
+    "pillow>=11.0",
+    # blocos do usuário
+    # v0.5: 2 meta-tools + scope() p/ gating por modelo, sandbox de code-mode,
+    # e pin() (ferramentas "quentes" viram specs de 1a classe, sem discovery).
+    # Integração em tools/sift_service.py + tools/loader.py.
+    "sift-tools>=0.5.0,<0.6",
+    # fixado na linha 0.1.x: é a API (Memory.from_config + config de provider)
+    # contra a qual o serviço de memória foi escrito.
+    "mem0ai>=0.1.40,<0.2",
+    # embedder local do mem0: provider "langchain" embrulhando FastEmbedEmbeddings
+    # (mesmo motor fastembed da SIFT — 100% local, sem torch, sem chave extra)
+    "langchain>=0.3",
+    "langchain-community>=0.3",
+    # Integração Google Workspace (Gmail + Agenda): API client + credenciais OAuth.
+    # A troca/refresh de token é feita via httpx (já presente); o state OAuth é
+    # assinado com pyjwt (já presente). Puxa google-auth-httplib2/httplib2.
+    "google-api-python-client>=2.150",
+    "google-auth>=2.36",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["aiworkspace*"]

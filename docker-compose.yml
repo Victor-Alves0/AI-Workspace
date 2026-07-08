@@ -1,0 +1,85 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aiworkspace}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aiworkspace}
+      POSTGRES_DB: ${POSTGRES_DB:-aiworkspace}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # apenas o host (127.0.0.1) — o server acessa o banco pela rede do compose
+      # (db:5432). Não exponha o Postgres à rede: as credenciais default são fracas
+      # e o sandbox de tools tem acesso de rede. Para psql use `docker compose exec db`.
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aiworkspace} -d ${POSTGRES_DB:-aiworkspace}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    build:
+      context: ./apps/server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      APP_SECRET: ${APP_SECRET:?set APP_SECRET in .env}
+      ENABLE_SIGNUP: ${ENABLE_SIGNUP:-true}
+      WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-duckduckgo}
+      SEARXNG_URL: ${SEARXNG_URL:-http://localhost:8080}
+      VOICE_BASE_URL: ${VOICE_BASE_URL:-https://api.openai.com/v1}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aiworkspace}:${POSTGRES_PASSWORD:-aiworkspace}@db:5432/${POSTGRES_DB:-aiworkspace}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      # Embedder da descoberta de tools da SIFT. O default (bge-small-en) é
+      # inglês-only e forte; o system prompt instrui o modelo a escrever queries
+      # do search_tools em INGLÊS (com fallback no idioma do usuário p/ tools
+      # descritas em outro idioma). Para um índice multilíngue de verdade, troque
+      # p/ intfloat/multilingual-e5-large (~2.2GB; o cache .npz inclui o modelo
+      # no hash → a troca auto-invalida índices antigos).
+      SIFT_EMBED_MODEL: ${SIFT_EMBED_MODEL:-BAAI/bge-small-en-v1.5}
+    volumes:
+      # persiste modelos de embedding (fastembed/HF) e índices SIFT (.npz)
+      # entre recriações do container — cold start rápido
+      - mlcache:/home/app/.cache
+    ports:
+      # host bind + porta configuráveis (o painel do admin diz quais valores pôr
+      # no .env). Ex.: SERVER_BIND=127.0.0.1 SERVER_PORT=8000
+      - "${SERVER_BIND:-0.0.0.0}:${SERVER_PORT:-8000}:8000"
+
+  # Voz local (TTS) — Kokoro-FastAPI, endpoint OpenAI-compatível em :8880/v1.
+  # OPT-IN: só sobe com `docker compose --profile voice up -d kokoro`.
+  # CPU por padrão (baixa os pesos ~350MB no 1º start). Para GPU NVIDIA, troque a
+  # imagem por `-gpu` e adicione o runtime de GPU (ver docs). O server acessa em
+  # http://kokoro:8880/v1 (use esse endereço na conexão "Voz Local").
+  kokoro:
+    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
+    profiles: ["voice"]
+    restart: unless-stopped
+    ports:
+      - "${KOKORO_BIND:-127.0.0.1}:${KOKORO_PORT:-8880}:8880"
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        # vazio => o front deriva a API do host da página (window.location:8000),
+        # permitindo acesso pela LAN (ex.: celular via IP da máquina). Defina no
+        # .env apenas para um domínio/porta próprios.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+    restart: unless-stopped
+    depends_on:
+      - server
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+    ports:
+      - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-3000}:3000"
+
+volumes:
+  pgdata:
+  mlcache:

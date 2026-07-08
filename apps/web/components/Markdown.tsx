@@ -1,0 +1,127 @@
+"use client";
+
+import { isValidElement, memo, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
+import { Check, Copy } from "lucide-react";
+
+interface ElProps {
+  className?: string;
+  children?: React.ReactNode;
+}
+
+// extrai o texto puro de uma árvore React (p/ copiar código já realçado)
+function textOf(node: React.ReactNode): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  if (isValidElement<ElProps>(node)) return textOf(node.props.children);
+  return "";
+}
+
+function CodeBlock({ children }: { children?: React.ReactNode }) {
+  const [copied, setCopied] = useState(false);
+  const codeEl = Array.isArray(children) ? children[0] : children;
+  let lang = "";
+  if (isValidElement<ElProps>(codeEl)) {
+    const m = /language-([\w+-]+)/.exec(codeEl.props.className ?? "");
+    if (m) lang = m[1];
+  }
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(textOf(codeEl).replace(/\n$/, ""));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return (
+    <div className="my-3 overflow-hidden rounded-xl border border-border">
+      <div className="flex items-center justify-between border-b border-border bg-surface px-3 py-1.5">
+        <span className="font-mono text-[11px] uppercase tracking-wider text-muted">
+          {lang || "código"}
+        </span>
+        <button
+          onClick={copy}
+          className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] text-muted transition-colors hover:bg-hover hover:text-ink"
+        >
+          {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
+          {copied ? "Copiado" : "Copiar"}
+        </button>
+      </div>
+      <pre>{children}</pre>
+    </div>
+  );
+}
+
+// Acima deste tamanho, realçar/parsear a mensagem inteira de uma vez trava a UI
+// ("uma Wikipédia escrita no chat"). Renderizamos só um prefixo e deixamos o
+// usuário expandir o resto sob demanda.
+const CLAMP_LIMIT = 8000;
+
+/**
+ * Markdown das mensagens do assistente: GFM (tabelas, listas de tarefas,
+ * links automáticos) + realce de sintaxe. Tipografia via classe `.md`.
+ * `clamp` evita travar em mensagens gigantes: mostra um prefixo + "Mostrar tudo".
+ */
+function Markdown({
+  content,
+  className = "",
+  clamp = false,
+  fast = false,
+}: {
+  content: string;
+  className?: string;
+  clamp?: boolean;
+  // `fast`: pula o realce de sintaxe (rehypeHighlight) — usado no STREAMING, onde
+  // o conteúdo é re-parseado a cada atualização e o realce da mensagem inteira
+  // travava a UI em respostas longas. O realce volta na mensagem já persistida.
+  fast?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = clamp && !expanded && content.length > CLAMP_LIMIT;
+  // corta num limite de parágrafo p/ não deixar uma cerca de código aberta
+  const shown = isLong
+    ? (() => {
+        const cut = content.lastIndexOf("\n\n", CLAMP_LIMIT);
+        return content.slice(0, cut > CLAMP_LIMIT / 2 ? cut : CLAMP_LIMIT);
+      })()
+    : content;
+  return (
+    <div className={`md ${className}`}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={fast ? [] : [rehypeHighlight]}
+        components={{
+          pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+          table: ({ children }) => (
+            <div className="md-table-wrap">
+              <table>{children}</table>
+            </div>
+          ),
+          a: ({ children, href }) => (
+            <a href={href} target="_blank" rel="noreferrer noopener">
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {shown}
+      </ReactMarkdown>
+      {isLong && (
+        <button
+          onClick={() => setExpanded(true)}
+          className="mt-2 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink-soft transition-colors hover:bg-hover hover:text-ink"
+        >
+          Mostrar mensagem completa · {content.length.toLocaleString("pt-BR")} caracteres
+        </button>
+      )}
+    </div>
+  );
+}
+
+export default memo(Markdown);
