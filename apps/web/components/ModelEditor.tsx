@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Brain, Camera, ChevronDown, ChevronRight, FileText, Gauge, Info, Pin, Plus, Search, Settings, ShieldAlert, Sliders, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
+import { ArrowLeft, Box, Brain, Camera, ChevronDown, ChevronRight, FileText, Gauge, Info, Pin, Plus, Search, Settings, ShieldAlert, Sliders, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { fileToAvatarDataUrl } from "@/lib/image";
 import type { Model, ModelConfig, Skill, SystemTool, Tool } from "@/lib/types";
@@ -470,6 +470,13 @@ export default function ModelEditor({
     setFilterConfig((fc) => ({ ...fc, subagents: { ...(fc.subagents ?? {}), ...patch } }));
   const team: string[] = Array.isArray(subCfg.team) ? subCfg.team : [];
   const teamCandidates = useMemo(() => myModels.filter((m) => m.id !== model?.id), [myModels, model]);
+  const [teamModal, setTeamModal] = useState(false);
+  // itens do seletor de operários (TransferModal): nome + modelo-base como sublabel
+  const teamItems: TransferItem[] = useMemo(
+    () => teamCandidates.map((m) => ({ key: m.id, label: m.name, sublabel: m.base_model })),
+    [teamCandidates],
+  );
+  const teamLabel = (id: string) => teamCandidates.find((m) => m.id === id)?.name ?? id;
   const [ttsVoice, setTtsVoice] = useState(model?.tts_voice ?? "");
   // vozes + status da conexão de Voz Local (Kokoro/clonagem) p/ o seletor de voz
   const [voices, setVoices] = useState<string[]>([]);
@@ -720,48 +727,57 @@ export default function ModelEditor({
               {avatarErr && <p className="max-w-28 text-center text-[11px] text-red-400">{avatarErr}</p>}
             </div>
 
-            <div className="min-w-0 flex-1 space-y-1">
-              <div className="flex items-start justify-between">
+            <div className="min-w-0 flex-1 space-y-3">
+              <div className="space-y-1">
+                <Label>Nome do modelo</Label>
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Nome do Modelo"
-                  className="w-full bg-transparent text-3xl font-bold text-ink outline-none placeholder:text-muted"
+                  placeholder="ex.: Mario Assistente"
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xl font-semibold text-ink outline-none transition-colors focus:border-accent placeholder:font-normal placeholder:text-muted"
                 />
               </div>
 
-              <Label>ID do Modelo</Label>
-              <div className="flex items-center gap-1.5">
-                <span className="font-mono text-sm text-muted">@</span>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <Label>ID do modelo</Label>
+                  {slugEdited && (
+                    <button onClick={() => { setSlug(""); setSlugEdited(false); }} title="Voltar a derivar do nome" className="text-[11px] text-muted transition-colors hover:text-ink">
+                      derivar do nome
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-2 transition-colors focus-within:border-accent">
+                  <span className="font-mono text-sm text-muted">@</span>
+                  <input
+                    value={slugEdited ? slug : derivedId}
+                    onChange={(e) => { setSlug(e.target.value); setSlugEdited(true); }}
+                    placeholder={derivedId}
+                    className="min-w-0 flex-1 bg-transparent font-mono text-sm text-ink-soft outline-none placeholder:text-muted"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <Label>Modelo base</Label>
+                <ModelField
+                  models={baseModels}
+                  value={baseModel}
+                  onChange={setBaseModel}
+                  placeholder="Selecione um modelo base"
+                  className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none transition-colors hover:border-accent/60"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label>Descrição</Label>
                 <input
-                  value={slugEdited ? slug : derivedId}
-                  onChange={(e) => { setSlug(e.target.value); setSlugEdited(true); }}
-                  placeholder={derivedId}
-                  className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1 py-0.5 font-mono text-sm text-ink-soft outline-none transition-colors hover:border-border focus:border-accent"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Uma frase curta sobre o que este modelo faz"
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink-soft outline-none transition-colors focus:border-accent placeholder:text-muted"
                 />
-                {slugEdited && (
-                  <button onClick={() => { setSlug(""); setSlugEdited(false); }} title="Voltar a derivar do nome" className="text-xs text-muted transition-colors hover:text-ink">
-                    auto
-                  </button>
-                )}
               </div>
-
-              <Label>Modelo Base (De)</Label>
-              <ModelField
-                models={baseModels}
-                value={baseModel}
-                onChange={setBaseModel}
-                placeholder="Selecione um modelo base"
-                className="flex w-full items-center justify-between gap-2 bg-transparent py-1 text-lg text-ink outline-none"
-              />
-
-              <Label>Descrição</Label>
-              <input
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Adicione uma descrição curta sobre o que este modelo faz"
-                className="w-full bg-transparent text-sm text-ink-soft outline-none placeholder:text-muted"
-              />
             </div>
           </div>
 
@@ -1103,24 +1119,36 @@ export default function ModelEditor({
             </div>
             {subOn && (
               <div className="mt-3 space-y-3 rounded-xl border border-border bg-surface p-3">
-                <div>
-                  <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Operários (time)</p>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[11px] font-medium uppercase tracking-wider text-muted">Operários (time)</p>
+                    <button
+                      onClick={() => setTeamModal(true)}
+                      disabled={teamCandidates.length === 0}
+                      className="flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-50"
+                    >
+                      <Users size={13} /> Selecionar
+                    </button>
+                  </div>
                   {teamCandidates.length === 0 ? (
                     <p className="text-xs text-muted">Crie outros modelos custom para usá-los como operários.</p>
+                  ) : team.length === 0 ? (
+                    <p className="text-xs text-muted">Nenhum operário no time. Clique em “Selecionar”.</p>
                   ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {teamCandidates.map((m) => {
-                        const on = team.includes(m.id);
-                        return (
+                    <div className="max-h-44 space-y-1.5 overflow-y-auto pr-1">
+                      {team.map((tid) => (
+                        <div key={tid} className="flex items-center gap-2 rounded-lg border border-border bg-surface2 px-3 py-1.5">
+                          <Box size={13} className="shrink-0 text-accent-hover" />
+                          <span className="flex-1 truncate text-sm text-ink">{teamLabel(tid)}</span>
                           <button
-                            key={m.id}
-                            onClick={() => setSubCfg({ team: on ? team.filter((x) => x !== m.id) : [...team, m.id] })}
-                            className={`rounded-full border px-3 py-1 text-xs transition-colors ${on ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border bg-surface2 text-muted hover:text-ink"}`}
+                            onClick={() => setSubCfg({ team: team.filter((x) => x !== tid) })}
+                            title="Remover do time"
+                            className="rounded-md p-1 text-muted transition-colors hover:text-red-300"
                           >
-                            {m.name}
+                            <X size={14} />
                           </button>
-                        );
-                      })}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -1360,6 +1388,18 @@ export default function ModelEditor({
           onClose={() => setFiltersModal(false)}
           availableLabel="Disponíveis"
           selectedLabel="Ativados"
+        />
+      )}
+      {teamModal && (
+        <TransferModal
+          title="Operários (time)"
+          items={teamItems}
+          selected={team}
+          onChange={(ids) => setSubCfg({ team: ids })}
+          onClose={() => setTeamModal(false)}
+          availableLabel="Disponíveis"
+          selectedLabel="No time"
+          searchPlaceholder="Buscar modelos…"
         />
       )}
 

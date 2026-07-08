@@ -105,6 +105,10 @@ export default function ChatPage() {
 
   const [temporary, setTemporary] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  // muda a cada clique em "Espaço de Trabalho" na barra lateral: força remontar o
+  // WorkspaceView (via key) para SEMPRE voltar à grade inicial, mesmo se o usuário
+  // estava dentro de um editor (modelo/skill) ou seção.
+  const [workspaceKey, setWorkspaceKey] = useState(0);
   // tela de Automações embutida (mantém a barra lateral visível)
   const [automationsOpen, setAutomationsOpen] = useState(false);
   // quando != null, o Espaço de Trabalho abre direto no editor deste modelo
@@ -995,9 +999,9 @@ export default function ChatPage() {
           onMoveChat={moveChat}
           onOpenSettings={() => { setShowSettings(true); setMobileNav(false); }}
           onShowArchived={() => { setShowArchived(true); setMobileNav(false); }}
-          onOpenWorkspace={() => { setWorkspaceSection(null); setWorkspaceOpen(true); setAutomationsOpen(false); setMobileNav(false); }}
+          onOpenWorkspace={() => { setEditModelTarget(null); setWorkspaceSection(null); setWorkspaceKey((k) => k + 1); setWorkspaceOpen(true); setAutomationsOpen(false); setMobileNav(false); }}
           onOpenAutomations={() => { setAutomationsOpen(true); setWorkspaceOpen(false); setMobileNav(false); }}
-          onOpenAnalytics={() => { setWorkspaceSection("Analítica"); setWorkspaceOpen(true); setAutomationsOpen(false); setMobileNav(false); }}
+          onOpenAnalytics={() => { setEditModelTarget(null); setWorkspaceSection("Analítica"); setWorkspaceKey((k) => k + 1); setWorkspaceOpen(true); setAutomationsOpen(false); setMobileNav(false); }}
           onLogout={logout}
         />
       </div>
@@ -1005,6 +1009,7 @@ export default function ChatPage() {
       <main className="flex flex-1 flex-col">
         {workspaceOpen ? (
           <WorkspaceView
+            key={workspaceKey}
             initialEditModel={editModelTarget}
             initialSection={workspaceSection}
             onModelsChanged={setCustomModels}

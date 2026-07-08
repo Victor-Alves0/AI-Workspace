@@ -5,13 +5,12 @@ import { useRouter } from "next/navigation";
 import {
   Archive,
   BarChart3,
+  CalendarClock,
   FlaskConical,
   LayoutGrid,
   LogOut,
-  NotebookPen,
   Settings,
   Shield,
-  Workflow,
 } from "lucide-react";
 import type { User } from "@/lib/types";
 import { Menu, MenuDivider, MenuItem } from "./ui";
@@ -76,13 +75,10 @@ export default function UserMenu({
             <MenuItem icon={<LayoutGrid size={16} />} onClick={() => { onOpenWorkspace ? onOpenWorkspace() : router.push("/workspace"); setOpen(false); }}>
               Espaço de Trabalho
             </MenuItem>
-            <MenuItem icon={<NotebookPen size={16} />} onClick={() => { router.push("/notes"); setOpen(false); }}>
-              Notas
-            </MenuItem>
             <MenuItem icon={<BarChart3 size={16} />} onClick={() => { onOpenAnalytics ? onOpenAnalytics() : router.push("/chat?v=analytics"); setOpen(false); }}>
               Analítica
             </MenuItem>
-            <MenuItem icon={<Workflow size={16} />} onClick={() => { router.push("/automations"); setOpen(false); }}>
+            <MenuItem icon={<CalendarClock size={16} />} onClick={() => { router.push("/automations"); setOpen(false); }}>
               Automações
             </MenuItem>
             <MenuItem icon={<FlaskConical size={16} />} onClick={() => { router.push("/playground"); setOpen(false); }}>

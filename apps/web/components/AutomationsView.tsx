@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Bell, Clock, Eye, Loader2, Pause, Play, Plus, Trash2, Workflow, Zap } from "lucide-react";
+import { Bell, CalendarClock, Clock, Eye, Loader2, Pause, Play, Plus, Trash2, Zap } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { AppNotification, Automation } from "@/lib/types";
 import AutomationEditor from "@/components/AutomationEditor";
@@ -145,7 +145,7 @@ export default function AutomationsView({
   return (
     <div className="flex h-full flex-1 flex-col bg-bg">
       <div className="flex items-center gap-3 border-b border-border px-6 py-3">
-        <Workflow size={20} className="text-accent-hover" />
+        <CalendarClock size={20} className="text-accent-hover" />
         <span className="font-semibold text-ink">Automações</span>
         <button
           onClick={() => setCreating(true)}
@@ -161,7 +161,7 @@ export default function AutomationsView({
           <div className="space-y-3 lg:col-span-2">
             {items.length === 0 ? (
               <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border py-16 text-center">
-                <Workflow size={32} className="text-muted" />
+                <CalendarClock size={32} className="text-muted" />
                 <p className="text-sm text-muted">Nenhuma automação ainda.</p>
               </div>
             ) : (

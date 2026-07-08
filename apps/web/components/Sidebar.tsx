@@ -1,22 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   Box,
   ChevronDown,
   ChevronRight,
+  CalendarClock,
   Folder as FolderIcon,
   FolderPlus,
   LayoutGrid,
-  NotebookPen,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
   Search,
   SquarePen,
   Trash2,
-  Workflow,
   Wrench,
 } from "lucide-react";
 import type { Chat, Folder, ModelConfig, User } from "@/lib/types";
@@ -150,7 +148,6 @@ export default function Sidebar({
   onOpenAnalytics: () => void;
   onLogout: () => void;
 }) {
-  const router = useRouter();
   const [sections, setSections] = useState({ models: true, folders: true, chats: true });
 
   // preserva quais seções (Modelos/Pastas/Chats) estão expandidas entre sessões
@@ -204,14 +201,11 @@ export default function Sidebar({
         <button onClick={onSearch} title="Pesquisar" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
           <Search size={18} />
         </button>
-        <button onClick={() => router.push("/notes")} title="Notas" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
-          <NotebookPen size={18} />
-        </button>
         <button onClick={onOpenWorkspace} title="Espaço de Trabalho" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
           <LayoutGrid size={18} />
         </button>
         <button onClick={onOpenAutomations} title="Automações" className="relative rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
-          <Workflow size={18} />
+          <CalendarClock size={18} />
           {unread > 0 && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-accent" />}
         </button>
         <div className="mt-auto">
@@ -239,12 +233,11 @@ export default function Sidebar({
       <div className="space-y-0.5 px-2">
         <NavButton icon={<SquarePen size={17} />} label="Novo Chat" collapsed={false} onClick={onNewChat} />
         <NavButton icon={<Search size={17} />} label="Pesquisar" collapsed={false} onClick={onSearch} />
-        <NavButton icon={<NotebookPen size={17} />} label="Notas" collapsed={false} onClick={() => router.push("/notes")} />
         <button
           onClick={onOpenAutomations}
           className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-medium text-ink transition-colors hover:bg-hover"
         >
-          <span className="shrink-0 text-ink-soft"><Workflow size={17} /></span>
+          <span className="shrink-0 text-ink-soft"><CalendarClock size={17} /></span>
           <span className="truncate">Automações</span>
           {unread > 0 && <span className="ml-auto rounded-full bg-accent px-1.5 text-[11px] font-medium text-white">{unread}</span>}
         </button>
