@@ -143,6 +143,8 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
      "model_desc": "Current date/time in a given time zone."},
     {"path": "utils.math.eval", "name": "Calculadora", "description": "Avalia expressões com funções (sqrt, sin, log…) e constantes (pi, e).",
      "model_desc": "Evaluate a math expression (functions, constants)."},
+    {"path": "user.profile.get", "name": "Perfil do Usuário", "description": "Consulta os dados da conta do usuário: nome, sobre, gênero, data de nascimento (e idade), e-mail e idioma.",
+     "model_desc": "Get the user's account info: name, about, gender, birth date/age, email, language."},
     {"path": "web.search.query", "name": "Pesquisa na Web", "description": "Busca informações atuais na web (título, url, trecho).",
      "model_desc": "Search the web for current or factual info."},
     {"path": "web.page.read", "name": "Ler Página", "description": "Abre uma URL e devolve o texto legível da página (lê o conteúdo do site, não só o trecho da busca).",
@@ -288,6 +290,34 @@ def _register_builtins(
                 return {"result": _safe_eval(expression)}
             except Exception as exc:  # noqa: BLE001
                 return {"error": str(exc)}
+
+    if want("user.profile.get"):
+        @sift.tool(
+            "user.profile.get",
+            description=(
+                "Get the current user's account/profile info to personalize answers or when "
+                "they ask about their own data (name, age, birthday, etc.). Returns only the "
+                "fields the user has filled in: name, about (free-text bio), gender, birthdate "
+                "(YYYY-MM-DD) with computed age, email, language. Never invent these values — "
+                "call this tool instead of guessing."
+            ),
+            params={},
+            returns=["name", "about", "gender", "birthdate", "age", "email", "language", "note"],
+        )
+        def _user_profile() -> dict[str, Any]:
+            prof = toolctx.user_profile.get() or {}
+            out: dict[str, Any] = {k: v for k, v in prof.items() if v}
+            bd = (prof.get("birthdate") or "").strip()
+            if bd:
+                try:
+                    d = _dt.date.fromisoformat(bd)
+                    today = _dt.date.today()
+                    out["age"] = today.year - d.year - ((today.month, today.day) < (d.month, d.day))
+                except ValueError:
+                    pass
+            if not out:
+                out["note"] = "The user has not filled in any profile info yet."
+            return out
 
     if want("web.search.query"):
         @sift.tool(

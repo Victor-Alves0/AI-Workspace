@@ -16,7 +16,7 @@ const MEM_READ: { key: "global" | "model" | "chat"; label: string }[] = [
   { key: "chat", label: "Chat" },
 ];
 const MEM_DEFAULT: Required<MemoryConfig> = {
-  enabled: true, write: "global", read: { global: true, model: true, chat: true }, review: false,
+  enabled: true, write: "global", read: { global: true, model: true, chat: true }, banks: [], review: false,
 };
 
 // Lista de parâmetros do painel (espelha o OpenWebUI). Os numéricos comuns

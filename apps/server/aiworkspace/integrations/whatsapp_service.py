@@ -135,14 +135,16 @@ def _memory_kwargs(conn: WhatsAppConnection, chat: Chat, mc: ModelConfig | None,
     from ..chat.routes import _mem_agent_id  # import tardio (evita ciclo)
 
     agent_id = _mem_agent_id(mc, model)
+    # bancos acoplados ao modelo: compartilhados também nas conversas do WhatsApp
+    banks = [str(b) for b in ((mc.capabilities or {}).get("memory") or {}).get("banks", [])] if mc else []
     if conn.memory == "global":
         return {
-            "chat_id": str(chat.id), "agent_id": agent_id,
+            "chat_id": str(chat.id), "agent_id": agent_id, "mem_banks": banks,
             "mem_read": {"global": True, "model": True, "chat": True},
             "mem_write": "model",
         }
     return {
-        "chat_id": str(chat.id), "agent_id": agent_id,
+        "chat_id": str(chat.id), "agent_id": agent_id, "mem_banks": banks,
         "mem_read": {"global": False, "model": False, "chat": True},
         "mem_write": "chat",
     }
@@ -158,7 +160,9 @@ async def _send_reply(conn: WhatsAppConnection, jid: str, text: str) -> None:
 async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
     """Um turno completo para UMA mensagem aprovada (sessão própria)."""
     from ..chat.orchestrator import run_turn_guarded
-    from ..chat.routes import _load_skills, _resolve_guards, _resolve_provider, _usage_record
+    from ..chat.routes import (
+        _load_skills, _resolve_guards, _resolve_provider, _usage_record, _user_profile_dict,
+    )
     from ..tools.loader import get_sift_for_user
 
     async with SessionLocal() as db:
@@ -236,6 +240,7 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
                 background=True,  # autônomo: sem revisão interativa de tools
                 sift=sift, code_mode=bool(getattr(mc, "code_mode", False)),
                 skills=skills, use_context=True, extra_system=extra_system,
+                user_profile=_user_profile_dict(user),
                 **_memory_kwargs(conn, chat, mc, model),
             ):
                 if ev["type"] == "done":

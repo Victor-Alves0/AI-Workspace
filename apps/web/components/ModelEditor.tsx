@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Box, Brain, Camera, ChevronDown, ChevronRight, FileText, Gauge, Info, Pin, Plus, Search, Settings, ShieldAlert, Sliders, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { fileToAvatarDataUrl } from "@/lib/image";
-import type { Model, ModelConfig, Skill, SystemTool, Tool } from "@/lib/types";
+import type { MemoryBank, Model, ModelConfig, Skill, SystemTool, Tool } from "@/lib/types";
 import TransferModal, { type TransferItem } from "./TransferModal";
 import ModelField from "./ModelField";
 import { Toggle } from "./ui";
@@ -294,7 +294,7 @@ const CAPS_DEFAULT_ON = new Set<string>(["chat_context"]);
 // memória por-modelo (guardada em capabilities.memory; null = herda do perfil).
 // Ao personalizar, materializa com enabled:true (liga a memória p/ os chats deste
 // modelo mesmo que o padrão do perfil esteja desligado).
-type MemoryCfg = { enabled?: boolean; write?: string; read?: { global?: boolean; model?: boolean; chat?: boolean } };
+type MemoryCfg = { enabled?: boolean; write?: string; read?: { global?: boolean; model?: boolean; chat?: boolean }; banks?: string[] };
 const MEM_WRITE_OPTS = [
   { value: "global", label: "Global" },
   { value: "model", label: "Do modelo" },
@@ -307,7 +307,7 @@ const MEM_READ_OPTS: { key: "global" | "model" | "chat"; label: string }[] = [
   { key: "chat", label: "Chat" },
 ];
 const MEM_CFG_DEFAULT: Required<MemoryCfg> = {
-  enabled: true, write: "global", read: { global: true, model: true, chat: true },
+  enabled: true, write: "global", read: { global: true, model: true, chat: true }, banks: [],
 };
 
 function slugify(s: string) {
@@ -429,7 +429,9 @@ export default function ModelEditor({
   // Subagentes: permissão de delegar (capability) + config (time/modo/limites em filter_config)
   const [subOn, setSubOn] = useState<boolean>((model?.capabilities as Record<string, unknown> | undefined)?.subagents === true);
   const [myModels, setMyModels] = useState<ModelConfig[]>([]);
+  const [memBanks, setMemBanks] = useState<MemoryBank[]>([]);
   useEffect(() => { api.get<ModelConfig[]>("/models").then(setMyModels).catch(() => {}); }, []);
+  useEffect(() => { api.get<MemoryBank[]>("/memory/banks").then(setMemBanks).catch(() => {}); }, []);
   const [toolsEnabled, setToolsEnabled] = useState(model?.tools_enabled ?? false);
   const [toolIds, setToolIds] = useState<string[]>(model?.tool_ids ?? []);
   const [codeMode, setCodeMode] = useState(model?.code_mode ?? false);
@@ -1066,6 +1068,11 @@ export default function ModelEditor({
                     className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
                   >
                     {MEM_WRITE_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    {memBanks.length > 0 && (
+                      <optgroup label="Bancos">
+                        {memBanks.map((b) => <option key={b.id} value={`bank:${b.id}`}>Banco: {b.name}</option>)}
+                      </optgroup>
+                    )}
                   </select>
                 </div>
                 <div>
@@ -1084,6 +1091,34 @@ export default function ModelEditor({
                       );
                     })}
                   </div>
+                </div>
+                {/* Bancos acoplados: memória compartilhada entre modelos */}
+                <div className="sm:col-span-2">
+                  <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">
+                    Bancos acoplados
+                    <InfoHint text="Bancos de memória compartilhados entre modelos. Acoplar um banco faz este modelo LER dele (em união com os escopos acima). Vários modelos no mesmo banco compartilham memórias sem usar o escopo global. Crie/gerencie bancos em Espaço → Memória → Bancos." />
+                  </p>
+                  {memBanks.length === 0 ? (
+                    <p className="text-xs text-muted">Nenhum banco criado. Crie em <span className="text-ink-soft">Espaço → Memória → Bancos</span>.</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {memBanks.map((b) => {
+                        const on = (mem.banks ?? []).includes(b.id);
+                        return (
+                          <button
+                            key={b.id}
+                            onClick={() => {
+                              const cur = mem.banks ?? [];
+                              setMem({ ...mem, banks: on ? cur.filter((x) => x !== b.id) : [...cur, b.id] });
+                            }}
+                            className={`rounded-full border px-3 py-1 text-xs transition-colors ${on ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border text-muted hover:text-ink"}`}
+                          >
+                            {b.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             )}

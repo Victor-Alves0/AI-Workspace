@@ -423,6 +423,8 @@ async def run_turn(
     mem_read: dict[str, bool] | None = None,
     mem_write: str = "off",
     mem_review: bool = False,
+    mem_banks: list[str] | None = None,
+    user_profile: dict[str, Any] | None = None,
     skills: list[dict[str, Any]] | None = None,
     use_context: bool = True,
     attachments: list[dict[str, Any]] | None = None,
@@ -459,16 +461,19 @@ async def run_turn(
     toolctx.user_tz.set(user_tz or "")
     # execução autônoma (automação): tools pulam fases interativas (ex.: revisão de e-mail)
     toolctx.background.set(bool(background))
+    # perfil do usuário visível à tool user.profile.get (nome, sobre, nascimento…)
+    toolctx.user_profile.set(user_profile or {})
 
     # 1. memória — UNIÃO dos escopos ligados em `mem_read` ({global, model, chat}).
     # Leak-safe: só global (compartilhado) + as do modelo atual + as deste chat —
     # nunca de outros chats/modelos. Ver memory/mem0_service.search_for_turn.
     mem_items: list[dict[str, str]] = []
-    if mem_read and any(mem_read.values()):
+    if (mem_read and any(mem_read.values())) or mem_banks:
         mem_items = await run_in_threadpool(
             lambda: mem0_service.search_for_turn(
                 api_key, user_text, user_id,
-                chat_id=chat_id, agent_id=agent_id, read=mem_read, limit=6,
+                chat_id=chat_id, agent_id=agent_id,
+                read=mem_read or {}, banks=mem_banks, limit=6,
             )
         )
     memories = [m["text"] for m in mem_items]

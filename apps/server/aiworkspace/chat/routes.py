@@ -356,6 +356,20 @@ _DEFAULT_MEMORY = {"enabled": False, "write": "global",
                    "read": {"global": True, "model": True, "chat": True}}
 
 
+def _user_profile_dict(user: User) -> dict[str, Any]:
+    """Dados da conta do usuário expostos à ferramenta `user.profile.get` (nome,
+    sobre, gênero, nascimento, e-mail, idioma). Só o que estiver preenchido."""
+    prof = user.profile or {}
+    return {
+        "name": (prof.get("name") or "").strip(),
+        "about": (prof.get("about") or "").strip(),
+        "gender": (prof.get("gender") or "").strip(),
+        "birthdate": (prof.get("birthdate") or "").strip(),
+        "email": user.email or "",
+        "language": (prof.get("language") or "").strip(),
+    }
+
+
 def _artifacts_enabled(user: User) -> bool:
     """Toggle "Artefatos" (Configurações → Interface → Chat). Padrão: ligado."""
     iface = (user.profile or {}).get("interface")
@@ -397,6 +411,22 @@ def _resolve_memory(chat: Chat, model_config: ModelConfig | None, user: User) ->
     read = {**_DEFAULT_MEMORY["read"], **(cfg.get("read") or {})}
     write = cfg.get("write") or "global"
     return read, write, review
+
+
+def _mem_banks(chat: Chat, model_config: ModelConfig | None, user: User) -> list[str]:
+    """Bancos de memória ACOPLADOS (ids) na config efetiva do turno — lidos em
+    UNIÃO com os escopos normais. Camadas: perfil → modelo → chat. Vazio quando a
+    memória está desligada no nível efetivo."""
+    cfg = dict(_DEFAULT_MEMORY)
+    cfg.update((user.profile or {}).get("memory") or {})
+    if model_config is not None:
+        cfg.update((model_config.capabilities or {}).get("memory") or {})
+    if chat.memory_config:
+        cfg.update(chat.memory_config)
+    if cfg.get("enabled") is False:
+        return []
+    banks = cfg.get("banks") or []
+    return [str(b) for b in banks if b]
 
 
 def _image_output(model_config: ModelConfig | None) -> bool:
@@ -936,6 +966,7 @@ async def send_message(
         worker_memory=sub_conf.get("worker_memory", False),
     ) if sub_specs else None
     mem_read, mem_write, mem_review = _resolve_memory(chat, model_config, user)
+    mem_banks = _mem_banks(chat, model_config, user)
     source = run_turn_guarded(
         guards=guards,
         api_key=api_key,
@@ -955,6 +986,8 @@ async def send_message(
         mem_read=mem_read,
         mem_write=mem_write,
         mem_review=mem_review,
+        mem_banks=mem_banks,
+        user_profile=_user_profile_dict(user),
         skills=skills,
         use_context=_use_context(model_config),
         attachments=attachments,
@@ -1192,6 +1225,8 @@ async def regenerate_message(
         mem_read=(_mem := _resolve_memory(chat, model_config, user))[0],
         mem_write=_mem[1],
         mem_review=_mem[2],
+        mem_banks=_mem_banks(chat, model_config, user),
+        user_profile=_user_profile_dict(user),
         skills=skills,
         use_context=_use_context(model_config),
         attachments=user_attachments,
@@ -1325,6 +1360,8 @@ async def continue_message(
         mem_read=(_mem := _resolve_memory(chat, model_config, user))[0],
         mem_write=_mem[1],
         mem_review=_mem[2],
+        mem_banks=_mem_banks(chat, model_config, user),
+        user_profile=_user_profile_dict(user),
         skills=skills,
         use_context=_use_context(model_config),
         genimage=genimage,

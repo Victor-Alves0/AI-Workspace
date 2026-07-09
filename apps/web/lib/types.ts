@@ -82,8 +82,11 @@ export interface Speaker {
 /** config de memória (perfil/modelo/chat). read = união dos escopos ligados. */
 export interface MemoryConfig {
   enabled?: boolean;
-  write?: "global" | "model" | "chat" | "off";
+  /** "bank:<id>" grava num banco compartilhado */
+  write?: "global" | "model" | "chat" | "off" | string;
   read?: { global?: boolean; model?: boolean; chat?: boolean };
+  /** ids dos bancos de memória acoplados (lidos em união) */
+  banks?: string[];
   /** revisar antes de salvar (padrão do perfil): novas memórias ficam pendentes */
   review?: boolean;
 }
@@ -91,12 +94,14 @@ export interface MemoryConfig {
 export interface MemoryItem {
   id: string;
   text: string;
-  scope: "global" | "model" | "chat";
+  scope: "global" | "model" | "chat" | "bank";
   disabled?: boolean;
   model_id?: string | null;
   model_name?: string | null;
   chat_id?: string | null;
   chat_title?: string | null;
+  bank_id?: string | null;
+  bank_name?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -106,6 +111,14 @@ export interface MemoryScopes {
   total: number;
   models: { id: string; name: string; count: number }[];
   chats: { id: string; title: string; count: number }[];
+  banks: { id: string; name: string; count: number }[];
+}
+
+export interface MemoryBank {
+  id: string;
+  name: string;
+  description: string;
+  count: number;
 }
 
 export interface Folder {

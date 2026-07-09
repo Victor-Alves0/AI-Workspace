@@ -13,6 +13,7 @@ from .generated_image import GeneratedImage
 from .usage_event import UsageEvent
 from .whatsapp import WhatsAppConnection, WhatsAppThread
 from .artifact import Artifact, ArtifactVersion
+from .memory_bank import MemoryBank
 
 __all__ = [
     "User",
@@ -32,4 +33,9 @@ __all__ = [
     "GoogleAccount",
     "GeneratedImage",
     "UsageEvent",
+    "WhatsAppConnection",
+    "WhatsAppThread",
+    "Artifact",
+    "ArtifactVersion",
+    "MemoryBank",
 ]

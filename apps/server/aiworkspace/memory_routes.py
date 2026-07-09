@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth.deps import require_approved
 from .db import get_db
 from .memory import mem0_service
-from .models import Chat, ModelConfig, User
+from .models import Chat, MemoryBank, ModelConfig, User
 from .secrets_service import OPENROUTER_KEY, get_secret
 
 router = APIRouter(prefix="/memory", tags=["memory"])
@@ -47,15 +47,18 @@ class MemoryOut(BaseModel):
     model_name: str | None = None
     chat_id: str | None = None
     chat_title: str | None = None
+    bank_id: str | None = None
+    bank_name: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
 
 class MemoryIn(BaseModel):
     text: str
-    scope: str = "global"  # global | model | chat
+    scope: str = "global"  # global | model | chat | bank
     model_id: str | None = None
     chat_id: str | None = None
+    bank_id: str | None = None
 
 
 class MemoryPatch(BaseModel):
@@ -116,6 +119,81 @@ async def _chat_titles(db: AsyncSession, user: User, ids: list[str]) -> dict[str
     return out
 
 
+async def _bank_names(db: AsyncSession, user: User, ids: list[str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    uuids: list[uuid.UUID] = []
+    for i in ids:
+        try:
+            uuids.append(uuid.UUID(i))
+        except ValueError:
+            out[i] = i
+    if uuids:
+        rows = await db.scalars(
+            select(MemoryBank).where(MemoryBank.user_id == user.id, MemoryBank.id.in_(uuids))
+        )
+        for b in rows:
+            out[str(b.id)] = b.name or "Banco"
+    for i in ids:
+        out.setdefault(i, "Banco removido")
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# Bancos de memória (coleções compartilháveis entre modelos)
+# --------------------------------------------------------------------------- #
+class BankIn(BaseModel):
+    name: str
+    description: str = ""
+
+
+class BankOut(BaseModel):
+    id: str
+    name: str
+    description: str
+    count: int = 0
+
+
+@router.get("/banks", response_model=list[BankOut])
+async def list_banks(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    rows = list(await db.scalars(
+        select(MemoryBank).where(MemoryBank.user_id == user.id).order_by(MemoryBank.created_at)
+    ))
+    key = await _key(db, user)
+    counts = await run_in_threadpool(mem0_service.bank_counts, key, str(user.id))
+    return [
+        BankOut(id=str(b.id), name=b.name, description=b.description or "", count=counts.get(str(b.id), 0))
+        for b in rows
+    ]
+
+
+@router.post("/banks", response_model=BankOut)
+async def create_bank(
+    body: BankIn, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    b = MemoryBank(user_id=user.id, name=(body.name or "Banco").strip()[:120], description=(body.description or "").strip())
+    db.add(b)
+    await db.commit()
+    await db.refresh(b)
+    return BankOut(id=str(b.id), name=b.name, description=b.description or "", count=0)
+
+
+@router.delete("/banks/{bank_id}")
+async def delete_bank(
+    bank_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    b = await db.get(MemoryBank, bank_id)
+    if b is None or b.user_id != user.id:
+        return {"ok": True}
+    key = await _key(db, user)
+    # apaga as memórias do banco no mem0 (agent_id "bank:<id>") e o registro
+    await run_in_threadpool(
+        lambda: mem0_service.delete_scope(key, str(user.id), scope="bank", agent_id=f"bank:{bank_id}")
+    )
+    await db.delete(b)
+    await db.commit()
+    return {"ok": True}
+
+
 @router.get("/settings", response_model=MemorySettings)
 async def get_settings_(user: User = Depends(require_approved)):
     cfg = {**DEFAULT_MEMORY, **((user.profile or {}).get("memory") or {})}
@@ -142,11 +220,13 @@ async def scopes(user: User = Depends(require_approved), db: AsyncSession = Depe
     summary = await run_in_threadpool(mem0_service.scope_summary, key, str(user.id))
     mnames = await _model_names(db, user, list(summary["models"].keys()))
     ctitles = await _chat_titles(db, user, list(summary["chats"].keys()))
+    bnames = await _bank_names(db, user, list(summary.get("banks", {}).keys()))
     return {
         "global": summary["global"],
         "total": summary["total"],
         "models": [{"id": k, "name": mnames.get(k, k), "count": v} for k, v in summary["models"].items()],
         "chats": [{"id": k, "title": ctitles.get(k, k), "count": v} for k, v in summary["chats"].items()],
+        "banks": [{"id": k, "name": bnames.get(k, k), "count": v} for k, v in summary.get("banks", {}).items()],
     }
 
 
@@ -180,6 +260,7 @@ async def list_memories(
     scope: str | None = None,
     model_id: str | None = None,
     chat_id: str | None = None,
+    bank_id: str | None = None,
     q: str = "",
     user: User = Depends(require_approved),
     db: AsyncSession = Depends(get_db),
@@ -187,20 +268,23 @@ async def list_memories(
     key = await _key(db, user)
     rows = await run_in_threadpool(
         lambda: mem0_service.list_memories(
-            key, str(user.id), scope=scope, chat_id=chat_id, agent_id=model_id, query=q
+            key, str(user.id), scope=scope, chat_id=chat_id, agent_id=model_id, bank_id=bank_id, query=q
         )
     )
     mids = {r["model_id"] for r in rows if r["model_id"]}
     cids = {r["chat_id"] for r in rows if r["chat_id"]}
+    bids = {r.get("bank_id") for r in rows if r.get("bank_id")}
     mnames = await _model_names(db, user, list(mids))
     ctitles = await _chat_titles(db, user, list(cids))
+    bnames = await _bank_names(db, user, list(bids))
     return [
         MemoryOut(
             id=r["id"], text=r["text"], scope=r["scope"], disabled=r.get("disabled", False),
-            model_id=r["model_id"], chat_id=r["chat_id"],
+            model_id=r["model_id"], chat_id=r["chat_id"], bank_id=r.get("bank_id"),
             created_at=r["created_at"], updated_at=r["updated_at"],
             model_name=mnames.get(r["model_id"]) if r["model_id"] else None,
             chat_title=ctitles.get(r["chat_id"]) if r["chat_id"] else None,
+            bank_name=bnames.get(r["bank_id"]) if r.get("bank_id") else None,
         )
         for r in rows
     ]
@@ -213,10 +297,12 @@ async def add_memory(
     db: AsyncSession = Depends(get_db),
 ):
     key = await _key(db, user)
+    # escopo "bank": o agent_id da memória é o id do banco (add_manual prefixa)
+    agent = body.bank_id if body.scope == "bank" else body.model_id
     ok = await run_in_threadpool(
         lambda: mem0_service.add_manual(
             key, str(user.id), body.text, scope=body.scope,
-            chat_id=body.chat_id, agent_id=body.model_id,
+            chat_id=body.chat_id, agent_id=agent,
         )
     )
     return {"ok": ok}

@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  Ban, Box, Check, CheckSquare, Clock, Globe, Loader2, MessagesSquare, Pencil, Plus,
+  Ban, Box, Boxes, Check, CheckSquare, Clock, Globe, Loader2, MessagesSquare, Pencil, Plus,
   RotateCcw, Search, Square, Trash2, X,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import type { MemoryConfig, MemoryItem, MemoryScopes } from "@/lib/types";
+import type { MemoryBank, MemoryConfig, MemoryItem, MemoryScopes } from "@/lib/types";
 import { useConfirm } from "@/components/ConfirmDialog";
 
-type Tab = "global" | "model" | "chat";
+type Tab = "global" | "model" | "chat" | "bank";
 
 const WRITE_LABEL: Record<string, string> = {
   global: "Global", model: "Do modelo", chat: "Do chat", off: "Não salvar",
@@ -36,6 +36,9 @@ export default function MemoryView() {
   const [tab, setTab] = useState<Tab>("global");
   const [selModel, setSelModel] = useState<string>("");
   const [selChat, setSelChat] = useState<string>("");
+  const [banks, setBanks] = useState<MemoryBank[]>([]);
+  const [selBank, setSelBank] = useState<string>("");
+  const [newBank, setNewBank] = useState<{ name: string; description: string } | null>(null);
   const [items, setItems] = useState<MemoryItem[] | null>(null);
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
@@ -46,36 +49,45 @@ export default function MemoryView() {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [pending, setPending] = useState<MemoryItem[]>([]);
 
+  const loadBanks = useCallback(async () => {
+    try { setBanks(await api.get<MemoryBank[]>("/memory/banks")); } catch {}
+  }, []);
+
   const loadScopes = useCallback(async () => {
     try { setScopes(await api.get<MemoryScopes>("/memory/scopes")); } catch {}
     try { setPending(await api.get<MemoryItem[]>("/memory/pending")); } catch {}
-  }, []);
+    loadBanks();
+  }, [loadBanks]);
 
   useEffect(() => {
     api.get<MemoryConfig>("/memory/settings").then(setSettings).catch(() => {});
     loadScopes();
   }, [loadScopes]);
 
-  // seleciona automaticamente o 1º modelo/chat da aba, se nenhum escolhido
+  // seleciona automaticamente o 1º modelo/chat/banco da aba, se nenhum escolhido
   useEffect(() => {
     if (tab === "model" && !selModel && scopes?.models.length) setSelModel(scopes.models[0].id);
     if (tab === "chat" && !selChat && scopes?.chats.length) setSelChat(scopes.chats[0].id);
-  }, [tab, scopes, selModel, selChat]);
+    if (tab === "bank" && !selBank && banks.length) setSelBank(banks[0].id);
+  }, [tab, scopes, banks, selModel, selChat, selBank]);
 
   const activeModelId = tab === "model" ? selModel : "";
   const activeChatId = tab === "chat" ? selChat : "";
+  const activeBankId = tab === "bank" ? selBank : "";
 
   const loadItems = useCallback(async () => {
     if (tab === "model" && !activeModelId) { setItems([]); return; }
     if (tab === "chat" && !activeChatId) { setItems([]); return; }
+    if (tab === "bank" && !activeBankId) { setItems([]); return; }
     setItems(null);
     const p = new URLSearchParams({ scope: tab });
     if (activeModelId) p.set("model_id", activeModelId);
     if (activeChatId) p.set("chat_id", activeChatId);
+    if (activeBankId) p.set("bank_id", activeBankId);
     if (q.trim()) p.set("q", q.trim());
     setSel(new Set());
     try { setItems(await api.get<MemoryItem[]>(`/memory?${p}`)); } catch { setItems([]); }
-  }, [tab, activeModelId, activeChatId, q]);
+  }, [tab, activeModelId, activeChatId, activeBankId, q]);
 
   useEffect(() => { loadItems(); }, [loadItems]);
 
@@ -113,10 +125,37 @@ export default function MemoryView() {
       await api.post("/memory", {
         text: newText.trim(), scope: tab,
         model_id: activeModelId || undefined, chat_id: activeChatId || undefined,
+        bank_id: activeBankId || undefined,
       });
       setNewText(""); setAdding(false);
       await Promise.all([loadItems(), loadScopes()]);
     } finally { setBusy(false); }
+  }
+
+  async function createBank() {
+    if (!newBank?.name.trim()) return;
+    setBusy(true);
+    try {
+      const b = await api.post<MemoryBank>("/memory/banks", {
+        name: newBank.name.trim(), description: newBank.description.trim(),
+      });
+      setNewBank(null);
+      await loadBanks();
+      setTab("bank");
+      setSelBank(b.id);
+    } finally { setBusy(false); }
+  }
+
+  async function deleteBank(b: MemoryBank) {
+    const ok = await confirm({
+      title: `Excluir o banco "${b.name}"?`,
+      body: <span className="text-muted">Isso apaga o banco e suas {b.count} memória(s). Modelos acoplados param de compartilhá-lo. Não dá para desfazer.</span>,
+      confirmLabel: "Excluir", danger: true,
+    });
+    if (!ok) return;
+    await api.del(`/memory/banks/${b.id}`);
+    if (selBank === b.id) setSelBank("");
+    await Promise.all([loadBanks(), loadScopes(), loadItems()]);
   }
 
   const toggleSel = (id: string) =>
@@ -236,7 +275,7 @@ export default function MemoryView() {
 
       {/* Segmentado de escopo */}
       <div className="flex flex-wrap items-center gap-2">
-        {([["global", "Global", <Globe key="g" size={15} />], ["model", "Por modelo", <Box key="m" size={15} />], ["chat", "Por chat", <MessagesSquare key="c" size={15} />]] as const).map(
+        {([["global", "Global", <Globe key="g" size={15} />], ["model", "Por modelo", <Box key="m" size={15} />], ["chat", "Por chat", <MessagesSquare key="c" size={15} />], ["bank", "Bancos", <Boxes key="b" size={15} />]] as const).map(
           ([k, label, icon]) => (
             <button
               key={k}
@@ -269,7 +308,64 @@ export default function MemoryView() {
             )) : <option value="">Nenhum chat com memória</option>}
           </select>
         )}
+        {tab === "bank" && (
+          <>
+            {banks.length > 0 && (
+              <select
+                value={selBank}
+                onChange={(e) => setSelBank(e.target.value)}
+                className="max-w-[240px] rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
+              >
+                {banks.map((b) => <option key={b.id} value={b.id}>{b.name} ({b.count})</option>)}
+              </select>
+            )}
+            <button
+              onClick={() => setNewBank({ name: "", description: "" })}
+              className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink"
+            >
+              <Plus size={14} /> Novo banco
+            </button>
+            {selBank && banks.find((b) => b.id === selBank) && (
+              <button
+                onClick={() => deleteBank(banks.find((b) => b.id === selBank)!)}
+                className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-muted transition-colors hover:border-red-400/40 hover:text-red-400"
+              >
+                <Trash2 size={14} /> Excluir banco
+              </button>
+            )}
+          </>
+        )}
       </div>
+
+      {/* Explicação da aba Bancos + form de criação */}
+      {tab === "bank" && (
+        <div className="rounded-xl border border-border bg-surface px-3 py-2.5 text-xs text-muted">
+          Bancos são coleções de memória <span className="text-ink-soft">compartilháveis entre modelos</span>. Acople o mesmo banco a vários modelos (no editor do modelo, seção Memória) e eles passam a ler/escrever nele — sem depender do escopo global.
+        </div>
+      )}
+      {newBank && (
+        <div className="space-y-2 rounded-xl border border-accent/40 bg-surface p-3">
+          <input
+            autoFocus
+            value={newBank.name}
+            onChange={(e) => setNewBank({ ...newBank, name: e.target.value })}
+            placeholder="Nome do banco (ex.: Projeto X, Pessoal)"
+            className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
+          />
+          <input
+            value={newBank.description}
+            onChange={(e) => setNewBank({ ...newBank, description: e.target.value })}
+            placeholder="Descrição (opcional)"
+            className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
+          />
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setNewBank(null)} className="rounded-full px-3 py-1.5 text-sm text-muted hover:text-ink">Cancelar</button>
+            <button onClick={createBank} disabled={busy || !newBank.name.trim()} className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50">
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Criar banco
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Busca + ações */}
       <div className="flex flex-wrap items-center gap-2">
@@ -284,7 +380,8 @@ export default function MemoryView() {
         </div>
         <button
           onClick={() => { setAdding((v) => !v); setNewText(""); }}
-          className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
+          disabled={tab === "bank" && !activeBankId}
+          className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
         >
           <Plus size={15} /> Adicionar
         </button>
@@ -340,6 +437,7 @@ export default function MemoryView() {
         <p className="rounded-2xl border border-dashed border-border px-4 py-14 text-center text-sm text-muted">
           {tab === "model" && !activeModelId ? "Selecione um modelo."
             : tab === "chat" && !activeChatId ? "Selecione um chat."
+            : tab === "bank" && !activeBankId ? "Crie um banco para começar."
             : "Nenhuma memória neste escopo ainda."}
         </p>
       ) : (

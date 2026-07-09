@@ -23,3 +23,9 @@ user_tz: contextvars.ContextVar[str] = contextvars.ContextVar("user_tz", default
 # assistindo. Ferramentas que pedem revisão interativa (ex.: rascunho de e-mail
 # para o usuário editar/confirmar) devem PULAR essa fase e agir direto.
 background: contextvars.ContextVar[bool] = contextvars.ContextVar("background", default=False)
+
+# Perfil do usuário do turno (nome, sobre, gênero, nascimento, e-mail, idioma) —
+# preenchido pelo run_turn a partir do User. Fica disponível à ferramenta de
+# sistema `user.profile.get`, que devolve esses dados quando o modelo precisa
+# (ex.: "qual meu nome?", "quantos anos eu tenho?"). Dict vazio = sem dados.
+user_profile: contextvars.ContextVar[dict] = contextvars.ContextVar("user_profile", default={})
