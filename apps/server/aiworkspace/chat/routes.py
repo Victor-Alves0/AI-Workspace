@@ -1044,32 +1044,48 @@ async def regenerate_message(
 
     rows = await _ordered_messages(db, chat_id)
     idx = next((i for i, m in enumerate(rows) if m.id == message_id), None)
-    if idx is None or rows[idx].role != "assistant":
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Resposta não encontrada")
+    if idx is None or rows[idx].role not in ("assistant", "user"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Mensagem não encontrada")
 
-    prior = rows[:idx]
-    # prompt = última mensagem do usuário antes da resposta
-    user_text = ""
-    user_attachments: list[dict] = []
-    cut = len(prior)
-    for i in range(len(prior) - 1, -1, -1):
-        if prior[i].role == "user":
-            user_text = prior[i].content
-            user_attachments = _clean_attachments(prior[i].attachments or [])
-            cut = i
-            break
-    if not user_text:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sem prompt do usuário para refazer")
-    history = [
-        {"role": m.role, "content": m.content}
-        for m in prior[:cut]
-        if m.role in ("user", "assistant") and m.content and not m.compacted
-    ]
+    if rows[idx].role == "user":
+        # "Tentar novamente" NA MENSAGEM DO USUÁRIO (ex.: depois de editá-la):
+        # a IA pensa a partir dela — a mensagem fica; tudo que veio depois sai.
+        user_text = rows[idx].content
+        user_attachments = _clean_attachments(rows[idx].attachments or [])
+        if not user_text and not user_attachments:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mensagem vazia")
+        history = [
+            {"role": m.role, "content": m.content}
+            for m in rows[:idx]
+            if m.role in ("user", "assistant") and m.content and not m.compacted
+        ]
+        for m in rows[idx + 1:]:
+            await db.delete(m)
+        await db.commit()
+    else:
+        prior = rows[:idx]
+        # prompt = última mensagem do usuário antes da resposta
+        user_text = ""
+        user_attachments = []
+        cut = len(prior)
+        for i in range(len(prior) - 1, -1, -1):
+            if prior[i].role == "user":
+                user_text = prior[i].content
+                user_attachments = _clean_attachments(prior[i].attachments or [])
+                cut = i
+                break
+        if not user_text:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sem prompt do usuário para refazer")
+        history = [
+            {"role": m.role, "content": m.content}
+            for m in prior[:cut]
+            if m.role in ("user", "assistant") and m.content and not m.compacted
+        ]
 
-    # remove a resposta e tudo que veio depois
-    for m in rows[idx:]:
-        await db.delete(m)
-    await db.commit()
+        # remove a resposta e tudo que veio depois
+        for m in rows[idx:]:
+            await db.delete(m)
+        await db.commit()
 
     model = chat.model
     system_prompt = chat.system_prompt

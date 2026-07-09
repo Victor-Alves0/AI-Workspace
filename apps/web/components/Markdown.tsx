@@ -95,7 +95,9 @@ function Markdown({
     <div className={`md ${className}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={fast ? [] : [rehypeHighlight]}
+        // detect: realça também blocos SEM tag de linguagem (```` sem "python") —
+        // o hljs adivinha entre as linguagens comuns. Com tag, usa a declarada.
+        rehypePlugins={fast ? [] : [[rehypeHighlight, { detect: true }]]}
         components={{
           pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
           table: ({ children }) => (

@@ -72,6 +72,102 @@ function toolArtifacts(events: ToolEvent[]): Artifact[] {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Citações de fonte: URLs vindas das ferramentas (pesquisa profunda, busca na
+// web, leitura de página). Viram a barra "Fontes" e linkificam os [n] do texto.
+// ---------------------------------------------------------------------------
+type Source = { title: string; url: string };
+
+function collectSources(events: ToolEvent[]): Source[] {
+  const out: Source[] = [];
+  const seen = new Set<string>();
+  const add = (title: unknown, url: unknown) => {
+    if (typeof url !== "string" || !/^https?:\/\//i.test(url) || seen.has(url)) return;
+    seen.add(url);
+    out.push({ title: typeof title === "string" && title.trim() ? title.trim() : url, url });
+  };
+  // varre um resultado procurando fontes conhecidas (funciona aninhado no run_code)
+  const scan = (node: unknown, wantDeep: boolean, depth = 0): void => {
+    if (node == null || depth > 6) return;
+    if (Array.isArray(node)) { node.forEach((x) => scan(x, wantDeep, depth + 1)); return; }
+    if (typeof node !== "object") return;
+    const o = node as Record<string, unknown>;
+    if (wantDeep) {
+      if (o.kind === "deep_research" && Array.isArray(o.sources)) {
+        for (const s of o.sources as Record<string, unknown>[]) add(s?.title, s?.url);
+      }
+    } else {
+      if (Array.isArray(o.results)) {
+        for (const r of o.results as Record<string, unknown>[]) add(r?.title, r?.url);
+      }
+      if (typeof o.url === "string" && (typeof o.title === "string" || typeof o.text === "string") && o.kind !== "image") {
+        add(o.title, o.url); // web.page.read
+      }
+    }
+    for (const v of Object.values(o)) scan(v, wantDeep, depth + 1);
+  };
+  // pesquisa profunda PRIMEIRO: o brief dela cita [n] na ordem das próprias fontes
+  for (const e of events) if (e.kind === "result") scan(e.data, true);
+  for (const e of events) if (e.kind === "result") scan(e.data, false);
+  return out;
+}
+
+/** Torna os [n] do texto clicáveis, apontando p/ a fonte n — sem tocar em blocos
+ *  de código (split pelas cercas ```) nem em links já formados (`[n](`). */
+function linkifyCitations(content: string, sources: Source[]): string {
+  if (!sources.length || !/\[\d{1,2}\]/.test(content)) return content;
+  const parts = content.split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`)/);
+  return parts
+    .map((seg, i) => {
+      if (i % 2 === 1) return seg; // dentro de cerca de código
+      return seg.replace(/(?<![\w\]])\[(\d{1,2})\](?!\()/g, (m, d: string) => {
+        const n = Number(d);
+        return n >= 1 && n <= sources.length ? `[[${d}]](${sources[n - 1].url})` : m;
+      });
+    })
+    .join("");
+}
+
+function srcHost(u: string): string {
+  try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; }
+}
+
+/** Barra "Fontes": chips numerados com favicon + domínio, linkando a origem. */
+function SourcesBar({ sources }: { sources: Source[] }) {
+  const [all, setAll] = useState(false);
+  const shown = all ? sources : sources.slice(0, 6);
+  return (
+    <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+      <span className="mr-0.5 text-[11px] font-medium uppercase tracking-wider text-muted">Fontes</span>
+      {shown.map((s, i) => (
+        <a
+          key={s.url}
+          href={s.url}
+          target="_blank"
+          rel="noreferrer noopener"
+          title={s.title}
+          className="flex max-w-[240px] items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1 text-xs text-ink-soft transition-colors hover:border-accent/40 hover:text-ink"
+        >
+          <span className="text-[10px] tabular-nums text-muted">{i + 1}</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`https://www.google.com/s2/favicons?sz=32&domain=${srcHost(s.url)}`}
+            alt=""
+            loading="lazy"
+            className="h-3.5 w-3.5 rounded-sm"
+          />
+          <span className="truncate">{srcHost(s.url)}</span>
+        </a>
+      ))}
+      {sources.length > 6 && (
+        <button onClick={() => setAll((v) => !v)} className="text-xs text-muted transition-colors hover:text-ink">
+          {all ? "menos" : `+${sources.length - 6}`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function renderArtifact(a: Artifact, key: React.Key) {
   return a.kind === "excalidraw" ? (
     <ExcalidrawCanvas key={key} mermaid={a.data.mermaid} title={a.data.title} />
@@ -591,6 +687,7 @@ export default function MessageItem({
   const usedTools = toolEvents.length > 0;
   const usedMemories = message.memories_used ?? [];
   const artifacts = toolArtifacts(toolEvents);
+  const sources = isUser ? [] : collectSources(toolEvents);
 
   async function copy() {
     try {
@@ -675,6 +772,14 @@ export default function MessageItem({
               <div className="mt-1 flex items-center justify-end gap-1.5 pr-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
                 <span className="text-[11px] text-muted">{fmtTime(message.created_at)}</span>
                 <button
+                  title="Tentar novamente — a IA responde de novo a partir desta mensagem"
+                  onClick={() => onRegenerate(message.id)}
+                  disabled={busy}
+                  className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <RotateCcw size={13} />
+                </button>
+                <button
                   title="Editar"
                   onClick={() => { setDraft(message.content); setEditing(true); }}
                   className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-ink"
@@ -725,7 +830,8 @@ export default function MessageItem({
         {message.reasoning?.text && (
           <ReasoningBlock text={message.reasoning.text} seconds={message.reasoning.seconds} />
         )}
-        {editing ? editor : <AssistantBody content={message.content} artifacts={artifacts} />}
+        {editing ? editor : <AssistantBody content={linkifyCitations(message.content, sources)} artifacts={artifacts} />}
+        {!editing && sources.length > 0 && <SourcesBar sources={sources} />}
 
         {/* barra de ações — abaixo de toda mensagem da IA */}
         {!editing && (

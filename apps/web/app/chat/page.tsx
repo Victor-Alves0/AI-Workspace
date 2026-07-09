@@ -852,10 +852,12 @@ export default function ChatPage() {
     setStreamingReasoning("");
     setToolEvents([]);
     setGuardNote(null);
-    // remove a resposta alvo e as posteriores da UI
+    // remove da UI a partir do alvo: resposta da IA sai junto; mensagem do
+    // usuário ("Tentar novamente" nela) FICA — a IA pensa a partir dela.
     setMessages((m) => {
       const i = m.findIndex((x) => x.id === id);
-      return i === -1 ? m : m.slice(0, i);
+      if (i === -1) return m;
+      return m.slice(0, m[i].role === "user" ? i + 1 : i);
     });
     const { handler, state } = makeStreamHandler();
     try {
