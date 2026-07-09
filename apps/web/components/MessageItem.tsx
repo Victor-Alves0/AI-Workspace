@@ -839,7 +839,7 @@ export default function MessageItem({
                 </div>
               )}
               {message.content && (
-                <div className="whitespace-pre-wrap rounded-2xl rounded-br-md bg-surface2 px-4 py-2.5 text-[15px] leading-7 text-ink">
+                <div className="whitespace-pre-wrap rounded-2xl rounded-br-md bg-surface2 px-4 py-2.5 text-[15px] leading-7 text-ink [overflow-wrap:anywhere]">
                   {message.content}
                 </div>
               )}

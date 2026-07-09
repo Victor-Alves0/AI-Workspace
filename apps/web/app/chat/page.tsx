@@ -114,6 +114,9 @@ export default function ChatPage() {
   // seleção de modelo (vale para home e para o chat ativo)
   const [curModel, setCurModel] = useState("");
   const [curCustomId, setCurCustomId] = useState<string | null>(null);
+  // true depois que o usuário abriu um chat/escolheu um modelo — impede o
+  // "modelo padrão" (carregado async no boot) de sobrescrever a seleção
+  const modelChosenRef = useRef(false);
   // rascunho de controles (system prompt / params) usado quando ainda não há chat ativo
   const [draftSystemPrompt, setDraftSystemPrompt] = useState("");
   const [draftParams, setDraftParams] = useState<Record<string, unknown>>({});
@@ -207,6 +210,11 @@ export default function ChatPage() {
   }, []);
 
   function applyDefaultModel(u: User, customs: ModelConfig[]) {
+    // este carregamento é assíncrono e LENTO (espera chats + modelos): se o
+    // usuário já abriu um chat (deep-link ?c= no F5) ou escolheu um modelo
+    // enquanto isso, NÃO sobrescreve — senão o seletor marca o modelo padrão
+    // em vez do modelo do chat aberto.
+    if (modelChosenRef.current) return;
     const dm = u.default_model;
     if (!dm) return;
     if (dm.startsWith("custom:")) {
@@ -676,6 +684,7 @@ export default function ChatPage() {
     setLiveArtifact(null);
     setChatArtifacts([]);
     reloadArtifacts(id);
+    modelChosenRef.current = true;
     setCurModel(detail.model);
     // restaura o vínculo com o modelo personalizado (define ferramentas)
     setCurCustomId(detail.model_config_id ?? null);
@@ -693,6 +702,7 @@ export default function ChatPage() {
 
   function newChatWithModel(mc: ModelConfig) {
     setTemporary(false);
+    modelChosenRef.current = true;
     setCurModel(mc.base_model);
     setCurCustomId(mc.id);
     goHome();
@@ -714,11 +724,13 @@ export default function ChatPage() {
 
   // seleção de modelo a partir do picker
   async function selectExternal(id: string) {
+    modelChosenRef.current = true;
     setCurModel(id);
     setCurCustomId(null);
     if (active) await patchActive({ model: id, model_config_id: null });
   }
   async function selectCustom(mc: ModelConfig) {
+    modelChosenRef.current = true;
     setCurModel(mc.base_model);
     setCurCustomId(mc.id);
     if (active) await patchActive({ model: mc.base_model, system_prompt: mc.system_prompt, params: mc.params, model_config_id: mc.id });
@@ -1064,7 +1076,7 @@ export default function ChatPage() {
 
   function pickPinned(item: { custom: ModelConfig | null; extId: string | null }) {
     if (item.custom) newChatWithModel(item.custom);
-    else if (item.extId) { setCurModel(item.extId); setCurCustomId(null); goHome(); }
+    else if (item.extId) { modelChosenRef.current = true; setCurModel(item.extId); setCurCustomId(null); goHome(); }
   }
 
   // uso de contexto: limite vem do modelo base; tokens usam o registro real da
@@ -1583,7 +1595,7 @@ function MessageBubble({
     return (
       <div className="mx-auto flex max-w-3xl justify-end">
         <div className="group relative max-w-[85%]">
-          <div className="whitespace-pre-wrap rounded-2xl rounded-br-md bg-surface2 px-4 py-2.5 text-[15px] leading-7 text-ink">
+          <div className="whitespace-pre-wrap rounded-2xl rounded-br-md bg-surface2 px-4 py-2.5 text-[15px] leading-7 text-ink [overflow-wrap:anywhere]">
             {content}
           </div>
           {(time || onDelete) && (

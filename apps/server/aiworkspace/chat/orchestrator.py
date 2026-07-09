@@ -37,6 +37,12 @@ from ..tools import toolctx
 
 logger = logging.getLogger(__name__)
 
+# resposta "vazia de verdade": só espaços e/ou marcadores de posicionamento de
+# artefato ([[research]], [[chart]], …) — usado pela cutucada final do loop
+_MARKER_ONLY_RE = re.compile(
+    r"^(?:\s|\[\[(?:canvas|diagram|chart|quote|stock|research|image|email)\]\])*$", re.IGNORECASE
+)
+
 # Tarefas em background (fora do caminho crítico da resposta). Guardamos as refs
 # para o asyncio não coletá-las antes de terminarem.
 _bg_tasks: set[asyncio.Task] = set()
@@ -662,6 +668,10 @@ async def run_turn(
     # (ex.: image_generation num modelo só-texto → 404/400) degrada p/ texto em vez de
     # quebrar TODA mensagem do chat.
     retried_plain = False
+    # "cutucada" final: modelos às vezes terminam MUDOS (ou só com um marcador
+    # [[research]]) depois de uma tool pesada — o usuário via o card e nenhuma
+    # resposta. Uma única volta extra, sem tools, força a redação final.
+    nudged = False
 
     # 3-4. loop de tool calling
     for _ in range(settings.max_tool_iterations):
@@ -734,6 +744,19 @@ async def run_turn(
             yield {"type": "usage", "usage": usage}
 
         if finish_reason != "tool_calls" or not tool_buffer:
+            if tool_events and not nudged and _MARKER_ONLY_RE.match(assistant_text or ""):
+                nudged = True
+                if assistant_text.strip():
+                    messages.append({"role": "assistant", "content": assistant_text})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Now write your final answer to the user's request in plain text, "
+                        "based on the tool results above. Do not call any tools."
+                    ),
+                })
+                tools = None
+                continue
             break
 
         # registra a mensagem do assistant com os tool_calls e executa cada um

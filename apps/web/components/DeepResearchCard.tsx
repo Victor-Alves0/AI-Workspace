@@ -5,14 +5,19 @@ import { ChevronDown, ExternalLink, Telescope } from "lucide-react";
 import type { DeepResearch } from "@/lib/types";
 import Markdown from "./Markdown";
 
-/** Card da pesquisa profunda (research.deep.run): fontes numeradas + resumo
- *  destilado (colapsável). O texto principal costuma vir na resposta da IA. */
+/** Card da pesquisa profunda (research.deep.run): minimizável (clique no
+ *  cabeçalho). Expandido mostra as fontes numeradas + resumo destilado
+ *  (colapsável). O texto principal costuma vir na resposta da IA. */
 export default function DeepResearchCard({ data }: { data: DeepResearch }) {
+  const [expanded, setExpanded] = useState(false);
   const [openBrief, setOpenBrief] = useState(false);
   const sources = data.sources ?? [];
   return (
     <div className="my-2 overflow-hidden rounded-xl border border-border bg-surface">
-      <div className="flex items-center gap-2 border-b border-border px-3.5 py-2.5">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className={`flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition-colors hover:bg-hover ${expanded ? "border-b border-border" : ""}`}
+      >
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-surface2 text-accent-hover">
           <Telescope size={16} />
         </span>
@@ -23,9 +28,10 @@ export default function DeepResearchCard({ data }: { data: DeepResearch }) {
         <span className="shrink-0 rounded-full bg-surface2 px-2 py-0.5 text-[10px] text-muted">
           {sources.length} fontes{data.rounds ? ` · ${data.rounds} rodadas` : ""}
         </span>
-      </div>
+        <ChevronDown size={15} className={`shrink-0 text-muted transition-transform ${expanded ? "rotate-180" : ""}`} />
+      </button>
 
-      {data.brief && (
+      {expanded && data.brief && (
         <div className="border-b border-border">
           <button
             onClick={() => setOpenBrief((v) => !v)}
@@ -42,6 +48,7 @@ export default function DeepResearchCard({ data }: { data: DeepResearch }) {
         </div>
       )}
 
+      {expanded && (
       <div className="max-h-64 space-y-1 overflow-y-auto p-2">
         {sources.map((s) => (
           <a
@@ -58,6 +65,7 @@ export default function DeepResearchCard({ data }: { data: DeepResearch }) {
           </a>
         ))}
       </div>
+      )}
     </div>
   );
 }

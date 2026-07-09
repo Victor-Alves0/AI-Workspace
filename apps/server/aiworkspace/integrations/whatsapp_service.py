@@ -55,6 +55,13 @@ def _digits(value: str) -> str:
     return re.sub(r"\D", "", (value or "").split("@")[0])
 
 
+def _norm_br(digits: str) -> str:
+    """Normaliza números BR: o WhatsApp costuma usar o formato SEM o nono dígito
+    (55 + DDD + 8 dígitos), mas as pessoas digitam COM o 9. Remove o 9 extra para
+    comparar as duas formas ("5583991659211" ≡ "558391659211")."""
+    return re.sub(r"^55(\d{2})9(\d{8})$", r"55\1\2", digits)
+
+
 def passes_filters(conn: WhatsAppConnection, m: dict[str, Any]) -> tuple[bool, str]:
     """Camada de filtragem ANTES do modelo. Retorna (aprovada, motivo_recusa)."""
     f = conn.filters or {}
@@ -63,11 +70,11 @@ def passes_filters(conn: WhatsAppConnection, m: dict[str, Any]) -> tuple[bool, s
     if m.get("is_group") and not f.get("groups"):
         return False, "grupo (desativado nos filtros)"
     # em grupos, quem fala é o participante; em 1:1, o próprio jid
-    sender = _digits(m.get("sender") or m.get("jid") or "")
+    sender = _norm_br(_digits(m.get("sender") or m.get("jid") or ""))
 
     def _match(entries: Any) -> bool:
         for e in entries or []:
-            d = _digits(str(e))
+            d = _norm_br(_digits(str(e)))
             if d and (sender.endswith(d) or d.endswith(sender)):
                 return True
         return False
@@ -150,8 +157,8 @@ async def _send_reply(conn: WhatsAppConnection, jid: str, text: str) -> None:
 
 async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
     """Um turno completo para UMA mensagem aprovada (sessão própria)."""
-    from ..chat.orchestrator import run_turn
-    from ..chat.routes import _load_skills, _resolve_provider, _usage_record
+    from ..chat.orchestrator import run_turn_guarded
+    from ..chat.routes import _load_skills, _resolve_guards, _resolve_provider, _usage_record
     from ..tools.loader import get_sift_for_user
 
     async with SessionLocal() as db:
@@ -203,6 +210,9 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
 
         sift = await get_sift_for_user(db, user.id, mc)
         skills = await _load_skills(db, user, mc)
+        # filtros do modelo que fazem sentido em texto: Guardas de saída (os de
+        # imagem — vision/genimage router — não se aplicam a mensagens do WhatsApp)
+        guards = await _resolve_guards(db, user, mc)
         who = m.get("sender_name") or _digits(m["jid"])
         extra_system = (
             f"You are replying on WhatsApp (connection '{conn.label or conn.phone}') to "
@@ -217,7 +227,8 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
         tool_events = None
         error = None
         try:
-            async for ev in run_turn(
+            async for ev in run_turn_guarded(
+                guards=guards,
                 api_key=api_key, model=model, history=history, user_text=text,
                 chat_system_prompt=mc.system_prompt if mc else None,
                 params=(mc.params if mc else {}) or {},

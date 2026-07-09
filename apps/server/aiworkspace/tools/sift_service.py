@@ -486,9 +486,11 @@ def _register_builtins(
             "research.deep.run",
             description=(
                 "Deep, multi-step web research: plans sub-questions, searches, reads pages, "
-                "returns a synthesized brief WITH sources. Slow and costly — use ONLY when "
-                "the user explicitly asks for deep/thorough/in-depth research. For a quick "
-                "fact use web.search instead. Optionally write [[research]] where it should appear."
+                "returns a synthesized brief WITH sources. Slow and costly — use ONLY when the "
+                "user EXPLICITLY asks for it ('pesquisa profunda', 'deep research', 'investigue "
+                "a fundo'). Needing a web lookup is NOT enough: questions about a link/product/"
+                "fact use page.read and web.search instead. Optionally write [[research]] where "
+                "it should appear. Always follow it with your own textual answer to the user."
             ),
             params={"query": "string:o::the research topic or question"},
             returns=["kind", "query", "brief", "sources", "rounds", "error"],

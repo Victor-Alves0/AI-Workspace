@@ -386,14 +386,16 @@ function OfficialWebhookInfo({ conn }: { conn: WhatsAppConnection }) {
 /* Criação                                                                    */
 /* ------------------------------------------------------------------------- */
 function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  // sem overflow-hidden/auto: o dropdown do seletor de modelo precisa "vazar"
+  // para fora do modal (senão fica clipado dentro dele)
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-bg shadow-menu" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full max-w-md rounded-2xl border border-border bg-bg shadow-menu" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-5 py-3">
           <p className="text-sm font-semibold text-ink">{title}</p>
           <button onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={18} /></button>
         </div>
-        <div className="max-h-[75vh] space-y-3 overflow-y-auto px-5 py-4">{children}</div>
+        <div className="space-y-3 px-5 py-4">{children}</div>
       </div>
     </div>
   );
