@@ -329,6 +329,8 @@ export interface AutomationOptions {
   use_context?: boolean;
   /** horas (número) ou "view_once" (apaga ao abrir e sair) */
   chat_ttl?: number | "view_once" | null;
+  /** nível de raciocínio (thinking) do turno; ausente = padrão do modelo */
+  reasoning?: "off" | "low" | "medium" | "high" | null;
 }
 
 export interface Automation {

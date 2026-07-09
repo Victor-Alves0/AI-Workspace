@@ -36,6 +36,14 @@ const TTL_OPTS: { key: string; label: string }[] = [
   { key: "view_once", label: "Ao abrir (visualização única)" },
 ];
 
+const REASONING_OPTS: { key: string; label: string }[] = [
+  { key: "", label: "Padrão do modelo" },
+  { key: "off", label: "Desligado" },
+  { key: "low", label: "Baixo" },
+  { key: "medium", label: "Médio" },
+  { key: "high", label: "Alto" },
+];
+
 const WATCHERS: { key: string; label: string }[] = [
   { key: "page", label: "Mudança em página" },
   { key: "web_search", label: "Busca na web + condição" },
@@ -269,9 +277,20 @@ export default function AutomationEditor({
             />
           </div>
 
-          {/* ===== AGENDADA: ferramentas + frequência ===== */}
+          {/* ===== AGENDADA: raciocínio + ferramentas + frequência ===== */}
           {!isMonitor && (
             <>
+              <div className="space-y-1">
+                <p className="text-xs text-muted">Raciocínio (thinking)</p>
+                <select
+                  value={d.options?.reasoning ?? ""}
+                  onChange={(e) => setOpt("reasoning", e.target.value || null)}
+                  className={inputCls}
+                >
+                  {REASONING_OPTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                </select>
+              </div>
+
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <p className="text-xs text-muted">Ferramentas (opcional — vazio usa as do modelo)</p>
