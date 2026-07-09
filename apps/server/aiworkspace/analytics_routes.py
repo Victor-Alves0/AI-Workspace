@@ -131,6 +131,7 @@ async def overview(
                 UsageEvent.total_tokens, UsageEvent.prompt_tokens,
                 UsageEvent.completion_tokens, UsageEvent.reasoning_tokens,
                 UsageEvent.cost, UsageEvent.created_at, UsageEvent.chat_id,
+                UsageEvent.provider,
             )
             .where(UsageEvent.user_id == user.id)
             # ordena por tempo p/ que, ao agrupar por modelo, o NOME mais recente
@@ -138,16 +139,6 @@ async def overview(
             .order_by(UsageEvent.created_at)
         )
     ).all()
-
-    # nº de conversas que geraram uso (distintas no ledger — histórico, não some
-    # com a exclusão do chat).
-    chat_ids: set = set()
-
-    # --- agregações em memória (volume por usuário é modesto) ---
-    by_model: dict[str, dict] = {}
-    tot_tokens = tot_cost = 0.0
-    tot_reasoning = 0
-    tot_prompt = tot_completion = 0
 
     # baldes temporais (locais, deslocando pelo tz_offset do navegador). A janela e
     # a granularidade dependem do 'range' escolhido pelo usuário.
@@ -163,61 +154,133 @@ async def overview(
             earliest = (c0.astimezone(timezone.utc) - off).date()
 
     start, gran = _range_start(range_key, local_today, earliest)
+    # janela ANTERIOR de mesmo tamanho (p/ o "▲/▼ % vs período anterior")
+    span_days = (local_today - start).days + 1
+    prev_start = start - timedelta(days=span_days)
+    prev_end = start - timedelta(days=1)
+
     keys = _bucket_keys(start, local_today, gran)
     per_day = {
         d.isoformat(): {
             "date": d.isoformat(),
             "label": _bucket_label(d, gran, range_key),
             "tokens": 0, "cost": 0.0, "messages": 0,
+            # empilhamento por modelo (preenchido depois com os top-N da janela)
+            "by": {},
         }
         for d in keys
     }
 
-    for model, model_name, model_config_id, tokens, prompt_t, completion_t, reason_t, cost, created_at, chat_id in rows:
-        # agrupa por chave ESTÁVEL (id do modelo custom, senão o id base do modelo),
-        # não pelo nome de exibição — renomear um modelo não fragmenta o histórico.
-        key = str(model_config_id or model or "desconhecido")
-        name = (model_name or model or "desconhecido").strip() or "desconhecido"
+    # --- agregações (volume por usuário é modesto; uma passada só) ---
+    by_model: dict[str, dict] = {}       # DENTRO da janela
+    chat_ids: set = set()                # conversas com uso na janela
+    win = {"tokens": 0, "cost": 0.0, "messages": 0, "prompt": 0, "completion": 0, "reasoning": 0}
+    prev = {"tokens": 0, "cost": 0.0, "messages": 0}
+    activity_days: dict[str, int] = {}   # tokens por dia local — últimos 12 meses
+    all_days: set[str] = set()           # dias com uso (streak, all-time)
+    all_tokens = 0
+    activity_start = _sub_months(local_today, 12)
+
+    for model, model_name, model_config_id, tokens, prompt_t, completion_t, reason_t, cost, created_at, chat_id, provider in rows:
         tokens = int(tokens or 0)
         cost = float(cost or 0.0)
-        prompt_t = int(prompt_t or 0)
-        completion_t = int(completion_t or 0)
-        reason_t = int(reason_t or 0)
+        all_tokens += tokens
+        if created_at is None:
+            continue
+        cdt = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+        local_date = (cdt.astimezone(timezone.utc) - off).date()
+        iso = local_date.isoformat()
+        all_days.add(iso)
+        if local_date >= activity_start:
+            activity_days[iso] = activity_days.get(iso, 0) + tokens
+
+        if prev_start <= local_date <= prev_end:
+            prev["tokens"] += tokens
+            prev["cost"] += cost
+            prev["messages"] += 1
+        if local_date < start:
+            continue
+
+        # ---- daqui p/ baixo: DENTRO da janela selecionada ----
+        # chave ESTÁVEL (id do modelo custom, senão o id base) — renomear não fragmenta
+        key = str(model_config_id or model or "desconhecido")
+        name = (model_name or model or "desconhecido").strip() or "desconhecido"
+        # fonte: deriva do id do modelo (cobre linhas antigas gravadas antes do fix)
+        prov = "ollama" if (model or "").startswith("ollama/") else (provider or "openrouter")
+        vendor = "local" if prov == "ollama" else ((model or "").split("/")[0] or "api")
         if chat_id is not None:
             chat_ids.add(chat_id)
 
-        m = by_model.setdefault(key, {"id": key, "model": name, "messages": 0, "tokens": 0, "cost": 0.0})
-        m["model"] = name  # rows ordenadas por tempo → nome mais recente vence
+        m = by_model.setdefault(key, {"id": key, "model": name, "provider": prov, "vendor": vendor,
+                                      "messages": 0, "tokens": 0, "cost": 0.0})
+        m["model"] = name
         m["messages"] += 1
         m["tokens"] += tokens
         m["cost"] += cost
 
-        tot_tokens += tokens
-        tot_cost += cost
-        tot_reasoning += reason_t
-        tot_prompt += prompt_t
-        tot_completion += completion_t
+        win["tokens"] += tokens
+        win["cost"] += cost
+        win["messages"] += 1
+        win["prompt"] += int(prompt_t or 0)
+        win["completion"] += int(completion_t or 0)
+        win["reasoning"] += int(reason_t or 0)
 
-        if created_at is not None:
-            # created_at é tz-aware (UTC); normaliza p/ o dia local do usuário e
-            # cai no balde (dia/semana/mês) correspondente da janela selecionada.
-            cdt = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
-            local_date = (cdt.astimezone(timezone.utc) - off).date()
-            bk = _bucket_key(local_date, gran).isoformat()
-            if bk in per_day:
-                per_day[bk]["tokens"] += tokens
-                per_day[bk]["cost"] += cost
-                per_day[bk]["messages"] += 1
+        bk = _bucket_key(local_date, gran).isoformat()
+        if bk in per_day:
+            b = per_day[bk]
+            b["tokens"] += tokens
+            b["cost"] += cost
+            b["messages"] += 1
+            e = b["by"].setdefault(key, {"t": 0, "c": 0.0, "m": 0})
+            e["t"] += tokens
+            e["c"] += cost
+            e["m"] += 1
 
-    total_messages = sum(m["messages"] for m in by_model.values())
-    model_list = sorted(by_model.values(), key=lambda x: x["messages"], reverse=True)
+    model_list = sorted(by_model.values(), key=lambda x: x["tokens"], reverse=True)
     for m in model_list:
-        m["pct"] = round(m["messages"] / total_messages * 100, 1) if total_messages else 0.0
+        m["pct"] = round(m["messages"] / win["messages"] * 100, 1) if win["messages"] else 0.0
         m["cost"] = round(m["cost"], 4)
 
-    per_day_list = list(per_day.values())
-    for d in per_day_list:
+    # série empilhada: top-5 modelos da janela + "outros" (o resto agregado)
+    top_keys = [m["id"] for m in model_list[:5]]
+    series = [{"id": m["id"], "name": m["model"], "provider": m["provider"]} for m in model_list[:5]]
+    has_other = len(model_list) > 5
+    if has_other:
+        series.append({"id": "__other__", "name": "Outros", "provider": ""})
+    per_day_list = []
+    for d in per_day.values():
+        by = d.pop("by")
+        stack = {k: by[k] for k in top_keys if k in by}
+        if has_other:
+            ot = {"t": 0, "c": 0.0, "m": 0}
+            for k, v in by.items():
+                if k not in top_keys:
+                    ot["t"] += v["t"]; ot["c"] += v["c"]; ot["m"] += v["m"]
+            if ot["m"]:
+                stack["__other__"] = ot
+        d["by"] = {k: {"t": v["t"], "c": round(v["c"], 4), "m": v["m"]} for k, v in stack.items()}
         d["cost"] = round(d["cost"], 4)
+        per_day_list.append(d)
+
+    # --- atividade (12 meses) + sequência de dias consecutivos (all-time) ---
+    longest = run = 0
+    prev_day: date | None = None
+    for iso in sorted(all_days):
+        d = date.fromisoformat(iso)
+        run = run + 1 if (prev_day is not None and d == prev_day + timedelta(days=1)) else 1
+        longest = max(longest, run)
+        prev_day = d
+    act_total = sum(activity_days.values())
+    first_act = min((date.fromisoformat(k) for k in activity_days), default=local_today)
+    act_span = max(1, (local_today - max(first_act, activity_start)).days + 1)
+    activity = {
+        "start": activity_start.isoformat(),
+        "days": [{"d": k, "t": v} for k, v in sorted(activity_days.items())],
+        "longest_streak": longest,
+        "avg_day": int(act_total / act_span),
+        "avg_week": int(act_total / act_span * 7),
+        "total_tokens": int(all_tokens),
+    }
 
     api_key = await get_secret(db, user.id, OPENROUTER_KEY)
     credits = await _openrouter_credits(api_key) if api_key else None
@@ -225,17 +288,23 @@ async def overview(
     return {
         "by_model": model_list,
         "per_day": per_day_list,
+        "series": series,
         "range": range_key,
         "granularity": gran,
         "credits": credits,
+        "activity": activity,
+        # variação vs o período anterior de mesmo tamanho ('all' não tem anterior)
+        "prev_totals": None if range_key == "all" else {
+            "tokens": prev["tokens"], "cost": round(prev["cost"], 4), "messages": prev["messages"],
+        },
         "totals": {
             "chats": len(chat_ids),
-            "messages": total_messages,
-            "tokens": int(tot_tokens),
-            "prompt_tokens": tot_prompt,
-            "completion_tokens": tot_completion,
-            "reasoning_tokens": tot_reasoning,
-            "cost": round(tot_cost, 4),
-            "avg_tokens": int(tot_tokens / total_messages) if total_messages else 0,
+            "messages": win["messages"],
+            "tokens": int(win["tokens"]),
+            "prompt_tokens": win["prompt"],
+            "completion_tokens": win["completion"],
+            "reasoning_tokens": win["reasoning"],
+            "cost": round(win["cost"], 4),
+            "avg_tokens": int(win["tokens"] / win["messages"]) if win["messages"] else 0,
         },
     }

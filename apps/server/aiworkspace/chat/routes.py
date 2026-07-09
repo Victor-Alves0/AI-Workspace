@@ -87,7 +87,8 @@ def _usage_record(usage: dict | None, model: str, model_config: ModelConfig | No
         "model": model,
         "model_config_id": str(model_config.id) if model_config else None,
         "model_name": model_config.name if model_config else model,
-        "provider": "openrouter",
+        # separação das FONTES no ledger: modelos locais (Ollama) ≠ API (OpenRouter)
+        "provider": "ollama" if (model or "").startswith("ollama/") else "openrouter",
         "prompt_tokens": int(u.get("prompt_tokens", 0) or 0),
         "completion_tokens": int(u.get("completion_tokens", 0) or 0),
         "total_tokens": int(u.get("total_tokens", 0) or 0),
