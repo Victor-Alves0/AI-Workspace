@@ -11,6 +11,7 @@ from .automation import Automation, Notification
 from .google_account import GoogleAccount
 from .generated_image import GeneratedImage
 from .usage_event import UsageEvent
+from .whatsapp import WhatsAppConnection, WhatsAppThread
 
 __all__ = [
     "User",

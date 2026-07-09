@@ -324,6 +324,34 @@ export interface AutomationSchedule {
   tz?: string;
 }
 
+// ------------------------------- WhatsApp ---------------------------------
+export interface WhatsAppFilters {
+  policy: "all" | "allow" | "block";
+  allow: string[];
+  block: string[];
+  groups: boolean;
+  trigger: string;
+}
+
+export interface WhatsAppConnection {
+  id: string;
+  label: string;
+  provider: "evolution" | "official";
+  phone: string;
+  model_config_id: string | null;
+  model: string;
+  filters: WhatsAppFilters;
+  memory: "local" | "global";
+  enabled: boolean;
+  state: { status?: string; last_error?: string | null };
+  threads: number;
+  phone_number_id: string;
+  has_token: boolean;
+  verify_token: string;
+  webhook_path: string;
+  created_at: string;
+}
+
 // opções do turno/chat da automação
 export interface AutomationOptions {
   use_context?: boolean;

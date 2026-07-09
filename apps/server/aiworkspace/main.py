@@ -31,6 +31,7 @@ from .settings_routes import router as settings_router
 from .skills_routes import router as skills_router
 from .tools_routes import router as tools_router
 from .voice_routes import router as voice_router
+from .whatsapp_routes import router as whatsapp_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("aiworkspace")
@@ -136,6 +137,7 @@ def create_app() -> FastAPI:
     app.include_router(voice_router)
     app.include_router(finance_router)
     app.include_router(integration_router)
+    app.include_router(whatsapp_router)
     app.include_router(image_router)
     app.include_router(automation_router)
     app.include_router(debug_router)

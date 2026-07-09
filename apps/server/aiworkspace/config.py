@@ -83,6 +83,17 @@ class Settings(BaseSettings):
     # console do Google e ser alcançado via localhost (política do Google).
     google_redirect_uri: str = "http://localhost:8000/integrations/google/callback"
 
+    # Integração WhatsApp
+    # Evolution API (caminho NÃO oficial, QR Code): serviço opt-in do compose
+    # (`--profile whatsapp`). Vazio = caminho não oficial indisponível (o oficial
+    # via Meta Cloud API funciona sem nada disso).
+    evolution_api_url: str = ""
+    evolution_api_key: str = ""
+    # Base das URLs de webhook geradas. Para o Evolution (rede interna do compose)
+    # o padrão resolve; para o Cloud API da Meta é preciso uma URL PÚBLICA https —
+    # defina aqui o endereço externo do server (túnel/proxy reverso).
+    whatsapp_webhook_base: str = "http://server:8000"
+
     # Limite de iterações de tool-calling por turno
     max_tool_iterations: int = 8
 

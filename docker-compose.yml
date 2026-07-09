@@ -8,6 +8,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-aiworkspace}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      # cria bancos extras (ex.: "evolution") no PRIMEIRO init do volume. Em
+      # volumes já existentes não roda — crie na mão: `docker compose exec db
+      # createdb -U aiworkspace evolution`
+      - ./infra/db-init:/docker-entrypoint-initdb.d:ro
     ports:
       # apenas o host (127.0.0.1) — o server acessa o banco pela rede do compose
       # (db:5432). Não exponha o Postgres à rede: as credenciais default são fracas
@@ -43,6 +47,11 @@ services:
       # p/ intfloat/multilingual-e5-large (~2.2GB; o cache .npz inclui o modelo
       # no hash → a troca auto-invalida índices antigos).
       SIFT_EMBED_MODEL: ${SIFT_EMBED_MODEL:-BAAI/bge-small-en-v1.5}
+      # Integração WhatsApp (caminho não oficial via Evolution; vazio = desabilitado)
+      EVOLUTION_API_URL: ${EVOLUTION_API_URL:-http://evolution:8080}
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
+      # base das URLs de webhook (Cloud API oficial exige uma URL pública https)
+      WHATSAPP_WEBHOOK_BASE: ${WHATSAPP_WEBHOOK_BASE:-http://server:8000}
     volumes:
       # persiste modelos de embedding (fastembed/HF) e índices SIFT (.npz)
       # entre recriações do container — cold start rápido
@@ -64,6 +73,34 @@ services:
     ports:
       - "${KOKORO_BIND:-127.0.0.1}:${KOKORO_PORT:-8880}:8880"
 
+  # WhatsApp NÃO oficial (QR Code) — Evolution API (Baileys).
+  # OPT-IN: só sobe com `docker compose --profile whatsapp up -d`.
+  # Requer o banco "evolution" no Postgres (criado automaticamente em volumes
+  # novos via infra/db-init; em volumes existentes: `docker compose exec db
+  # createdb -U aiworkspace evolution`) e EVOLUTION_API_KEY no .env.
+  # O caminho OFICIAL (Meta Cloud API) NÃO precisa deste serviço.
+  evolution:
+    image: evoapicloud/evolution-api:v2.3.7
+    profiles: ["whatsapp"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?set EVOLUTION_API_KEY in .env}
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USER:-aiworkspace}:${POSTGRES_PASSWORD:-aiworkspace}@db:5432/evolution?schema=public
+      DATABASE_CONNECTION_CLIENT_NAME: evolution
+      CACHE_LOCAL_ENABLED: "true"
+      CACHE_REDIS_ENABLED: "false"
+      CONFIG_SESSION_PHONE_CLIENT: AI Workspace
+      LOG_LEVEL: ERROR
+    volumes:
+      - evolution_instances:/evolution/instances
+    ports:
+      - "${EVOLUTION_BIND:-127.0.0.1}:${EVOLUTION_PORT:-8081}:8080"
+
   web:
     build:
       context: ./apps/web
@@ -83,3 +120,4 @@ services:
 volumes:
   pgdata:
   mlcache:
+  evolution_instances:
