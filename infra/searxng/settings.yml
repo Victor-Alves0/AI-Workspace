@@ -1,0 +1,32 @@
+# SearXNG — metabuscador self-hosted usado pela Pesquisa na Web do AI Workspace.
+# Sobe opt-in: `docker compose --profile search up -d`.
+# O backend consulta GET /search?format=json, então o formato JSON PRECISA estar
+# ligado (search.formats abaixo) e o limiter DESLIGADO (uso interno na rede do
+# compose; a porta é publicada só em 127.0.0.1).
+use_default_settings: true
+
+general:
+  instance_name: "AI Workspace Search"
+  # não divulga esta instância publicamente
+  donation_url: false
+  contact_url: false
+
+server:
+  # Troque por um valor aleatório próprio se quiser:
+  #   python -c "import secrets; print(secrets.token_hex(32))"
+  secret_key: "ea061d003e653e10a5f118e292fdf8daa2cba1c1bbe3b1c33cb10a30d427ccaf"
+  # instância interna (rede do compose): sem rate-limit, senão a API JSON é barrada
+  limiter: false
+  public_instance: false
+  image_proxy: true
+
+search:
+  # HTML (UI, se você abrir :8080) + JSON (consumido pelo backend)
+  formats:
+    - html
+    - json
+  safe_search: 1
+  autocomplete: ""
+
+# motores: usa os padrões do SearXNG (Google, Bing, DuckDuckGo, Wikipedia, …).
+# Para desligar algum, adicione aqui `engines: [{name: <engine>, disabled: true}]`.

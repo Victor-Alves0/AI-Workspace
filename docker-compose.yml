@@ -35,7 +35,7 @@ services:
       APP_SECRET: ${APP_SECRET:?set APP_SECRET in .env}
       ENABLE_SIGNUP: ${ENABLE_SIGNUP:-true}
       WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-duckduckgo}
-      SEARXNG_URL: ${SEARXNG_URL:-http://localhost:8080}
+      SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
       VOICE_BASE_URL: ${VOICE_BASE_URL:-https://api.openai.com/v1}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aiworkspace}:${POSTGRES_PASSWORD:-aiworkspace}@db:5432/${POSTGRES_DB:-aiworkspace}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
@@ -72,6 +72,22 @@ services:
     restart: unless-stopped
     ports:
       - "${KOKORO_BIND:-127.0.0.1}:${KOKORO_PORT:-8880}:8880"
+
+  # SearXNG — metabuscador self-hosted para a Pesquisa na Web (sem chave de API).
+  # OPT-IN: `docker compose --profile search up -d searxng`. Depois, no .env:
+  #   WEB_SEARCH_PROVIDER=searxng   (o server já aponta p/ http://searxng:8080)
+  # Config em infra/searxng/settings.yml (formato JSON ligado, limiter desligado).
+  searxng:
+    image: searxng/searxng:latest
+    profiles: ["search"]
+    restart: unless-stopped
+    volumes:
+      - ./infra/searxng:/etc/searxng:rw
+    environment:
+      SEARXNG_BASE_URL: http://localhost:${SEARXNG_PORT:-8080}/
+    ports:
+      # só no host (127.0.0.1): o server acessa pela rede do compose (searxng:8080)
+      - "${SEARXNG_BIND:-127.0.0.1}:${SEARXNG_PORT:-8080}:8080"
 
   # WhatsApp NÃO oficial (QR Code) — Evolution API (Baileys).
   # OPT-IN: só sobe com `docker compose --profile whatsapp up -d`.
