@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 import time
 from email.message import EmailMessage
 from typing import Any
@@ -269,34 +270,41 @@ def _hval(headers: list[dict], name: str) -> str:
 
 
 # ------------------------------- Gmail ------------------------------------- #
-# Teto de segurança da busca do Gmail: cada mensagem custa 1 chamada EXTRA à API
-# (padrão N+1 p/ puxar cabeçalhos + snippet), então mesmo um "puxe todos"
-# (max_results=0) para aqui — evita pendurar a request / estourar o rate limit.
-GMAIL_SEARCH_HARD_MAX = 500
+# Tetos da busca do Gmail. LISTAR ids é barato (1 chamada por até 500), mas cada
+# mensagem custa 1 GET EXTRA de metadados (padrão N+1) — foi isso que fazia
+# "quantos e-mails não lidos?" (max_results=0 → 500 GETs sequenciais) levar 3+
+# minutos e estourar o turno. Agora: contagem = só ids (exata até o hard max);
+# metadados = só uma amostra/teto.
+GMAIL_SEARCH_HARD_MAX = 500   # teto de IDs paginados (contagem exata até aqui)
+GMAIL_METADATA_MAX = 50       # teto de GETs N+1 quando o modelo pede N explícito
+GMAIL_COUNT_SAMPLE = 25       # amostra com metadados quando max_results=0 (contar)
 
 
 def gmail_search(token: str, query: str, max_results: int) -> dict[str, Any]:
     """Lista mensagens do Gmail (metadados + snippet).
 
-    ``max_results``: quantas puxar. ``0`` (ou negativo) = TODAS que casam a
-    ``query`` — paginando —, limitado por ``GMAIL_SEARCH_HARD_MAX``. Qualquer
-    valor explícito também respeita esse teto de segurança."""
+    ``max_results``: quantas puxar (metadados; teto ``GMAIL_METADATA_MAX``).
+    ``0`` (ou negativo) = CONTAR todas que casam a ``query`` (ids paginados até
+    ``GMAIL_SEARCH_HARD_MAX``) e devolver metadados só das primeiras
+    ``GMAIL_COUNT_SAMPLE`` — `count` é a contagem real."""
     svc = _service(token, "gmail", "v1")
-    want = GMAIL_SEARCH_HARD_MAX if max_results <= 0 else min(int(max_results), GMAIL_SEARCH_HARD_MAX)
+    count_all = max_results <= 0
+    want_ids = GMAIL_SEARCH_HARD_MAX if count_all else min(int(max_results), GMAIL_METADATA_MAX)
     ids: list[str] = []
     page_token: str | None = None
-    while len(ids) < want:
+    while len(ids) < want_ids:
         res = svc.users().messages().list(
             userId="me", q=query or "",
-            maxResults=min(500, want - len(ids)),
+            maxResults=min(500, want_ids - len(ids)),
             pageToken=page_token,
         ).execute()
         ids.extend(m["id"] for m in res.get("messages", []))
         page_token = res.get("nextPageToken")
         if not page_token:
             break
+    meta_n = min(len(ids), GMAIL_COUNT_SAMPLE if count_all else want_ids)
     out = []
-    for mid in ids[:want]:
+    for mid in ids[:meta_n]:
         full = svc.users().messages().get(
             userId="me", id=mid, format="metadata",
             metadataHeaders=["From", "Subject", "Date"],
@@ -309,7 +317,12 @@ def gmail_search(token: str, query: str, max_results: int) -> dict[str, Any]:
             "date": _hval(hs, "Date"),
             "snippet": full.get("snippet", ""),
         })
-    return {"messages": out, "count": len(out)}
+    result: dict[str, Any] = {"messages": out, "count": len(ids)}
+    if len(ids) > len(out):
+        result["note"] = f"{len(ids)} matching messages (metadata shown for the first {len(out)})"
+    if count_all and page_token:
+        result["note"] = f"{len(ids)}+ matching messages (hit the safety cap)"
+    return result
 
 
 def _decode_body(payload: dict) -> str:
@@ -414,6 +427,25 @@ def _event_out(ev: dict) -> dict[str, Any]:
     return out
 
 
+_NAIVE_DT = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$")
+_DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _rfc3339(s: str) -> str:
+    """Sanitiza timeMin/timeMax vindos do MODELO: o Google exige RFC3339 com
+    offset e responde 400 a datetimes 'naive' (ex.: 2026-07-09T01:38:00, sem Z).
+    Data pura vira meia-noite UTC; datetime sem offset ganha 'Z'."""
+    s = (s or "").strip()
+    if _DATE_ONLY.match(s):
+        return f"{s}T00:00:00Z"
+    if _NAIVE_DT.match(s):
+        base = s.replace(" ", "T")
+        if len(base) == 16:  # sem segundos
+            base += ":00"
+        return base + "Z"
+    return s
+
+
 def cal_list(token: str, time_min: str, time_max: str, max_results: int,
              calendar_id: str = "primary") -> dict[str, Any]:
     svc = _service(token, "calendar", "v3")
@@ -424,9 +456,9 @@ def cal_list(token: str, time_min: str, time_max: str, max_results: int,
         "maxResults": max_results,
     }
     if time_min:
-        kw["timeMin"] = time_min
+        kw["timeMin"] = _rfc3339(time_min)
     if time_max:
-        kw["timeMax"] = time_max
+        kw["timeMax"] = _rfc3339(time_max)
     res = svc.events().list(**kw).execute()
     return {"events": [_event_out(e) for e in res.get("items", [])]}
 

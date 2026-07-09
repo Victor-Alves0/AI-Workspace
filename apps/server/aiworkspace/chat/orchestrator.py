@@ -474,7 +474,12 @@ async def run_turn(
     has_tools = sift is not None and use_tools
     if has_tools and code_mode:
         sift_prompt = sift.code_system_prompt
-        tools = sift.code_tools()
+        tools = list(sift.code_tools())
+        # tools LONGAS promovidas a 1ª classe (rodam fora do sandbox do run_code —
+        # o watchdog de parede mataria o filho e descartaria o resultado)
+        extra = getattr(sift, "_aw_code_extra_tools", None)
+        if extra:
+            tools += list(extra)
     elif has_tools:
         sift_prompt = sift.system_prompt
         # usa os specs já capturados COM as ferramentas fixadas (pin), quando houver
@@ -840,6 +845,23 @@ async def run_turn(
                 result = {"error": "run_code não está habilitado para este modelo"}
             else:
                 result = await run_in_threadpool(sift.dispatch, name, args)
+                # Path errado/fora do escopo (modelo chutou, ex.: 'web.read' em vez
+                # de 'web.page.read'): enriquece o erro com o caminho de recuperação,
+                # senão modelos fracos DESISTEM e dizem que a ferramenta não existe.
+                if isinstance(result, str) and (
+                    "not allowed in this scope" in result or "unknown tool" in result.lower()
+                ):
+                    try:
+                        _r = json.loads(result)
+                        if isinstance(_r, dict) and _r.get("error"):
+                            _r["hint"] = (
+                                "This tool path does not exist here. Call search_tools "
+                                "with a short query to discover the CORRECT path, then "
+                                "retry execute_tool — do not tell the user the tool is unavailable."
+                            )
+                            result = json.dumps(_r, ensure_ascii=False)
+                    except (json.JSONDecodeError, ValueError):
+                        pass
             # SIFT v0.4 retorna strings (JSON ou texto p/ search_tools); não
             # re-serializar para não duplo-codificar o conteúdo enviado ao modelo.
             if isinstance(result, str):

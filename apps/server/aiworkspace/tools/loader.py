@@ -93,6 +93,18 @@ def _pinned_paths(pinned_ids: list[str], rows: list[Any]) -> list[str]:
     return sorted(set(out))
 
 
+# Tools LONGAS (podem levar minutos) que não podem rodar via run_code: o watchdog
+# de parede do sandbox (sift_code_timeout_seconds) mata o processo-filho e o
+# resultado — que o pai continua computando e pagando — é DESCARTADO. No Modo
+# Código, promovemos essas tools a specs de 1ª classe (nome flat, ex.:
+# research__deep__run): o modelo as chama direto e elas rodam fora do sandbox.
+_CODE_MODE_PROMOTE = ("research.deep.run",)
+
+
+def _allow_match(path: str, allow: list[str]) -> bool:
+    return any(path == a or (a.endswith(".*") and path.startswith(a[:-1])) for a in allow)
+
+
 def _allow_patterns(tool_ids: list[str], rows: list[Any]) -> list[str]:
     """Converte a seleção do ModelConfig em padrões de allow do SIFT.
 
@@ -185,6 +197,20 @@ async def get_sift_for_user(
                 logger.warning("Falha ao fixar tools SIFT (%s); sem pin", exc)
             finally:
                 full._pinned.clear()
+        # Modo Código: promove as tools longas a 1ª classe (fora do sandbox).
+        if code_mode:
+            promote = [p for p in _CODE_MODE_PROMOTE if _allow_match(p, allow)]
+            if promote:
+                try:
+                    full._pinned[:] = promote
+                    specs = scope.openai_tools()
+                    scope._aw_code_extra_tools = [  # type: ignore[attr-defined]
+                        t for t in specs if "__" in ((t.get("function") or {}).get("name") or "")
+                    ]
+                except Exception as exc:  # noqa: BLE001 - segue sem promoção
+                    logger.warning("Falha ao promover tools longas no code mode (%s)", exc)
+                finally:
+                    full._pinned.clear()
         # metadados p/ o orchestrator: modo de exposição + prompt "quando usar"
         try:
             scope._aw_tools = _tool_catalog(tool_ids, rows)  # type: ignore[attr-defined]

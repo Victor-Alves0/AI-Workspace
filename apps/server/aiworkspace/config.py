@@ -39,7 +39,10 @@ class Settings(BaseSettings):
     # Sandbox do code mode da SIFT (run_code). A partir da SIFT 0.4.1 o processo
     # filho não importa mais o pacote sift (numpy/gateway ficam fora), então
     # 256MB bastam e o boot é ~0.2s. Margem folgada aqui p/ snippets do modelo.
-    sift_code_timeout_seconds: int = 15
+    # Tools chamadas via call() no sandbox contam contra este teto de parede; as
+    # MUITO longas (pesquisa profunda) são promovidas a 1ª classe fora do sandbox
+    # (loader._CODE_MODE_PROMOTE) — 30s cobre as médias (page.read ~12s, Google).
+    sift_code_timeout_seconds: int = 30
     sift_code_mem_mb: int = 512
 
     # Limites de input
