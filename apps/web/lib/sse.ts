@@ -90,6 +90,25 @@ export async function streamMessage(
   await readSSE(res, onEvent);
 }
 
+// Mesa-redonda (multi-modelo): roda uma ou várias rodadas em que os participantes
+// conversam entre si. `content` (opcional) injeta uma mensagem do usuário antes de
+// rodar; `steps` "one" = um turno, "auto" = várias rodadas até parar/limite.
+export async function streamRoundtable(
+  chatId: string,
+  body: { content?: string; steps?: "one" | "auto"; next?: string | null },
+  onEvent: (e: ChatEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await authedFetch(`/chats/${chatId}/roundtable/run`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content: body.content ?? "", steps: body.steps ?? "auto", next: body.next ?? null }),
+    signal,
+  });
+  await readSSE(res, onEvent);
+}
+
 // Re-assina uma geração em andamento (ex.: usuário deu F5 no meio da resposta).
 // Se nada estiver gerando, o servidor emite {type:"idle"} e encerra.
 export async function streamResume(

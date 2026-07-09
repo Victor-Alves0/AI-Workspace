@@ -41,8 +41,42 @@ export interface Chat {
   model_config_id: string | null;
   /** memória por-chat (null = herda do modelo/perfil) */
   memory_config?: MemoryConfig | null;
+  /** modo do chat: "single" (normal) | "roundtable" (mesa-redonda multi-modelo) */
+  mode?: "single" | "roundtable";
+  /** participantes da mesa-redonda */
+  participants?: RoundtableParticipant[];
+  /** config da mesa-redonda (política de turno, moderador, limites) */
+  roundtable_config?: RoundtableConfig | null;
   created_at: string;
   updated_at: string;
+}
+
+/** um participante da mesa-redonda: um modelo base ou um ModelConfig custom */
+export interface RoundtableParticipant {
+  id: string;
+  model: string;
+  model_config_id?: string | null;
+  name: string;
+  avatar?: string | null;
+  color?: string | null;
+  /** papel/instrução escrita direto na mesa (além do system do modelo) */
+  persona?: string | null;
+}
+
+export interface RoundtableConfig {
+  turn_policy?: "round_robin" | "manual" | "moderator";
+  moderator?: { model?: string; model_config_id?: string | null };
+  max_rounds?: number;
+  /** modo manual: quem fala em seguida */
+  next?: string | null;
+}
+
+/** quem produziu uma fala na mesa-redonda (assistant multi-modelo) */
+export interface Speaker {
+  id: string;
+  name: string;
+  model?: string;
+  color?: string | null;
 }
 
 /** config de memória (perfil/modelo/chat). read = união dos escopos ligados. */
@@ -189,6 +223,8 @@ export interface Message {
   is_summary?: boolean;
   /** mensagem visível ao usuário mas fora do contexto da IA (compactada) */
   compacted?: boolean;
+  /** mesa-redonda: quem falou (assistant multi-modelo); ausente = humano */
+  speaker?: Speaker | null;
   created_at: string;
 }
 
@@ -355,5 +391,10 @@ export type ChatEvent =
   | { type: "reasoning"; text: string }
   | { type: "title"; title: string }
   | { type: "image_gen"; status: "start" | "error"; prompt?: string }
+  // mesa-redonda: início/fim da fala de um participante + fim da rodada
+  | { type: "speaker_start"; speaker: Speaker }
+  | { type: "speaker_end"; speaker: Speaker; message_id: string }
+  | { type: "roundtable_done"; reason?: string }
+  | { type: "roundtable_paused" }
   | { type: "idle" }
   | { type: "error"; message: string };

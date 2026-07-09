@@ -4,12 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUpRight, Bell, GitBranch, Image as ImageIcon, Menu, MessageSquareDashed, Plus, Search, Scissors, ShieldAlert, SlidersHorizontal, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamResume } from "@/lib/sse";
+import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamResume, streamRoundtable } from "@/lib/sse";
 import { speak, startRecording, transcribe } from "@/lib/voice";
 import { browserNotify, playChime, requestNotifPermission } from "@/lib/notify";
 import { downloadJSON, downloadPDF, downloadTXT } from "@/lib/download";
 import { pickSuggestions, type Suggestion } from "@/lib/suggestions";
-import type { AskSpec, Attachment, Chat, Folder, Message, Model, ModelConfig, Prompt, Skill, SystemTool, Tool, ToolEvent, User } from "@/lib/types";
+import type { AskSpec, Attachment, Chat, Folder, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User } from "@/lib/types";
+import Roundtable, { nextColor, RT_COLORS } from "@/components/Roundtable";
 import Markdown from "@/components/Markdown";
 import { ReasoningBlock, ToolEventsPanel, fmtTime } from "@/components/MessageItem";
 import AskOptions from "@/components/AskOptions";
@@ -95,6 +96,10 @@ export default function ChatPage() {
   // ctx/mem indicam se o operário roda com contexto do chat / memória própria.
   const [subagents, setSubagents] = useState<{ name: string; ctx?: boolean; mem?: boolean }[]>([]);
   const [sending, setSending] = useState(false);
+  // mesa-redonda: rodando + fala em streaming do participante atual
+  const [rtRunning, setRtRunning] = useState(false);
+  const [rtStreaming, setRtStreaming] = useState<{ speaker: Speaker; content: string; reasoning: string } | null>(null);
+  const rtAbort = useRef<AbortController | null>(null);
 
   // seleção de modelo (vale para home e para o chat ativo)
   const [curModel, setCurModel] = useState("");
@@ -283,7 +288,7 @@ export default function ChatPage() {
   }, [messages, streaming, streamingReasoning, toolEvents]);
 
   // mede a altura do composer flutuante (muda com opções/anexos/linhas)
-  const hasConversation = messages.length > 0 || !!streaming;
+  const hasConversation = messages.length > 0 || !!streaming || rtRunning || !!rtStreaming;
   useEffect(() => {
     const el = composerRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -363,6 +368,115 @@ export default function ChatPage() {
     const ext = extModels.find((m) => m.id === curModel);
     return ext?.name ?? curModel;
   }, [curCustom, extModels, curModel]);
+
+  // ---------------------------------------------------------------------------
+  // Mesa-redonda (multi-modelo): modelos conversam entre si; o usuário guia.
+  // ---------------------------------------------------------------------------
+  const isRoundtable = active?.mode === "roundtable";
+  const participants = useMemo<RoundtableParticipant[]>(
+    () => (active?.participants as RoundtableParticipant[]) ?? [],
+    [active],
+  );
+  const rtConfig = useMemo<RoundtableConfig>(() => (active?.roundtable_config as RoundtableConfig) ?? {}, [active]);
+  const rid = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `p-${Date.now()}-${Math.random()}`);
+
+  // aplica um patch no chat da mesa (mode/participants/config) — otimista + PATCH
+  const patchRoundtable = useCallback(async (patch: Partial<Chat>) => {
+    if (!active) return;
+    setActive({ ...active, ...patch } as Chat);
+    try { await api.patch(`/chats/${active.id}`, patch); } catch { /* ignore */ }
+  }, [active]);
+
+  async function enterRoundtable() {
+    let chat = active;
+    if (!chat) {
+      if (!curModel) { alert("Selecione um modelo primeiro."); return; }
+      chat = await api.post<Chat>("/chats", { title: "Mesa-redonda", model: curModel, model_config_id: curCustomId });
+      setActive(chat);
+      refreshChats();
+    }
+    const seed: RoundtableParticipant[] = chat.participants && chat.participants.length
+      ? chat.participants
+      : [{ id: rid(), model: chat.model || curModel, model_config_id: chat.model_config_id ?? curCustomId, name: modelLabel || "Modelo 1", color: RT_COLORS[0] }];
+    const cfg = chat.roundtable_config ?? { turn_policy: "round_robin" as const, max_rounds: 6 };
+    setActive({ ...chat, mode: "roundtable", participants: seed, roundtable_config: cfg });
+    try { await api.patch(`/chats/${chat.id}`, { mode: "roundtable", participants: seed, roundtable_config: cfg }); } catch { /* ignore */ }
+  }
+
+  function addParticipant(p: { model: string; model_config_id?: string | null; name: string; avatar?: string | null }) {
+    const part: RoundtableParticipant = {
+      id: rid(), model: p.model, model_config_id: p.model_config_id ?? null,
+      name: p.name, avatar: p.avatar ?? null, color: nextColor(participants.map((x) => x.color)),
+    };
+    patchRoundtable({ participants: [...participants, part] });
+  }
+  function removeParticipant(id: string) {
+    const next = participants.filter((p) => p.id !== id);
+    patchRoundtable({ participants: next, ...(next.length === 0 ? { mode: "single" } : {}) } as Partial<Chat>);
+  }
+  function updateParticipant(id: string, patch: Partial<RoundtableParticipant>) {
+    patchRoundtable({ participants: participants.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
+  }
+  function updateRtConfig(patch: Partial<RoundtableConfig>) {
+    patchRoundtable({ roundtable_config: { ...rtConfig, ...patch } });
+  }
+
+  function makeRtHandler() {
+    return (ev: any) => {
+      if (ev.type === "speaker_start") {
+        setRtStreaming({ speaker: ev.speaker, content: "", reasoning: "" });
+        setAtBottom(true);
+      } else if (ev.type === "token") {
+        setRtStreaming((s) => (s ? { ...s, content: s.content + (ev.text || "") } : s));
+      } else if (ev.type === "reasoning") {
+        setRtStreaming((s) => (s ? { ...s, reasoning: s.reasoning + (ev.text || "") } : s));
+      } else if (ev.type === "speaker_end") {
+        setRtStreaming((s) => {
+          if (s) {
+            setMessages((m) => [...m, {
+              id: ev.message_id || `a-${Date.now()}`, role: "assistant", content: s.content,
+              reasoning: s.reasoning ? { text: s.reasoning } : null, speaker: ev.speaker,
+              created_at: new Date().toISOString(),
+            }]);
+          }
+          return null;
+        });
+      } else if (ev.type === "error") {
+        setRtStreaming(null);
+      }
+    };
+  }
+
+  async function runRoundtable(steps: "auto" | "one", content?: string) {
+    if (!active || rtRunning) return;
+    setRtRunning(true);
+    setAtBottom(true);
+    if (content && content.trim()) {
+      setMessages((m) => [...m, { id: `tmp-${Date.now()}`, role: "user", content, created_at: new Date().toISOString() }]);
+    }
+    const ac = new AbortController();
+    rtAbort.current = ac;
+    try {
+      await streamRoundtable(
+        active.id,
+        { content: content ?? "", steps, next: rtConfig.turn_policy === "manual" ? rtConfig.next ?? null : null },
+        makeRtHandler(),
+        ac.signal,
+      );
+    } catch { /* abortado / rede */ }
+    finally {
+      setRtRunning(false);
+      setRtStreaming(null);
+      rtAbort.current = null;
+      reloadMessages(active.id);
+      refreshChats();
+    }
+  }
+
+  async function pauseRoundtable() {
+    if (!active) return;
+    try { await api.post(`/chats/${active.id}/roundtable/stop`, {}); } catch { /* ignore */ }
+  }
 
   // padrão de memória herdado (precedência: perfil → modelo), p/ o Controls mostrar
   // o estado quando o chat herda. Sistema = opt-in (desligada).
@@ -627,6 +741,13 @@ export default function ChatPage() {
     // textArg vem dos seletores de opção (kind:"ask"); senão usa o campo de texto
     const override = typeof textArg === "string";
     const text = (override ? textArg : input).trim();
+    // mesa-redonda: a mensagem do usuário GUIA a conversa; roda os participantes.
+    if (isRoundtable && active) {
+      if (rtRunning) return;
+      if (!override) setInput("");
+      await runRoundtable("auto", text);
+      return;
+    }
     if ((!text && attachments.length === 0) || sending) return;
     const model = active ? active.model : curModel;
     if (!model) {
@@ -1030,6 +1151,15 @@ export default function ChatPage() {
               <button onClick={newChat} title="Novo chat" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
                 <Plus size={18} />
               </button>
+              {!temporary && (
+                <button
+                  onClick={enterRoundtable}
+                  title="Mesa-redonda: fazer os modelos conversarem entre si"
+                  className={`rounded-lg p-1.5 transition-colors ${isRoundtable ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
+                >
+                  <Users size={18} />
+                </button>
+              )}
             </div>
             {!active && !temporary && curModel && (
               <button onClick={setAsDefault} className="pl-2 text-left text-xs text-muted transition-colors hover:text-ink">
@@ -1056,6 +1186,25 @@ export default function ChatPage() {
             </button>
           </div>
         </div>
+        {isRoundtable && (
+          <div className="border-b border-border px-4 py-2">
+            <Roundtable
+              participants={participants}
+              config={rtConfig}
+              running={rtRunning}
+              currentSpeakerId={rtStreaming?.speaker.id ?? null}
+              models={extModels}
+              custom={customModels}
+              onAdd={addParticipant}
+              onRemove={removeParticipant}
+              onUpdate={updateParticipant}
+              onConfigChange={updateRtConfig}
+              onRun={() => runRoundtable("auto")}
+              onStep={() => runRoundtable("one")}
+              onPause={pauseRoundtable}
+            />
+          </div>
+        )}
         <div className="flex flex-1 overflow-hidden">
           <div className="relative flex flex-1 flex-col">
             {!hasConversation ? (
@@ -1117,6 +1266,12 @@ export default function ChatPage() {
                   )}
                   {messages.map((m) => (
                     <div key={m.id} id={`msg-${m.id}`} className="msg-row">
+                      {m.speaker && !m.is_summary && (
+                        <div className="mx-auto mb-1 flex max-w-3xl items-center gap-1.5 px-1 text-xs font-semibold">
+                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: m.speaker.color || "#888" }} />
+                          <span style={{ color: m.speaker.color || undefined }}>{m.speaker.name}</span>
+                        </div>
+                      )}
                       {m.is_summary ? (
                         <CompactionDivider onOpen={() => setShowCompactions(true)} />
                       ) : temporary ? (
@@ -1134,7 +1289,7 @@ export default function ChatPage() {
                         <MessageItem
                           message={m}
                           busy={sending}
-                          modelName={modelLabel}
+                          modelName={m.speaker?.name ?? modelLabel}
                           onSpeak={(c) => speak(c, curCustom?.tts_voice ?? undefined)}
                           onEdit={editMessage}
                           onRegenerate={regenerateMessage}
@@ -1164,7 +1319,25 @@ export default function ChatPage() {
                     </div>
                   )}
                   {sending && guardNote && <GuardRetry note={guardNote} />}
-                  {streaming || streamingReasoning || generatingImage || (sending && toolEvents.length > 0) ? (
+                  {/* mesa-redonda: fala do participante da vez, em streaming */}
+                  {isRoundtable && rtStreaming && (
+                    <div className="msg-row">
+                      <div className="mx-auto mb-1 flex max-w-3xl items-center gap-1.5 px-1 text-xs font-semibold">
+                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: rtStreaming.speaker.color || "#888" }} />
+                        <span style={{ color: rtStreaming.speaker.color || undefined }}>{rtStreaming.speaker.name}</span>
+                      </div>
+                      <MessageBubble
+                        role="assistant"
+                        content={rtStreaming.content}
+                        streaming={!!rtStreaming.content}
+                        name={rtStreaming.speaker.name}
+                        reasoning={rtStreaming.reasoning ? { text: rtStreaming.reasoning } : null}
+                        reasoningLive={!rtStreaming.content}
+                      />
+                    </div>
+                  )}
+                  {isRoundtable && rtRunning && !rtStreaming && <Thinking />}
+                  {!isRoundtable && (streaming || streamingReasoning || generatingImage || (sending && toolEvents.length > 0) ? (
                     <MessageBubble
                       role="assistant"
                       content={streaming}
@@ -1177,7 +1350,7 @@ export default function ChatPage() {
                     />
                   ) : (
                     sending && <Thinking />
-                  )}
+                  ))}
                 </div>
                 {/* composer flutuante: sobrepõe as mensagens; elas somem num fade
                     ao rolar por baixo (o fundo sólido oculta, o gradiente suaviza) */}

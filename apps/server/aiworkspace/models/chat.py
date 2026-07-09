@@ -41,6 +41,14 @@ class Chat(Base):
     title: Mapped[str] = mapped_column(String(255), default="Novo Chat")
     system_prompt: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
     model: Mapped[str] = mapped_column(String(255), default="")
+    # modo do chat: "single" (padrão) | "roundtable" (mesa-redonda multi-modelo)
+    mode: Mapped[str] = mapped_column(String(16), default="single")
+    # participantes da mesa-redonda: [{id, model, model_config_id?, name, avatar?,
+    #   color, persona?}]. Vazio em chats normais.
+    participants: Mapped[list] = mapped_column(JSONB, default=list)
+    # config da mesa: {turn_policy: round_robin|manual|moderator, moderator: {...},
+    #   max_rounds, next: <participant id>}
+    roundtable_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # parâmetros do modelo (temperature, top_p, etc.)
     params: Mapped[dict] = mapped_column(JSONB, default=dict)
     # memória por-chat (nullable = herda do modelo/perfil):
@@ -97,6 +105,9 @@ class Message(Base):
     # compactação NÃO-destrutiva: a mensagem continua visível ao usuário, mas fica
     # FORA do contexto enviado ao modelo (substituída pelo resumo do divisor).
     compacted: Mapped[bool] = mapped_column(Boolean, default=False)
+    # mesa-redonda: quem produziu esta fala (assistant multi-modelo). null = humano.
+    #   {"id":..., "name":..., "model":..., "color":...}
+    speaker: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     chat: Mapped["Chat"] = relationship(back_populates="messages")
 

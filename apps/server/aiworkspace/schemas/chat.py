@@ -31,6 +31,10 @@ class ChatUpdate(BaseModel):
     model_config_id: uuid.UUID | None = None
     # memória por-chat: {"write": "...", "read": {...}} (null = herda modelo/perfil)
     memory_config: dict[str, Any] | None = None
+    # mesa-redonda (multi-modelo)
+    mode: str | None = None
+    participants: list[dict[str, Any]] | None = None
+    roundtable_config: dict[str, Any] | None = None
 
 
 class MessageOut(BaseModel):
@@ -48,6 +52,8 @@ class MessageOut(BaseModel):
     attachments: list[dict[str, Any]] | None = None
     is_summary: bool = False
     compacted: bool = False
+    # mesa-redonda: quem falou (assistant multi-modelo); null = humano
+    speaker: dict[str, Any] | None = None
     created_at: datetime
 
     class Config:
@@ -73,6 +79,9 @@ class ChatOut(BaseModel):
     folder_id: uuid.UUID | None
     model_config_id: uuid.UUID | None
     memory_config: dict[str, Any] | None = None
+    mode: str = "single"
+    participants: list[dict[str, Any]] = Field(default_factory=list)
+    roundtable_config: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
 
