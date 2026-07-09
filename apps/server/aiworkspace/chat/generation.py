@@ -57,6 +57,14 @@ class Generation:
             self.done = True
             self._cond.notify_all()
 
+    def stop(self) -> bool:
+        """Cancela o driver ("Parar" do usuário). O parcial já transmitido é
+        persistido pelo caminho de CancelledError; retorna se havia o que parar."""
+        if self.done or self.task is None or self.task.done():
+            return False
+        self.task.cancel()
+        return True
+
     async def subscribe(self, start: int = 0) -> AsyncIterator[dict]:
         """Itera os eventos a partir do índice ``start`` até a geração terminar.
 
@@ -125,7 +133,8 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish) -> Gen
                     collected["error"] = ev.get("message")
                 await gen._append(ev)
         except asyncio.CancelledError:
-            # shutdown do servidor: ainda tenta salvar o parcial e re-propaga.
+            # "Parar" do usuário ou shutdown: salva o parcial e re-propaga.
+            await gen._append({"type": "stopped"})
             await _finalize(gen, on_finish, collected)
             raise
         except Exception as exc:  # noqa: BLE001 - erro no turno vira evento visível

@@ -427,4 +427,31 @@ export type ChatEvent =
   | { type: "roundtable_done"; reason?: string }
   | { type: "roundtable_paused" }
   | { type: "idle" }
+  // geração interrompida pelo botão "Parar" (o parcial é persistido)
+  | { type: "stopped" }
+  // artefatos criados/atualizados ao persistir a resposta
+  | { type: "artifacts"; ids: string[] }
   | { type: "error"; message: string };
+
+// ------------------------------- Artefatos --------------------------------
+export type ChatArtifactKind =
+  | "code" | "markdown" | "html" | "svg" | "mermaid" | "json" | "csv" | "text";
+
+export interface ChatArtifact {
+  id: string;
+  chat_id: string;
+  identifier: string;
+  title: string;
+  kind: ChatArtifactKind;
+  language: string;
+  content: string;
+  version: number;
+  updated_at: string | null;
+}
+
+export interface ChatArtifactVersion {
+  version: number;
+  label: "ai" | "user" | "restore";
+  size: number;
+  created_at: string | null;
+}

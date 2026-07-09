@@ -12,6 +12,7 @@ import {
   Info,
   Keyboard,
   KeyRound,
+  MessageSquareText,
   PanelsTopLeft,
   RotateCcw,
   Search,
@@ -532,14 +533,37 @@ function InterfaceTab({
   setView: (v: string | null) => void;
 }) {
   if (view === "sidebar") return <SidebarSettings profile={profile} set={set} onBack={() => setView(null)} />;
+  if (view === "chat") return <ChatSettings profile={profile} set={set} onBack={() => setView(null)} />;
   return (
     <div>
       <Heading>Interface</Heading>
       <CardGrid
-        cards={[{ key: "sidebar", icon: <PanelsTopLeft size={22} />, name: "Barra Lateral", desc: "Aparência e navegação" }]}
+        cards={[
+          { key: "sidebar", icon: <PanelsTopLeft size={22} />, name: "Barra Lateral", desc: "Aparência e navegação" },
+          { key: "chat", icon: <MessageSquareText size={22} />, name: "Chat", desc: "Artefatos e conversa" },
+        ]}
         onOpen={setView}
       />
     </div>
+  );
+}
+
+function ChatSettings({ profile, set, onBack }: { profile: Record<string, any>; set: (k: string, v: any) => void; onBack: () => void }) {
+  const iface: Record<string, any> = profile.interface ?? {};
+  const setIface = (k: string, v: any) => set("interface", { ...iface, [k]: v });
+  const artifacts = iface.artifacts !== false; // padrão: ligado
+  return (
+    <DetailView title="Chat" onBack={onBack}>
+      <div className="rounded-xl border border-border bg-surface px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <span className="text-sm text-ink">Artefatos</span>
+            <p className="text-xs text-muted">Conteúdos extensos (código, documentos, HTML…) abrem numa janela dedicada ao lado do chat, com edição e versões</p>
+          </div>
+          <Toggle on={artifacts} onClick={() => setIface("artifacts", !artifacts)} />
+        </div>
+      </div>
+    </DetailView>
   );
 }
 

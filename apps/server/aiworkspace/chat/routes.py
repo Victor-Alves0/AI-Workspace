@@ -22,7 +22,7 @@ from ..auth.deps import require_approved
 from ..config import get_settings
 from ..db import SessionLocal, get_db
 from .. import crypto, extraction
-from ..models import Chat, ChatCompaction, Message, ModelConfig, Skill, User
+from ..models import Artifact, Chat, ChatCompaction, Message, ModelConfig, Skill, User
 from ..schemas.chat import (
     ChatCreate,
     ChatDetail,
@@ -36,6 +36,7 @@ from ..integrations import ollama_service
 from ..secrets_service import IMAGEGEN_KEY, OPENROUTER_KEY, get_secret
 from ..tools.loader import get_sift_for_user, tool_config
 from ..usage_service import usage_event_from_record
+from . import artifacts as artifacts_service
 from . import generation
 from .orchestrator import run_turn, run_turn_guarded
 from .titles import generate_title
@@ -353,6 +354,22 @@ def _final_message_fields(collected: dict) -> tuple[str, dict | None]:
 # padrão de memória (novos chats): OPT-IN (desligada) — igual ao memory_routes.DEFAULT_MEMORY
 _DEFAULT_MEMORY = {"enabled": False, "write": "global",
                    "read": {"global": True, "model": True, "chat": True}}
+
+
+def _artifacts_enabled(user: User) -> bool:
+    """Toggle "Artefatos" (Configurações → Interface → Chat). Padrão: ligado."""
+    iface = (user.profile or {}).get("interface")
+    iface = iface if isinstance(iface, dict) else {}
+    return bool(iface.get("artifacts", True))
+
+
+async def _artifacts_extra(db: AsyncSession, chat_id: uuid.UUID, user: User) -> str | None:
+    """Bloco de system prompt dos Artefatos: instruções de uso + conteúdo ATUAL
+    dos artefatos do chat (o modelo vê edições manuais do usuário)."""
+    if not _artifacts_enabled(user):
+        return None
+    rows = list(await db.scalars(select(Artifact).where(Artifact.chat_id == chat_id)))
+    return artifacts_service.system_block(rows)
 
 
 def _mem_agent_id(model_config: ModelConfig | None, model: str) -> str:
@@ -860,15 +877,23 @@ async def send_message(
     user_text = body.content
     user_id = str(user.id)
 
+    arts_on = _artifacts_enabled(user)
+
     # persiste a resposta e (opt-in) gera o título; roda no driver de background,
     # blindado por `shield` — completa mesmo se o cliente desconectar (F5).
     async def _finish(collected: dict, emit) -> None:
         content_to_save, reasoning = _final_message_fields(collected)
+        arts_changed: list[str] = []
         # salva também quando não houve texto mas houve artefato (ex.: imagem nativa)
         if content_to_save or collected["tools"]:
             rec = _usage_record(collected["usage"], model, model_config)
             _flag_budget(rec, model_config, user)
             async with SessionLocal() as s:
+                if arts_on and content_to_save:
+                    # blocos <artifact> viram linhas versionadas; no texto fica [[artifact:id]]
+                    content_to_save, arts_changed = await artifacts_service.extract_and_apply(
+                        s, chat_id, user.id, content_to_save
+                    )
                 m = Message(
                     chat_id=chat_id,
                     role="assistant",
@@ -886,6 +911,8 @@ async def send_message(
                 if ev is not None:
                     s.add(ev)
                 await s.commit()
+        if arts_changed:
+            await emit({"type": "artifacts", "ids": arts_changed})
         # título por IA (1ª troca + opt-in): substitui o fallback de 60 chars.
         if auto_title and collected["content"]:
             new_title = await generate_title(
@@ -920,6 +947,7 @@ async def send_message(
         user_id=user_id,
         user_tz=user_tz,
         base_url=base_url,
+        extra_system=await _artifacts_extra(db, chat_id, user) if arts_on else None,
         sift=sift,
         code_mode=_code_mode(model_config),
         chat_id=str(chat_id),
@@ -963,6 +991,19 @@ async def _subscribe(gen: generation.Generation):
     reconstruir o parcial num assinante que chegou depois — ex.: após F5)."""
     async for event in gen.subscribe(0):
         yield _sse(event)
+
+
+@router.post("/{chat_id}/stop")
+async def stop_generation(
+    chat_id: uuid.UUID,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    """"Parar" do usuário: cancela a geração em andamento deste chat. O texto já
+    transmitido é persistido como resposta parcial (mesmo caminho do shutdown)."""
+    await _get_owned_chat(db, chat_id, user)
+    gen = generation.get_active(str(chat_id))
+    return {"ok": True, "stopped": bool(gen and gen.stop())}
 
 
 @router.get("/{chat_id}/stream")
@@ -1091,14 +1132,20 @@ async def regenerate_message(
     system_prompt = chat.system_prompt
     params = chat.params or {}
     user_id = str(user.id)
+    arts_on = _artifacts_enabled(user)
 
     async def _finish(collected: dict, emit) -> None:
         content_to_save, reasoning = _final_message_fields(collected)
+        arts_changed: list[str] = []
         # salva também quando não houve texto mas houve artefato (ex.: imagem nativa)
         if content_to_save or collected["tools"]:
             rec = _usage_record(collected["usage"], model, model_config)
             _flag_budget(rec, model_config, user)
             async with SessionLocal() as s:
+                if arts_on and content_to_save:
+                    content_to_save, arts_changed = await artifacts_service.extract_and_apply(
+                        s, chat_id, user.id, content_to_save
+                    )
                 m = Message(
                     chat_id=chat_id,
                     role="assistant",
@@ -1116,6 +1163,8 @@ async def regenerate_message(
                 if ev is not None:
                     s.add(ev)
                 await s.commit()
+        if arts_changed:
+            await emit({"type": "artifacts", "ids": arts_changed})
 
     guards = await _resolve_guards(db, user, model_config)
     sub_specs, sub_conf = await _resolve_subagents(db, user, model_config)
@@ -1135,6 +1184,7 @@ async def regenerate_message(
         user_id=user_id,
         user_tz=user_tz,
         base_url=base_url,
+        extra_system=await _artifacts_extra(db, chat_id, user) if arts_on else None,
         sift=sift,
         code_mode=_code_mode(model_config),
         chat_id=str(chat_id),
@@ -1200,6 +1250,8 @@ async def continue_message(
     params = chat.params or {}
     user_id = str(user.id)
 
+    arts_on = _artifacts_enabled(user)
+
     async def _finish(collected: dict, emit) -> None:
         content = collected["content"] or (collected["streamed"] or "").strip()
         if not content:
@@ -1211,7 +1263,12 @@ async def continue_message(
         # ledger: só o DELTA desta continuação (o evento do original já foi gravado);
         # capturado ANTES de `rec` virar cumulativo abaixo.
         delta_ev = usage_event_from_record(user.id, chat_id, message_id, rec)
+        arts_changed: list[str] = []
         async with SessionLocal() as s:
+            if arts_on:
+                content, arts_changed = await artifacts_service.extract_and_apply(
+                    s, chat_id, user.id, content
+                )
             target = await s.get(Message, message_id)
             if target is not None:
                 if delta_ev is not None:
@@ -1247,6 +1304,8 @@ async def continue_message(
                 if tools:
                     target.tool_events = (target.tool_events or []) + tools
                 await s.commit()
+        if arts_changed:
+            await emit({"type": "artifacts", "ids": arts_changed})
 
     source = run_turn(
         api_key=api_key,
@@ -1258,6 +1317,7 @@ async def continue_message(
         user_id=user_id,
         user_tz=user_tz,
         base_url=base_url,
+        extra_system=await _artifacts_extra(db, chat_id, user) if arts_on else None,
         sift=sift,
         code_mode=_code_mode(model_config),
         chat_id=str(chat_id),

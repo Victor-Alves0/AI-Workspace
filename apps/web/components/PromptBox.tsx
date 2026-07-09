@@ -18,6 +18,7 @@ import {
   Search,
   Send,
   Sparkles,
+  Square,
   Upload,
   Wrench,
   X,
@@ -203,6 +204,7 @@ export default function PromptBox({
   value,
   onChange,
   onSend,
+  onStop,
   sending,
   recording,
   onToggleMic,
@@ -229,6 +231,8 @@ export default function PromptBox({
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
+  /** enquanto `sending`, o botão de enviar vira "Parar" e chama isto */
+  onStop?: () => void;
   placeholder?: string;
   sending: boolean;
   recording: boolean;
@@ -669,7 +673,15 @@ export default function PromptBox({
             >
               <Mic size={18} />
             </button>
-            {value.trim() ? (
+            {sending && onStop ? (
+              <button
+                onClick={onStop}
+                title="Parar geração"
+                className="rounded-full bg-accent p-2 text-ink transition-colors hover:bg-accent-hover"
+              >
+                <Square size={16} fill="currentColor" />
+              </button>
+            ) : value.trim() ? (
               <button
                 onClick={onSend}
                 disabled={sending}

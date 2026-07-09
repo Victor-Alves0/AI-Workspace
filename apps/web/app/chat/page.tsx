@@ -9,7 +9,9 @@ import { speak, startRecording, transcribe } from "@/lib/voice";
 import { browserNotify, playChime, requestNotifPermission } from "@/lib/notify";
 import { downloadJSON, downloadPDF, downloadTXT } from "@/lib/download";
 import { pickSuggestions, type Suggestion } from "@/lib/suggestions";
-import type { AskSpec, Attachment, Chat, Folder, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User } from "@/lib/types";
+import type { AskSpec, Attachment, Chat, ChatArtifact, Folder, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User } from "@/lib/types";
+import { splitStreamArtifacts, type StreamArtifact } from "@/lib/artifacts";
+import ArtifactPanel from "@/components/ArtifactPanel";
 import Roundtable, { nextColor, RT_COLORS } from "@/components/Roundtable";
 import Markdown from "@/components/Markdown";
 import { ReasoningBlock, ToolEventsPanel, fmtTime } from "@/components/MessageItem";
@@ -88,6 +90,11 @@ export default function ChatPage() {
   const [streamingReasoning, setStreamingReasoning] = useState("");
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const [generatingImage, setGeneratingImage] = useState(false);
+  // Artefatos (janela dedicada): lista do chat + qual está aberto + o "ao vivo"
+  // (bloco <artifact> ainda chegando no streaming)
+  const [chatArtifacts, setChatArtifacts] = useState<ChatArtifact[]>([]);
+  const [artifactOpen, setArtifactOpen] = useState<string | null>(null);
+  const [liveArtifact, setLiveArtifact] = useState<StreamArtifact | null>(null);
   // Guarda de saída acionou uma re-tentativa (mostra um chip enquanto refaz)
   const [guardNote, setGuardNote] = useState<{ name: string; action: string } | null>(null);
   // "@" no promptbox: agente (modelo custom) que recebe SÓ o próximo turno
@@ -96,6 +103,9 @@ export default function ChatPage() {
   // ctx/mem indicam se o operário roda com contexto do chat / memória própria.
   const [subagents, setSubagents] = useState<{ name: string; ctx?: boolean; mem?: boolean }[]>([]);
   const [sending, setSending] = useState(false);
+  // "Parar" durante a geração: como interromper o turno atual (cancel no servidor
+  // p/ chats persistentes; abort local p/ temporários). null = nada para parar.
+  const stopRef = useRef<(() => void) | null>(null);
   // mesa-redonda: rodando + fala em streaming do participante atual
   const [rtRunning, setRtRunning] = useState(false);
   const [rtStreaming, setRtStreaming] = useState<{ speaker: Speaker; content: string; reasoning: string } | null>(null);
@@ -502,6 +512,9 @@ export default function ChatPage() {
     setStreaming("");
     setStreamingReasoning("");
     setToolEvents([]);
+    setChatArtifacts([]);
+    setArtifactOpen(null);
+    setLiveArtifact(null);
     setSuggestions(pickSuggestions(3));
     setWorkspaceOpen(false);
     setAutomationsOpen(false);
@@ -510,6 +523,14 @@ export default function ChatPage() {
   const reloadMessages = useCallback(async (chatId: string) => {
     const rows = await api.get<Message[]>(`/chats/${chatId}/messages`);
     setMessages(rows);
+  }, []);
+
+  const reloadArtifacts = useCallback(async (chatId: string) => {
+    try {
+      setChatArtifacts(await api.get<ChatArtifact[]>(`/chats/${chatId}/artifacts`));
+    } catch {
+      /* rota indisponível/erro transitório: mantém a lista atual */
+    }
   }, []);
 
   // poll leve: automações/lembretes criam chats e mensagens em background — sem
@@ -525,14 +546,34 @@ export default function ChatPage() {
     return () => clearInterval(t);
   }, [refreshChats, reloadMessages]);
 
+  // toggle "Artefatos" (Configurações → Interface → Chat). Padrão: ligado.
+  const artifactsEnabled =
+    ((user?.profile as Record<string, any> | undefined)?.interface as Record<string, unknown> | undefined)?.artifacts !== false;
+
   // handler comum de eventos SSE (tokens, reasoning, tools, erro)
   function makeStreamHandler() {
     const state = { acc: "", reason: "", tools: [] as ToolEvent[] };
+    // Artefatos ao vivo: blocos <artifact> saem da bolha e vão pro painel.
+    // (desativado em chats temporários — o servidor não injeta as instruções lá)
+    const artsLive = artifactsEnabled && !temporary;
     // throttle: renderiza no MÁXIMO a cada ~70ms (não por token). Re-parsear o
     // markdown inteiro a cada token travava a UI em respostas longas (O(n²)). Sem
     // timer pendente — o tail final chega pelo reloadMessages ao fim do stream.
     let lastFlush = 0;
-    const flush = () => { lastFlush = Date.now(); setStreaming(state.acc); setStreamingReasoning(state.reason); };
+    const flush = () => {
+      lastFlush = Date.now();
+      if (artsLive && state.acc.includes("<artifact")) {
+        const { text, live } = splitStreamArtifacts(state.acc);
+        setStreaming(text);
+        if (live) {
+          setLiveArtifact(live);
+          setArtifactOpen(live.identifier);
+        }
+      } else {
+        setStreaming(state.acc);
+      }
+      setStreamingReasoning(state.reason);
+    };
     const maybeFlush = () => { if (Date.now() - lastFlush >= 70) flush(); };
     const handler = (ev: any) => {
       if (ev.type === "token") {
@@ -570,6 +611,11 @@ export default function ChatPage() {
         state.acc += `\n\n⚠️ Erro: ${ev.message}`;
         setGeneratingImage(false);
         flush();
+      } else if (ev.type === "artifacts") {
+        // resposta persistida criou/atualizou artefatos: abre o último no painel
+        const ids: string[] = ev.ids ?? [];
+        if (ids.length) setArtifactOpen(ids[ids.length - 1]);
+        setLiveArtifact(null);
       } else if (ev.type === "title") {
         // título gerado por IA na 1ª troca: atualiza o cabeçalho na hora
         setActive((a) => (a && ev.title ? { ...a, title: ev.title } : a));
@@ -594,6 +640,8 @@ export default function ChatPage() {
           setStreaming("");
           setStreamingReasoning("");
           setToolEvents([]);
+          // geração retomada (pós-F5) também pode ser parada
+          stopRef.current = () => { api.post(`/chats/${id}/stop`).catch(() => {}); };
         }
         handler(ev);
       });
@@ -601,10 +649,13 @@ export default function ChatPage() {
       /* falha ao re-assinar: ignora — as mensagens persistidas já estão na tela */
     }
     if (started) {
+      stopRef.current = null;
       setStreaming("");
       setStreamingReasoning("");
+      setLiveArtifact(null);
       setSending(false);
       await reloadMessages(id);
+      await reloadArtifacts(id);
       refreshChats();
     }
   }
@@ -621,6 +672,10 @@ export default function ChatPage() {
     setStreaming("");
     setStreamingReasoning("");
     setToolEvents([]);
+    setArtifactOpen(null);
+    setLiveArtifact(null);
+    setChatArtifacts([]);
+    reloadArtifacts(id);
     setCurModel(detail.model);
     // restaura o vínculo com o modelo personalizado (define ferramentas)
     setCurCustomId(detail.model_config_id ?? null);
@@ -779,11 +834,19 @@ export default function ChatPage() {
 
     try {
       if (temporary) {
+        // temporário roda preso à request: "Parar" = abortar a conexão local
+        const ctrl = new AbortController();
+        stopRef.current = () => ctrl.abort();
         const history = messages.map((m) => ({ role: m.role, content: m.content }));
-        await streamEphemeral(
-          { model, content: text, history, system_prompt: initialSystemPrompt, params: initialParams, model_config_id: curCustomId, skill_ids: turnSkillIds, attachments: turnAttachments },
-          onEvent,
-        );
+        try {
+          await streamEphemeral(
+            { model, content: text, history, system_prompt: initialSystemPrompt, params: initialParams, model_config_id: curCustomId, skill_ids: turnSkillIds, attachments: turnAttachments },
+            onEvent,
+            ctrl.signal,
+          );
+        } catch (e) {
+          if (!(e instanceof DOMException && e.name === "AbortError")) throw e;
+        }
         if (state.acc) {
           setMessages((m) => [...m, { id: `a-${Date.now()}`, role: "assistant", content: state.acc, reasoning: state.reason ? { text: state.reason } : null, tool_events: state.tools.length ? state.tools : null, created_at: new Date().toISOString() }]);
         }
@@ -799,20 +862,31 @@ export default function ChatPage() {
           });
           setActive(chat);
         }
+        // persistente: o servidor cancela a geração e salva o parcial
+        const cid = chat.id;
+        stopRef.current = () => { api.post(`/chats/${cid}/stop`).catch(() => {}); };
         await streamMessage(chat.id, text, onEvent, undefined, turnSkillIds, turnAttachments, turnAgentId);
         setStreaming("");
         setStreamingReasoning("");
         refreshChats();
         // recarrega as mensagens reais (ids do servidor + registro de tokens/custo)
         await reloadMessages(chat.id);
+        await reloadArtifacts(chat.id);
       }
       if (state.acc) notify("Resposta pronta", state.acc.replace(/\s+/g, " ").slice(0, 90));
     } finally {
+      stopRef.current = null;
       setStreaming("");
       setStreamingReasoning("");
       setGeneratingImage(false);
+      setLiveArtifact(null);
       setSending(false);
     }
+  }
+
+  // botão "Parar" do composer: interrompe o turno em geração (o parcial fica)
+  function handleStop() {
+    stopRef.current?.();
   }
 
   async function editMessage(id: string, content: string) {
@@ -860,16 +934,21 @@ export default function ChatPage() {
       return m.slice(0, m[i].role === "user" ? i + 1 : i);
     });
     const { handler, state } = makeStreamHandler();
+    const cid = active.id;
+    stopRef.current = () => { api.post(`/chats/${cid}/stop`).catch(() => {}); };
     try {
       await streamRegenerate(active.id, id, handler);
       setStreaming("");
       setStreamingReasoning("");
       await reloadMessages(active.id);
+      await reloadArtifacts(active.id);
       refreshChats();
       if (state.acc) notify("Resposta pronta", state.acc.replace(/\s+/g, " ").slice(0, 90));
     } finally {
+      stopRef.current = null;
       setStreaming("");
       setStreamingReasoning("");
+      setLiveArtifact(null);
       setSending(false);
     }
   }
@@ -881,15 +960,20 @@ export default function ChatPage() {
     setStreamingReasoning("");
     setToolEvents([]);
     const { handler, state } = makeStreamHandler();
+    const cid = active.id;
+    stopRef.current = () => { api.post(`/chats/${cid}/stop`).catch(() => {}); };
     try {
       await streamContinue(active.id, id, handler);
       setStreaming("");
       setStreamingReasoning("");
       await reloadMessages(active.id);
+      await reloadArtifacts(active.id);
       if (state.acc) notify("Resposta continuada", state.acc.replace(/\s+/g, " ").slice(0, 90));
     } finally {
+      stopRef.current = null;
       setStreaming("");
       setStreamingReasoning("");
+      setLiveArtifact(null);
       setSending(false);
     }
   }
@@ -1226,7 +1310,7 @@ export default function ChatPage() {
                   </h1>
                 </div>
                 <div className="w-full max-w-3xl">
-                  <PromptBox value={input} onChange={setInput} onSend={send} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} />
+                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} />
                 </div>
                 {/* menu do "+" abre para baixo aqui (há espaço); na conversa abre para cima */}
                 {temporary && <p className="mt-2 text-xs text-muted">Chat temporário — esta conversa não será salva.</p>}
@@ -1292,6 +1376,8 @@ export default function ChatPage() {
                           message={m}
                           busy={sending}
                           modelName={m.speaker?.name ?? modelLabel}
+                          chatArtifacts={chatArtifacts}
+                          onOpenArtifact={(ident) => setArtifactOpen(ident)}
                           onSpeak={(c) => speak(c, curCustom?.tts_voice ?? undefined)}
                           onEdit={editMessage}
                           onRegenerate={regenerateMessage}
@@ -1373,7 +1459,7 @@ export default function ChatPage() {
                       {showAsk && askSpec && (
                         <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                       )}
-                      <PromptBox value={input} onChange={setInput} onSend={send} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
+                      <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
                     </div>
                   </div>
                 </div>
@@ -1381,6 +1467,19 @@ export default function ChatPage() {
               </>
             )}
           </div>
+          {/* Artefatos: janela dedicada ao lado da conversa */}
+          {artifactsEnabled && hasConversation && artifactOpen != null && (liveArtifact || chatArtifacts.length > 0) && (
+            <div className="hidden w-[46%] min-w-[380px] max-w-[760px] shrink-0 md:block">
+              <ArtifactPanel
+                artifacts={chatArtifacts}
+                openIdentifier={artifactOpen}
+                live={liveArtifact}
+                onSelect={(ident) => setArtifactOpen(ident)}
+                onClose={() => { setArtifactOpen(null); setLiveArtifact(null); }}
+                onChanged={async () => { if (active) await reloadArtifacts(active.id); }}
+              />
+            </div>
+          )}
         </div>
         </>
         )}

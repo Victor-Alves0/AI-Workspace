@@ -2,8 +2,32 @@
 
 import CodeMirror from "@uiw/react-codemirror";
 import { python } from "@codemirror/lang-python";
+import { javascript } from "@codemirror/lang-javascript";
+import { html } from "@codemirror/lang-html";
+import { css } from "@codemirror/lang-css";
+import { json } from "@codemirror/lang-json";
+import { markdown } from "@codemirror/lang-markdown";
+import { sql } from "@codemirror/lang-sql";
+import { xml } from "@codemirror/lang-xml";
 import { createTheme } from "@uiw/codemirror-themes";
 import { tags as t } from "@lezer/highlight";
+
+// linguagem do CodeMirror a partir do nome/tipo do artefato (default: python,
+// o original deste editor — usado pelas tools/skills)
+function langExtension(language: string) {
+  switch ((language || "").toLowerCase()) {
+    case "js": case "javascript": case "jsx":
+    case "ts": case "typescript": case "tsx":
+      return javascript({ jsx: true, typescript: true });
+    case "html": return html();
+    case "css": return css();
+    case "json": return json();
+    case "markdown": case "md": return markdown();
+    case "sql": return sql();
+    case "xml": case "svg": case "mermaid": return xml();
+    default: return python();
+  }
+}
 
 // Tema próprio do CodeMirror, casado com os tokens do design system
 // (mesma paleta do realce de markdown em globals.css).
@@ -41,10 +65,12 @@ export default function CodeEditor({
   value,
   onChange,
   placeholder,
+  language = "python",
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
+  language?: string;
 }) {
   return (
     <div className="h-full overflow-hidden rounded-xl border border-border [&_.cm-editor]:h-full [&_.cm-editor]:text-[13px] [&_.cm-editor]:leading-6 [&_.cm-editor.cm-focused]:outline-none [&_.cm-scroller]:h-full">
@@ -53,7 +79,7 @@ export default function CodeEditor({
         onChange={onChange}
         placeholder={placeholder}
         theme={theme}
-        extensions={[python()]}
+        extensions={[langExtension(language)]}
         height="100%"
         basicSetup={{
           lineNumbers: true,

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Mail, Pencil, Play, RotateCcw, Send, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench } from "lucide-react";
-import type { ChartSpec, DeepResearch, Message, StockQuote, ToolEvent } from "@/lib/types";
+import type { ChartSpec, ChatArtifact, DeepResearch, Message, StockQuote, ToolEvent } from "@/lib/types";
 import { api, ApiError, API_URL } from "@/lib/api";
 import Markdown from "./Markdown";
 import ExcalidrawCanvas from "./ExcalidrawCanvas";
@@ -349,8 +349,77 @@ const KIND_OF: Record<string, Artifact["kind"] | null> = {
   research: "deep_research", image: "image", email: "email_draft", canvas: null,
 };
 
-/** Corpo da mensagem da IA: markdown + artefatos, interleaved nos marcadores. */
-function AssistantBody({ content, artifacts }: { content: string; artifacts: Artifact[] }) {
+// marcador dos ARTEFATOS DE CHAT (janela dedicada): o servidor troca o bloco
+// <artifact> por [[artifact:slug]] ao persistir; aqui vira um cartão clicável.
+const CHAT_ART_RE = /\[\[artifact:([\w-]+)\]\]/gi;
+
+function ArtifactChip({
+  identifier, meta, onOpen,
+}: {
+  identifier: string;
+  meta?: Pick<ChatArtifact, "title" | "kind" | "version">;
+  onOpen?: (identifier: string) => void;
+}) {
+  return (
+    <button
+      onClick={() => onOpen?.(identifier)}
+      className="group my-2 flex w-full max-w-md items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-2.5 text-left transition-colors hover:border-accent/40 hover:bg-hover"
+    >
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent-hover">
+        <FileText size={16} />
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-medium text-ink">{meta?.title || identifier}</span>
+        <span className="block text-[11px] text-muted">
+          Artefato{meta ? ` · ${meta.kind}${meta.version > 1 ? ` · v${meta.version}` : ""}` : ""} — clique para abrir
+        </span>
+      </span>
+    </button>
+  );
+}
+
+/** Corpo da mensagem da IA: primeiro separa os cartões de ARTEFATO DE CHAT
+ *  ([[artifact:slug]]), depois os marcadores de artefatos de ferramenta. */
+function AssistantBody({
+  content, artifacts, chatArtifacts = [], onOpenArtifact,
+}: {
+  content: string;
+  artifacts: Artifact[];
+  chatArtifacts?: ChatArtifact[];
+  onOpenArtifact?: (identifier: string) => void;
+}) {
+  CHAT_ART_RE.lastIndex = 0;
+  if (CHAT_ART_RE.test(content)) {
+    const nodes: React.ReactNode[] = [];
+    CHAT_ART_RE.lastIndex = 0;
+    let last = 0, seg = 0, m: RegExpExecArray | null;
+    const seen = new Set<string>();
+    while ((m = CHAT_ART_RE.exec(content))) {
+      const before = content.slice(last, m.index);
+      if (before.trim()) nodes.push(<ToolMarkedBody key={`s${seg++}`} content={before} artifacts={[]} />);
+      const ident = m[1].toLowerCase();
+      if (!seen.has(ident)) {
+        seen.add(ident);
+        nodes.push(
+          <ArtifactChip
+            key={`chip-${ident}-${seg}`}
+            identifier={ident}
+            meta={chatArtifacts.find((a) => a.identifier === ident)}
+            onOpen={onOpenArtifact}
+          />,
+        );
+      }
+      last = m.index + m[0].length;
+    }
+    const tail = content.slice(last);
+    if (tail.trim() || artifacts.length) nodes.push(<ToolMarkedBody key={`s${seg++}`} content={tail} artifacts={artifacts} />);
+    return <>{nodes}</>;
+  }
+  return <ToolMarkedBody content={content} artifacts={artifacts} />;
+}
+
+/** Markdown + artefatos de FERRAMENTA, interleaved nos marcadores [[chart]] etc. */
+function ToolMarkedBody({ content, artifacts }: { content: string; artifacts: Artifact[] }) {
   if (!artifacts.length || !new RegExp(MARKER_SRC, "i").test(content)) {
     return (
       <>
@@ -660,6 +729,8 @@ export default function MessageItem({
   onRemember,
   busy = false,
   modelName,
+  chatArtifacts,
+  onOpenArtifact,
 }: {
   message: Message;
   onSpeak: (content: string) => void;
@@ -672,6 +743,9 @@ export default function MessageItem({
   busy?: boolean;
   /** nome exibido acima da mensagem do assistente (fallback qdo não há usage) */
   modelName?: string;
+  /** artefatos de chat (janela dedicada) — p/ os cartões [[artifact:slug]] */
+  chatArtifacts?: ChatArtifact[];
+  onOpenArtifact?: (identifier: string) => void;
 }) {
   const isUser = message.role === "user";
   const [editing, setEditing] = useState(false);
@@ -830,7 +904,7 @@ export default function MessageItem({
         {message.reasoning?.text && (
           <ReasoningBlock text={message.reasoning.text} seconds={message.reasoning.seconds} />
         )}
-        {editing ? editor : <AssistantBody content={linkifyCitations(message.content, sources)} artifacts={artifacts} />}
+        {editing ? editor : <AssistantBody content={linkifyCitations(message.content, sources)} artifacts={artifacts} chatArtifacts={chatArtifacts} onOpenArtifact={onOpenArtifact} />}
         {!editing && sources.length > 0 && <SourcesBar sources={sources} />}
 
         {/* barra de ações — abaixo de toda mensagem da IA */}
