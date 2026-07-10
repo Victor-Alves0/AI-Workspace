@@ -161,7 +161,7 @@ export default function Controls({
   }
 
   return (
-    <aside className="flex w-80 shrink-0 flex-col border-l border-transparent bg-sidebar transition-colors hover:border-border">
+    <aside className="pt-safe pb-safe flex w-80 shrink-0 flex-col border-l border-transparent bg-sidebar transition-colors hover:border-border">
       <div className="flex items-center justify-between px-4 py-3">
         <span className="flex items-center gap-2 text-sm font-semibold text-ink">
           <SlidersHorizontal size={16} className="text-muted" /> Controles

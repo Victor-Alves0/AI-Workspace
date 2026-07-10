@@ -223,7 +223,7 @@ export default function Sidebar({
   }
 
   return (
-    <aside className="group/side flex w-64 shrink-0 flex-col overflow-hidden border-r border-transparent bg-sidebar transition-[width] duration-300 ease-in-out hover:border-border">
+    <aside className="pt-safe pb-safe group/side flex w-64 shrink-0 flex-col overflow-hidden border-r border-transparent bg-sidebar transition-[width] duration-300 ease-in-out hover:border-border">
       {/* header */}
       <div className="flex items-center justify-between px-3 py-3">
         <span className="flex items-center gap-2.5 font-semibold tracking-tight text-ink">

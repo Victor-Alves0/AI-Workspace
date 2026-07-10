@@ -60,6 +60,15 @@ textarea,
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Safe-area para superfícies FIXAS (drawers/modais): position:fixed escapa do
+ * padding do body, então elas precisam do próprio inset — senão o cabeçalho fica
+ * por baixo da barra de status/notch do celular (não dá p/ tocar nem ver). */
+.pt-safe { padding-top: env(safe-area-inset-top); }
+.pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+.pl-safe { padding-left: env(safe-area-inset-left); }
+.pr-safe { padding-right: env(safe-area-inset-right); }
+.top-safe { top: env(safe-area-inset-top); }
+
 ::selection {
   background: rgb(var(--c-accent) / 0.35);
   color: rgb(var(--c-ink));

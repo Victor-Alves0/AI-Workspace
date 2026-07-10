@@ -311,7 +311,7 @@ export default function ArtifactPanel({
   const shown = viewingVersion?.content ?? (view === "code" ? (draft ?? content) : content);
 
   const body = (
-    <div className={`flex min-w-0 flex-col border-border bg-bg ${full ? "fixed inset-0 z-[80]" : "h-full w-full border-l"}`}>
+    <div className={`pt-safe pb-safe flex min-w-0 flex-col border-border bg-bg ${full ? "fixed inset-0 z-[80]" : "h-full w-full border-l"}`}>
       {/* abas (vários artefatos no mesmo chat) */}
       {artifacts.length > 1 && !showingLive && (
         <div className="flex gap-1 overflow-x-auto border-b border-border px-2 pt-2">

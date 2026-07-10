@@ -1592,7 +1592,7 @@ export default function ChatPage() {
 
       {/* Notificações (toasts) — canto superior direito */}
       {toasts.length > 0 && (
-        <div className="fixed right-4 top-4 z-[100] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
+        <div className="fixed right-4 top-[calc(1rem+env(safe-area-inset-top))] z-[100] flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2">
           {toasts.map((t) => (
             <div key={t.id} className="animate-fade-up flex items-start gap-3 rounded-xl border border-border bg-surface px-4 py-3 shadow-menu">
               <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent-hover">

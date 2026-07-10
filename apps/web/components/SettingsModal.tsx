@@ -317,10 +317,12 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged }
       onClick={close}
       className={`fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm transition-opacity duration-200 md:px-4 ${visible ? "opacity-100" : "opacity-0"}`}
     >
-      {/* mobile: tela cheia (drill-down); desktop: janela centralizada */}
+      {/* mobile: tela cheia (drill-down); desktop: janela centralizada.
+          pt-safe/pb-safe: fixed escapa do padding do body → insets próprios p/ o
+          cabeçalho não ficar sob a barra de status do celular. */}
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`flex h-full w-full flex-col overflow-hidden bg-bg shadow-2xl transition-all duration-200 md:h-[86vh] md:max-w-4xl md:rounded-2xl md:border md:border-border ${
+        className={`pt-safe pb-safe flex h-full w-full flex-col overflow-hidden bg-bg shadow-2xl transition-all duration-200 md:h-[86vh] md:max-w-4xl md:rounded-2xl md:border md:border-border ${
           visible ? "scale-100 opacity-100" : "scale-95 opacity-0"
         }`}
       >

@@ -186,7 +186,7 @@ export default function TransferModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 px-3 py-4 backdrop-blur-sm md:px-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 px-3 pt-[calc(1rem+env(safe-area-inset-top))] pb-[calc(1rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:px-4">
       <div ref={ref} className="animate-pop flex h-full max-h-[640px] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-modal md:h-[560px]">
         {/* header + busca */}
         <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
