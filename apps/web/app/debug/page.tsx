@@ -67,7 +67,7 @@ export default function DebugPage() {
 
   if (denied) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-3 text-muted">
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-muted">
         <p>Acesso negado — o painel de debug é apenas para admin.</p>
         <button onClick={() => router.push("/chat")} className="text-accent">← Voltar ao chat</button>
       </div>
@@ -75,7 +75,7 @@ export default function DebugPage() {
   }
 
   return (
-    <div className="h-screen overflow-y-auto bg-bg p-6">
+    <div className="h-full overflow-y-auto bg-bg p-6">
       <div className="mx-auto max-w-5xl space-y-4">
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-semibold">Painel de Debug</h1>

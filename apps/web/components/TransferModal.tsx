@@ -186,8 +186,8 @@ export default function TransferModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm">
-      <div ref={ref} className="animate-pop flex h-[560px] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-modal">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 px-3 py-4 backdrop-blur-sm md:px-4">
+      <div ref={ref} className="animate-pop flex h-full max-h-[640px] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-modal md:h-[560px]">
         {/* header + busca */}
         <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3">
           <h2 className="text-base font-semibold tracking-tight text-ink">{title}</h2>
@@ -197,8 +197,9 @@ export default function TransferModal({
         </div>
         <div className="flex items-center gap-2 border-b border-border px-5 py-2.5">
           <Search size={16} className="text-muted" />
+          {/* autoFocus só com mouse: no celular abriria o teclado por cima da lista */}
           <input
-            autoFocus
+            autoFocus={typeof window !== "undefined" && !window.matchMedia?.("(pointer: coarse)").matches}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder={searchPlaceholder}
@@ -206,8 +207,8 @@ export default function TransferModal({
           />
         </div>
 
-        {/* dual list */}
-        <div className="flex min-h-0 flex-1 items-stretch gap-3 p-5">
+        {/* dual list — mobile: colunas empilhadas com as setas na horizontal */}
+        <div className="flex min-h-0 flex-1 flex-col items-stretch gap-2.5 p-3 md:flex-row md:gap-3 md:p-5">
           <TransferPane
             heading={availableLabel}
             list={available}
@@ -218,35 +219,35 @@ export default function TransferModal({
             hasQuery={!!q.trim()}
           />
 
-          {/* setas */}
-          <div className="flex flex-col items-center justify-center gap-2">
+          {/* setas (mobile: giradas 90° — adicionar desce, remover sobe) */}
+          <div className="flex shrink-0 flex-row items-center justify-center gap-2 md:flex-col">
             <button
               onClick={() => moveToSelected(available.map((i) => i.key))}
               title="Adicionar todos"
               className="rounded-lg border border-border p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink"
             >
-              <ChevronsRight size={16} />
+              <ChevronsRight size={16} className="rotate-90 md:rotate-0" />
             </button>
             <button
               onClick={() => moveToSelected([...markLeft])}
               title="Adicionar selecionados"
               className="rounded-lg border border-border bg-surface2 p-1.5 text-ink transition-colors hover:bg-accent hover:text-white"
             >
-              <ChevronRight size={16} />
+              <ChevronRight size={16} className="rotate-90 md:rotate-0" />
             </button>
             <button
               onClick={() => moveToAvailable([...markRight])}
               title="Remover selecionados"
               className="rounded-lg border border-border bg-surface2 p-1.5 text-ink transition-colors hover:bg-accent hover:text-white"
             >
-              <ChevronLeft size={16} />
+              <ChevronLeft size={16} className="rotate-90 md:rotate-0" />
             </button>
             <button
               onClick={() => moveToAvailable(chosen.map((i) => i.key))}
               title="Remover todos"
               className="rounded-lg border border-border p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink"
             >
-              <ChevronsLeft size={16} />
+              <ChevronsLeft size={16} className="rotate-90 md:rotate-0" />
             </button>
           </div>
 
@@ -265,7 +266,8 @@ export default function TransferModal({
         </div>
 
         <div className="flex items-center justify-between border-t border-border px-5 py-3 text-xs text-muted">
-          <span>Clique para marcar • clique duplo para mover • use as setas</span>
+          <span className="hidden md:inline">Clique para marcar • clique duplo para mover • use as setas</span>
+          <span className="md:hidden">Toque para marcar • use as setas</span>
           <button
             onClick={onClose}
             className="rounded-full bg-accent px-5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"

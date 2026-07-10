@@ -32,7 +32,7 @@ export default function PendingPage() {
   const rejected = user?.status === "rejected";
 
   return (
-    <div className="flex h-screen items-center justify-center bg-bg p-4">
+    <div className="flex h-full items-center justify-center bg-bg p-4">
       <div className="w-full max-w-md rounded-2xl border border-border bg-surface p-8 text-center">
         <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-surface2 text-amber-400">
           <Clock size={28} />

@@ -74,7 +74,7 @@ function SectionShell({ title, count, onBack, actions, children }: {
   title: string; count?: number; onBack: () => void; actions?: ReactNode; children: ReactNode;
 }) {
   return (
-    <div className="px-8 py-6">
+    <div className="px-4 py-5 md:px-8 md:py-6">
       {/* breadcrumb: Espaço de Trabalho › seção atual */}
       <nav className="mb-4 flex items-center gap-1.5 text-sm">
         <button onClick={onBack} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-muted transition-colors hover:bg-hover hover:text-ink">
@@ -83,11 +83,12 @@ function SectionShell({ title, count, onBack, actions, children }: {
         <span className="text-muted">/</span>
         <span className="font-medium text-ink">{title}</span>
       </nav>
-      <div className="mb-5 flex items-center justify-between gap-3">
+      {/* mobile: as ações quebram de linha inteiras (sem amassar os botões) */}
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2.5">
         <h1 className="text-2xl font-bold text-ink">
           {title}{count !== undefined && <span className="ml-2 font-semibold text-muted">{count}</span>}
         </h1>
-        {actions && <div className="flex items-center gap-2 text-sm">{actions}</div>}
+        {actions && <div className="flex flex-wrap items-center gap-2 text-sm">{actions}</div>}
       </div>
       {children}
     </div>
@@ -110,8 +111,8 @@ function SearchBar({ value, onChange, placeholder }: {
   );
 }
 
-const BTN_GHOST = "rounded-full border border-border bg-surface px-4 py-1.5 text-ink-soft transition-colors hover:bg-surface2";
-const BTN_PRIMARY = "flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 font-medium text-white transition-colors hover:bg-accent-hover";
+const BTN_GHOST = "whitespace-nowrap rounded-full border border-border bg-surface px-4 py-1.5 text-ink-soft transition-colors hover:bg-surface2";
+const BTN_PRIMARY = "flex items-center gap-1.5 whitespace-nowrap rounded-full bg-accent px-4 py-1.5 font-medium text-white transition-colors hover:bg-accent-hover";
 
 function EmptyState({ text }: { text: string }) {
   return <p className="rounded-2xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted">{text}</p>;
@@ -379,13 +380,13 @@ export default function WorkspaceView({
     <div className="h-full flex-1 overflow-y-auto bg-bg">
       {/* ------------------------------ grade inicial ----------------------------- */}
       {section === null && (
-        <div className="mx-auto max-w-5xl px-8 py-8">
-          <div className="mb-6 flex items-center justify-between">
-            <div>
+        <div className="mx-auto max-w-5xl px-4 py-6 md:px-8 md:py-8">
+          <div className="mb-6 flex items-center justify-between gap-3">
+            <div className="min-w-0">
               <h1 className="text-2xl font-bold text-ink">Espaço de Trabalho</h1>
               <p className="mt-1 text-sm text-muted">Tudo que personaliza sua IA, num só lugar.</p>
             </div>
-            <button onClick={onClose} className="flex items-center gap-1.5 rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">
+            <button onClick={onClose} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">
               <ArrowLeft size={16} /> Voltar ao chat
             </button>
           </div>

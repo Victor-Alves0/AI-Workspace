@@ -73,7 +73,7 @@ export default function AdminPage() {
 
   if (denied) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-3 text-muted">
+      <div className="flex h-full flex-col items-center justify-center gap-3 text-muted">
         <p>Acesso negado — apenas admin.</p>
         <button onClick={() => router.push("/chat")} className="text-accent">← Voltar ao chat</button>
       </div>
@@ -83,7 +83,7 @@ export default function AdminPage() {
   const pending = users.filter((u) => u.status === "pending");
 
   return (
-    <div className="h-screen overflow-y-auto bg-bg p-6">
+    <div className="h-full overflow-y-auto bg-bg p-6">
       <div className="mx-auto max-w-4xl space-y-5">
         <div className="flex items-center justify-between">
           <h1 className="flex items-center gap-2 text-xl font-semibold text-ink">

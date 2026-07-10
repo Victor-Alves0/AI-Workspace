@@ -110,7 +110,7 @@ export default function ToolsPage() {
   }
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-full">
       {/* lista */}
       <aside className="flex w-72 shrink-0 flex-col border-r border-border bg-surface">
         <div className="flex items-center justify-between p-3">

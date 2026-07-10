@@ -690,7 +690,7 @@ export default function ModelEditor({
   return (
     <div className="flex h-full flex-1 flex-col bg-bg">
       {/* topo — barra fixa com voltar + título */}
-      <div className="flex items-center gap-3 border-b border-border px-6 py-3">
+      <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3 md:px-6">
         <button
           onClick={onClose}
           className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm text-muted transition-colors hover:bg-hover hover:text-ink"
@@ -700,10 +700,10 @@ export default function ModelEditor({
         <span className="text-sm font-medium text-ink">{isNew ? "Novo modelo" : "Editar modelo"}</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-6">
+      <div className="flex-1 overflow-y-auto px-4 py-5 md:px-6 md:py-6">
         <div className="mx-auto max-w-4xl">
-          {/* cabeçalho: avatar + nome/id/base/descrição */}
-          <div className="flex gap-6">
+          {/* cabeçalho: avatar + nome/id/base/descrição (mobile: empilhado) */}
+          <div className="flex flex-col gap-5 sm:flex-row sm:gap-6">
             <div className="flex shrink-0 flex-col items-center gap-2">
               <input ref={avatarFileRef} type="file" accept="image/*" className="hidden" onChange={pickAvatar} />
               <button
@@ -1369,7 +1369,7 @@ export default function ModelEditor({
       </div>
 
       {/* rodapé */}
-      <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-3">
+      <div className="flex shrink-0 items-center justify-end gap-3 border-t border-border px-4 py-3 md:px-6">
         {err && <span className="text-xs text-red-400">{err}</span>}
         <button onClick={save} disabled={saving} className="rounded-full bg-accent px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
           {saving ? "…" : "Salvar e Atualizar"}

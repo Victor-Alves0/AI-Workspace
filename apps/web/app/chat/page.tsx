@@ -1158,7 +1158,7 @@ export default function ChatPage() {
 
   if (!user) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center gap-3">
+      <div className="flex h-full flex-col items-center justify-center gap-3">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/logo.png" alt="" className="h-10 w-10 animate-pulse rounded-xl" />
         <p className="text-sm text-muted">Carregando…</p>
@@ -1188,7 +1188,7 @@ export default function ChatPage() {
   );
 
   return (
-    <div className="flex h-screen bg-bg">
+    <div className="flex h-full bg-bg">
       {/* backdrop do drawer (mobile) */}
       {mobileNav && (
         <div className="fixed inset-0 z-40 bg-black/50 md:hidden" onClick={() => setMobileNav(false)} />
@@ -1225,7 +1225,7 @@ export default function ChatPage() {
         />
       </div>
 
-      <main className="flex flex-1 flex-col">
+      <main className="flex min-w-0 flex-1 flex-col">
         {workspaceOpen ? (
           <WorkspaceView
             key={workspaceKey}
@@ -1479,9 +1479,9 @@ export default function ChatPage() {
               </>
             )}
           </div>
-          {/* Artefatos: janela dedicada ao lado da conversa */}
+          {/* Artefatos: coluna ao lado da conversa; no mobile vira tela cheia */}
           {artifactsEnabled && hasConversation && artifactOpen != null && (liveArtifact || chatArtifacts.length > 0) && (
-            <div className="hidden w-[46%] min-w-[380px] max-w-[760px] shrink-0 md:block">
+            <div className="fixed inset-0 z-50 shrink-0 bg-bg md:static md:z-auto md:w-[46%] md:min-w-[380px] md:max-w-[760px] md:bg-transparent">
               <ArtifactPanel
                 artifacts={chatArtifacts}
                 openIdentifier={artifactOpen}

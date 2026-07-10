@@ -38,7 +38,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative flex h-screen items-center justify-center overflow-hidden px-4">
+    <div className="relative flex h-full items-center justify-center overflow-hidden px-4">
       {/* glow sutil da marca ao fundo */}
       <div
         aria-hidden

@@ -6,7 +6,7 @@ import { ArrowLeft } from "lucide-react";
 export default function ComingSoon({ title, icon }: { title: string; icon?: React.ReactNode }) {
   const router = useRouter();
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-4 bg-bg text-center">
+    <div className="flex h-full flex-col items-center justify-center gap-4 bg-bg text-center">
       <div className="text-muted">{icon}</div>
       <div>
         <h1 className="text-2xl font-semibold">{title}</h1>

@@ -23,15 +23,41 @@
     Consolas, monospace;
 }
 
-html,
+/* Moldura de "app": a página em si NUNCA rola — cada tela é 100dvh e rola por
+ * dentro (mensagens, painéis). Sem isso, no iOS o 100vh passa da área visível
+ * (barra de URL) e a barra do topo + promptbox saem rolando com a página. */
+html {
+  height: 100%;
+}
 body {
   height: 100%;
+  height: 100dvh; /* viewport dinâmico: acompanha a barra de URL/teclado */
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 body {
   @apply bg-bg font-sans text-ink antialiased;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11"; /* Inter: formas alternativas mais limpas */
   text-rendering: optimizeLegibility;
+  /* recortes do aparelho (notch/gestos) quando instalado como app (viewport-fit=cover) */
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* toque: sem atraso de double-tap-zoom nem flash cinza do iOS ao tocar */
+button,
+a,
+input,
+select,
+textarea,
+[role="button"] {
+  touch-action: manipulation;
+}
+* {
+  -webkit-tap-highlight-color: transparent;
 }
 
 ::selection {

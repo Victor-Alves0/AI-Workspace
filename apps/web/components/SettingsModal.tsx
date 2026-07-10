@@ -158,7 +158,7 @@ function CardGrid({
   onOpen: (key: string) => void;
 }) {
   return (
-    <div className="grid grid-cols-3 gap-3 pt-1">
+    <div className="grid grid-cols-2 gap-3 pt-1 sm:grid-cols-3">
       {cards.map((c) => (
         <button
           key={c.key}
@@ -253,6 +253,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged }
   // card aberto dentro de Conexões / Integrações (null = mostra a grade)
   const [connView, setConnView] = useState<string | null>(null);
   const [integView, setIntegView] = useState<string | null>(null);
+  // mobile: só um painel por vez — lista de categorias OU o conteúdo da aba
+  const [mobilePane, setMobilePane] = useState<"nav" | "content">("nav");
   const [showArchived, setShowArchived] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -306,11 +308,12 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged }
   return (
     <div
       onClick={close}
-      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm transition-opacity duration-200 ${visible ? "opacity-100" : "opacity-0"}`}
+      className={`fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm transition-opacity duration-200 md:px-4 ${visible ? "opacity-100" : "opacity-0"}`}
     >
+      {/* mobile: tela cheia (drill-down); desktop: janela centralizada */}
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`flex h-[86vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-border bg-bg shadow-2xl transition-all duration-200 ${
+        className={`flex h-full w-full flex-col overflow-hidden bg-bg shadow-2xl transition-all duration-200 md:h-[86vh] md:max-w-4xl md:rounded-2xl md:border md:border-border ${
           visible ? "scale-100 opacity-100" : "scale-95 opacity-0"
         }`}
       >
@@ -323,8 +326,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged }
         </div>
 
         <div className="flex min-h-0 flex-1">
-          {/* barra lateral de categorias */}
-          <div className="flex w-56 shrink-0 flex-col px-3">
+          {/* barra lateral de categorias (mobile: painel inteiro; some ao abrir uma aba) */}
+          <div className={`${mobilePane === "content" || searchResults ? "hidden md:flex" : "flex"} w-full shrink-0 flex-col px-3 md:w-56`}>
             <div className="mb-2 flex items-center gap-2 rounded-lg bg-surface px-3 py-2">
               <Search size={15} className="text-muted" />
               <input
@@ -338,7 +341,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged }
               {CATS.map((c) => (
                 <button
                   key={c.key}
-                  onClick={() => { setCat(c.key); setConnView(null); setIntegView(null); }}
+                  onClick={() => { setCat(c.key); setConnView(null); setIntegView(null); setMobilePane("content"); }}
                   className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm ${
                     cat === c.key ? "bg-hover font-medium text-ink" : "text-muted hover:bg-hover hover:text-ink"
                   }`}
@@ -361,13 +364,20 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged }
           </div>
 
           {/* coluna de conteúdo: área rolável + rodapé (a barra lateral vai até o fim) */}
-          <div className="flex min-w-0 flex-1 flex-col">
-          <div className="min-w-0 flex-1 overflow-y-auto px-6 pb-4">
+          <div className={`${mobilePane === "content" || searchResults ? "flex" : "hidden md:flex"} min-w-0 flex-1 flex-col`}>
+          {/* mobile: voltar à lista de categorias */}
+          <button
+            onClick={() => { setMobilePane("nav"); setQ(""); }}
+            className="flex items-center gap-1 px-3 pb-2 text-sm font-medium text-muted transition-colors hover:text-ink md:hidden"
+          >
+            <ChevronLeft size={17} /> {catLabel(cat)}
+          </button>
+          <div className="min-w-0 flex-1 overflow-y-auto px-4 pb-4 md:px-6">
             {searchResults ? (
               <SearchResults
                 results={searchResults}
                 onPick={(c, view) => {
-                  setCat(c); setQ("");
+                  setCat(c); setQ(""); setMobilePane("content");
                   setConnView(c === "connections" || c === "interface" ? view ?? null : null);
                 }}
               />
@@ -413,7 +423,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged }
               ) : (
                 <div>
                   <Heading>Integrações</Heading>
-                  <div className="grid grid-cols-3 gap-3 pt-1">
+                  <div className="grid grid-cols-2 gap-3 pt-1 sm:grid-cols-3">
                     <button
                       onClick={() => setIntegView("google")}
                       className="group flex flex-col items-center gap-2.5 rounded-2xl border border-border bg-surface px-4 py-7 text-center transition-all duration-150 hover:border-accent/40 hover:bg-hover"
@@ -476,7 +486,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged }
             )}
           </div>
             {/* rodapé — sob a coluna de conteúdo; mesma altura do divisor do admin */}
-            <div className="flex h-14 items-center justify-end gap-3 border-t border-border px-6">
+            <div className="flex h-14 shrink-0 items-center justify-end gap-3 border-t border-border px-4 md:px-6">
               {saveErr && <span className="text-xs text-red-400">{saveErr}</span>}
               {savedFlash && <span className="text-xs text-green-400">Salvo ✓</span>}
               <button onClick={saveProfile} className="rounded-full bg-accent px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover">

@@ -15,7 +15,7 @@ export default function Home() {
   }, [router]);
 
   return (
-    <div className="flex h-screen items-center justify-center text-muted">
+    <div className="flex h-full items-center justify-center text-muted">
       Carregando…
     </div>
   );
