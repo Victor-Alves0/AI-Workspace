@@ -343,12 +343,30 @@ def _temporal_note(user_tz: str, tz_offset: int | None = None) -> str:
     )
 
 
-def _system_message(static_system: str, mem_block: str, model: str, time_note: str = "") -> dict[str, Any]:
+def _priority_block(extra_system: str | None) -> str:
+    """Instruções de alta prioridade (guardas/canal) com um cabeçalho que deixa
+    claro ao modelo que elas prevalecem. Fica no FIM do system (maior peso)."""
+    txt = (extra_system or "").strip()
+    if not txt:
+        return ""
+    return (
+        "=== INSTRUÇÕES PRIORITÁRIAS ===\n"
+        "As diretrizes abaixo têm precedência sobre as anteriores; siga-as à risca.\n"
+        f"{txt}"
+    )
+
+
+def _system_message(
+    static_system: str, mem_block: str, model: str, time_note: str = "",
+    extra_system: str | None = None,
+) -> dict[str, Any]:
     """Monta a mensagem `system`. Para provedores de cache explícito, marca a
-    parte estável com cache_control e deixa memória + hora depois (sem cache), para
-    que o prefixo grande e repetido seja de fato reaproveitado entre turnos (a hora
-    muda a cada minuto — jamais pode entrar no prefixo cacheado)."""
-    tail = "\n\n".join([b for b in (time_note, mem_block) if b])
+    parte estável com cache_control e deixa memória + hora + prioridade depois (sem
+    cache), para que o prefixo grande e repetido seja de fato reaproveitado entre
+    turnos (a hora muda a cada minuto e o reforço do guarda muda a cada tentativa —
+    jamais podem entrar no prefixo cacheado). A ordem do tail coloca as instruções
+    PRIORITÁRIAS por último = última coisa lida pelo modelo (maior peso)."""
+    tail = "\n\n".join([b for b in (time_note, mem_block, _priority_block(extra_system)) if b])
     prov = model.split("/", 1)[0].lower()
     if prov in _EXPLICIT_CACHE_PROVIDERS and static_system:
         parts: list[dict[str, Any]] = [
@@ -541,13 +559,17 @@ async def run_turn(
     skills_block = _skills_block(skills)
     if skills_block:
         static_system = (static_system + "\n\n" + skills_block).strip()
-    # reforço injetado por um Guarda de saída (retry): instrução extra no fim do
-    # system prompt, onde tem mais peso. Ver run_turn_guarded.
-    if extra_system:
-        static_system = (static_system + "\n\n" + extra_system).strip()
     mem_block = _memory_block(memories)
     time_note = _temporal_note(user_tz, user_tz_offset)
-    messages: list[dict[str, Any]] = [_system_message(static_system, mem_block, model, time_note)]
+    # `extra_system` = instruções de ALTA PRIORIDADE: reforço de um Guarda de saída
+    # (retry) OU instruções do canal (ex.: WhatsApp). Vão para o FIM do system, DEPOIS
+    # de memória/hora e com um marcador de prioridade — é a última coisa que o modelo
+    # lê (maior peso/recência) e fica FORA do prefixo cacheável (o guarda reescreve a
+    # cada tentativa; assim o prefixo grande e estável continua sendo reaproveitado).
+    # Ver run_turn_guarded.
+    messages: list[dict[str, Any]] = [
+        _system_message(static_system, mem_block, model, time_note, extra_system)
+    ]
     # capacidade "Contexto do Chat": quando desligada, o modelo NÃO recebe o
     # histórico (turno stateless — só system + mensagem atual).
     if use_context:
@@ -996,19 +1018,36 @@ async def run_turn(
 # com nome, detecção, reação e teto de tentativas próprios. Ver routes._resolve_guards.
 # --------------------------------------------------------------------------- #
 
-# frases típicas de recusa (PT + EN), procuradas no INÍCIO da resposta p/ reduzir
-# falso-positivo (uma recusa costuma vir logo de cara).
-_GUARD_REFUSAL = (
+# Detecção de recusa em DUAS camadas, p/ capturar bem sem falso-positivo:
+#
+# 1) ABERTURAS: frases curtas/ambíguas que só contam como recusa quando a resposta
+#    COMEÇA com elas — substring solto marcava "I can't wait to help!" como recusa.
+_REFUSAL_OPENERS = (
     "não posso", "nao posso", "não vou", "nao vou", "não poderei", "nao poderei",
     "desculpe, mas", "desculpe mas", "sinto muito, mas", "sinto muito mas",
-    "infelizmente não", "infelizmente nao", "como uma ia", "como um modelo de linguagem",
-    "não sou capaz", "nao sou capaz", "não é apropriado", "nao e apropriado",
-    "não posso ajudar", "nao posso ajudar", "não posso atender", "nao posso atender",
-    "vai contra minhas", "não posso continuar", "nao posso continuar",
+    "infelizmente não", "infelizmente nao", "não sou capaz", "nao sou capaz",
+    "não posso ajudar", "nao posso ajudar", "como uma ia,", "como um modelo de linguagem",
     "i can't", "i cannot", "i can not", "i'm sorry, but", "i am sorry, but",
-    "i'm unable", "i am unable", "as an ai", "i won't", "i will not",
-    "i'm not able", "i am not able", "against my", "not appropriate",
-    "i must decline", "i'm not comfortable", "cannot assist", "can't assist",
+    "i'm sorry but", "i'm unable", "i am unable", "i won't", "i will not",
+    "i'm not able", "i am not able", "i'm afraid i", "i must decline",
+    "unfortunately, i can", "unfortunately i can", "as an ai,",
+)
+# Continuações POSITIVAS logo após uma abertura → veta o falso-positivo
+# ("I can't wait to help", "não posso deixar de recomendar").
+_REFUSAL_VETO = (
+    "wait", "believe how", "thank", "help you enough", "stop thinking",
+    "deixar de", "esperar", "acreditar", "agradecer", "conter",
+)
+# 2) FRASES FORTES: recusa inequívoca em QUALQUER ponto do início da resposta.
+_REFUSAL_STRONG = (
+    "i must decline", "i'm not comfortable", "i am not comfortable",
+    "cannot assist with", "can't assist with", "cannot help with that",
+    "i can't help with that", "i cannot help with that", "against my guidelines",
+    "against my programming", "not able to provide that", "unable to provide that",
+    "não posso ajudar com", "nao posso ajudar com", "não posso te ajudar com",
+    "nao posso te ajudar com", "não posso atender", "nao posso atender",
+    "vai contra minhas", "não posso continuar", "nao posso continuar",
+    "não é apropriado", "nao e apropriado",
 )
 
 # teto global de tentativas por turno (defesa contra loop/custo), independente da
@@ -1035,9 +1074,16 @@ def _guard_triggered(guard: dict, text: str, done: dict | None) -> bool:
             return re.search(pat, body, re.IGNORECASE | re.DOTALL) is not None
         except re.error:
             return False
-    # refusal (padrão): procura padrões de recusa no começo da resposta
-    head = body[:600].lower()
-    return any(p in head for p in _GUARD_REFUSAL)
+    # refusal (padrão): recusa no INÍCIO da resposta (não em substring solto)
+    low = body.lstrip()[:400].lower()
+    if any(p in low for p in _REFUSAL_STRONG):
+        return True
+    for opener in _REFUSAL_OPENERS:
+        if low.startswith(opener):
+            after = low[len(opener):len(opener) + 40]
+            if not any(v in after for v in _REFUSAL_VETO):
+                return True
+    return False
 
 
 _JUDGE_SYSTEM = (

@@ -624,6 +624,11 @@ export default function ChatPage() {
         const ids: string[] = ev.ids ?? [];
         if (ids.length) setArtifactOpen(ids[ids.length - 1]);
         setLiveArtifact(null);
+      } else if (ev.type === "done") {
+        // fluxo dos guardas de saída vem só no done (não é streamado como tool_call);
+        // captura p/ o chat temporário mostrar o escudo (o persistente recarrega do banco)
+        const g = ((ev.tool_events ?? []) as ToolEvent[]).filter((t) => t.kind === "guard");
+        if (g.length) state.tools = [...g, ...state.tools.filter((t) => t.kind !== "guard")];
       } else if (ev.type === "title") {
         // título gerado por IA na 1ª troca: atualiza o cabeçalho na hora
         setActive((a) => (a && ev.title ? { ...a, title: ev.title } : a));

@@ -480,6 +480,15 @@ async def _genimage_config(
     return out
 
 
+# reforço padrão quando um guarda "reinforce" não tem texto próprio — sem isto o
+# retry repetiria o mesmo prompt e provavelmente a mesma resposta rejeitada.
+_DEFAULT_REINFORCE = (
+    "Sua resposta anterior foi barrada por um filtro de qualidade. Reavalie o pedido "
+    "e produza uma resposta completa, útil e direta, sem recusas, ressalvas "
+    "desnecessárias nem preâmbulos."
+)
+
+
 async def _resolve_guards(
     db: AsyncSession, user: User, model_config: ModelConfig | None
 ) -> list[dict]:
@@ -531,6 +540,10 @@ async def _resolve_guards(
                 continue  # provedor do fallback indisponível (ex.: Ollama off)
             guard["_api_key"] = key
             guard["_base_url"] = base
+        elif not guard["inject_text"].strip():
+            # reinforce sem texto próprio → usa o reforço padrão (senão o retry
+            # repetiria o mesmo prompt e a mesma resposta)
+            guard["inject_text"] = _DEFAULT_REINFORCE
         out.append(guard)
     return out
 
@@ -786,6 +799,7 @@ async def ephemeral(
 
     model_config = await _get_model_config(db, body.get("model_config_id"), user)
     genimage = await _genimage_config(db, user, model_config)
+    guards = await _resolve_guards(db, user, model_config)  # guardas valem no temporário também
     sift = await get_sift_for_user(db, user.id, model_config)
     skills = await _load_skills(db, user, model_config, body.get("skill_ids") or [])
     attachments = await _prepare_attachments(body.get("attachments"), model_config)
@@ -801,7 +815,8 @@ async def ephemeral(
     user_id = str(user.id)
 
     async def event_stream():
-        async for event in run_turn(
+        async for event in run_turn_guarded(
+            guards=guards,
             api_key=api_key,
             model=model,
             history=history,

@@ -441,7 +441,7 @@ export type ChatEvent =
   | { type: "tool_call"; name: string; arguments: Record<string, unknown> }
   | { type: "tool_result"; name: string; result: unknown }
   | { type: "usage"; usage: Record<string, unknown> }
-  | { type: "done"; content: string; usage?: MessageUsage | null }
+  | { type: "done"; content: string; usage?: MessageUsage | null; tool_events?: ToolEvent[] | null }
   | { type: "reasoning"; text: string }
   | { type: "title"; title: string }
   | { type: "image_gen"; status: "start" | "error"; prompt?: string }
