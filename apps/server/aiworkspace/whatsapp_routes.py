@@ -64,6 +64,42 @@ class ConnectionUpdate(BaseModel):
     phone_number_id: str | None = Field(default=None, max_length=64)
     access_token: str | None = Field(default=None, max_length=1024)  # vazio = mantém
     app_secret: str | None = Field(default=None, max_length=256)
+    # prompt adicional do número (concatenado ao system prompt do modelo)
+    system_prompt: str | None = Field(default=None, max_length=8000)
+    # limites de mensagens por contato: {total, per_hour, per_day, per_month}
+    limits: dict[str, Any] | None = None
+    # contexto/roles por número: [{number, name, role, context}]
+    contacts: list[dict[str, Any]] | None = None
+
+
+_LIMIT_KEYS = ("total", "per_hour", "per_day", "per_month")
+
+
+def _clean_limits(raw: dict[str, Any]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for k in _LIMIT_KEYS:
+        try:
+            v = int(raw.get(k) or 0)
+        except (TypeError, ValueError):
+            v = 0
+        if v > 0:
+            out[k] = v
+    return out
+
+
+def _clean_contacts(raw: list[dict[str, Any]]) -> list[dict[str, str]]:
+    out = []
+    for c in raw[:200]:
+        number = str(c.get("number") or "").strip()[:40]
+        if not number:
+            continue
+        out.append({
+            "number": number,
+            "name": str(c.get("name") or "").strip()[:120],
+            "role": str(c.get("role") or "").strip()[:120],
+            "context": str(c.get("context") or "").strip()[:2000],
+        })
+    return out
 
 
 def _serialize(conn: WhatsAppConnection, threads: int = 0) -> dict[str, Any]:
@@ -76,6 +112,9 @@ def _serialize(conn: WhatsAppConnection, threads: int = 0) -> dict[str, Any]:
         "model": conn.model,
         "filters": {**_DEFAULT_FILTERS, **(conn.filters or {})},
         "memory": conn.memory,
+        "system_prompt": conn.system_prompt or "",
+        "limits": conn.limits or {},
+        "contacts": conn.contacts or [],
         "enabled": conn.enabled,
         "state": conn.state or {},
         "threads": threads,
@@ -195,6 +234,10 @@ async def update_connection(
         data.pop("access_token")  # vazio = mantém o atual
     if "app_secret" in data and data["app_secret"] is None:
         data.pop("app_secret")
+    if "limits" in data:
+        data["limits"] = _clean_limits(data["limits"] or {})
+    if "contacts" in data:
+        data["contacts"] = _clean_contacts(data["contacts"] or [])
     for field, value in data.items():
         setattr(conn, field, value)
     await db.commit()

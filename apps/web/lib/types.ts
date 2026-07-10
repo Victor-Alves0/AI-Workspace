@@ -355,6 +355,12 @@ export interface WhatsAppConnection {
   model: string;
   filters: WhatsAppFilters;
   memory: "local" | "global";
+  /** prompt adicional deste número, concatenado ao system prompt do modelo */
+  system_prompt: string;
+  /** limites de mensagens por contato (0/ausente = sem limite) */
+  limits: { total?: number; per_hour?: number; per_day?: number; per_month?: number };
+  /** contexto/roles por número */
+  contacts: { number: string; name: string; role: string; context: string }[];
   enabled: boolean;
   state: { status?: string; last_error?: string | null };
   threads: number;

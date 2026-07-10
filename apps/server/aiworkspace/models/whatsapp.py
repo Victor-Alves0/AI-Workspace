@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -53,6 +53,19 @@ class WhatsAppConnection(Base):
     # memória das conversas: "local" (isolada por conversa) | "global" (alimenta a
     # memória compartilhada do modelo, junto com os outros canais)
     memory: Mapped[str] = mapped_column(String(8), default="local")
+    # prompt adicional DESTE número, concatenado ao system prompt do modelo
+    # (ex.: "responda curto, sem markdown, informal")
+    system_prompt: Mapped[str] = mapped_column(Text, default="")
+    # limites de mensagens por número que entra em contato (0/ausente = sem limite):
+    #   {total: int, per_hour: int, per_day: int, per_month: int}
+    limits: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # contexto/roles por contato — vai ao modelo quando o número conversa:
+    #   [{number, name, role, context}]
+    contacts: Mapped[list] = mapped_column(JSONB, default=list)
+    # pasta "Chats" desta conexão (WhatsApp/<número>/Chats) — criada sob demanda
+    folder_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("folders.id", ondelete="SET NULL"), nullable=True
+    )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     # estado vivo: {status, profile_name, last_error, last_event_at}
     state: Mapped[dict] = mapped_column(JSONB, default=dict)

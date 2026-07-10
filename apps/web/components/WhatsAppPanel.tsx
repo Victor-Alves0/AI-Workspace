@@ -329,6 +329,43 @@ function ConnectionCard({
             </div>
           </div>
 
+          {/* prompt adicional deste número (concatenado ao do modelo) */}
+          <label className="block text-sm">
+            <span className="text-xs text-muted">Prompt adicional deste número (junta-se ao System Prompt do modelo)</span>
+            <textarea
+              rows={3}
+              defaultValue={conn.system_prompt}
+              onBlur={(e) => { if (e.target.value !== conn.system_prompt) patch({ system_prompt: e.target.value }); }}
+              placeholder={'Ex.: "Responda sempre curto, como mensagem de WhatsApp. Nunca use Markdown. Seja informal."'}
+              className={`${inputCls} resize-y`}
+            />
+          </label>
+
+          {/* limites de uso por contato */}
+          <div className="space-y-2 rounded-lg border border-border bg-surface2/40 px-2.5 py-2">
+            <p className="text-xs font-semibold text-ink">Limites de uso <span className="font-normal text-muted">— mensagens por contato (0 = sem limite)</span></p>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {([["total", "Permanente"], ["per_hour", "Por hora"], ["per_day", "Por dia"], ["per_month", "Por mês"]] as const).map(([k, lbl]) => (
+                <label key={k} className="block text-sm">
+                  <span className="text-xs text-muted">{lbl}</span>
+                  <input
+                    type="number" min={0}
+                    defaultValue={conn.limits?.[k] ?? 0}
+                    onBlur={(e) => {
+                      const v = Math.max(0, parseInt(e.target.value || "0", 10) || 0);
+                      if (v !== (conn.limits?.[k] ?? 0)) patch({ limits: { ...conn.limits, [k]: v } });
+                    }}
+                    className={inputCls}
+                  />
+                </label>
+              ))}
+            </div>
+            <p className="text-[11px] leading-4 text-muted">Ao atingir o limite, novas mensagens do contato são ignoradas até a janela renovar (o permanente zera apagando o chat da conversa).</p>
+          </div>
+
+          {/* contexto/roles por número */}
+          <ContactRoles contacts={conn.contacts ?? []} onChange={(contacts) => patch({ contacts })} />
+
           {conn.provider === "official" && <OfficialWebhookInfo conn={conn} />}
 
           <div className="flex items-center justify-end">
@@ -343,6 +380,81 @@ function ConnectionCard({
                 <Trash2 size={13} /> Excluir conexão
               </button>
             )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Contexto/roles por número: lista de contatos com papel + contexto que o
+ * modelo recebe quando aquele número conversa. */
+type ContactRole = WhatsAppConnection["contacts"][number];
+
+function ContactRoles({ contacts, onChange }: {
+  contacts: ContactRole[];
+  onChange: (list: ContactRole[]) => void;
+}) {
+  const [draft, setDraft] = useState<ContactRole | null>(null);
+
+  const save = (idx: number, patch: Partial<ContactRole>) => {
+    const next = contacts.map((c, i) => (i === idx ? { ...c, ...patch } : c));
+    onChange(next);
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border bg-surface2/40 px-2.5 py-2">
+      <div className="flex items-center justify-between">
+        <p className="text-xs font-semibold text-ink">Contatos <span className="font-normal text-muted">— contexto/role por número</span></p>
+        {!draft && (
+          <button
+            onClick={() => setDraft({ number: "", name: "", role: "", context: "" })}
+            className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] text-ink-soft transition-colors hover:bg-hover hover:text-ink"
+          >
+            <Plus size={12} /> Adicionar
+          </button>
+        )}
+      </div>
+
+      {contacts.length === 0 && !draft && (
+        <p className="text-[11px] leading-4 text-muted">
+          Ex.: &quot;+55 83 9…&quot; → &quot;Este número é o dono da empresa.&quot; O modelo recebe isso sempre que o número conversar.
+        </p>
+      )}
+
+      {contacts.map((c, i) => (
+        <div key={`${c.number}-${i}`} className="space-y-1.5 rounded-lg border border-border bg-surface px-2.5 py-2">
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+            <input defaultValue={c.number} onBlur={(e) => { if (e.target.value !== c.number) save(i, { number: e.target.value }); }} placeholder="Número" className={`${inputCls} mt-0 font-mono text-xs`} />
+            <input defaultValue={c.name} onBlur={(e) => { if (e.target.value !== c.name) save(i, { name: e.target.value }); }} placeholder="Nome (opcional)" className={`${inputCls} mt-0`} />
+            <input defaultValue={c.role} onBlur={(e) => { if (e.target.value !== c.role) save(i, { role: e.target.value }); }} placeholder="Role/Função" className={`${inputCls} mt-0`} />
+          </div>
+          <div className="flex items-start gap-1.5">
+            <textarea rows={1} defaultValue={c.context} onBlur={(e) => { if (e.target.value !== c.context) save(i, { context: e.target.value }); }} placeholder="Contexto/prompt adicional (ex.: este número é o dono da empresa)" className={`${inputCls} mt-0 flex-1 resize-y`} />
+            <button onClick={() => onChange(contacts.filter((_, j) => j !== i))} title="Remover" className="mt-1 shrink-0 rounded p-1 text-muted transition-colors hover:text-red-400">
+              <Trash2 size={14} />
+            </button>
+          </div>
+        </div>
+      ))}
+
+      {draft && (
+        <div className="space-y-1.5 rounded-lg border border-accent/40 bg-surface px-2.5 py-2">
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+            <input autoFocus value={draft.number} onChange={(e) => setDraft({ ...draft, number: e.target.value })} placeholder="Número (ex.: 5583999999999)" className={`${inputCls} mt-0 font-mono text-xs`} />
+            <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Nome (opcional)" className={`${inputCls} mt-0`} />
+            <input value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })} placeholder="Role/Função" className={`${inputCls} mt-0`} />
+          </div>
+          <textarea rows={2} value={draft.context} onChange={(e) => setDraft({ ...draft, context: e.target.value })} placeholder="Contexto/prompt adicional" className={`${inputCls} mt-0 resize-y`} />
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={() => setDraft(null)} className="rounded-full border border-border px-3 py-1 text-xs text-muted transition-colors hover:text-ink">Cancelar</button>
+            <button
+              disabled={!draft.number.trim()}
+              onClick={() => { onChange([...contacts, draft]); setDraft(null); }}
+              className="rounded-full bg-accent px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
+            >
+              Salvar contato
+            </button>
           </div>
         </div>
       )}

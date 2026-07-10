@@ -17,14 +17,15 @@ import re
 import time
 import uuid
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ..db import SessionLocal
 from ..models import (
     Chat,
+    Folder,
     Message,
     ModelConfig,
     User,
@@ -124,6 +125,40 @@ def passes_filters(conn: WhatsAppConnection, m: dict[str, Any]) -> tuple[bool, s
     return True, ""
 
 
+async def _find_or_create_folder(db, user_id, name: str, parent_id) -> Folder:
+    folder = await db.scalar(
+        select(Folder).where(
+            Folder.user_id == user_id, Folder.name == name, Folder.parent_id == parent_id
+        )
+    )
+    if folder is None:
+        folder = Folder(user_id=user_id, name=name, parent_id=parent_id)
+        db.add(folder)
+        await db.flush()
+    return folder
+
+
+async def _ensure_folder(db, conn: WhatsAppConnection, user: User):
+    """Pasta das conversas desta conexão: WhatsApp/<número>/Chats. Criada sob
+    demanda e memorizada em conn.folder_id (renomear/mover pastas é respeitado —
+    só recriamos se a pasta for excluída)."""
+    if conn.folder_id is not None:
+        folder = await db.get(Folder, conn.folder_id)
+        if folder is not None:
+            return folder.id
+        conn.folder_id = None  # pasta excluída pelo usuário → recria a estrutura
+    try:
+        root = await _find_or_create_folder(db, user.id, "WhatsApp", None)
+        label = (f"+{conn.phone}" if conn.phone else "") or conn.label or "Número"
+        number = await _find_or_create_folder(db, user.id, label[:255], root.id)
+        chats = await _find_or_create_folder(db, user.id, "Chats", number.id)
+    except Exception:  # noqa: BLE001 - organização nunca derruba o turno
+        logger.exception("whatsapp: falha ao criar pastas (%s)", conn.id)
+        return None
+    conn.folder_id = chats.id
+    return chats.id
+
+
 async def _resolve_thread(
     db, conn: WhatsAppConnection, user: User, m: dict[str, Any], mc: ModelConfig | None
 ) -> tuple[WhatsAppThread, Chat]:
@@ -138,6 +173,8 @@ async def _resolve_thread(
         if chat is not None:
             if m.get("sender_name") and thread.contact_name != m["sender_name"]:
                 thread.contact_name = m["sender_name"]
+            if chat.folder_id is None:  # adota chats antigos/desapastados
+                chat.folder_id = await _ensure_folder(db, conn, user)
             return thread, chat
         await db.delete(thread)  # chat apagado pelo usuário → recria o par
         await db.flush()
@@ -149,6 +186,7 @@ async def _resolve_thread(
         model=conn.model or (mc.base_model if mc else ""),
         model_config_id=mc.id if mc else None,
         params=(mc.params if mc else {}) or {},
+        folder_id=await _ensure_folder(db, conn, user),
     )
     db.add(chat)
     await db.flush()
@@ -159,6 +197,58 @@ async def _resolve_thread(
     db.add(thread)
     await db.flush()
     return thread, chat
+
+
+# janelas dos limites de uso ("total" = permanente, sem janela)
+_LIMIT_WINDOWS: list[tuple[str, timedelta | None, str]] = [
+    ("total", None, "permanente"),
+    ("per_hour", timedelta(hours=1), "por hora"),
+    ("per_day", timedelta(days=1), "por dia"),
+    ("per_month", timedelta(days=30), "por mês"),
+]
+
+
+async def _limit_reached(db, conn: WhatsAppConnection, chat: Chat) -> str | None:
+    """Limites de uso por número que contata: conta as mensagens JÁ processadas
+    desse contato (mensagens "user" do chat da conversa) contra cada janela.
+    Retorna o rótulo do limite estourado, ou None. Janelas são deslizantes
+    (renovam sozinhas); "total" só zera se o dono apagar o chat."""
+    lm = conn.limits or {}
+    now = datetime.now(timezone.utc)
+    for key, window, label in _LIMIT_WINDOWS:
+        try:
+            cap = int(lm.get(key) or 0)
+        except (TypeError, ValueError):
+            cap = 0
+        if cap <= 0:
+            continue
+        q = (
+            select(func.count())
+            .select_from(Message)
+            .where(Message.chat_id == chat.id, Message.role == "user")
+        )
+        if window is not None:
+            q = q.where(Message.created_at >= now - window)
+        n = await db.scalar(q) or 0
+        if n >= cap:
+            return f"{label} ({n}/{cap})"
+    return None
+
+
+def _contact_note(conn: WhatsAppConnection, m: dict[str, Any]) -> str:
+    """Contexto/role configurado para o número que está falando (se houver)."""
+    sender = _norm_br(_digits(m.get("sender") or m.get("jid") or ""))
+    if not sender:
+        return ""
+    for c in conn.contacts or []:
+        d = _norm_br(_digits(str(c.get("number") or "")))
+        if not d or not (sender.endswith(d) or d.endswith(sender)):
+            continue
+        who = " — ".join(p for p in [str(c.get("name") or "").strip(), str(c.get("role") or "").strip()] if p)
+        ctx = str(c.get("context") or "").strip()
+        note = f"About this contact{f' ({who})' if who else ''}"
+        return f"{note}: {ctx}" if ctx else (note if who else "")
+    return ""
 
 
 def _memory_kwargs(conn: WhatsAppConnection, chat: Chat, mc: ModelConfig | None, model: str) -> dict:
@@ -227,6 +317,15 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
 
         thread, chat = await _resolve_thread(db, conn, user, m, mc)
 
+        # limites de uso deste contato: estourou → a mensagem não é processada
+        # (a janela renova sozinha; "permanente" só zera apagando o chat)
+        hit = await _limit_reached(db, conn, chat)
+        if hit is not None:
+            await db.commit()  # persiste pastas/threads criadas na resolução
+            logger.info("whatsapp: limite %s atingido (%s, %s) — mensagem ignorada",
+                        hit, conn.id, m["jid"])
+            return
+
         # prefixo-gatilho configurado → o modelo recebe o texto sem o prefixo
         text = m["text"]
         trigger = ((conn.filters or {}).get("trigger") or "").strip()
@@ -252,12 +351,20 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
         # imagem — vision/genimage router — não se aplicam a mensagens do WhatsApp)
         guards = await _resolve_guards(db, user, mc)
         who = m.get("sender_name") or _digits(m["jid"])
-        extra_system = (
+        extra_parts = [
             f"You are replying on WhatsApp (connection '{conn.label or conn.phone}') to "
             f"{who}. Answer as a WhatsApp message: concise, plain text (WhatsApp only "
             f"renders *bold*, _italic_ and ```code```; never use headings, tables or links "
             f"in markdown syntax). Match the contact's language."
-        )
+        ]
+        # prompt adicional configurado para ESTE número conectado
+        if (conn.system_prompt or "").strip():
+            extra_parts.append(conn.system_prompt.strip())
+        # contexto/role do contato que está falando (lista da conexão)
+        note = _contact_note(conn, m)
+        if note:
+            extra_parts.append(note)
+        extra_system = "\n\n".join(extra_parts)
 
         content = ""
         usage = None

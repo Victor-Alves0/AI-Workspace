@@ -186,6 +186,13 @@ export default function Sidebar({
     for (const c of chats) if (c.folder_id) (map[c.folder_id] ||= []).push(c);
     return map;
   }, [chats]);
+  // árvore de pastas: raízes + filhas por parent_id (ex.: WhatsApp/<número>/Chats)
+  const rootFolders = useMemo(() => folders.filter((f) => !f.parent_id), [folders]);
+  const foldersByParent = useMemo(() => {
+    const map: Record<string, Folder[]> = {};
+    for (const f of folders) if (f.parent_id) (map[f.parent_id] ||= []).push(f);
+    return map;
+  }, [folders]);
 
   // largura animada: um único <aside> encolhe/expande suavemente e o conteúdo
   // troca entre trilho de ícones e navegação completa
@@ -287,16 +294,19 @@ export default function Sidebar({
         />
         {sections.folders && (
           <div className="mt-1 space-y-0.5">
-            {folders.map((f) => (
+            {rootFolders.map((f) => (
               <FolderRow
                 key={f.id}
                 folder={f}
                 chats={chatsByFolder[f.id] ?? []}
+                subfolders={foldersByParent[f.id] ?? []}
+                foldersByParent={foldersByParent}
+                chatsByFolder={chatsByFolder}
                 activeId={activeId}
                 actions={chatActions}
                 onRename={onRenameFolder}
                 onDelete={onDeleteFolder}
-                onDropChat={(chatId) => onMoveChat(chatId, f.id)}
+                onMoveChat={onMoveChat}
               />
             ))}
           </div>
@@ -336,19 +346,26 @@ export default function Sidebar({
 function FolderRow({
   folder,
   chats,
+  subfolders,
+  foldersByParent,
+  chatsByFolder,
   activeId,
   actions,
   onRename,
   onDelete,
-  onDropChat,
+  onMoveChat,
 }: {
   folder: Folder;
   chats: Chat[];
+  /** pastas-filhas diretas (renderizadas recursivamente) */
+  subfolders: Folder[];
+  foldersByParent: Record<string, Folder[]>;
+  chatsByFolder: Record<string, Chat[]>;
   activeId: string | null;
   actions: ChatActions;
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
-  onDropChat: (chatId: string) => void;
+  onMoveChat: (chatId: string, folderId: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [over, setOver] = useState(false);
@@ -368,7 +385,7 @@ function FolderRow({
           setOver(false);
           const id = e.dataTransfer.getData("text/chat-id");
           if (id) {
-            onDropChat(id);
+            onMoveChat(id, folder.id);
             setOpen(true);
           }
         }}
@@ -408,10 +425,25 @@ function FolderRow({
       </div>
       {open && (
         <div className="ml-4 border-l border-border pl-1">
+          {subfolders.map((sf) => (
+            <FolderRow
+              key={sf.id}
+              folder={sf}
+              chats={chatsByFolder[sf.id] ?? []}
+              subfolders={foldersByParent[sf.id] ?? []}
+              foldersByParent={foldersByParent}
+              chatsByFolder={chatsByFolder}
+              activeId={activeId}
+              actions={actions}
+              onRename={onRename}
+              onDelete={onDelete}
+              onMoveChat={onMoveChat}
+            />
+          ))}
           {chats.map((c) => (
             <ChatItem key={c.id} chat={c} active={c.id === activeId} actions={actions} />
           ))}
-          {chats.length === 0 && <p className="px-2 py-1 text-xs text-muted">vazia</p>}
+          {chats.length === 0 && subfolders.length === 0 && <p className="px-2 py-1 text-xs text-muted">vazia</p>}
         </div>
       )}
     </div>
