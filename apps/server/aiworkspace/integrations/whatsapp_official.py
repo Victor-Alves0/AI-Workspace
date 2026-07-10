@@ -67,6 +67,10 @@ def parse_webhook(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 text = ((m.get("text") or {}).get("body") or "").strip()
                 if not sender or not text:
                     continue
+                try:
+                    ts = int(m.get("timestamp") or 0)
+                except (TypeError, ValueError):
+                    ts = 0
                 out.append(
                     {
                         "jid": sender,  # Cloud API entrega só o número (sem @...)
@@ -75,6 +79,7 @@ def parse_webhook(payload: dict[str, Any]) -> list[dict[str, Any]]:
                         "from_me": False,  # o Cloud API não repassa as próprias
                         "is_group": False,  # Cloud API é 1:1 (grupos não suportados)
                         "msg_id": m.get("id") or "",
+                        "ts": ts,  # unix (s) — dedup/idade contra reentrega de webhook
                     }
                 )
     return out

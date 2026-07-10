@@ -14,7 +14,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 from typing import Any
 
@@ -49,6 +51,38 @@ def _lock(key: str) -> asyncio.Lock:
     if key not in _locks:
         _locks[key] = asyncio.Lock()
     return _locks[key]
+
+
+# Deduplicação de mensagens já processadas (por msg_id), limitada em memória.
+# O Evolution/Baileys REENVIA o histórico recente como MESSAGES_UPSERT quando a
+# sessão reconecta (e a Meta pode retentar webhooks). Sem isto, a IA respondia
+# tudo de novo — re-cumprimentava e re-respondia mensagens antigas.
+_seen_ids: set[str] = set()
+_seen_order: deque[str] = deque(maxlen=2000)
+
+# Mensagens mais antigas que isto (pelo messageTimestamp do WhatsApp) são
+# descartadas: são histórico reenviado na reconexão, não conversa nova. Folga
+# grande p/ não perder mensagens legítimas atrasadas por uma resposta longa.
+_MAX_AGE_SECONDS = 600
+
+
+def _seen(msg_id: str) -> bool:
+    """True se este msg_id já foi processado (e registra os novos)."""
+    if not msg_id:
+        return False  # sem id não dá p/ deduplicar — deixa passar
+    if msg_id in _seen_ids:
+        return True
+    _seen_order.append(msg_id)  # deque limitada evita o append crescer sem fim
+    _seen_ids.add(msg_id)
+    # poda em lote (rara): ressincroniza o set com a janela recente da deque
+    if len(_seen_ids) > 2 * (_seen_order.maxlen or 2000):
+        _seen_ids.intersection_update(_seen_order)
+    return False
+
+
+def _too_old(m: dict[str, Any]) -> bool:
+    ts = int(m.get("ts") or 0)
+    return ts > 0 and (time.time() - ts) > _MAX_AGE_SECONDS
 
 
 def _digits(value: str) -> str:
@@ -291,6 +325,14 @@ async def handle_incoming(connection_id: uuid.UUID, messages: list[dict[str, Any
             return
         approved = []
         for m in messages:
+            # 1) histórico reenviado na reconexão (timestamp antigo) → ignora
+            if _too_old(m):
+                logger.info("whatsapp: mensagem antiga ignorada (%s): id=%s", conn.id, m.get("msg_id"))
+                continue
+            # 2) já processada (reentrega de webhook / retry) → ignora
+            if _seen(m.get("msg_id") or ""):
+                logger.info("whatsapp: duplicata ignorada (%s): id=%s", conn.id, m.get("msg_id"))
+                continue
             ok, reason = passes_filters(conn, m)
             if ok:
                 approved.append(m)

@@ -150,6 +150,19 @@ def parse_webhook(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "from_me": bool(key.get("fromMe")),
                 "is_group": jid.endswith("@g.us"),
                 "msg_id": key.get("id") or "",
+                # unix (s) do envio — usado p/ descartar histórico reenviado na
+                # reconexão (o Baileys re-emite MESSAGES_UPSERT do histórico)
+                "ts": _to_unix(it.get("messageTimestamp")),
             }
         )
     return out
+
+
+def _to_unix(value: Any) -> int:
+    """messageTimestamp do Baileys: int, string ou Long {low,high}. 0 = ausente."""
+    if isinstance(value, dict):  # protobuf Long serializado
+        value = value.get("low")
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
