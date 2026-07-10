@@ -323,6 +323,13 @@ export interface Prompt {
 export interface AutomationTarget {
   mode: "new_each" | "reuse" | "existing";
   chat_id?: string | null;
+  /** entrega do resultado ao WhatsApp (opcional) */
+  whatsapp?: {
+    enabled?: boolean;
+    connection_id?: string | null;
+    to?: "number" | "contacts" | "threads";
+    number?: string;
+  };
 }
 
 // agendamento de uma automação por tempo. Modos:
@@ -366,6 +373,8 @@ export interface WhatsAppConnection {
   limits: { total?: number; per_hour?: number; per_day?: number; per_month?: number };
   /** contexto/roles por número */
   contacts: { number: string; name: string; role: string; context: string }[];
+  /** Modo humanizador: digitação simulada + quebra de mensagens */
+  humanize: { enabled?: boolean; typing?: boolean; split?: boolean; min_seconds?: number; max_seconds?: number };
   enabled: boolean;
   state: { status?: string; last_error?: string | null };
   threads: number;

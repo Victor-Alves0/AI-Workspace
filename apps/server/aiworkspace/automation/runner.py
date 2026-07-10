@@ -11,6 +11,7 @@ Tudo isolado em try/except pelo chamador; aqui focamos na lógica de um disparo.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -22,7 +23,7 @@ from sqlalchemy import select
 from ..chat.routes import _load_skills, _usage_record
 from ..chat.orchestrator import run_turn
 from ..db import SessionLocal
-from ..models import Automation, Chat, Message, ModelConfig, Notification, User
+from ..models import Automation, Chat, Message, ModelConfig, Notification, User, WhatsAppConnection
 from ..providers import openrouter
 from ..search import web_search
 from ..secrets_service import (
@@ -248,7 +249,7 @@ async def _run_scheduled(db, automation: Automation, user: User) -> dict[str, An
             message_id=msg.id,
         )
     )
-    return {"chat_id": str(chat.id), "message_id": str(msg.id)}
+    return {"chat_id": str(chat.id), "message_id": str(msg.id), "text": assistant_content}
 
 
 async def _run_reminder(db, automation: Automation, user: User) -> dict[str, Any]:
@@ -270,7 +271,7 @@ async def _run_reminder(db, automation: Automation, user: User) -> dict[str, Any
             message_id=msg.id,
         )
     )
-    return {"chat_id": str(chat.id), "message_id": str(msg.id), "one_shot": True}
+    return {"chat_id": str(chat.id), "message_id": str(msg.id), "one_shot": True, "text": body}
 
 
 async def _resolve_model(db, automation: Automation, user: User) -> tuple[Any, str]:
@@ -357,7 +358,29 @@ async def _run_monitor(db, automation: Automation, user: User) -> dict[str, Any]
             message_id=msg.id,
         )
     )
-    return {"changed": True, "chat_id": str(chat.id), "message_id": str(msg.id)}
+    return {"changed": True, "chat_id": str(chat.id), "message_id": str(msg.id), "text": body}
+
+
+async def _deliver_whatsapp(db, automation: Automation, user: User, text: str | None) -> None:
+    """Se a automação estiver configurada para enviar ao WhatsApp, resolve a conexão
+    e os destinatários e dispara o envio em BACKGROUND (o humanizador tem atrasos —
+    não pode segurar a transação da automação)."""
+    wa = (automation.target or {}).get("whatsapp") or {}
+    if not wa.get("enabled") or not wa.get("connection_id") or not (text or "").strip():
+        return
+    from ..integrations import whatsapp_service
+    try:
+        conn = await db.get(WhatsAppConnection, uuid.UUID(str(wa["connection_id"])))
+    except (ValueError, TypeError):
+        return
+    if conn is None or conn.user_id != user.id or not conn.enabled:
+        logger.warning("automação %s: conexão WhatsApp inválida/desligada", automation.id)
+        return
+    recipients = await whatsapp_service.resolve_recipients(db, conn, wa)
+    if not recipients:
+        logger.info("automação %s: sem destinatários no WhatsApp", automation.id)
+        return
+    asyncio.create_task(whatsapp_service.broadcast(conn.id, recipients, text.strip()))
 
 
 async def run_automation(automation_id: uuid.UUID) -> dict[str, Any]:
@@ -384,6 +407,12 @@ async def run_automation(automation_id: uuid.UUID) -> dict[str, Any]:
                 result = await _run_scheduled(db, automation, user)
 
             await db.commit()
+            # entrega ao WhatsApp (se configurado) — monitor só quando houve mudança
+            if automation.kind != "monitor" or result.get("changed"):
+                try:
+                    await _deliver_whatsapp(db, automation, user, result.get("text"))
+                except Exception:  # noqa: BLE001 - entrega não pode falhar a automação
+                    logger.exception("automação %s: falha ao entregar no WhatsApp", automation_id)
             return result
     finally:
         _running.discard(automation_id)

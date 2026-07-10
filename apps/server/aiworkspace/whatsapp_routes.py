@@ -70,6 +70,8 @@ class ConnectionUpdate(BaseModel):
     limits: dict[str, Any] | None = None
     # contexto/roles por número: [{number, name, role, context}]
     contacts: list[dict[str, Any]] | None = None
+    # Modo humanizador: {enabled, typing, min_seconds, max_seconds, split}
+    humanize: dict[str, Any] | None = None
 
 
 _LIMIT_KEYS = ("total", "per_hour", "per_day", "per_month")
@@ -85,6 +87,21 @@ def _clean_limits(raw: dict[str, Any]) -> dict[str, int]:
         if v > 0:
             out[k] = v
     return out
+
+
+def _clean_humanize(raw: dict[str, Any]) -> dict[str, Any]:
+    def _sec(key: str, default: int) -> int:
+        try:
+            return max(0, min(int(raw.get(key, default)), 120))
+        except (TypeError, ValueError):
+            return default
+    return {
+        "enabled": bool(raw.get("enabled")),
+        "typing": raw.get("typing", True) is not False,
+        "split": bool(raw.get("split")),
+        "min_seconds": _sec("min_seconds", 1),
+        "max_seconds": _sec("max_seconds", 6),
+    }
 
 
 def _clean_contacts(raw: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -115,6 +132,7 @@ def _serialize(conn: WhatsAppConnection, threads: int = 0) -> dict[str, Any]:
         "system_prompt": conn.system_prompt or "",
         "limits": conn.limits or {},
         "contacts": conn.contacts or [],
+        "humanize": conn.humanize or {},
         "enabled": conn.enabled,
         "state": conn.state or {},
         "threads": threads,
@@ -238,6 +256,8 @@ async def update_connection(
         data["limits"] = _clean_limits(data["limits"] or {})
     if "contacts" in data:
         data["contacts"] = _clean_contacts(data["contacts"] or [])
+    if "humanize" in data:
+        data["humanize"] = _clean_humanize(data["humanize"] or {})
     for field, value in data.items():
         setattr(conn, field, value)
     await db.commit()

@@ -366,6 +366,9 @@ function ConnectionCard({
           {/* contexto/roles por número */}
           <ContactRoles contacts={conn.contacts ?? []} onChange={(contacts) => patch({ contacts })} />
 
+          {/* Modo humanizador */}
+          <Humanizer humanize={conn.humanize ?? {}} onChange={(humanize) => patch({ humanize })} />
+
           {conn.provider === "official" && <OfficialWebhookInfo conn={conn} />}
 
           <div className="flex items-center justify-end">
@@ -456,6 +459,58 @@ function ContactRoles({ contacts, onChange }: {
               Salvar contato
             </button>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Modo humanizador: "digitando…", atraso e quebra de mensagens. */
+type Humanize = WhatsAppConnection["humanize"];
+
+function Humanizer({ humanize, onChange }: { humanize: Humanize; onChange: (h: Humanize) => void }) {
+  const h = humanize ?? {};
+  const on = !!h.enabled;
+  const set = (p: Partial<Humanize>) => onChange({ ...h, ...p });
+  const minS = h.min_seconds ?? 1;
+  const maxS = h.max_seconds ?? 6;
+  return (
+    <div className="space-y-2 rounded-lg border border-border bg-surface2/40 px-2.5 py-2">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs font-semibold text-ink">Modo humanizador</p>
+          <p className="text-[11px] leading-4 text-muted">Simula uma pessoa: mostra “digitando…”, espera um tempo e pode responder em várias mensagens.</p>
+        </div>
+        <Toggle on={on} onClick={() => set({ enabled: !on })} />
+      </div>
+      {on && (
+        <div className="space-y-2 border-t border-border pt-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-ink-soft">Mostrar “digitando…”</span>
+            <Toggle on={h.typing !== false} onClick={() => set({ typing: h.typing === false })} />
+          </div>
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-sm text-ink-soft">Cortar em várias mensagens</span>
+              <p className="text-[11px] text-muted">Quebra respostas longas em mensagens naturais</p>
+            </div>
+            <Toggle on={!!h.split} onClick={() => set({ split: !h.split })} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block text-sm">
+              <span className="text-xs text-muted">Atraso mínimo (s)</span>
+              <input type="number" min={0} max={120} defaultValue={minS}
+                onBlur={(e) => { const v = Math.max(0, Math.min(120, parseInt(e.target.value || "0", 10) || 0)); if (v !== minS) set({ min_seconds: v }); }}
+                className={inputCls} />
+            </label>
+            <label className="block text-sm">
+              <span className="text-xs text-muted">Atraso máximo (s)</span>
+              <input type="number" min={0} max={120} defaultValue={maxS}
+                onBlur={(e) => { const v = Math.max(0, Math.min(120, parseInt(e.target.value || "0", 10) || 0)); if (v !== maxS) set({ max_seconds: v }); }}
+                className={inputCls} />
+            </label>
+          </div>
+          <p className="text-[11px] leading-4 text-muted">O tempo real varia com o tamanho da mensagem, entre o mínimo e o máximo.</p>
         </div>
       )}
     </div>

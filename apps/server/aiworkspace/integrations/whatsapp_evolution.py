@@ -100,15 +100,29 @@ async def get_profile(instance: str) -> dict[str, str]:
     return {"phone": "", "name": ""}
 
 
-async def send_text(instance: str, jid: str, text: str) -> dict[str, Any]:
-    """Envia texto para um contato/grupo. `jid` pode ser o jid completo ou só dígitos."""
+async def send_text(instance: str, jid: str, text: str, delay_ms: int = 0) -> dict[str, Any]:
+    """Envia texto para um contato/grupo. `jid` pode ser o jid completo ou só dígitos.
+    `delay_ms` > 0 pede à Evolution que mostre 'digitando…' por esse tempo antes."""
+    payload: dict[str, Any] = {"number": jid, "text": text}
+    if delay_ms > 0:
+        payload["delay"] = int(delay_ms)
     async with _client() as c:
-        r = await c.post(
-            f"/message/sendText/{instance}",
-            json={"number": jid, "text": text},
-        )
+        r = await c.post(f"/message/sendText/{instance}", json=payload)
         r.raise_for_status()
         return r.json()
+
+
+async def send_presence(instance: str, jid: str, presence: str = "composing", delay_ms: int = 3000) -> None:
+    """Mostra o status de presença ('composing' = digitando, 'recording', 'paused').
+    Best-effort: falhar aqui não pode impedir o envio da mensagem."""
+    try:
+        async with _client() as c:
+            await c.post(
+                f"/chat/sendPresence/{instance}",
+                json={"number": jid, "presence": presence, "delay": int(delay_ms)},
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("sendPresence falhou (%s): %s", instance, exc)
 
 
 async def delete_instance(instance: str) -> None:

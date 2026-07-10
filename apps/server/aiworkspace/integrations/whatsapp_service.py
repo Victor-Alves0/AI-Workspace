@@ -281,6 +281,175 @@ async def _send_reply(conn: WhatsAppConnection, jid: str, text: str) -> None:
         await evolution.send_text(conn.instance, jid, text)
 
 
+# --------------------------------------------------------------------------- #
+# Modo humanizador: "digitando…", atraso proporcional e quebra em várias
+# mensagens — em vez de despejar um bloco só de texto instantâneo.
+# --------------------------------------------------------------------------- #
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?…])\s+(?=[A-ZÀ-Ý0-9\"'(])")
+
+
+def _humanize_cfg(conn: WhatsAppConnection) -> dict[str, Any]:
+    h = conn.humanize or {}
+    return {
+        "enabled": bool(h.get("enabled")),
+        "typing": h.get("typing", True) is not False,
+        "split": bool(h.get("split")),
+        "min_seconds": max(0, int(h.get("min_seconds", 1) or 0)),
+        "max_seconds": max(0, int(h.get("max_seconds", 6) or 0)),
+    }
+
+
+def _split_message(text: str, max_parts: int = 5) -> list[str]:
+    """Quebra um texto em mensagens naturais: por parágrafos (linha em branco);
+    se veio um bloco só, tenta por frases. Junta o excedente na última parte."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    parts = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    if len(parts) == 1:
+        sents = [s.strip() for s in _SENTENCE_SPLIT.split(parts[0]) if s.strip()]
+        if len(sents) > 1:
+            parts = sents
+    if len(parts) > max_parts:
+        parts = parts[: max_parts - 1] + [" ".join(parts[max_parts - 1:])]
+    return parts
+
+
+def _delay_seconds(cfg: dict, chunk: str) -> float:
+    """Tempo 'humano' antes de enviar um trecho: ~cadência de digitação, preso
+    entre min e max da configuração."""
+    lo = float(cfg["min_seconds"])
+    hi = float(cfg["max_seconds"]) if cfg["max_seconds"] else max(lo, 6.0)
+    est = len(chunk) / 22.0  # ~22 caracteres por segundo
+    return max(lo, min(est, hi))
+
+
+async def _hold_typing(conn: WhatsAppConnection, jid: str, seconds: float) -> None:
+    """Dorme `seconds` mantendo 'digitando…' vivo (renova a presença a cada ~4s).
+    Só a Evolution expõe presença; no oficial isto vira só o atraso."""
+    deadline = time.monotonic() + seconds
+    if conn.provider != "evolution":
+        await asyncio.sleep(min(seconds, 30))
+        return
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        step = min(4.0, remaining)
+        await evolution.send_presence(conn.instance, jid, "composing", int((step + 0.5) * 1000))
+        await asyncio.sleep(step)
+
+
+async def _deliver(conn: WhatsAppConnection, jid: str, text: str) -> None:
+    """Entrega a resposta ao contato. Com o Modo humanizador ligado, mostra
+    'digitando…', espera um tempo proporcional e (opcional) manda em partes."""
+    cfg = _humanize_cfg(conn)
+    if not cfg["enabled"]:
+        await _send_reply(conn, jid, text)
+        return
+    chunks = _split_message(text) if cfg["split"] else [(text or "").strip()]
+    for chunk in chunks:
+        if not chunk:
+            continue
+        delay = _delay_seconds(cfg, chunk)
+        if cfg["typing"]:
+            await _hold_typing(conn, jid, delay)  # dorme "digitando"
+        elif delay > 0:
+            await asyncio.sleep(min(delay, 30))
+        await _send_reply(conn, jid, chunk)
+
+
+async def send_outbound(
+    db, conn: WhatsAppConnection, user: User, jid: str, text: str, contact_name: str = ""
+) -> None:
+    """Envio PROATIVO (ex.: disparado por automação): registra a mensagem no chat
+    da conversa (para aparecer na sidebar/histórico) e entrega com humanizador."""
+    mc = None
+    if conn.model_config_id:
+        mc = await db.get(ModelConfig, conn.model_config_id)
+        if mc is not None and mc.user_id != user.id:
+            mc = None
+    thread, chat = await _resolve_thread(
+        db, conn, user, {"jid": jid, "sender_name": contact_name}, mc
+    )
+    db.add(Message(chat_id=chat.id, role="assistant", content=text))
+    thread.last_message_at = datetime.now(timezone.utc)
+    await db.commit()
+    await _deliver(conn, jid, text)
+
+
+def _to_jid(number: str) -> str:
+    """Número em dígitos → jid canônico de contato (evita thread duplicada com o
+    formato que chega no inbound)."""
+    d = _digits(number)
+    return f"{d}@s.whatsapp.net" if d else ""
+
+
+_MAX_RECIPIENTS = 100  # teto de segurança p/ um disparo (anti-spam/ban)
+
+
+async def resolve_recipients(db, conn: WhatsAppConnection, wa: dict) -> list[dict[str, str]]:
+    """Destinatários de um envio proativo, conforme o modo escolhido:
+    - "number":   um número específico (wa["number"]);
+    - "contacts": os contatos cadastrados na conexão (lista de roles);
+    - "threads":  todas as conversas existentes desta conexão (quem já falou)."""
+    mode = (wa or {}).get("to") or "number"
+    out: list[dict[str, str]] = []
+    if mode == "number":
+        jid = _to_jid(str(wa.get("number") or ""))
+        if jid:
+            out.append({"jid": jid, "name": ""})
+    elif mode == "contacts":
+        for c in conn.contacts or []:
+            jid = _to_jid(str(c.get("number") or ""))
+            if jid:
+                out.append({"jid": jid, "name": str(c.get("name") or "")})
+    elif mode == "threads":
+        rows = list(await db.scalars(
+            select(WhatsAppThread).where(WhatsAppThread.connection_id == conn.id)
+        ))
+        for t in rows:
+            if t.jid:
+                out.append({"jid": t.jid, "name": t.contact_name or ""})
+    # dedup por jid, preservando ordem, com teto de segurança
+    seen: set[str] = set()
+    uniq: list[dict[str, str]] = []
+    for r in out:
+        if r["jid"] in seen:
+            continue
+        seen.add(r["jid"])
+        uniq.append(r)
+        if len(uniq) >= _MAX_RECIPIENTS:
+            break
+    return uniq
+
+
+async def broadcast(connection_id: uuid.UUID, recipients: list[dict[str, str]], text: str) -> None:
+    """Entrega `text` a vários destinatários por uma conexão (sessão própria).
+    `recipients` = [{jid, name}]. Um lock por conversa evita colidir com respostas
+    de inbound em andamento. Cada destinatário é isolado (falha de um não derruba
+    os demais)."""
+    text = (text or "").strip()
+    if not text or not recipients:
+        return
+    async with SessionLocal() as db:
+        conn = await db.get(WhatsAppConnection, connection_id)
+        if conn is None or not conn.enabled:
+            return
+        user = await db.get(User, conn.user_id)
+        if user is None:
+            return
+        for r in recipients:
+            jid = r.get("jid") or ""
+            if not jid:
+                continue
+            async with _lock(f"{connection_id}|{jid}"):
+                try:
+                    await send_outbound(db, conn, user, jid, text, r.get("name") or "")
+                except Exception:  # noqa: BLE001 - um destinatário não derruba o resto
+                    logger.exception("whatsapp: falha ao enviar proativo p/ %s (%s)", jid, conn.id)
+
+
 async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
     """Um turno completo para UMA mensagem aprovada (sessão própria)."""
     from ..chat.orchestrator import run_turn_guarded
@@ -414,7 +583,7 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
         thread.last_message_at = datetime.now(timezone.utc)
 
         try:
-            await _send_reply(conn, m["jid"], content)
+            await _deliver(conn, m["jid"], content)
             conn.state = {**(conn.state or {}), "last_error": None,
                           "last_event_at": datetime.now(timezone.utc).isoformat()}
         except Exception as exc:  # noqa: BLE001 - resposta gerada mas não entregue

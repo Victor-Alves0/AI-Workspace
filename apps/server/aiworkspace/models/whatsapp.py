@@ -62,6 +62,10 @@ class WhatsAppConnection(Base):
     # contexto/roles por contato — vai ao modelo quando o número conversa:
     #   [{number, name, role, context}]
     contacts: Mapped[list] = mapped_column(JSONB, default=list)
+    # "Modo humanizador": simula digitação humana ao responder/enviar.
+    #   {enabled: bool, typing: bool ("digitando…"), min_seconds, max_seconds,
+    #    split: bool (quebra a resposta em várias mensagens)}
+    humanize: Mapped[dict] = mapped_column(JSONB, default=dict)
     # pasta "Chats" desta conexão (WhatsApp/<número>/Chats) — criada sob demanda
     folder_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("folders.id", ondelete="SET NULL"), nullable=True

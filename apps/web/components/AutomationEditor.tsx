@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import type { Automation, AutomationOptions, Chat, Model, ModelConfig, SystemTool, Tool } from "@/lib/types";
+import type { Automation, AutomationOptions, Chat, Model, ModelConfig, SystemTool, Tool, WhatsAppConnection } from "@/lib/types";
 import ModelField from "./ModelField";
 import TransferModal, { type TransferItem } from "./TransferModal";
 
@@ -77,6 +77,72 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
   );
 }
 
+const WA_INPUT = "mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent placeholder:text-muted";
+
+/* Entrega o resultado da automação por um número do WhatsApp: escolhe a conexão
+ * (quem envia) e o destino (número específico / contatos cadastrados / todas as
+ * conversas existentes). Guardado em target.whatsapp. */
+type WaDelivery = { enabled?: boolean; connection_id?: string | null; to?: "number" | "contacts" | "threads"; number?: string };
+
+function WhatsAppDelivery({ value, connections, onChange }: {
+  value: WaDelivery;
+  connections: WhatsAppConnection[];
+  onChange: (v: WaDelivery) => void;
+}) {
+  const v = value ?? {};
+  const on = !!v.enabled;
+  const set = (p: Partial<WaDelivery>) => onChange({ ...v, ...p });
+  const to = v.to ?? "number";
+  const conn = connections.find((c) => c.id === v.connection_id);
+  return (
+    <div className="space-y-2 rounded-xl border border-border bg-surface px-3 py-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm text-ink">Enviar para o WhatsApp</p>
+          <p className="text-xs text-muted">Entrega o resultado por um número conectado</p>
+        </div>
+        <Toggle on={on} onClick={() => set({ enabled: !on })} />
+      </div>
+      {on && (
+        <div className="space-y-2 border-t border-border pt-2.5">
+          {connections.length === 0 ? (
+            <p className="text-xs text-amber-400/80">Nenhum número conectado. Conecte em Configurações → Integrações → WhatsApp.</p>
+          ) : (
+            <>
+              <label className="block text-sm">
+                <span className="text-xs text-muted">Número que envia (conexão)</span>
+                <select value={v.connection_id ?? ""} onChange={(e) => set({ connection_id: e.target.value || null })} className={WA_INPUT}>
+                  <option value="">Selecione…</option>
+                  {connections.map((c) => (
+                    <option key={c.id} value={c.id}>{c.label || c.phone || "Sem nome"}{c.phone ? ` (+${c.phone})` : ""}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="text-xs text-muted">Enviar para</span>
+                <select value={to} onChange={(e) => set({ to: e.target.value as WaDelivery["to"] })} className={WA_INPUT}>
+                  <option value="number">Um número específico</option>
+                  <option value="contacts">Todos os contatos cadastrados{conn ? ` (${conn.contacts?.length ?? 0})` : ""}</option>
+                  <option value="threads">Todas as conversas existentes{conn ? ` (${conn.threads ?? 0})` : ""}</option>
+                </select>
+              </label>
+              {to === "number" && (
+                <label className="block text-sm">
+                  <span className="text-xs text-muted">Número (com DDI + DDD)</span>
+                  <input value={v.number ?? ""} onChange={(e) => set({ number: e.target.value })} placeholder="5583999999999" className={`${WA_INPUT} font-mono text-xs`} />
+                </label>
+              )}
+              {to === "threads" && (
+                <p className="text-[11px] leading-4 text-amber-400/70">Envia a MESMA mensagem a todos que já conversaram com esse número. Use com cuidado (evite spam/bloqueio).</p>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AutomationEditor({
   automation,
   onClose,
@@ -109,6 +175,7 @@ export default function AutomationEditor({
   const [models, setModels] = useState<ModelConfig[]>([]);
   const [extModels, setExtModels] = useState<Model[]>([]);
   const [chats, setChats] = useState<Chat[]>([]);
+  const [waConns, setWaConns] = useState<WhatsAppConnection[]>([]);
   const [tools, setTools] = useState<Tool[]>([]);
   const [systemTools, setSystemTools] = useState<SystemTool[]>([]);
   const [toolsModal, setToolsModal] = useState(false);
@@ -135,6 +202,7 @@ export default function AutomationEditor({
       api.get<Model[]>("/integrations/ollama/models").catch(() => [] as Model[]),
     ]).then(([ext, local]) => setExtModels([...ext, ...local])).catch(() => {});
     api.get<Chat[]>("/chats").then(setChats).catch(() => {});
+    api.get<{ connections: WhatsAppConnection[] }>("/integrations/whatsapp").then((r) => setWaConns(r.connections ?? [])).catch(() => {});
     api.get<Tool[]>("/tools").then(setTools).catch(() => {});
     api.get<SystemTool[]>("/tools/system").then(setSystemTools).catch(() => {});
   }, []);
@@ -459,6 +527,13 @@ export default function AutomationEditor({
               </select>
             )}
           </div>
+
+          {/* enviar o resultado para o WhatsApp */}
+          <WhatsAppDelivery
+            value={d.target.whatsapp ?? {}}
+            connections={waConns}
+            onChange={(wa) => set("target", { ...d.target, whatsapp: wa })}
+          />
 
           {/* opções do chat */}
           <div className="space-y-2.5 rounded-xl border border-border bg-surface px-3 py-2.5">
