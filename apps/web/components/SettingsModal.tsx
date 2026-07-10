@@ -249,10 +249,10 @@ function SecretField({ label, name, configured, hint, onSaved }: {
 }
 
 /* --------------------------------- modal ---------------------------------- */
-export default function SettingsModal({ onClose, onSaved, onConnectionsChanged }: { onClose: () => void; onSaved?: () => void; onConnectionsChanged?: () => void }) {
+export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, initialCat }: { onClose: () => void; onSaved?: () => void; onConnectionsChanged?: () => void; initialCat?: string }) {
   const router = useRouter();
   const [visible, setVisible] = useState(false);
-  const [cat, setCat] = useState<Cat>("general");
+  const [cat, setCat] = useState<Cat>((initialCat as Cat) || "general");
   const [q, setQ] = useState("");
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Record<string, any>>({});
@@ -260,8 +260,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged }
   // card aberto dentro de Conexões / Integrações (null = mostra a grade)
   const [connView, setConnView] = useState<string | null>(null);
   const [integView, setIntegView] = useState<string | null>(null);
-  // mobile: só um painel por vez — lista de categorias OU o conteúdo da aba
-  const [mobilePane, setMobilePane] = useState<"nav" | "content">("nav");
+  // mobile: abre direto no conteúdo quando veio de um deep-link (paleta de comandos)
+  const [mobilePane, setMobilePane] = useState<"nav" | "content">(initialCat ? "content" : "nav");
   const [showArchived, setShowArchived] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);

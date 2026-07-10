@@ -22,7 +22,7 @@ import Controls from "@/components/Controls";
 import ModelPicker from "@/components/ModelPicker";
 import SettingsModal from "@/components/SettingsModal";
 import OnboardingModal from "@/components/OnboardingModal";
-import SearchModal from "@/components/SearchModal";
+import CommandPalette, { type PaletteItem } from "@/components/CommandPalette";
 import ArchivedModal from "@/components/ArchivedModal";
 import CompactionHistory from "@/components/CompactionHistory";
 import PromptBox, { type ReasoningEffort } from "@/components/PromptBox";
@@ -140,7 +140,9 @@ export default function ChatPage() {
   // mobile: drawer da barra lateral + detecção de tela pequena (< md)
   const [mobileNav, setMobileNav] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [showSearch, setShowSearch] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
+  const [settingsCat, setSettingsCat] = useState<string | undefined>(undefined);
+  const openSettings = useCallback((cat?: string) => { setSettingsCat(cat); setShowSettings(true); }, []);
   const [showArchived, setShowArchived] = useState(false);
   const [showCompactions, setShowCompactions] = useState(false);
 
@@ -1154,7 +1156,7 @@ export default function ChatPage() {
   const shortcutHandlersRef = useRef<Record<string, () => void>>({});
   shortcutHandlersRef.current = {
     new_chat: () => newChat(),
-    search: () => setShowSearch(true),
+    command_palette: () => setShowPalette(true),
     toggle_sidebar: () => toggleCollapse(),
     toggle_controls: () => setShowControls((v) => !v),
     workspace: () => { setWorkspaceSection(null); setWorkspaceOpen(true); setAutomationsOpen(false); },
@@ -1199,6 +1201,30 @@ export default function ChatPage() {
       </div>
     );
   }
+
+  // itens da paleta de comandos (Ctrl/⌘ K): ações + chats + modelos
+  const paletteItems: PaletteItem[] = [
+    { id: "act-new", group: "Ações", label: "Novo chat", keywords: "conversa nova", icon: <MessageSquareDashed size={16} />, run: () => newChat() },
+    { id: "act-temp", group: "Ações", label: "Chat temporário", keywords: "privado incógnito não salvar", icon: <MessageSquareDashed size={16} />, run: () => { if (!temporary) toggleTemporary(); } },
+    { id: "act-round", group: "Ações", label: "Mesa-redonda", keywords: "multi modelo debate", icon: <Users size={16} />, run: () => enterRoundtable() },
+    { id: "act-ws", group: "Ações", label: "Espaço de Trabalho", keywords: "modelos ferramentas prompts skills", icon: <Wrench size={16} />, run: () => { setWorkspaceSection(null); setWorkspaceOpen(true); setAutomationsOpen(false); } },
+    { id: "act-auto", group: "Ações", label: "Automações", keywords: "agendar monitor", icon: <Bell size={16} />, run: () => { setAutomationsOpen(true); setWorkspaceOpen(false); } },
+    { id: "act-archived", group: "Ações", label: "Chats arquivados", keywords: "arquivo", icon: <Search size={16} />, run: () => setShowArchived(true) },
+    ...(user.role === "admin" ? [{ id: "act-admin", group: "Ações", label: "Painel do Admin", keywords: "usuarios rede backup", icon: <ShieldAlert size={16} />, run: () => router.push("/admin") } as PaletteItem] : []),
+    { id: "act-logout", group: "Ações", label: "Sair", keywords: "logout desconectar sair", icon: <X size={16} />, run: () => logout() },
+    { id: "set-general", group: "Configurações", label: "Configurações", sublabel: "Geral", icon: <SlidersHorizontal size={16} />, run: () => openSettings("general") },
+    { id: "set-status", group: "Configurações", label: "Status do sistema", keywords: "saude chave conexao", icon: <SlidersHorizontal size={16} />, run: () => openSettings("status") },
+    { id: "set-budget", group: "Configurações", label: "Orçamento mensal", keywords: "conta gasto limite custo", icon: <SlidersHorizontal size={16} />, run: () => openSettings("account") },
+    { id: "set-conn", group: "Configurações", label: "Conexões (APIs, Web, Voz)", keywords: "openrouter chave searxng", icon: <SlidersHorizontal size={16} />, run: () => openSettings("connections") },
+    { id: "set-integ", group: "Configurações", label: "Integrações (WhatsApp, Google)", keywords: "whatsapp google tuya", icon: <SlidersHorizontal size={16} />, run: () => openSettings("integrations") },
+    ...customModels.map((mc): PaletteItem => ({
+      id: `model-${mc.id}`, group: "Modelos", label: mc.name, sublabel: mc.base_model,
+      keywords: "usar modelo trocar", icon: <Wrench size={16} />, run: () => selectCustom(mc),
+    })),
+    ...chats.slice(0, 60).map((c): PaletteItem => ({
+      id: `chat-${c.id}`, group: "Chats", label: c.title, keywords: "conversa abrir", run: () => selectChat(c.id),
+    })),
+  ];
 
   // seletor de opções pendente: só na ÚLTIMA mensagem (do assistente), fora de envio
   const lastMsg = messages[messages.length - 1];
@@ -1245,7 +1271,7 @@ export default function ChatPage() {
           collapsed={isMobile ? false : collapsed}
           onToggleCollapse={isMobile ? () => setMobileNav(false) : toggleCollapse}
           onNewChat={() => { newChat(); setMobileNav(false); }}
-          onSearch={() => { setShowSearch(true); setMobileNav(false); }}
+          onSearch={() => { setShowPalette(true); setMobileNav(false); }}
           chatActions={{ ...chatActions, onSelect: (id: string) => { chatActions.onSelect(id); setMobileNav(false); } }}
           onCreateFolder={createFolder}
           onRenameFolder={renameFolder}
@@ -1568,7 +1594,8 @@ export default function ChatPage() {
 
       {showSettings && (
         <SettingsModal
-          onClose={() => setShowSettings(false)}
+          initialCat={settingsCat}
+          onClose={() => { setShowSettings(false); setSettingsCat(undefined); }}
           onSaved={() => { api.get<User>("/auth/me").then(setUser).catch(() => {}); }}
           onConnectionsChanged={refreshExtModels}
         />
@@ -1580,7 +1607,7 @@ export default function ChatPage() {
           onDone={() => { api.get<User>("/auth/me").then(setUser).catch(() => {}); refreshExtModels(); }}
         />
       )}
-      {showSearch && <SearchModal chats={chats} onSelect={selectChat} onClose={() => setShowSearch(false)} />}
+      {showPalette && <CommandPalette items={paletteItems} onClose={() => setShowPalette(false)} />}
       {showArchived && <ArchivedModal onChanged={refreshChats} onClose={() => setShowArchived(false)} />}
       {showCompactions && active && (
         <CompactionHistory

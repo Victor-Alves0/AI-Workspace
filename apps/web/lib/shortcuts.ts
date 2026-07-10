@@ -11,8 +11,8 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
     title: "Navegação",
     actions: [
+      { id: "command_palette", label: "Paleta de comandos", default: "mod+k" },
       { id: "new_chat", label: "Novo chat", default: "mod+shift+o" },
-      { id: "search", label: "Buscar chats", default: "mod+k" },
       { id: "toggle_sidebar", label: "Mostrar/ocultar barra lateral", default: "mod+b" },
       { id: "toggle_controls", label: "Mostrar/ocultar painel de controles", default: "mod+j" },
       { id: "workspace", label: "Abrir Espaço de Trabalho", default: "mod+shift+e" },
