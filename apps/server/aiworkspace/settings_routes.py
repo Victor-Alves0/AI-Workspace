@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from . import budget_service
+from .app_config import ALLOW_SIGNUPS, get_setting
 from .auth.deps import require_approved
 from .config import get_settings
 from .db import get_db
@@ -142,6 +144,57 @@ async def list_models(
         }
         for m in models
     ]
+
+
+@router.get("/usage/summary")
+async def usage_summary(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Estado do orçamento pessoal do usuário (gasto do mês, teto, modo, bloqueio)."""
+    return await budget_service.budget_state(db, user)
+
+
+@router.get("/status")
+async def system_status(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Checagens de prontidão POR-USUÁRIO (chave, modelo, integrações) + o
+    orçamento. Itens de infra (banco/sidecar) só para o admin."""
+    from sqlalchemy import func, select
+
+    from .integrations import tuya_service, voice_service
+    from .integrations import whatsapp_evolution as evolution
+    from .models import GoogleAccount, WhatsAppConnection
+
+    uid = user.id
+    web = (user.profile or {}).get("web_search") or {}
+    provider = (web.get("primary") or get_settings().web_search_provider or "duckduckgo")
+
+    wa_rows = list(await db.scalars(
+        select(WhatsAppConnection).where(WhatsAppConnection.user_id == uid)
+    ))
+    wa_connected = sum(1 for c in wa_rows if (c.state or {}).get("status") == "open")
+    google_count = await db.scalar(
+        select(func.count()).select_from(GoogleAccount).where(GoogleAccount.user_id == uid)
+    )
+
+    out: dict = {
+        "openrouter_key": await has_secret(db, uid, OPENROUTER_KEY),
+        "default_model": user.default_model,
+        "web": {"provider": provider, "searxng_url": web.get("searxng_url") or get_settings().searxng_url},
+        "voice": (await voice_service.get_provider(db, uid)) is not None,
+        "whatsapp": {"count": len(wa_rows), "connected": wa_connected},
+        "google": int(google_count or 0),
+        "tuya": await tuya_service.is_configured(db, str(uid)),
+        "budget": await budget_service.budget_state(db, user),
+    }
+    if user.role == "admin":
+        out["admin"] = {
+            "db": True,  # se chegou aqui, a sessão do banco respondeu
+            "evolution_configured": evolution.configured(),
+            "signup_open": bool(await get_setting(db, ALLOW_SIGNUPS, False)),
+        }
+    return out
 
 
 @router.get("/about")

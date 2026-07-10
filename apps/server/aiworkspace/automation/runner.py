@@ -132,6 +132,9 @@ async def _resolve_target_chat(
 
 
 async def _run_scheduled(db, automation: Automation, user: User) -> dict[str, Any]:
+    from ..budget_service import budget_state
+    if (await budget_state(db, user)).get("blocked"):
+        raise RuntimeError("Orçamento mensal atingido (automação pausada)")
     api_key = await get_secret(db, user.id, OPENROUTER_KEY)
     if not api_key:
         raise RuntimeError("Chave do OpenRouter não configurada")

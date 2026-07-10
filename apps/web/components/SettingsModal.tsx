@@ -6,6 +6,7 @@ import {
   Blocks,
   Cable,
   ChevronLeft,
+  Activity,
   Database,
   AudioLines,
   Globe,
@@ -51,10 +52,11 @@ import VoicePanel from "./VoicePanel";
 import { WebSearchPanel } from "./toolPanels";
 import { useConfirm } from "./ConfirmDialog";
 
-type Cat = "general" | "interface" | "connections" | "integrations" | "personalization" | "shortcuts" | "data" | "account" | "about";
+type Cat = "general" | "status" | "interface" | "connections" | "integrations" | "personalization" | "shortcuts" | "data" | "account" | "about";
 
 const CATS: { key: Cat; label: string; icon: React.ReactNode }[] = [
   { key: "general", label: "Geral", icon: <Settings size={16} /> },
+  { key: "status", label: "Status", icon: <Activity size={16} /> },
   { key: "interface", label: "Interface", icon: <PanelsTopLeft size={16} /> },
   { key: "connections", label: "Conexões", icon: <Cable size={16} /> },
   { key: "integrations", label: "Integrações", icon: <Blocks size={16} /> },
@@ -78,6 +80,8 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Parâmetros Avançados", cat: "personalization" },
   { label: "Atalhos de teclado", cat: "shortcuts" },
   { label: "Atalhos", cat: "shortcuts" },
+  { label: "Status do sistema", cat: "status" },
+  { label: "Orçamento mensal", cat: "account" },
   { label: "Nome", cat: "account" },
   { label: "Sobre você", cat: "account" },
   { label: "Gênero", cat: "account" },
@@ -387,6 +391,16 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged }
             ) : (
             <>
             {cat === "general" && <GeneralTab profile={profile} set={set} />}
+            {cat === "status" && (
+              <StatusTab
+                user={user}
+                onGoto={(c, view) => {
+                  setCat(c); setMobilePane("content");
+                  setConnView(c === "connections" ? view ?? null : null);
+                  setIntegView(c === "integrations" ? view ?? null : null);
+                }}
+              />
+            )}
             {cat === "shortcuts" && <ShortcutsTab profile={profile} set={set} />}
             {cat === "account" && <AccountTab user={user} profile={profile} set={set} />}
             {cat === "data" && (
@@ -900,8 +914,188 @@ function AccountTab({ user, profile, set }: { user: User | null; profile: Record
       </Row>
       {showKeys && (
         <p className="pb-2 text-xs text-muted">
-          As chaves de provedores (OpenRouter, busca, voz) ficam em <span className="text-ink-soft">Conexões</span> e <span className="text-ink-soft">Áudio</span>. Tokens de acesso à API deste app: em breve.
+          As chaves de provedores (OpenRouter, busca, voz) ficam em <span className="text-ink-soft">Conexões → APIs</span>. Tokens de acesso à API deste app: em breve.
         </p>
+      )}
+
+      <BudgetSettings profile={profile} set={set} />
+    </div>
+  );
+}
+
+/* Orçamento pessoal: como cada usuário usa a PRÓPRIA chave de API, isto é uma
+ * proteção opt-in contra susto na fatura — não é controle do admin. */
+function BudgetSettings({ profile, set }: { profile: Record<string, any>; set: (k: string, v: any) => void }) {
+  const b: Record<string, any> = profile.budget ?? {};
+  const on = !!b.enabled;
+  const setB = (patch: Record<string, any>) => set("budget", { ...b, ...patch });
+  const [usage, setUsage] = useState<{ spent: number; cap: number; enabled: boolean } | null>(null);
+  useEffect(() => { api.get<typeof usage>("/settings/usage/summary").then(setUsage).catch(() => {}); }, []);
+  const spent = usage?.spent ?? 0;
+  const cap = Number(b.monthly_usd) || 0;
+  const pct = cap > 0 ? Math.min(100, Math.round((spent / cap) * 100)) : 0;
+  return (
+    <div className="mt-4 border-t border-border pt-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-ink">Orçamento mensal</p>
+          <p className="text-xs text-muted">Você usa a sua própria chave de API — isto só te avisa (ou pausa) para não tomar susto na fatura.</p>
+        </div>
+        <Toggle on={on} onClick={() => setB({ enabled: !on })} />
+      </div>
+      {on && (
+        <div className="mt-3 space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm text-ink-soft">
+              Teto (US$/mês)
+              <input
+                type="number" min={0} step={1}
+                defaultValue={cap || ""}
+                onBlur={(e) => { const v = Math.max(0, parseFloat(e.target.value) || 0); if (v !== cap) setB({ monthly_usd: v }); }}
+                placeholder="10"
+                className="w-24 rounded-lg border border-border bg-surface2 px-3 py-1.5 text-right text-sm text-ink outline-none focus:border-accent"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-sm text-ink-soft">
+              Ao atingir
+              <select value={b.mode === "pause" ? "pause" : "warn"} onChange={(e) => setB({ mode: e.target.value })} className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
+                <option value="warn">Só avisar</option>
+                <option value="pause">Avisar e pausar</option>
+              </select>
+            </label>
+          </div>
+          {cap > 0 && (
+            <div>
+              <div className="h-2 overflow-hidden rounded-full bg-surface2">
+                <div className={`h-full rounded-full transition-all ${pct >= 100 ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-accent"}`} style={{ width: `${pct}%` }} />
+              </div>
+              <p className="mt-1 text-xs text-muted">US$ {spent.toFixed(2)} de US$ {cap.toFixed(2)} usados este mês ({pct}%).</p>
+            </div>
+          )}
+          <p className="text-[11px] leading-4 text-muted">
+            {b.mode === "pause"
+              ? "Ao passar do teto, novas mensagens (chat, WhatsApp e automações) ficam pausadas até o mês virar ou você ajustar aqui."
+              : "Ao passar do teto, mostramos um aviso — nada é bloqueado."}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* --------------------------------- Status --------------------------------- */
+type StatusState = "ok" | "warn" | "off";
+
+function StatusRow({ label, state, detail, actionLabel, onAction, extra }: {
+  label: string; state: StatusState; detail?: string;
+  actionLabel?: string; onAction?: () => void; extra?: React.ReactNode;
+}) {
+  const dot = state === "ok" ? "bg-green-500" : state === "warn" ? "bg-amber-500" : "bg-red-500";
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3.5 py-2.5">
+      <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${dot}`} />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm text-ink">{label}</p>
+        {detail && <p className="truncate text-xs text-muted">{detail}</p>}
+      </div>
+      {extra}
+      {actionLabel && onAction && (
+        <button onClick={onAction} className="shrink-0 whitespace-nowrap rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink">
+          {actionLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+
+interface Status {
+  openrouter_key: boolean; default_model: string | null;
+  web: { provider: string; searxng_url?: string };
+  voice: boolean; whatsapp: { count: number; connected: number };
+  google: number; tuya: boolean;
+  budget: { enabled: boolean; over: boolean; blocked: boolean; spent: number; cap: number; mode: string };
+  admin?: { db: boolean; evolution_configured: boolean; signup_open: boolean };
+}
+
+function StatusTab({ user, onGoto }: { user: User | null; onGoto: (cat: Cat, view?: string) => void }) {
+  const [st, setSt] = useState<Status | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [testing, setTesting] = useState(false);
+  const [orTest, setOrTest] = useState<null | "ok" | "fail">(null);
+  useEffect(() => { api.get<Status>("/settings/status").then(setSt).catch(() => {}).finally(() => setLoading(false)); }, []);
+  async function testOpenRouter() {
+    setTesting(true); setOrTest(null);
+    try { await api.get("/settings/models"); setOrTest("ok"); }
+    catch { setOrTest("fail"); }
+    finally { setTesting(false); }
+  }
+  if (loading) return <div><Heading>Status do sistema</Heading><p className="text-sm text-muted">Carregando…</p></div>;
+  if (!st) return <div><Heading>Status do sistema</Heading><p className="text-sm text-red-400">Falha ao carregar o status.</p></div>;
+
+  const b = st.budget;
+  return (
+    <div>
+      <Heading>Status do sistema</Heading>
+      <p className="mb-3 text-xs text-muted">Prontidão da sua conta. Cada usuário tem as próprias chaves e configurações.</p>
+      <div className="space-y-2">
+        <StatusRow
+          label="Chave do OpenRouter"
+          state={st.openrouter_key ? "ok" : "off"}
+          detail={st.openrouter_key ? (orTest === "ok" ? "Válida ✓" : orTest === "fail" ? "A chave falhou no teste" : "Configurada") : "Necessária para conversar"}
+          actionLabel={st.openrouter_key ? undefined : "Configurar"}
+          onAction={() => onGoto("connections", "apis")}
+          extra={st.openrouter_key && (
+            <button onClick={testOpenRouter} disabled={testing} className="shrink-0 rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-60">
+              {testing ? "Testando…" : "Testar"}
+            </button>
+          )}
+        />
+        <StatusRow
+          label="Modelo padrão"
+          state={st.default_model ? "ok" : "warn"}
+          detail={st.default_model ?? "Nenhum definido — escolha no seletor do chat"}
+        />
+        <StatusRow
+          label="Pesquisa na web"
+          state="ok"
+          detail={`Mecanismo: ${st.web.provider}${st.web.provider === "searxng" ? ` · ${st.web.searxng_url ?? ""}` : ""}`}
+          actionLabel="Configurar"
+          onAction={() => onGoto("connections", "web")}
+        />
+        <StatusRow
+          label="Voz local"
+          state={st.voice ? "ok" : "off"}
+          detail={st.voice ? "Provedor configurado" : "Não configurada (opcional)"}
+          actionLabel="Configurar"
+          onAction={() => onGoto("connections", "voice")}
+        />
+        <StatusRow
+          label="WhatsApp"
+          state={st.whatsapp.count === 0 ? "off" : st.whatsapp.connected > 0 ? "ok" : "warn"}
+          detail={st.whatsapp.count === 0 ? "Nenhum número conectado (opcional)" : `${st.whatsapp.connected}/${st.whatsapp.count} conectado(s)`}
+          actionLabel="Gerenciar"
+          onAction={() => onGoto("integrations", "whatsapp")}
+        />
+        <StatusRow label="Google" state={st.google > 0 ? "ok" : "off"} detail={st.google > 0 ? `${st.google} conta(s)` : "Não conectado (opcional)"} actionLabel="Gerenciar" onAction={() => onGoto("integrations", "google")} />
+        <StatusRow label="Casa (Tuya)" state={st.tuya ? "ok" : "off"} detail={st.tuya ? "Conectada" : "Não conectada (opcional)"} actionLabel="Gerenciar" onAction={() => onGoto("integrations", "tuya")} />
+        <StatusRow
+          label="Orçamento mensal"
+          state={!b.enabled ? "off" : b.over ? (b.blocked ? "warn" : "warn") : "ok"}
+          detail={!b.enabled ? "Desativado (opcional)" : `US$ ${b.spent.toFixed(2)} de US$ ${b.cap.toFixed(2)}${b.over ? (b.blocked ? " — pausado" : " — acima do teto") : ""}`}
+          actionLabel="Ajustar"
+          onAction={() => onGoto("account")}
+        />
+      </div>
+
+      {st.admin && (
+        <>
+          <Heading>Infraestrutura (admin)</Heading>
+          <div className="space-y-2">
+            <StatusRow label="Banco de dados" state={st.admin.db ? "ok" : "off"} detail={st.admin.db ? "Respondendo" : "Sem resposta"} />
+            <StatusRow label="Sidecar do WhatsApp (Evolution)" state={st.admin.evolution_configured ? "ok" : "off"} detail={st.admin.evolution_configured ? "Habilitado" : "Não habilitado (opcional)"} />
+            <StatusRow label="Cadastro de novos usuários" state={st.admin.signup_open ? "warn" : "ok"} detail={st.admin.signup_open ? "Aberto" : "Fechado"} />
+          </div>
+        </>
       )}
     </div>
   );

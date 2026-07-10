@@ -477,6 +477,14 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
             await db.commit()
             return
 
+        # orçamento pessoal do dono (modo "pausar"): não responde enquanto estourado
+        from ..budget_service import budget_state
+        if (await budget_state(db, user)).get("blocked"):
+            conn.state = {**(conn.state or {}), "last_error": "Orçamento mensal atingido (pausado)"}
+            await db.commit()
+            logger.info("whatsapp: orçamento estourado (%s) — resposta pausada", conn.id)
+            return
+
         try:
             api_key, base_url = await _resolve_provider(db, user, model)
         except Exception as exc:  # noqa: BLE001 - HTTPException fora de request

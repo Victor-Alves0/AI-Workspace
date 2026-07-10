@@ -84,6 +84,10 @@ class ProfileIn(BaseModel):
     interface: dict[str, Any] | None = None
     # atalhos de teclado personalizados: { actionId: {keys: "mod+k", enabled: bool} }
     shortcuts: dict[str, Any] | None = None
+    # orçamento pessoal opt-in: {enabled, monthly_usd, mode: "warn"|"pause"}
+    budget: dict[str, Any] | None = None
+    # concluiu (ou pulou) o wizard de primeiro uso
+    onboarded: bool | None = None
 
     @field_validator("avatar")
     @classmethod

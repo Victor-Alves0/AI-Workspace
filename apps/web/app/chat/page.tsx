@@ -21,6 +21,7 @@ import Sidebar from "@/components/Sidebar";
 import Controls from "@/components/Controls";
 import ModelPicker from "@/components/ModelPicker";
 import SettingsModal from "@/components/SettingsModal";
+import OnboardingModal from "@/components/OnboardingModal";
 import SearchModal from "@/components/SearchModal";
 import ArchivedModal from "@/components/ArchivedModal";
 import CompactionHistory from "@/components/CompactionHistory";
@@ -285,6 +286,26 @@ export default function ChatPage() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4500);
   }, [user]);
   const dismissToast = (id: number) => setToasts((t) => t.filter((x) => x.id !== id));
+
+  // onboarding (1º uso, por-usuário): dispara quando falta a chave do OpenRouter
+  // e o usuário ainda não concluiu/pulou o wizard.
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  useEffect(() => {
+    if (!user || (user.profile as Record<string, unknown> | undefined)?.onboarded) return;
+    api.get<{ openrouter: boolean }>("/settings/secrets")
+      .then((s) => {
+        if (!s.openrouter) setShowOnboarding(true);
+        else api.put("/settings/profile", { onboarded: true }).catch(() => {}); // já tem chave → não incomoda
+      })
+      .catch(() => {});
+  }, [user]);
+
+  // orçamento pessoal: banner quando o usuário passa do teto do mês
+  const [budget, setBudget] = useState<{ enabled: boolean; over: boolean; blocked: boolean; spent: number; cap: number; mode: string } | null>(null);
+  const refreshBudget = useCallback(() => {
+    api.get<typeof budget>("/settings/usage/summary").then(setBudget).catch(() => {});
+  }, []);
+  useEffect(() => { refreshBudget(); }, [refreshBudget]);
 
   // pede permissão de notificação nativa quando o usuário liga "Notificações"
   useEffect(() => {
@@ -891,6 +912,13 @@ export default function ChatPage() {
         await reloadArtifacts(chat.id);
       }
       if (state.acc) notify("Resposta pronta", state.acc.replace(/\s+/g, " ").slice(0, 90));
+    } catch (e) {
+      // orçamento pessoal estourado (modo "pausar") ou outra falha ao iniciar o turno
+      const msg = e instanceof ApiError ? e.message : "Falha ao enviar a mensagem";
+      setMessages((m) => m.filter((x) => !x.id.startsWith("tmp-"))); // desfaz o balão otimista
+      if (!override) setInput(text); // devolve o texto pro composer
+      notify(e instanceof ApiError && e.status === 402 ? "Orçamento mensal atingido" : "Erro", msg);
+      refreshBudget();
     } finally {
       stopRef.current = null;
       setStreaming("");
@@ -898,6 +926,7 @@ export default function ChatPage() {
       setGeneratingImage(false);
       setLiveArtifact(null);
       setSending(false);
+      refreshBudget(); // atualiza o gasto do mês (mantém o banner em dia)
     }
   }
 
@@ -1306,6 +1335,17 @@ export default function ChatPage() {
             />
           </div>
         )}
+        {budget?.enabled && budget.over && (
+          <button
+            onClick={() => setShowSettings(true)}
+            className={`flex w-full items-center justify-center gap-2 px-4 py-1.5 text-center text-xs transition-colors ${budget.blocked ? "bg-red-500/15 text-red-300 hover:bg-red-500/25" : "bg-amber-500/15 text-amber-300 hover:bg-amber-500/25"}`}
+          >
+            <ShieldAlert size={13} className="shrink-0" />
+            {budget.blocked
+              ? `Orçamento mensal atingido (US$ ${budget.spent.toFixed(2)} de ${budget.cap.toFixed(2)}) — novas mensagens pausadas. Ajustar →`
+              : `Você passou do seu orçamento mensal (US$ ${budget.spent.toFixed(2)} de ${budget.cap.toFixed(2)}). Ajustar →`}
+          </button>
+        )}
         <div className="flex flex-1 overflow-hidden">
           <div className="relative flex flex-1 flex-col">
             {!hasConversation ? (
@@ -1531,6 +1571,13 @@ export default function ChatPage() {
           onClose={() => setShowSettings(false)}
           onSaved={() => { api.get<User>("/auth/me").then(setUser).catch(() => {}); }}
           onConnectionsChanged={refreshExtModels}
+        />
+      )}
+      {showOnboarding && user && (
+        <OnboardingModal
+          user={user}
+          onClose={() => setShowOnboarding(false)}
+          onDone={() => { api.get<User>("/auth/me").then(setUser).catch(() => {}); refreshExtModels(); }}
         />
       )}
       {showSearch && <SearchModal chats={chats} onSelect={selectChat} onClose={() => setShowSearch(false)} />}

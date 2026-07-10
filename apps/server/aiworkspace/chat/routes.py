@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth.deps import require_approved
 from ..config import get_settings
 from ..db import SessionLocal, get_db
-from .. import crypto, extraction
+from .. import budget_service, crypto, extraction
 from ..models import Artifact, Chat, ChatCompaction, Message, ModelConfig, Skill, User
 from ..schemas.chat import (
     ChatCreate,
@@ -794,6 +794,7 @@ async def ephemeral(
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             f"Mensagem excede {settings.max_message_chars} caracteres",
         )
+    await budget_service.enforce_or_raise(db, user)  # orçamento pessoal (modo "pausar")
 
     api_key, base_url = await _resolve_provider(db, user, model)
 
@@ -861,6 +862,7 @@ async def send_message(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Selecione um modelo no chat")
     if not (body.content or "").strip() and not body.attachments:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mensagem vazia")
+    await budget_service.enforce_or_raise(db, user)  # orçamento pessoal (modo "pausar")
 
     api_key, base_url = await _resolve_provider(db, user, chat.model)
 
@@ -1129,6 +1131,7 @@ async def regenerate_message(
     """Refaz uma resposta do assistant: descarta essa mensagem (e as posteriores)
     e gera uma nova a partir do mesmo prompt do usuário."""
     chat = await _get_owned_chat(db, chat_id, user)
+    await budget_service.enforce_or_raise(db, user)  # orçamento pessoal (modo "pausar")
     api_key, base_url, model_config, sift, skills = await _prepare_turn(db, user, chat)
     genimage = await _genimage_config(db, user, model_config)
     ocr_on, ocr_eng, ocr_lang = _ocr_prefs(model_config)
@@ -1275,6 +1278,7 @@ async def continue_message(
 ):
     """Continua a última resposta do assistant, anexando ao conteúdo existente."""
     chat = await _get_owned_chat(db, chat_id, user)
+    await budget_service.enforce_or_raise(db, user)  # orçamento pessoal (modo "pausar")
     api_key, base_url, model_config, sift, skills = await _prepare_turn(db, user, chat)
     genimage = await _genimage_config(db, user, model_config)
 
