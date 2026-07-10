@@ -96,7 +96,7 @@ export default function ChatPage() {
   const [artifactOpen, setArtifactOpen] = useState<string | null>(null);
   const [liveArtifact, setLiveArtifact] = useState<StreamArtifact | null>(null);
   // Guarda de saída acionou uma re-tentativa (mostra um chip enquanto refaz)
-  const [guardNote, setGuardNote] = useState<{ name: string; action: string } | null>(null);
+  const [guardNote, setGuardNote] = useState<{ name: string; action: string; fallback_model?: string | null } | null>(null);
   // "@" no promptbox: agente (modelo custom) que recebe SÓ o próximo turno
   const [agentId, setAgentId] = useState<string | null>(null);
   // subagentes trabalhando neste turno (orquestrador delegou) — mostra chips.
@@ -608,7 +608,7 @@ export default function ChatPage() {
         else if (ev.status === "done") setSubagents((s) => s.filter((x) => x.name !== ev.agent));
       } else if (ev.type === "guard") {
         // um Guarda de saída detectou algo e vai refazer a resposta
-        setGuardNote({ name: ev.name, action: ev.action });
+        setGuardNote({ name: ev.name, action: ev.action, fallback_model: ev.fallback_model });
       } else if (ev.type === "guard_reset") {
         // descarta a tentativa anterior — a resposta boa vem na próxima
         state.acc = ""; state.reason = ""; state.tools = [];
@@ -1748,8 +1748,10 @@ function CompactionDivider({ onOpen }: { onOpen: () => void }) {
 }
 
 /** Chip "Guarda de saída acionado" — mostrado enquanto o servidor refaz a resposta. */
-function GuardRetry({ note }: { note: { name: string; action: string } }) {
-  const label = note.action === "fallback_model" ? "trocando de modelo" : "reforçando e refazendo";
+function GuardRetry({ note }: { note: { name: string; action: string; fallback_model?: string | null } }) {
+  const label = note.action === "fallback_model"
+    ? `trocando para ${note.fallback_model || "o modelo de fallback"}`
+    : "reforçando e refazendo";
   return (
     <div className="mx-auto flex max-w-3xl items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-300">
       <ShieldAlert size={14} className="shrink-0" />

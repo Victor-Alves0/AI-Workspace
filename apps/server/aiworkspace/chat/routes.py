@@ -102,6 +102,8 @@ def _usage_record(usage: dict | None, model: str, model_config: ModelConfig | No
         rec["input_breakdown"] = u["input_breakdown"]
     if isinstance(u.get("output_breakdown"), dict):
         rec["output_breakdown"] = u["output_breakdown"]
+    if isinstance(u.get("tools_breakdown"), dict):
+        rec["tools_breakdown"] = u["tools_breakdown"]
     return rec
 
 

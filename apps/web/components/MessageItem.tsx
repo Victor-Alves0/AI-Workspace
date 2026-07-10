@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Mail, Pencil, Play, RotateCcw, Send, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench } from "lucide-react";
+import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Mail, Pencil, Play, RotateCcw, Send, ShieldAlert, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench } from "lucide-react";
 import type { ChartSpec, ChatArtifact, DeepResearch, Message, StockQuote, ToolEvent } from "@/lib/types";
 import { api, ApiError, API_URL } from "@/lib/api";
 import Markdown from "./Markdown";
@@ -516,12 +516,70 @@ function MemoriesUsedPanel({ items }: { items: { id: string; text: string; scope
   );
 }
 
+const GUARD_DETECT_LABEL: Record<string, string> = {
+  refusal: "recusa detectada",
+  empty: "resposta vazia/curta",
+  regex: "padrão (regex) casou",
+  judge: "juiz LLM acionou",
+};
+
+/** Acionamento de um Guarda de saída: escudo + fluxo do que aconteceu
+ * (tentativa rejeitada → detecção → reação → nova tentativa). */
+function GuardEventRow({ event }: { event: ToolEvent }) {
+  const [open, setOpen] = useState(false);
+  const d = (event.data ?? {}) as {
+    attempt?: number; detect?: string; action?: string; model?: string;
+    fallback_model?: string | null; injected?: string | null; rejected_preview?: string | null;
+  };
+  return (
+    <div className="overflow-hidden rounded-lg border border-amber-500/30 bg-amber-500/5 text-xs">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-amber-300/90 transition-colors hover:text-amber-200"
+      >
+        <ShieldAlert size={12} className="shrink-0" />
+        <span className="truncate">guarda de saída · {event.name}</span>
+        <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-amber-300/60">
+          tentativa {d.attempt ?? "?"}
+        </span>
+        <ChevronRight size={12} className={`shrink-0 transition-transform duration-150 ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <div className="space-y-1.5 border-t border-amber-500/20 px-2.5 py-2 leading-5 text-ink-soft">
+          <p>
+            <span className="text-muted">Detecção:</span> {GUARD_DETECT_LABEL[d.detect ?? ""] ?? d.detect}
+            {d.model && <> · <span className="text-muted">modelo:</span> <span className="font-mono text-[11px]">{d.model}</span></>}
+          </p>
+          {d.rejected_preview && (
+            <div>
+              <p className="text-muted">Resposta rejeitada:</p>
+              <p className="mt-0.5 rounded-md bg-bg px-2 py-1.5 italic text-muted">“{d.rejected_preview}”</p>
+            </div>
+          )}
+          <p>
+            <span className="text-muted">Reação:</span>{" "}
+            {d.action === "fallback_model" ? (
+              <>trocou para o modelo <span className="font-mono text-[11px] text-ink">{d.fallback_model}</span> e refez</>
+            ) : (
+              <>reforçou as instruções e refez</>
+            )}
+          </p>
+          {d.injected && (
+            <p className="text-muted">Instrução injetada: <span className="italic text-ink-soft">“{d.injected}”</span></p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ToolEventRow({ event }: { event: ToolEvent }) {
   const [open, setOpen] = useState(false);
   const preRef = useRef<HTMLPreElement>(null);
   useEffect(() => {
     if (open) preRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [open]);
+  if (event.kind === "guard") return <GuardEventRow event={event} />;
   const isCall = event.kind === "call";
   return (
     <div className="overflow-hidden rounded-lg border border-border/70 bg-bg text-xs">
@@ -617,24 +675,29 @@ function fmtCost(c: number) {
   return `US$ ${c.toFixed(4)}`;
 }
 
-/** Linha "▸ Rótulo  N tokens" que expande p/ mostrar as sub-parcelas. */
+/** Linha "▸ Rótulo  N tokens" que expande p/ mostrar as sub-parcelas.
+ * `showZero` (modo Extenso) mantém visíveis também as fontes que não gastaram. */
 function BreakdownRow({
   label,
   total,
   parts,
+  showZero = false,
+  startOpen = false,
 }: {
   label: string;
   total: number;
-  parts: { label: string; value: number }[];
+  parts: { label: string; value: number; sub?: boolean }[];
+  showZero?: boolean;
+  startOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(startOpen);
   const listRef = useRef<HTMLDivElement>(null);
   // ao expandir, traz as sub-parcelas p/ a área visível (na última mensagem elas
   // nasceriam atrás do composer; o scroll-padding do container compensa)
   useEffect(() => {
     if (open) listRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [open]);
-  const shown = parts.filter((p) => p.value > 0);
+  const shown = showZero ? parts : parts.filter((p) => p.value > 0);
   return (
     <div>
       <button
@@ -650,9 +713,9 @@ function BreakdownRow({
       {open && shown.length > 0 && (
         <div ref={listRef} className="ml-5 space-y-0.5 border-l border-border pl-3 pt-0.5">
           {shown.map((p) => (
-            <div key={p.label} className="flex items-center justify-between gap-4">
-              <span>{p.label}</span>
-              <span className="font-mono text-ink-soft">{p.value.toLocaleString("pt-BR")}</span>
+            <div key={p.label} className={`flex items-center justify-between gap-4 ${p.sub ? "pl-3" : ""} ${p.value === 0 ? "opacity-50" : ""}`}>
+              <span className="truncate">{p.label}</span>
+              <span className="shrink-0 font-mono text-ink-soft">{p.value.toLocaleString("pt-BR")}</span>
             </div>
           ))}
         </div>
@@ -664,51 +727,75 @@ function BreakdownRow({
 function UsagePanel({ u }: { u: NonNullable<Message["usage"]> }) {
   const inb = u.input_breakdown;
   const outb = u.output_breakdown;
+  const perTool = Object.entries(u.tools_breakdown ?? {}).sort((a, b) => b[1] - a[1]);
+  // Compacto (padrão): esconde fontes que não gastaram. Extenso: mostra TODAS as
+  // fontes possíveis + o gasto por ferramenta. Preferência lembrada no navegador.
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    try { setFull(localStorage.getItem("aw_usage_view") === "full"); } catch {}
+  }, []);
+  const setMode = (v: boolean) => {
+    setFull(v);
+    try { localStorage.setItem("aw_usage_view", v ? "full" : "compact"); } catch {}
+  };
   const ref = useRef<HTMLDivElement>(null);
   // como o ToolEventsPanel: ao abrir, rola a si mesmo p/ cima do composer
   useEffect(() => {
     ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, []);
+
+  const inputParts = [
+    { label: "Usuário (mensagem atual)", value: inb?.user ?? 0 },
+    { label: "Contexto (histórico do chat)", value: inb?.context ?? 0 },
+    { label: "Prompt do sistema", value: inb?.system ?? 0 },
+    { label: "Instruções do canal/guardas", value: inb?.extra ?? 0 },
+    { label: "Memória (mem0)", value: inb?.memory ?? 0 },
+    { label: "Ferramentas (instruções + schemas)", value: inb?.tools ?? 0 },
+    { label: "Skills", value: inb?.skills ?? 0 },
+    { label: "Resultados de ferramentas", value: inb?.tool_results ?? 0 },
+    // Extenso: o gasto de cada ferramenta, aninhado sob "Resultados"
+    ...(full ? perTool.map(([tool, v]) => ({ label: tool, value: v, sub: true })) : []),
+    { label: "Arquivos e anexos", value: inb?.file ?? 0 },
+  ];
+  const outputParts = [
+    { label: "Resposta", value: outb?.output ?? Math.max(0, u.completion_tokens - (u.reasoning_tokens ?? 0)) },
+    { label: "Raciocínio (thinking)", value: outb?.thinking ?? u.reasoning_tokens ?? 0 },
+  ];
+  const cached = u.cached_tokens ?? 0;
+  const showCached = full || cached > 0;
+
   return (
-    <div ref={ref} className="animate-pop mt-1.5 w-72 max-w-full rounded-xl border border-border bg-surface px-3.5 py-2.5 text-xs text-muted shadow-menu">
-      <p className="mb-2 text-ink-soft">
-        Origem: <span className="text-ink">{u.model_name}</span>{" "}
-        <span className="font-mono text-[11px]">({u.model})</span>
-      </p>
+    <div ref={ref} className="animate-pop mt-1.5 w-80 max-w-full rounded-xl border border-border bg-surface px-3.5 py-2.5 text-xs text-muted shadow-menu">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <p className="min-w-0 truncate text-ink-soft">
+          Origem: <span className="text-ink">{u.model_name}</span>{" "}
+          <span className="font-mono text-[11px]">({u.model})</span>
+        </p>
+        {/* Compacto = só o que gastou · Extenso = todas as fontes + por ferramenta */}
+        <div className="flex shrink-0 overflow-hidden rounded-md border border-border text-[10px]">
+          <button onClick={() => setMode(false)} className={`px-2 py-0.5 transition-colors ${!full ? "bg-surface2 font-medium text-ink" : "text-muted hover:text-ink"}`}>
+            Compacto
+          </button>
+          <button onClick={() => setMode(true)} className={`border-l border-border px-2 py-0.5 transition-colors ${full ? "bg-surface2 font-medium text-ink" : "text-muted hover:text-ink"}`}>
+            Extenso
+          </button>
+        </div>
+      </div>
 
       <div className="space-y-0.5">
-        <BreakdownRow
-          label="Entrada"
-          total={u.prompt_tokens}
-          parts={[
-            { label: "Usuário (mensagem atual)", value: inb?.user ?? 0 },
-            { label: "Contexto (histórico do chat)", value: inb?.context ?? 0 },
-            { label: "Prompt do sistema", value: inb?.system ?? 0 },
-            { label: "Memória (mem0)", value: inb?.memory ?? 0 },
-            { label: "Ferramentas (SIFT)", value: inb?.tools ?? 0 },
-            { label: "Resultados de ferramentas", value: inb?.tool_results ?? 0 },
-            { label: "Arquivos", value: inb?.file ?? 0 },
-          ]}
-        />
-        <BreakdownRow
-          label="Saída"
-          total={u.completion_tokens}
-          parts={[
-            { label: "Resposta", value: outb?.output ?? Math.max(0, u.completion_tokens - (u.reasoning_tokens ?? 0)) },
-            { label: "Raciocínio", value: outb?.thinking ?? u.reasoning_tokens ?? 0 },
-          ]}
-        />
-        <BreakdownRow
-          label="Cacheado"
-          total={u.cached_tokens ?? 0}
-          parts={[
-            { label: "Entrada em cache (leitura)", value: u.cached_tokens ?? 0 },
-            {
-              label: "Não cacheado",
-              value: Math.max(0, u.prompt_tokens - (u.cached_tokens ?? 0)),
-            },
-          ]}
-        />
+        <BreakdownRow label="Entrada" total={u.prompt_tokens} parts={inputParts} showZero={full} startOpen={full} />
+        <BreakdownRow label="Saída" total={u.completion_tokens} parts={outputParts} showZero={full} />
+        {showCached && (
+          <BreakdownRow
+            label="Cacheado"
+            total={cached}
+            showZero={full}
+            parts={[
+              { label: "Entrada em cache (leitura)", value: cached },
+              { label: "Não cacheado", value: Math.max(0, u.prompt_tokens - cached) },
+            ]}
+          />
+        )}
       </div>
 
       <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
@@ -759,6 +846,8 @@ export default function MessageItem({
   const [saving, setSaving] = useState(false);
   const toolEvents = message.tool_events ?? [];
   const usedTools = toolEvents.length > 0;
+  // guardas de saída que agiram nesta resposta (fluxo no painel de ferramentas)
+  const guardEvents = toolEvents.filter((e) => e.kind === "guard");
   const usedMemories = message.memories_used ?? [];
   const artifacts = toolArtifacts(toolEvents);
   const sources = isUser ? [] : collectSources(toolEvents);
@@ -888,6 +977,15 @@ export default function MessageItem({
                 <Wrench size={15} />
               </span>
             )}
+            {guardEvents.length > 0 && (
+              <button
+                onClick={() => setShowTools(true)}
+                title="Um Guarda de saída agiu nesta resposta — clique para ver o fluxo"
+                className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-400 transition-colors hover:bg-amber-500/25"
+              >
+                <ShieldAlert size={12} /> Guarda{guardEvents.length > 1 ? ` ×${guardEvents.length}` : ""}
+              </button>
+            )}
             {u?.over_budget ? (
               <span
                 title={`Este turno usou ${u.total_tokens.toLocaleString("pt-BR")} tokens (limite de aviso: ${u.over_budget.toLocaleString("pt-BR")})`}
@@ -932,6 +1030,11 @@ export default function MessageItem({
               {usedTools && (
                 <IconButton title="Ferramentas usadas" onClick={() => setShowTools((v) => !v)}>
                   <Wrench size={15} className={showTools ? "text-accent-hover" : ""} />
+                </IconButton>
+              )}
+              {guardEvents.length > 0 && (
+                <IconButton title="Guardas de saída (fluxo)" onClick={() => setShowTools((v) => !v)}>
+                  <ShieldAlert size={15} className={showTools ? "text-amber-400" : "text-amber-400/70"} />
                 </IconButton>
               )}
               {usedMemories.length > 0 && (

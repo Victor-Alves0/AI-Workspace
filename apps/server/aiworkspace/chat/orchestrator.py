@@ -631,20 +631,26 @@ async def run_turn(
     # sem o usuário perceber — do input real digitado no promptbox.
     #   user          = mensagem atual (promptbox)
     #   context       = histórico do chat reenviado neste turno
-    #   system        = prompt do sistema do chat
+    #   system        = prompt do sistema do chat (+ nota temporal)
+    #   extra         = instruções extras do canal/guardas/artefatos (extra_system)
     #   memory        = memórias recuperadas do mem0
-    #   tools         = system_prompt do SIFT + schemas das tools (overhead fixo)
+    #   tools         = system_prompt do SIFT + catálogo + schemas das tools
+    #   skills        = bloco de skills equipadas (nome+descrição)
     #   tool_results  = saídas das ferramentas injetadas durante o loop agêntico
-    #   file          = anexos (0 por enquanto; categoria reservada)
+    #   file          = anexos (arquivos + descrição de imagens do Vision Router)
     input_chars = {
         "user": len(user_text),
         "context": sum(len(str(m.get("content") or "")) for m in history) if use_context else 0,
-        "system": len(chat_system_prompt or ""),
+        "system": len(chat_system_prompt or "") + len(time_note),
+        "extra": len(extra_system or ""),
         "memory": len(mem_block),
-        "tools": len(sift_prompt) + len(skills_block) + (len(json.dumps(tools)) if tools else 0),
+        "tools": len(sift_prompt) + (len(json.dumps(tools)) if tools else 0),
+        "skills": len(skills_block),
         "tool_results": 0,  # preenchido conforme as tools respondem no loop (inclui view_skill)
-        "file": attach_chars,  # arquivos anexados + descrição de imagens (Vision Router)
+        "file": attach_chars,
     }
+    # por FERRAMENTA: quanto cada tool devolveu (p/ o detalhamento "Extenso")
+    tool_result_chars: dict[str, int] = {}
 
     assistant_text = ""
     # raciocínio ("thinking") de modelos que o expõem via OpenRouter
@@ -925,6 +931,7 @@ async def run_turn(
                 }
             )
             input_chars["tool_results"] += len(content)  # custo invisível: saída da tool volta como entrada
+            tool_result_chars[name] = tool_result_chars.get(name, 0) + len(content)
 
         assistant_text = ""  # reinicia p/ a próxima volta (resposta final)
 
@@ -961,6 +968,11 @@ async def run_turn(
     }
     total_usage["input_breakdown"] = input_breakdown
     total_usage["output_breakdown"] = output_breakdown
+    # por ferramenta (mesma distribuição proporcional; soma ≈ tool_results)
+    if prompt_total and weight_total and tool_result_chars:
+        total_usage["tools_breakdown"] = {
+            k: round(prompt_total * v / weight_total) for k, v in tool_result_chars.items()
+        }
 
     has_usage = total_usage["total_tokens"] > 0 or total_usage["cost"] > 0
     yield {
@@ -1074,7 +1086,7 @@ def _merge_done_usage(acc: dict | None, u: dict | None) -> dict | None:
     for k in ("prompt_tokens", "completion_tokens", "total_tokens", "reasoning_tokens", "cached_tokens"):
         acc[k] = int(acc.get(k, 0) or 0) + int(u.get(k, 0) or 0)
     acc["cost"] = float(acc.get("cost", 0.0) or 0.0) + float(u.get("cost", 0.0) or 0.0)
-    for grp in ("input_breakdown", "output_breakdown"):
+    for grp in ("input_breakdown", "output_breakdown", "tools_breakdown"):
         merged = dict(acc.get(grp) or {})
         for k, v in (u.get(grp) or {}).items():
             merged[k] = int(merged.get(k, 0) or 0) + int(v or 0)
@@ -1103,17 +1115,27 @@ async def run_turn_guarded(
     base_model = turn_kwargs.get("model")
     base_key = turn_kwargs.get("api_key")
     base_base = turn_kwargs.get("base_url")
+    base_extra = turn_kwargs.get("extra_system")  # extra do canal (ex.: WhatsApp) é preservado
     cur_model, cur_key, cur_base = base_model, base_key, base_base
     extra_system: str | None = None
     merged_usage: dict | None = None
+    # fluxo dos guardas p/ a UI: cada acionamento vira uma entrada no tool_events
+    # da mensagem final (kind "guard") — o usuário vê o que aconteceu e por quê.
+    guard_log: list[dict[str, Any]] = []
     attempt = 0
 
     while True:
         attempt += 1
+        # o extra do canal (base_extra) SEMPRE entra; reforços de guarda são somados
+        combined_extra = (
+            f"{base_extra}\n\n{extra_system}".strip()
+            if base_extra and extra_system
+            else (extra_system or base_extra)
+        )
         kw = {
             **turn_kwargs,
             "model": cur_model, "api_key": cur_key, "base_url": cur_base,
-            "extra_system": extra_system,
+            "extra_system": combined_extra,
         }
         final_done: dict | None = None
         last_error: dict | None = None
@@ -1147,20 +1169,38 @@ async def run_turn_guarded(
 
         if hit is not None:
             remaining[hit["id"]] -= 1
+            rejected_model = cur_model  # modelo que produziu a resposta rejeitada
             action = hit.get("action") or "reinforce"
+            inj = ""
             if action == "fallback_model" and (hit.get("fallback_model") or "").strip():
                 cur_model = hit["fallback_model"].strip()
                 cur_key = hit.get("_api_key") or base_key
                 cur_base = hit.get("_base_url")
             else:  # reinforce
+                action = "reinforce"
                 inj = (hit.get("inject_text") or "").strip()
                 if inj:
                     extra_system = (extra_system + "\n\n" + inj).strip() if extra_system else inj
+            guard_log.append({
+                "kind": "guard",
+                "name": hit.get("name") or "Guarda de saída",
+                "data": {
+                    "attempt": attempt,
+                    "detect": hit.get("detect") or "refusal",
+                    "action": action,
+                    "model": rejected_model,
+                    "fallback_model": cur_model if action == "fallback_model" else None,
+                    "injected": inj[:400] or None,
+                    "rejected_preview": (text or "").strip()[:320] or None,
+                },
+            })
             yield {
                 "type": "guard",
                 "name": hit.get("name") or "Guarda de saída",
-                "action": "fallback_model" if action == "fallback_model" else "reinforce",
+                "action": action,
                 "attempt": attempt,
+                "detect": hit.get("detect") or "refusal",
+                "fallback_model": cur_model if action == "fallback_model" else None,
             }
             yield {"type": "guard_reset"}  # o front descarta a tentativa anterior
             continue
@@ -1169,6 +1209,11 @@ async def run_turn_guarded(
         if final_done is not None:
             if merged_usage is not None:
                 final_done = {**final_done, "usage": merged_usage}
+            if guard_log:
+                # o fluxo dos guardas entra ANTES dos eventos de tool da tentativa
+                # final (ordem cronológica) e persiste com a mensagem
+                evs = guard_log + list(final_done.get("tool_events") or [])
+                final_done = {**final_done, "tool_events": evs or None}
             yield final_done
         elif last_error is not None:
             yield last_error

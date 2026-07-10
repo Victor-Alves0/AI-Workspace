@@ -155,19 +155,24 @@ export interface MessageUsage {
   cost: number;
   // detalhamento por categoria (proporcional ao tamanho de cada bloco)
   input_breakdown?: {
-    user: number;
-    context: number;
-    file: number;
-    system: number;
-    memory: number;
-    tools: number;
-    tool_results: number;
+    user?: number;
+    context?: number;
+    file?: number;
+    system?: number;
+    /** instruções extras do canal/guardas/artefatos (extra_system) */
+    extra?: number;
+    memory?: number;
+    tools?: number;
+    skills?: number;
+    tool_results?: number;
   };
   output_breakdown?: { output: number; thinking: number };
+  /** tokens de resultado POR ferramenta (soma ≈ input_breakdown.tool_results) */
+  tools_breakdown?: Record<string, number>;
 }
 
 export interface ToolEvent {
-  kind: "call" | "result";
+  kind: "call" | "result" | "guard";
   name: string;
   data: unknown;
 }
