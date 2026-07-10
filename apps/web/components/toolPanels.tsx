@@ -17,7 +17,7 @@ type PanelProps = { value: Record<string, any>; onChange: (v: Record<string, any
 
 /* ------------------------------- helpers UI ------------------------------- */
 function Heading({ children }: { children: React.ReactNode }) {
-  return <p className="mb-1 mt-4 text-xs font-semibold text-ink first:mt-0">{children}</p>;
+  return <p className="mb-2 mt-5 border-b border-border pb-1.5 text-xs font-semibold text-ink first:mt-0">{children}</p>;
 }
 function Row({ label, sub, children }: { label: string; sub?: string; children?: React.ReactNode }) {
   return (
@@ -75,7 +75,7 @@ const ENGINES: { key: string; label: string; keyed: boolean; note: string }[] = 
   { key: "brave", label: "Brave Search", keyed: true, note: "Requer chave" },
 ];
 
-export function WebSearchPanel({ value, onChange, status }: PanelProps) {
+export function WebSearchPanel({ value, onChange, status, scope = "model" }: PanelProps & { scope?: "model" | "user" }) {
   const ws = value ?? {};
   const wsSet = (k: string, v: any) => onChange({ ...ws, [k]: v });
   const primary: string = ws.primary ?? "duckduckgo";
@@ -86,7 +86,11 @@ export function WebSearchPanel({ value, onChange, status }: PanelProps) {
   const maxResults = ws.max_results === "" ? "" : ws.max_results ?? 5;
   return (
     <div>
-      <p className="text-xs leading-5 text-muted">Mecanismo que este modelo usa na busca. Configure a chave (quando exigida) e filtros.</p>
+      <p className="text-xs leading-5 text-muted">
+        {scope === "user"
+          ? "Mecanismo padrão de pesquisa da sua conta (vale para todos os modelos). Um modelo pode sobrepor na engrenagem da ferramenta Pesquisa na Web."
+          : "Mecanismo que este modelo usa na busca. Configure a chave (quando exigida) e filtros."}
+      </p>
       <Heading>Mecanismo</Heading>
       <div className="rounded-xl border border-border bg-surface px-3">
         <Row label="Mecanismo principal">

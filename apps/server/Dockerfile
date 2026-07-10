@@ -10,8 +10,21 @@ WORKDIR /app
 # tesseract (motor OCR local, idiomas pt+en) e poppler (rasteriza PDF p/ OCR)
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential libpq-dev curl \
+        build-essential libpq-dev curl ca-certificates \
         tesseract-ocr tesseract-ocr-por tesseract-ocr-eng poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# postgresql-client-16 (pg_dump/pg_restore do backup completo no painel admin).
+# Vem do repo oficial PGDG: o Debian do python:3.12-slim traz o client 15, que
+# se RECUSA a dumpar um servidor Postgres 16.
+RUN install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSo /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+        https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && . /etc/os-release \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] http://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-16 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./

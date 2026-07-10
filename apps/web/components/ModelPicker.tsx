@@ -29,6 +29,7 @@ interface Row {
 
 export default function ModelPicker({
   label,
+  avatar,
   models,
   custom,
   value,
@@ -42,6 +43,8 @@ export default function ModelPicker({
   onEditModel,
 }: {
   label: string;
+  /** foto do modelo ativo, mostrada à esquerda do nome (opcional em Interface → Chat) */
+  avatar?: string | null;
   models: Model[];
   custom: ModelConfig[];
   value: string;
@@ -108,6 +111,10 @@ export default function ModelPicker({
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-lg font-semibold tracking-tight text-ink transition-colors hover:bg-hover"
       >
+        {avatar && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={avatar} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
+        )}
         <span className="max-w-[140px] truncate sm:max-w-[240px]">{label || "Selecionar modelo"}</span>
         <ChevronDown size={18} className="shrink-0 text-muted" />
       </button>

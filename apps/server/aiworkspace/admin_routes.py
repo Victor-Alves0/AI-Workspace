@@ -1,14 +1,20 @@
-"""Painel do admin: gestão de usuários e configurações globais."""
+"""Painel do admin: gestão de usuários, configurações globais e backup."""
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import os
+import shutil
+import tempfile
 import uuid
 from datetime import datetime
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import __version__, network_config
@@ -17,6 +23,8 @@ from .auth.deps import require_admin
 from .config import get_settings
 from .db import get_db
 from .models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -171,3 +179,123 @@ async def update_check(admin: User = Depends(require_admin)):
     except httpx.HTTPError as exc:
         out["error"] = f"Falha ao consultar o GitHub: {exc}"
     return out
+
+
+# --------------------------------------------------------------------------- #
+# Backup completo / migração de sistema (pg_dump / pg_restore)
+#
+# O sistema INTEIRO vive no Postgres (usuários, chats, segredos cifrados,
+# imagens geradas, vetores do mem0), então um dump do banco = backup completo.
+# Para restaurar em outra máquina, o .env precisa do MESMO APP_SECRET — os
+# segredos são cifrados com chave derivada dele.
+# --------------------------------------------------------------------------- #
+def _pg_url() -> str:
+    return get_settings().sync_database_url
+
+
+def _require_pg_tools() -> None:
+    if not shutil.which("pg_dump") or not shutil.which("pg_restore"):
+        raise HTTPException(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            "pg_dump/pg_restore indisponíveis — reconstrua a imagem do server "
+            "(docker compose build server) para habilitar o backup.",
+        )
+
+
+@router.get("/backup")
+async def export_backup(admin: User = Depends(require_admin)):
+    """Baixa um backup completo do sistema (formato custom do pg_dump)."""
+    _require_pg_tools()
+    proc = await asyncio.create_subprocess_exec(
+        "pg_dump", "--format=custom", "--no-owner", "--no-privileges",
+        f"--dbname={_pg_url()}",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+
+    async def stream():
+        assert proc.stdout is not None
+        while True:
+            chunk = await proc.stdout.read(256 * 1024)
+            if not chunk:
+                break
+            yield chunk
+        err = (await proc.stderr.read()).decode(errors="replace") if proc.stderr else ""
+        if await proc.wait() != 0:
+            logger.error("pg_dump falhou: %s", err[-2000:])
+            raise RuntimeError("pg_dump falhou")  # aborta o download (arquivo incompleto)
+
+    filename = f"aiworkspace-{datetime.now():%Y%m%d-%H%M}.backup"
+    return StreamingResponse(
+        stream(),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/restore")
+async def import_backup(
+    file: UploadFile,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Restaura um backup completo (SUBSTITUI todos os dados atuais).
+
+    Fluxo: salva o upload em arquivo temporário → derruba as outras conexões do
+    banco (o --clean precisa de exclusividade) → pg_restore. Depois, as sessões
+    podem exigir novo login (os usuários passam a ser os do backup)."""
+    _require_pg_tools()
+    tmp = tempfile.NamedTemporaryFile(suffix=".backup", delete=False)
+    try:
+        while chunk := await file.read(1024 * 1024):
+            tmp.write(chunk)
+        tmp.close()
+
+        # valida que é um dump do pg_dump (formato custom começa com "PGDMP")
+        with open(tmp.name, "rb") as f:
+            if f.read(5) != b"PGDMP":
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Arquivo inválido — envie um backup exportado por este painel (.backup).",
+                )
+
+        # encerra as demais conexões (pools do app) p/ liberar locks do restore
+        await db.execute(text(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+        ))
+        await db.commit()
+
+        proc = await asyncio.create_subprocess_exec(
+            "pg_restore", "--clean", "--if-exists", "--no-owner", "--no-privileges",
+            f"--dbname={_pg_url()}", tmp.name,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        err = stderr.decode(errors="replace")
+        if proc.returncode != 0:
+            logger.error("pg_restore falhou: %s", err[-4000:])
+            raise HTTPException(
+                status.HTTP_502_BAD_GATEWAY,
+                f"pg_restore falhou (código {proc.returncode}): {err[-500:]}",
+            )
+
+        # caches em memória ficam órfãos do banco antigo → limpa (best-effort)
+        try:
+            from .db import engine
+            from .tools import sift_service
+            sift_service._cache.clear()
+            await engine.dispose()
+        except Exception:  # noqa: BLE001 - o restart recomendado resolve o resto
+            logger.exception("limpeza pós-restore falhou (siga com o restart)")
+
+        logger.warning("Backup restaurado pelo admin %s", admin.email)
+        return {
+            "ok": True,
+            "note": "Backup restaurado. Se os usuários mudaram, faça login novamente. "
+                    "Recomendado: reiniciar o server (docker compose restart server).",
+        }
+    finally:
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass

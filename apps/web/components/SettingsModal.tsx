@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   Database,
   AudioLines,
+  Globe,
   Home,
   Info,
   Keyboard,
@@ -20,7 +21,6 @@ import {
   Sparkles,
   UserCog,
   CircleUserRound,
-  Volume2,
   X,
 } from "lucide-react";
 import {
@@ -48,9 +48,10 @@ import TuyaPanel from "./TuyaPanel";
 import WhatsAppPanel from "./WhatsAppPanel";
 import OllamaPanel from "./OllamaPanel";
 import VoicePanel from "./VoicePanel";
+import { WebSearchPanel } from "./toolPanels";
 import { useConfirm } from "./ConfirmDialog";
 
-type Cat = "general" | "interface" | "connections" | "integrations" | "personalization" | "shortcuts" | "audio" | "data" | "account" | "about";
+type Cat = "general" | "interface" | "connections" | "integrations" | "personalization" | "shortcuts" | "data" | "account" | "about";
 
 const CATS: { key: Cat; label: string; icon: React.ReactNode }[] = [
   { key: "general", label: "Geral", icon: <Settings size={16} /> },
@@ -59,7 +60,6 @@ const CATS: { key: Cat; label: string; icon: React.ReactNode }[] = [
   { key: "integrations", label: "Integrações", icon: <Blocks size={16} /> },
   { key: "personalization", label: "Personalização", icon: <Sparkles size={16} /> },
   { key: "shortcuts", label: "Atalhos", icon: <Keyboard size={16} /> },
-  { key: "audio", label: "Áudio", icon: <Volume2 size={16} /> },
   { key: "data", label: "Controle de Dados", icon: <Database size={16} /> },
   { key: "account", label: "Conta", icon: <CircleUserRound size={16} /> },
   { key: "about", label: "Sobre", icon: <Info size={16} /> },
@@ -93,7 +93,10 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Chave Brave Search", cat: "connections", view: "apis" },
   { label: "Chave Finnhub", cat: "connections", view: "apis" },
   { label: "Chave Alpha Vantage", cat: "connections", view: "apis" },
-  { label: "Chave do provedor de voz", cat: "audio" },
+  { label: "Chave do provedor de voz", cat: "connections", view: "apis" },
+  { label: "Web", cat: "connections", view: "web" },
+  { label: "SearXNG", cat: "connections", view: "web" },
+  { label: "Pesquisa na web (mecanismo padrão)", cat: "connections", view: "web" },
   { label: "Importar Chats", cat: "data" },
   { label: "Exportar Chats", cat: "data" },
   { label: "Chats Arquivados", cat: "data" },
@@ -146,7 +149,7 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
 }
 
 function Heading({ children }: { children: React.ReactNode }) {
-  return <p className="mb-1 mt-5 text-sm font-semibold text-ink first:mt-0">{children}</p>;
+  return <p className="mb-2 mt-6 border-b border-border pb-1.5 text-sm font-semibold text-ink first:mt-0">{children}</p>;
 }
 
 /* grade de cards (2 colunas): quadradinho com ícone + nome abaixo */
@@ -399,12 +402,22 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged }
                 <OllamaPanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
               ) : connView === "voice" ? (
                 <VoicePanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
+              ) : connView === "web" ? (
+                <DetailView title="Web" onBack={() => setConnView(null)}>
+                  <WebSearchPanel
+                    scope="user"
+                    value={profile.web_search ?? {}}
+                    onChange={(v) => set("web_search", v)}
+                    status={(status ?? undefined) as Record<string, boolean> | undefined}
+                  />
+                </DetailView>
               ) : (
                 <div>
                   <Heading>Conexões</Heading>
                   <CardGrid
                     cards={[
                       { key: "apis", icon: <KeyRound size={22} />, name: "APIs", desc: "Chaves de serviços" },
+                      { key: "web", icon: <Globe size={22} />, name: "Web", desc: "Pesquisa na web / SearXNG" },
                       { key: "ollama", icon: <SiOllama size={22} />, name: "Ollama", desc: "Utilize modelos locais" },
                       { key: "voice", icon: <AudioLines size={22} />, name: "Voz Local", desc: "Kokoro / clonagem de voz" },
                     ]}
@@ -452,7 +465,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged }
                         <SiWhatsapp size={22} />
                       </span>
                       <span className="text-sm font-medium text-ink">WhatsApp</span>
-                      <span className="text-xs leading-4 text-muted">IA atendendo seus números</span>
+                      <span className="text-xs leading-4 text-muted">Contato Pessoal</span>
                     </button>
                     {[
                       { name: "Discord", icon: <SiDiscord size={22} /> },
@@ -472,12 +485,6 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged }
                   </div>
                 </div>
               )
-            )}
-            {cat === "audio" && (
-              <div>
-                <Heading>Áudio (TTS / STT)</Heading>
-                <SecretField label="Chave do provedor de voz" name="voice" configured={status?.voice ?? false} hint="Endpoint compatível com OpenAI (VOICE_BASE_URL). Use OpenAI ou um servidor local." onSaved={reloadSecrets} />
-              </div>
             )}
             {cat === "about" && <AboutTab />}
             {cat === "interface" && <InterfaceTab profile={profile} set={set} view={connView} setView={setConnView} />}
@@ -550,7 +557,7 @@ function InterfaceTab({
       <CardGrid
         cards={[
           { key: "sidebar", icon: <PanelsTopLeft size={22} />, name: "Barra Lateral", desc: "Aparência e navegação" },
-          { key: "chat", icon: <MessageSquareText size={22} />, name: "Chat", desc: "Artefatos e conversa" },
+          { key: "chat", icon: <MessageSquareText size={22} />, name: "Chat", desc: "Layout e opcionais" },
         ]}
         onOpen={setView}
       />
@@ -562,15 +569,27 @@ function ChatSettings({ profile, set, onBack }: { profile: Record<string, any>; 
   const iface: Record<string, any> = profile.interface ?? {};
   const setIface = (k: string, v: any) => set("interface", { ...iface, [k]: v });
   const artifacts = iface.artifacts !== false; // padrão: ligado
+  const modelAvatar = iface.model_avatar !== false; // padrão: ligado
   return (
     <DetailView title="Chat" onBack={onBack}>
-      <div className="rounded-xl border border-border bg-surface px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <span className="text-sm text-ink">Artefatos</span>
-            <p className="text-xs text-muted">Conteúdos extensos (código, documentos, HTML…) abrem numa janela dedicada ao lado do chat, com edição e versões</p>
+      <div className="space-y-2.5">
+        <div className="rounded-xl border border-border bg-surface px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <span className="text-sm text-ink">Artefatos</span>
+              <p className="text-xs text-muted">Conteúdos extensos (código, documentos, HTML…) abrem numa janela dedicada ao lado do chat, com edição e versões</p>
+            </div>
+            <Toggle on={artifacts} onClick={() => setIface("artifacts", !artifacts)} />
           </div>
-          <Toggle on={artifacts} onClick={() => setIface("artifacts", !artifacts)} />
+        </div>
+        <div className="rounded-xl border border-border bg-surface px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <span className="text-sm text-ink">Foto do modelo no seletor</span>
+              <p className="text-xs text-muted">Mostra o avatar do modelo ao lado do nome, no topo do chat</p>
+            </div>
+            <Toggle on={modelAvatar} onClick={() => setIface("model_avatar", !modelAvatar)} />
+          </div>
         </div>
       </div>
     </DetailView>
@@ -1074,7 +1093,7 @@ function ApisPanel({ status, reloadSecrets, onBack }: { status: SecretStatus | n
     <DetailView title="APIs" onBack={onBack}>
       <Heading>Modelos e voz</Heading>
       <SecretField label="Chave do OpenRouter" name="openrouter" configured={status?.openrouter ?? false} hint="Provedor de modelos (obrigatória para conversar)." onSaved={reloadSecrets} />
-      <SecretField label="Chave do provedor de voz" name="voice" configured={status?.voice ?? false} hint="TTS/STT — endpoint compatível com OpenAI (também em Áudio)." onSaved={reloadSecrets} />
+      <SecretField label="Chave do provedor de voz" name="voice" configured={status?.voice ?? false} hint="TTS/STT — endpoint compatível com OpenAI (VOICE_BASE_URL). Use OpenAI ou um servidor local." onSaved={reloadSecrets} />
       <Heading>Pesquisa na web</Heading>
       <SecretField label="Chave Tavily" name="tavily" configured={status?.tavily ?? false} hint="tavily.com — ferramenta Pesquisa na Web / Deep Search." onSaved={reloadSecrets} />
       <SecretField label="Chave Brave Search" name="brave" configured={status?.brave ?? false} hint="brave.com/search/api" onSaved={reloadSecrets} />

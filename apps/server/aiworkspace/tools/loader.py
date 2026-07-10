@@ -21,7 +21,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..models import GoogleAccount, Tool
+from ..models import GoogleAccount, Tool, User
 from ..secrets_service import (
     ALPHAVANTAGE_KEY,
     BRAVE_KEY,
@@ -151,7 +151,12 @@ async def get_sift_for_user(
     tools_cfg = tool_config(model_config)
     tavily = await get_secret(db, user_id, TAVILY_KEY)
     brave = await get_secret(db, user_id, BRAVE_KEY)
-    cfg = sift_service.search_config_from_secrets(tavily, brave, tools_cfg.get("web_search"))
+    # pesquisa na web em camadas: env < Conexões → Web (conta) < config do modelo
+    u = await db.get(User, user_id)
+    user_ws = ((u.profile or {}).get("web_search") or {}) if u else {}
+    model_ws = tools_cfg.get("web_search") or {}
+    web_prefs = {**user_ws, **model_ws} or None
+    cfg = sift_service.search_config_from_secrets(tavily, brave, web_prefs)
     finnhub = await get_secret(db, user_id, FINNHUB_KEY)
     alpha = await get_secret(db, user_id, ALPHAVANTAGE_KEY)
     fin_cfg = sift_service.finance_config_from_secrets(finnhub, alpha, tools_cfg.get("finance"))

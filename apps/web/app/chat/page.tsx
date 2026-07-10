@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUpRight, Bell, GitBranch, Image as ImageIcon, Menu, MessageSquareDashed, Plus, Search, Scissors, ShieldAlert, SlidersHorizontal, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
+import { ArrowDown, ArrowUpRight, Bell, GitBranch, Image as ImageIcon, Menu, MessageSquareDashed, Search, Scissors, ShieldAlert, SlidersHorizontal, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamResume, streamRoundtable } from "@/lib/sse";
 import { speak, startRecording, transcribe } from "@/lib/voice";
@@ -1173,6 +1173,7 @@ export default function ChatPage() {
   const picker = (
     <ModelPicker
       label={modelLabel}
+      avatar={user.profile?.interface?.model_avatar !== false ? curCustom?.avatar_url ?? null : null}
       models={extModels}
       custom={customModels}
       value={curModel}
@@ -1246,9 +1247,6 @@ export default function ChatPage() {
                 <Menu size={20} />
               </button>
               {picker}
-              <button onClick={newChat} title="Novo chat" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
-                <Plus size={18} />
-              </button>
               {!temporary && (
                 <button
                   onClick={enterRoundtable}

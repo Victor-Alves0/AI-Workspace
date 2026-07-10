@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Check, Network, RefreshCw, Shield, Trash2, X } from "lucide-react";
-import { api, ApiError } from "@/lib/api";
+import {
+  ArrowLeft, Bug, Check, DatabaseBackup, Download, Loader2, Network,
+  RefreshCw, Shield, Trash2, Upload, Users, X,
+} from "lucide-react";
+import { api, API_URL, ApiError } from "@/lib/api";
 import type { AdminUser } from "@/lib/types";
 
 interface NetworkCfg { host: string; port: number; allowed_ips: string[]; repo: string; branch: string; trust_proxy?: boolean; web_origin?: string }
@@ -83,16 +86,25 @@ export default function AdminPage() {
   const pending = users.filter((u) => u.status === "pending");
 
   return (
-    <div className="h-full overflow-y-auto bg-bg p-6">
+    <div className="h-full overflow-y-auto bg-bg px-4 py-5 md:p-6">
       <div className="mx-auto max-w-4xl space-y-5">
-        <div className="flex items-center justify-between">
-          <h1 className="flex items-center gap-2 text-xl font-semibold text-ink">
-            <Shield size={20} /> Painel do Admin
-          </h1>
-          <div className="flex items-center gap-3 text-sm">
-            <button onClick={() => router.push("/debug")} className="text-muted hover:text-ink">Debug</button>
-            <button onClick={() => router.push("/chat")} className="flex items-center gap-1 text-muted hover:text-ink">
-              <ArrowLeft size={16} /> Chat
+        {/* cabeçalho: breadcrumb de volta + título + ações em pílulas */}
+        <div>
+          <button onClick={() => router.push("/chat")} className="mb-3 flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm text-muted transition-colors hover:bg-hover hover:text-ink">
+            <ArrowLeft size={16} /> Voltar ao chat
+          </button>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/15 text-accent-hover">
+                <Shield size={20} />
+              </span>
+              <div>
+                <h1 className="text-xl font-bold tracking-tight text-ink">Painel do Admin</h1>
+                <p className="text-xs text-muted">Usuários, rede, atualização e backup do sistema</p>
+              </div>
+            </div>
+            <button onClick={() => router.push("/debug")} className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">
+              <Bug size={15} /> Debug
             </button>
           </div>
         </div>
@@ -207,13 +219,17 @@ export default function AdminPage() {
           </div>
         )}
 
+        {/* Backup completo / migração de sistema */}
+        <BackupCard />
+
         {pending.length > 0 && (
           <p className="text-sm text-amber-400">{pending.length} usuário(s) aguardando aprovação.</p>
         )}
 
         {/* tabela de usuários */}
-        <div className="overflow-hidden rounded-xl border border-border">
-          <table className="w-full text-left text-sm">
+        <p className="flex items-center gap-2 pt-1 text-sm font-semibold text-ink"><Users size={16} /> Usuários</p>
+        <div className="overflow-x-auto rounded-xl border border-border">
+          <table className="w-full min-w-[480px] text-left text-sm">
             <thead className="bg-surface text-muted">
               <tr>
                 <th className="px-4 py-3 font-medium">Email</th>
@@ -257,6 +273,99 @@ export default function AdminPage() {
           </table>
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ------------------------ Backup / migração de sistema ------------------------ */
+/* Exporta/importa o sistema INTEIRO (usuários, chats, modelos, memórias,
+ * segredos cifrados, imagens…) — tudo vive no Postgres, então um dump = backup
+ * completo. Para migrar de VPS: exporte aqui, suba o app na máquina nova com o
+ * MESMO APP_SECRET no .env e importe o arquivo. */
+function BackupCard() {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [confirmFile, setConfirmFile] = useState<File | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function exportBackup() {
+    setExporting(true);
+    setResult(null);
+    try {
+      const r = await fetch(`${API_URL}/admin/backup`, { credentials: "include" });
+      if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `Falha (${r.status})`);
+      const blob = await r.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = r.headers.get("Content-Disposition")?.match(/filename="(.+?)"/)?.[1] ?? "aiworkspace.backup";
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      setResult({ ok: false, text: e instanceof Error ? e.message : "Falha ao exportar" });
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function importBackup(f: File) {
+    setImporting(true);
+    setResult(null);
+    try {
+      const form = new FormData();
+      form.append("file", f);
+      const r = await fetch(`${API_URL}/admin/restore`, { method: "POST", credentials: "include", body: form });
+      const data = await r.json().catch(() => null);
+      if (!r.ok) throw new Error(data?.detail ?? `Falha (${r.status})`);
+      setResult({ ok: true, text: data?.note ?? "Backup restaurado." });
+    } catch (e) {
+      setResult({ ok: false, text: e instanceof Error ? e.message : "Falha ao importar" });
+    } finally {
+      setImporting(false);
+      setConfirmFile(null);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
+      <p className="flex items-center gap-2 text-sm font-semibold text-ink"><DatabaseBackup size={16} /> Backup e migração</p>
+      <p className="text-xs leading-5 text-muted">
+        Exporta o sistema <span className="text-ink-soft">inteiro</span> (usuários, chats, modelos, memórias, integrações,
+        segredos cifrados) num único arquivo. Para migrar de servidor: suba o app na máquina nova com o
+        <span className="font-mono text-ink-soft"> mesmo APP_SECRET</span> no .env e importe o arquivo aqui.
+      </p>
+      <div className="flex flex-wrap items-center gap-2.5">
+        <button onClick={exportBackup} disabled={exporting} className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
+          {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Exportar sistema
+        </button>
+        <input ref={fileRef} type="file" accept=".backup,.dump" className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) setConfirmFile(f); }} />
+        <button onClick={() => fileRef.current?.click()} disabled={importing} className="flex items-center gap-1.5 rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-60">
+          {importing ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} Importar backup
+        </button>
+      </div>
+      {confirmFile && (
+        <div className="space-y-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2.5 text-sm">
+          <p className="text-ink">
+            Importar <span className="font-mono text-xs">{confirmFile.name}</span>?{" "}
+            <span className="text-red-300">Isto SUBSTITUI todos os dados atuais</span> (usuários, chats, tudo). Não tem volta.
+          </p>
+          <div className="flex items-center gap-2">
+            <button onClick={() => importBackup(confirmFile)} className="rounded-full bg-red-500/90 px-4 py-1 text-xs font-medium text-white hover:bg-red-500">
+              Sim, substituir tudo
+            </button>
+            <button onClick={() => { setConfirmFile(null); if (fileRef.current) fileRef.current.value = ""; }} className="rounded-full border border-border px-4 py-1 text-xs text-muted hover:text-ink">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+      {result && (
+        <p className={`rounded-lg px-3 py-2 text-xs ${result.ok ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
+          {result.text}
+        </p>
+      )}
     </div>
   );
 }
