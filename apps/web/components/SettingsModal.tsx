@@ -19,6 +19,7 @@ import {
   RotateCcw,
   Search,
   Settings,
+  ShieldCheck,
   Sparkles,
   UserCog,
   CircleUserRound,
@@ -53,7 +54,7 @@ import VoicePanel from "./VoicePanel";
 import { WebSearchPanel } from "./toolPanels";
 import { useConfirm } from "./ConfirmDialog";
 
-type Cat = "general" | "status" | "interface" | "connections" | "integrations" | "personalization" | "shortcuts" | "data" | "account" | "about";
+type Cat = "general" | "status" | "interface" | "connections" | "integrations" | "personalization" | "shortcuts" | "security" | "data" | "account" | "about";
 
 const CATS: { key: Cat; label: string; icon: React.ReactNode }[] = [
   { key: "general", label: "Geral", icon: <Settings size={16} /> },
@@ -63,6 +64,7 @@ const CATS: { key: Cat; label: string; icon: React.ReactNode }[] = [
   { key: "integrations", label: "Integrações", icon: <Blocks size={16} /> },
   { key: "personalization", label: "Personalização", icon: <Sparkles size={16} /> },
   { key: "shortcuts", label: "Atalhos", icon: <Keyboard size={16} /> },
+  { key: "security", label: "Segurança", icon: <ShieldCheck size={16} /> },
   { key: "data", label: "Controle de Dados", icon: <Database size={16} /> },
   { key: "account", label: "Conta", icon: <CircleUserRound size={16} /> },
   { key: "about", label: "Sobre", icon: <Info size={16} /> },
@@ -81,6 +83,9 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Parâmetros Avançados", cat: "personalization" },
   { label: "Atalhos de teclado", cat: "shortcuts" },
   { label: "Atalhos", cat: "shortcuts" },
+  { label: "Segurança", cat: "security" },
+  { label: "Confirmar ações sensíveis", cat: "security" },
+  { label: "Pedir permissão antes de agir", cat: "security" },
   { label: "Status do sistema", cat: "status" },
   { label: "Orçamento mensal", cat: "account" },
   { label: "Nome", cat: "account" },
@@ -405,6 +410,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
               />
             )}
             {cat === "shortcuts" && <ShortcutsTab profile={profile} set={set} />}
+            {cat === "security" && <SecurityTab profile={profile} set={set} />}
             {cat === "account" && <AccountTab user={user} profile={profile} set={set} />}
             {cat === "data" && (
               <DataTab
@@ -747,6 +753,26 @@ function GeneralTab({ profile, set }: { profile: Record<string, any>; set: (k: s
       <Row label="Notificações">
         <Toggle on={!!profile.notifications} onClick={() => set("notifications", !profile.notifications)} />
       </Row>
+    </div>
+  );
+}
+
+function SecurityTab({ profile, set }: { profile: Record<string, any>; set: (k: string, v: any) => void }) {
+  const sec = (profile.security as Record<string, any>) ?? {};
+  const confirmOn = !!sec.confirm_actions;
+  return (
+    <div>
+      <Heading>Segurança</Heading>
+      <Row
+        label="Pedir confirmação antes de ações sensíveis"
+        sub="A IA pede sua aprovação antes de enviar/arquivar e-mails, criar ou alterar eventos na agenda e acionar dispositivos da casa. Desligado (padrão), ela executa direto."
+      >
+        <Toggle on={confirmOn} onClick={() => set("security", { ...sec, confirm_actions: !confirmOn })} />
+      </Row>
+      <p className="mt-3 text-xs leading-5 text-muted">
+        Vale para todos os seus modelos. Automações e canais (WhatsApp/Telegram) sempre executam
+        direto, pois rodam sem você presente para confirmar.
+      </p>
     </div>
   );
 }

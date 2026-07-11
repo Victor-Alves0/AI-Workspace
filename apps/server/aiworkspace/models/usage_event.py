@@ -11,6 +11,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import Float, ForeignKey, String
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
@@ -37,3 +38,6 @@ class UsageEvent(Base):
     reasoning_tokens: Mapped[int] = mapped_column(default=0)
     cached_tokens: Mapped[int] = mapped_column(default=0)
     cost: Mapped[float] = mapped_column(Float, default=0.0)
+
+    # tokens (aproximados) por ferramenta usada na resposta: {caminho_da_tool: tokens}
+    tools_breakdown: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")

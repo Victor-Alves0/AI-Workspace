@@ -54,8 +54,9 @@ _bg_tasks: set[asyncio.Task] = set()
 def _spawn_memory_write(
     api_key: str, user_text: str, assistant_text: str, user_id: str,
     chat_id: str, agent_id: str | None, scope: str, review: bool = False,
+    *, project_id: str | None = None,
 ) -> None:
-    """Grava a memória pós-turno no escopo escolhido (global/model/chat), SEM
+    """Grava a memória pós-turno no escopo escolhido (global/model/chat/project), SEM
     bloquear a conclusão do turno.
 
     A extração do mem0 é um LLM call (~3s) + embeddings + inserts no pgvector.
@@ -75,6 +76,7 @@ def _spawn_memory_write(
                     scope=scope,
                     chat_id=chat_id,
                     agent_id=agent_id,
+                    project_id=project_id,
                     review=review,
                 )
             )
@@ -146,6 +148,10 @@ def _compose_tool_prompt(base: str, catalog: list[str], mode: str, custom: str, 
 # "breakpoint" com cache_control numa parte do conteúdo). Nos demais (OpenAI,
 # DeepSeek, Grok, …) o cache é automático e não requer marcação.
 _EXPLICIT_CACHE_PROVIDERS = ("anthropic", "google")
+
+# referência "#": abaixo deste tamanho (chars ≈ 6k tokens) o arquivo entra INTEIRO
+# no contexto; acima, cai p/ os trechos mais relevantes (retrieval no próprio doc).
+_REF_FULLTEXT_LIMIT = 24000
 
 
 def _build_static_system(chat_system_prompt: str | None, sift_prompt: str) -> str:
@@ -548,6 +554,8 @@ async def run_turn(
     mem_write: str = "off",
     mem_review: bool = False,
     mem_banks: list[str] | None = None,
+    # id do "projeto" (a pasta do chat) p/ o escopo de memória compartilhado
+    mem_project: str | None = None,
     user_profile: dict[str, Any] | None = None,
     skills: list[dict[str, Any]] | None = None,
     use_context: bool = True,
@@ -563,6 +571,9 @@ async def run_turn(
     genimage: dict[str, Any] | None = None,
     image_output: bool = False,
     knowledge: dict[str, Any] | None = None,
+    # docs referenciados com "#" no compositor: [{id, filename, base_id, text}].
+    # Injetados neste turno (híbrido: texto inteiro se pequeno, senão trechos).
+    ref_docs: list[dict[str, Any]] | None = None,
     extra_system: str | None = None,
     # detalhamento (em chars) das origens do extra_system, p/ o painel de uso:
     # {"artifacts": n, "channel": n, "guards": n} — só rotula, não muda o prompt
@@ -604,7 +615,7 @@ async def run_turn(
             lambda: mem0_service.search_for_turn(
                 api_key, user_text, user_id,
                 chat_id=chat_id, agent_id=agent_id,
-                read=mem_read or {}, banks=mem_banks, limit=6,
+                read=mem_read or {}, banks=mem_banks, project_id=mem_project, limit=6,
             )
         )
     memories = [m["text"] for m in mem_items]
@@ -642,21 +653,67 @@ async def run_turn(
         }
         yield {"type": "tool_result", "name": "knowledge", "result": auto_knowledge_event}
 
+    # 1c. Arquivos referenciados com "#" no compositor. HÍBRIDO: doc pequeno entra
+    # inteiro; doc grande cai p/ os trechos mais relevantes (retrieval no próprio doc).
+    ref_block = ""
+    ref_knowledge_event: dict[str, Any] | None = None
+    ref_list = ref_docs or []
+    if ref_list:
+        ref_results: list[dict[str, Any]] = []
+        for rd in ref_list:
+            text = (rd.get("text") or "").strip()
+            if not text:
+                continue
+            if len(text) <= _REF_FULLTEXT_LIMIT:
+                ref_results.append({"doc_id": rd.get("id"), "filename": rd.get("filename"), "text": text})
+            else:
+                try:
+                    hits = await kb_retrieval.search(
+                        user_id, [str(rd.get("base_id"))], user_text, 6, doc_ids=[str(rd.get("id"))]
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("busca no doc referenciado falhou: %s", exc)
+                    hits = []
+                if hits:
+                    ref_results.extend(hits)
+                else:
+                    # sem match/índice: injeta o começo do arquivo (com corte)
+                    ref_results.append({
+                        "doc_id": rd.get("id"), "filename": rd.get("filename"),
+                        "text": text[:_REF_FULLTEXT_LIMIT],
+                    })
+        if ref_results:
+            _rblk, ref_sources = _knowledge_block_and_sources(ref_results)
+            ref_block = (
+                "## Arquivos referenciados\n"
+                "O usuário anexou estes arquivos com \"#\" (numerados por fonte). Use-os como "
+                "base principal da resposta e CITE a fonte com [n] quando aplicável.\n\n" + _rblk
+            )
+            ref_knowledge_event = {
+                "kind": "knowledge", "query": user_text[:200],
+                "sources": ref_sources, "count": len(ref_results),
+            }
+            yield {"type": "tool_result", "name": "knowledge", "result": ref_knowledge_event}
+
     # 2. montagem — em code mode o modelo recebe run_code (orquestra várias
     # tools escrevendo Python numa chamada só) em vez de execute_tool
     has_tools = sift is not None and use_tools
+    # metadados do integrador no escopo (scope.meta, oficial na SIFT >= 0.7):
+    # catálogo legível, modo de exposição, prompt "quando usar", tools promovidas
+    sift_meta: dict[str, Any] = (getattr(sift, "meta", None) or {}) if has_tools else {}
     if has_tools and code_mode:
         sift_prompt = sift.code_system_prompt
         tools = list(sift.code_tools())
         # tools LONGAS promovidas a 1ª classe (rodam fora do sandbox do run_code —
         # o watchdog de parede mataria o filho e descartaria o resultado)
-        extra = getattr(sift, "_aw_code_extra_tools", None)
+        extra = sift_meta.get("code_extra_tools")
         if extra:
             tools += list(extra)
     elif has_tools:
         sift_prompt = sift.system_prompt
-        # usa os specs já capturados COM as ferramentas fixadas (pin), quando houver
-        tools = getattr(sift, "_aw_openai_tools", None) or sift.openai_tools()
+        # SIFT >= 0.7: pins são por-escopo — openai_tools() do scope já inclui as
+        # ferramentas fixadas como specs de 1ª classe (nome flat)
+        tools = sift.openai_tools()
     else:
         sift_prompt = ""
         tools = []
@@ -665,10 +722,10 @@ async def run_turn(
     # resolvido pelas meta-ferramentas). O catálogo é injetado nos dois modos (o modelo
     # precisa saber o que tem); "list" reforça o texto. O guard de ação é sempre anexado.
     if has_tools:
-        mode = getattr(sift, "_aw_sift_mode", "prompt")
-        catalog = getattr(sift, "_aw_tools", None) or []
+        mode = sift_meta.get("sift_mode") or "prompt"
+        catalog = sift_meta.get("catalog") or []
         meta = "run_code" if code_mode else "execute_tool"
-        custom = (getattr(sift, "_aw_sift_prompt", "") or "").strip() or DEFAULT_TOOL_PROMPT
+        custom = (sift_meta.get("sift_prompt") or "").strip() or DEFAULT_TOOL_PROMPT
         sift_prompt = _compose_tool_prompt(sift_prompt, catalog, mode, custom, meta)
 
     # Skills (independentes do SIFT): o modelo vê só nome+descrição e carrega o
@@ -712,7 +769,7 @@ async def run_turn(
     mem_block = _memory_block(memories)
     # bloco de contexto por-turno (fora do prefixo cacheado): memória + conhecimento
     # recuperado (modo auto). Ambos variam a cada turno conforme a pergunta.
-    context_block = "\n\n".join(b for b in (mem_block, knowledge_block) if b)
+    context_block = "\n\n".join(b for b in (mem_block, knowledge_block, ref_block) if b)
     time_note = _temporal_note(user_tz, user_tz_offset)
     # `extra_system` = instruções de ALTA PRIORIDADE: reforço de um Guarda de saída
     # (retry) OU instruções do canal (ex.: WhatsApp). Vão para o FIM do system, DEPOIS
@@ -844,7 +901,7 @@ async def run_turn(
         "system": len(chat_system_prompt or "") + len(time_note),
         "extra": len(extra_system or ""),
         "memory": len(mem_block),
-        "knowledge": len(knowledge_block),
+        "knowledge": len(knowledge_block) + len(ref_block),
         "tools": len(sift_prompt) + (len(json.dumps(tools)) if tools else 0),
         "skills": len(skills_block),
         "tool_results": 0,  # preenchido conforme as tools respondem no loop (inclui view_skill)
@@ -872,6 +929,9 @@ async def run_turn(
     # emitidas acima) p/ persistirem na mensagem (SourcesBar após F5).
     if auto_knowledge_event is not None:
         tool_events.append({"kind": "result", "name": "knowledge", "data": auto_knowledge_event})
+    # fontes dos arquivos referenciados com "#" — persistem p/ o SourcesBar após F5
+    if ref_knowledge_event is not None:
+        tool_events.append({"kind": "result", "name": "knowledge", "data": ref_knowledge_event})
     # imagens GERADAS NATIVAMENTE pelo modelo (capability image_generation, ex.: nano
     # banana). Deduplicadas por conteúdo — o stream pode repetir a mesma imagem.
     # NÃO emitimos "image_gen start" aqui: a capability ligada não significa que ESTA
@@ -890,7 +950,13 @@ async def run_turn(
     nudged = False
 
     # 3-4. loop de tool calling
-    for _ in range(settings.max_tool_iterations):
+    for _iter in range(settings.max_tool_iterations):
+        # última rodada permitida (quando há mais de uma): retira as tools para
+        # OBRIGAR uma resposta final. Sem isto, um modelo que continua chamando tools
+        # até o teto encerra o loop com texto vazio — o usuário veria os cards das
+        # tools e nenhuma resposta.
+        if _iter > 0 and _iter == settings.max_tool_iterations - 1:
+            tools = None
         tool_buffer: dict[int, dict] = {}
         finish_reason: str | None = None
         usage: dict | None = None
@@ -1105,6 +1171,11 @@ async def run_turn(
                 # run_code não foi anunciado a este modelo; não executa código
                 result = {"error": "run_code não está habilitado para este modelo"}
             else:
+                # NÃO trocar por sift.adispatch: na SIFT 0.7 ele roda tools SÍNCRONAS
+                # inline ("offload them yourself if they block") — e TODAS as nossas
+                # builtins são sync (requests/Google/Tuya, segundos cada) → bloquearia
+                # o event loop do servidor inteiro. O threadpool é o offload correto
+                # enquanto as tools não forem `async def`.
                 result = await run_in_threadpool(sift.dispatch, name, args)
                 # Path errado/fora do escopo (modelo chutou, ex.: 'web.read' em vez
                 # de 'web.page.read'): enriquece o erro com o caminho de recuperação,
@@ -1170,7 +1241,7 @@ async def run_turn(
     # 5. memória pós-turno (só em chats persistentes; escopo escolhido pelo chat).
     # Dispara em BACKGROUND: não deve atrasar o `done`/conclusão visível na UI.
     if assistant_text and chat_id and mem_write and mem_write != "off":
-        _spawn_memory_write(api_key, user_text, assistant_text, user_id, chat_id, agent_id, mem_write, mem_review)
+        _spawn_memory_write(api_key, user_text, assistant_text, user_id, chat_id, agent_id, mem_write, mem_review, project_id=mem_project)
 
     # fecha a duração caso o stream tenha terminado ainda "pensando"
     if reasoning_started is not None:

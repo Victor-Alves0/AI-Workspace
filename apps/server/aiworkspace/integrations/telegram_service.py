@@ -216,8 +216,8 @@ async def _deliver(conn: TelegramConnection, token: str, tg_chat_id: str, text: 
 async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
     from ..chat.orchestrator import run_turn_guarded
     from ..chat.routes import (
-        _audio_router_config, _load_skills, _resolve_guards, _resolve_provider,
-        _usage_record, _user_profile_dict,
+        _audio_router_config, _code_mode, _load_skills, _resolve_guards,
+        _resolve_provider, _usage_record, _user_profile_dict,
     )
     from ..tools.loader import get_sift_for_user
 
@@ -298,6 +298,11 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
             extra_parts.append(conn.system_prompt.strip())
         extra_system = "\n\n".join(extra_parts)
 
+        # COMMIT antes do turno (depois das queries de preparação): devolve a conexão
+        # ao pool durante o run_turn e preserva a mensagem recebida se o processo
+        # cair no meio (ver whatsapp_service).
+        await db.commit()
+
         content = ""
         usage = reasoning = tool_events = None
         error = None
@@ -307,7 +312,7 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
                 chat_system_prompt=mc.system_prompt if mc else None,
                 params=(mc.params if mc else {}) or {},
                 user_id=str(user.id), base_url=base_url, background=True,
-                sift=sift, code_mode=bool(getattr(mc, "code_mode", False)),
+                sift=sift, code_mode=_code_mode(mc),
                 skills=skills, use_context=True, extra_system=extra_system,
                 extra_breakdown={"channel": len(extra_system)},
                 attachments=attachments or None, audio_router=audio_router,

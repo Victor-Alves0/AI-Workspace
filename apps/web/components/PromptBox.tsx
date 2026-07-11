@@ -9,6 +9,7 @@ import {
   Check,
   Database,
   FileText,
+  Hash,
   History,
   LayoutGrid,
   Mic,
@@ -23,7 +24,28 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import type { Attachment, Prompt, Skill } from "@/lib/types";
+import type { Attachment, KnowledgeRef, Prompt, Skill } from "@/lib/types";
+
+/** um doc referenciado com "#" no compositor (chip + injeção no turno) */
+export interface RefDoc { id: string; label: string; path: string }
+
+/** achata a árvore de refs (bases→pastas→docs) numa lista de docs referenciáveis
+ *  com caminho legível "base / pasta / arquivo". */
+function flattenRefs(refs: KnowledgeRef[]): RefDoc[] {
+  const out: RefDoc[] = [];
+  for (const base of refs) {
+    const byId = Object.fromEntries(base.folders.map((f) => [f.id, f]));
+    for (const d of base.docs) {
+      const parts: string[] = [];
+      let fid = d.folder_id;
+      let guard = 0;
+      while (fid && byId[fid] && guard++ < 20) { parts.unshift(byId[fid].name); fid = byId[fid].parent_id; }
+      const path = [base.name, ...parts, d.filename].join(" / ");
+      out.push({ id: d.id, label: d.filename, path });
+    }
+  }
+  return out;
+}
 import { fileToBase64, fileToImageDataUrl, fileToText } from "@/lib/image";
 import { MenuItem, useClickOutside } from "./ui";
 
@@ -216,6 +238,9 @@ export default function PromptBox({
   agents = [],
   agentId = null,
   onAgentChange,
+  knowledgeRefs = [],
+  refDocs = [],
+  onRefDocsChange,
   capabilities = {},
   attachments = [],
   onAttachmentsChange,
@@ -249,6 +274,11 @@ export default function PromptBox({
   agents?: { id: string; name: string }[];
   agentId?: string | null;
   onAgentChange?: (id: string | null) => void;
+  /** árvore de refs ("#"): bases acessíveis ao modelo/chat com pastas + docs */
+  knowledgeRefs?: KnowledgeRef[];
+  /** docs referenciados no próximo turno (chips) */
+  refDocs?: RefDoc[];
+  onRefDocsChange?: (r: RefDoc[]) => void;
   /** capacidades do modelo ativo (gate de upload: vision / file_upload) */
   capabilities?: Record<string, boolean>;
   /** anexos (imagens/arquivos) do próximo envio */
@@ -393,11 +423,43 @@ export default function PromptBox({
   }, [agents, atQuery]);
   const agentMenuOpen = !dismissed && !promptMenuOpen && !skillMenuOpen && agentMatches.length > 0;
 
+  // "#arquivo" (menção): referencia um doc da Base de Conhecimento p/ ESTE turno.
+  // Mesma mecânica do "@"/"$". Só aparece o que o modelo/chat pode acessar.
+  const refEntries = useMemo(() => flattenRefs(knowledgeRefs), [knowledgeRefs]);
+  const hashToken = useMemo(() => {
+    const before = value.slice(0, caret);
+    const m = /(^|\s)#([\w.\-]*)$/.exec(before);
+    if (!m) return null;
+    return { query: m[2].toLowerCase(), start: m.index + m[1].length };
+  }, [value, caret]);
+  const hashQuery = hashToken?.query ?? null;
+  const refMatches = useMemo(() => {
+    if (hashQuery === null) return [];
+    const picked = new Set(refDocs.map((r) => r.id));
+    return refEntries.filter(
+      (e) => !picked.has(e.id) && (e.label.toLowerCase().includes(hashQuery) || e.path.toLowerCase().includes(hashQuery)),
+    );
+  }, [refEntries, hashQuery, refDocs]);
+  const refMenuOpen = !dismissed && !promptMenuOpen && !skillMenuOpen && !agentMenuOpen && refMatches.length > 0;
+
   // ao mudar o que foi digitado, reabre o menu e reseta o destaque
   useEffect(() => {
     setHi(0);
     setDismissed(false);
-  }, [slashQuery, dollarQuery, atQuery]);
+  }, [slashQuery, dollarQuery, atQuery, hashQuery]);
+
+  function pickRef(e: RefDoc) {
+    if (hashToken) {
+      const pos = hashToken.start;
+      onChange(value.slice(0, pos) + value.slice(caret));
+      requestAnimationFrame(() => {
+        const ta = taRef.current;
+        if (ta) { ta.focus(); ta.setSelectionRange(pos, pos); }
+        setCaret(pos);
+      });
+    }
+    onRefDocsChange?.([...refDocs, e]);
+  }
 
   function pickAgent(a: { id: string; name: string }) {
     if (atToken) {
@@ -520,6 +582,45 @@ export default function PromptBox({
             </p>
           </div>
         )}
+        {refMenuOpen && (
+          <div className="animate-pop absolute bottom-full left-3 right-3 z-50 mb-2 overflow-hidden rounded-xl border border-border bg-surface shadow-menu">
+            <p className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">Base de Conhecimento</p>
+            <div className="max-h-60 overflow-y-auto py-1">
+              {refMatches.map((e, i) => (
+                <button
+                  key={e.id}
+                  onMouseEnter={() => setHi(i)}
+                  onClick={() => pickRef(e)}
+                  className={`flex w-full items-start gap-2 px-3 py-2 text-left transition-colors ${i === hi ? "bg-hover" : ""}`}
+                >
+                  <FileText size={14} className="mt-0.5 shrink-0 text-accent-hover" />
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm text-ink">{e.label}</span>
+                    <span className="block truncate text-xs text-muted">{e.path}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <p className="border-t border-border px-3 py-1.5 text-[10px] text-muted">
+              Anexa o arquivo a esta mensagem · ↑↓ · Enter/Tab · Esc
+            </p>
+          </div>
+        )}
+        {refDocs.length > 0 && (
+          <div className="mb-1.5 flex flex-wrap gap-1.5 px-1">
+            {refDocs.map((r) => (
+              <span key={r.id} className="flex items-center gap-1 rounded-full bg-accent/15 px-2.5 py-0.5 text-xs text-accent-hover" title={r.path}>
+                <Hash size={11} /> {r.label}
+                <button
+                  onClick={() => onRefDocsChange?.(refDocs.filter((x) => x.id !== r.id))}
+                  className="text-accent-hover/70 transition-colors hover:text-accent-hover"
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         {attachedAgent && (
           <div className="mb-1.5 flex flex-wrap gap-1.5 px-1">
             <span className="flex items-center gap-1 rounded-full bg-accent/15 px-2.5 py-0.5 text-xs text-accent-hover">
@@ -594,8 +695,8 @@ export default function PromptBox({
           onSelect={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
           onPaste={canAttach ? onPaste : undefined}
           onKeyDown={(e) => {
-            // menu ativo: prompts ("/"), skills ("$") ou agentes ("@") — nunca juntos
-            const count = promptMenuOpen ? promptMatches.length : skillMenuOpen ? skillMatches.length : agentMenuOpen ? agentMatches.length : 0;
+            // menu ativo: prompts ("/"), skills ("$"), agentes ("@") ou refs ("#") — nunca juntos
+            const count = promptMenuOpen ? promptMatches.length : skillMenuOpen ? skillMatches.length : agentMenuOpen ? agentMatches.length : refMenuOpen ? refMatches.length : 0;
             if (count > 0) {
               if (e.key === "ArrowDown") {
                 e.preventDefault();
@@ -611,7 +712,8 @@ export default function PromptBox({
                 e.preventDefault();
                 if (promptMenuOpen) pickPrompt(promptMatches[hi] ?? promptMatches[0]);
                 else if (skillMenuOpen) pickSkill(skillMatches[hi] ?? skillMatches[0]);
-                else pickAgent(agentMatches[hi] ?? agentMatches[0]);
+                else if (agentMenuOpen) pickAgent(agentMatches[hi] ?? agentMatches[0]);
+                else pickRef(refMatches[hi] ?? refMatches[0]);
                 return;
               }
               if (e.key === "Escape") {
@@ -629,6 +731,11 @@ export default function PromptBox({
             if (e.key === "Backspace" && !value && attachedSkills.length) {
               e.preventDefault();
               onAttachedSkillIdsChange?.(attachedSkillIds.slice(0, -1));
+              return;
+            }
+            if (e.key === "Backspace" && !value && refDocs.length) {
+              e.preventDefault();
+              onRefDocsChange?.(refDocs.slice(0, -1));
               return;
             }
             if (e.key === "Enter" && !e.shiftKey) {
@@ -665,7 +772,20 @@ export default function PromptBox({
                     >
                       Enviar Captura
                     </MenuItem>
-                    <MenuItem icon={<Database size={16} />} onClick={() => setPlusOpen(false)}>
+                    <MenuItem
+                      icon={<Database size={16} />}
+                      onClick={() => {
+                        setPlusOpen(false);
+                        if (!refEntries.length) return;
+                        // insere "#" no fim p/ abrir o menu de referências
+                        const base = value.endsWith(" ") || !value ? value : value + " ";
+                        onChange(base + "#");
+                        requestAnimationFrame(() => {
+                          const ta = taRef.current;
+                          if (ta) { ta.focus(); const p = (base + "#").length; ta.setSelectionRange(p, p); setCaret(p); }
+                        });
+                      }}
+                    >
                       Anexar Base de Conhecimento
                     </MenuItem>
                     <MenuItem icon={<MessagesSquare size={16} />} onClick={() => setPlusOpen(false)}>

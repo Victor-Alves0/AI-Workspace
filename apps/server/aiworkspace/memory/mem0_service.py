@@ -280,6 +280,9 @@ def _field(item: dict, key: str) -> str | None:
 # eixo agent_id do mem0 com este prefixo, para não colidir com o escopo "model"
 # (cujo agent_id é o id do ModelConfig ou "base:<modelo>").
 _BANK_PREFIX = "bank:"
+# Projeto: memória compartilhada por TODOS os chats de uma pasta (o "projeto").
+# Também mora no eixo agent_id, com prefixo próprio; o id é o da pasta (folder_id).
+_PROJECT_PREFIX = "project:"
 
 
 def _item_scope(item: dict) -> str:
@@ -287,7 +290,11 @@ def _item_scope(item: dict) -> str:
         return "chat"
     aid = _field(item, "agent_id")
     if aid:
-        return "bank" if aid.startswith(_BANK_PREFIX) else "model"
+        if aid.startswith(_BANK_PREFIX):
+            return "bank"
+        if aid.startswith(_PROJECT_PREFIX):
+            return "project"
+        return "model"
     return "global"
 
 
@@ -298,9 +305,10 @@ def _normalize(item: dict) -> dict[str, Any]:
         "id": item.get("id"),
         "text": item.get("memory") or item.get("data") or "",
         "scope": scope,
-        # no escopo "model" model_id é o agent_id; no "bank" expomos o id do banco
+        # no escopo "model" model_id é o agent_id; nos demais expomos o id específico
         "model_id": aid if scope == "model" else None,
         "bank_id": aid[len(_BANK_PREFIX):] if scope == "bank" and aid else None,
+        "project_id": aid[len(_PROJECT_PREFIX):] if scope == "project" and aid else None,
         "chat_id": _field(item, "run_id"),
         "created_at": item.get("created_at"),
         "updated_at": item.get("updated_at"),
@@ -318,15 +326,18 @@ def search_for_turn(
     agent_id: str | None,
     read: dict[str, bool],
     banks: list[str] | None = None,
+    project_id: str | None = None,
     limit: int = 6,
 ) -> list[dict[str, str]]:
     """Memórias relevantes para ESTE turno = união dos escopos ligados em `read`
-    ({global, model, chat}) MAIS os bancos acoplados (`banks`, ids). Uma única busca
-    por user_id (rankeada por similaridade), particionada no cliente: mantém globais,
-    as do modelo atual (agent_id), as deste chat (run_id) e as dos bancos acoplados —
-    nunca de outros chats/modelos/bancos. Desativadas/pendentes são puladas.
-    Retorna [{id, text, scope}]. Bloqueante."""
+    ({global, model, chat, project}) MAIS os bancos acoplados (`banks`, ids). Uma única
+    busca por user_id (rankeada por similaridade), particionada no cliente: mantém
+    globais, as do modelo atual (agent_id), as deste chat (run_id), as do projeto
+    (pasta) e as dos bancos acoplados — nunca de outros chats/modelos/projetos/bancos.
+    Desativadas/pendentes são puladas. Retorna [{id, text, scope}]. Bloqueante."""
     bank_aids = {_BANK_PREFIX + b for b in (banks or [])}
+    project_aid = _PROJECT_PREFIX + project_id if project_id else None
+    read_project = bool(read.get("project")) and project_aid is not None
     if not any(read.values()) and not bank_aids:
         return []
     mem = _memory_for_key(api_key)
@@ -350,6 +361,7 @@ def search_for_turn(
             (sc == "global" and read.get("global"))
             or (sc == "chat" and read.get("chat") and _field(it, "run_id") == chat_id)
             or (sc == "model" and read.get("model") and _field(it, "agent_id") == agent_id)
+            or (sc == "project" and read_project and _field(it, "agent_id") == project_aid)
             or (sc == "bank" and _field(it, "agent_id") in bank_aids)
         )
         if keep:
@@ -367,21 +379,26 @@ def add_scoped(
     scope: str,
     chat_id: str | None = None,
     agent_id: str | None = None,
+    project_id: str | None = None,
     review: bool = False,
 ) -> None:
     """Grava a memória pós-turno no escopo escolhido pelo chat: global / model /
-    chat / "bank:<id>" (banco compartilhado). `off` (ou escopo sem a chave
-    necessária) = não grava. Com `review`, as novas memórias entram como
+    chat / project (pasta) / "bank:<id>" (banco compartilhado). `off` (ou escopo sem
+    o id necessário) = não grava. Com `review`, as novas memórias entram como
     PENDENTES (o modelo não as usa até serem aprovadas)."""
     if scope == "off":
         return
     run_id = chat_id if scope == "chat" else None
     aid = agent_id if scope == "model" else None
+    if scope == "project":  # escrita no projeto: agent_id = "project:<folder_id>"
+        aid = _PROJECT_PREFIX + project_id if project_id else None
     if scope.startswith(_BANK_PREFIX):  # escrita num banco: agent_id = "bank:<id>"
         aid = scope
     if scope == "chat" and not run_id:
         return
     if scope == "model" and not aid:
+        return
+    if scope == "project" and not aid:
         return
     res = add(api_key, messages, user_id, run_id=run_id, agent_id=aid)
     if review:
@@ -398,6 +415,7 @@ def list_memories(
     chat_id: str | None = None,
     agent_id: str | None = None,
     bank_id: str | None = None,
+    project_id: str | None = None,
     query: str = "",
     limit: int = 500,
 ) -> list[dict[str, Any]]:
@@ -424,6 +442,8 @@ def list_memories(
         rows = [r for r in rows if r["model_id"] == agent_id]
     if bank_id:
         rows = [r for r in rows if r.get("bank_id") == bank_id]
+    if project_id:
+        rows = [r for r in rows if r.get("project_id") == project_id]
     dis = _disabled_ids(user_id)
     pend = _pending_ids(user_id)
     for r in rows:
@@ -451,6 +471,8 @@ def add_manual(
     aid = agent_id if scope == "model" else None
     if scope == "bank" and agent_id:
         aid = agent_id if agent_id.startswith(_BANK_PREFIX) else _BANK_PREFIX + agent_id
+    if scope == "project" and agent_id:
+        aid = agent_id if agent_id.startswith(_PROJECT_PREFIX) else _PROJECT_PREFIX + agent_id
     try:
         mem.add([{"role": "user", "content": text.strip()}], user_id=user_id,
                 infer=False, **_scope(run_id, aid))
@@ -519,6 +541,9 @@ def delete_scope(
         if scope == "bank" and agent_id:  # agent_id = "bank:<id>"
             mem.delete_all(user_id=user_id, agent_id=agent_id)
             return -1
+        if scope == "project" and agent_id:  # agent_id = "project:<folder_id>"
+            mem.delete_all(user_id=user_id, agent_id=agent_id)
+            return -1
         if scope == "global":
             n = 0
             for it in list_memories(api_key, user_id, scope="global", limit=2000):
@@ -537,6 +562,7 @@ def scope_summary(api_key: str, user_id: str) -> dict[str, Any]:
     models: dict[str, int] = {}
     chats: dict[str, int] = {}
     banks: dict[str, int] = {}
+    projects: dict[str, int] = {}
     glob = 0
     for i in items:
         if i["scope"] == "global":
@@ -547,7 +573,10 @@ def scope_summary(api_key: str, user_id: str) -> dict[str, Any]:
             chats[i["chat_id"]] = chats.get(i["chat_id"], 0) + 1
         elif i["scope"] == "bank" and i.get("bank_id"):
             banks[i["bank_id"]] = banks.get(i["bank_id"], 0) + 1
-    return {"global": glob, "models": models, "chats": chats, "banks": banks, "total": len(items)}
+        elif i["scope"] == "project" and i.get("project_id"):
+            projects[i["project_id"]] = projects.get(i["project_id"], 0) + 1
+    return {"global": glob, "models": models, "chats": chats, "banks": banks,
+            "projects": projects, "total": len(items)}
 
 
 def bank_counts(api_key: str, user_id: str) -> dict[str, int]:

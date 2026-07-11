@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  Ban, Box, Boxes, Check, CheckSquare, Clock, Globe, Loader2, MessagesSquare, Pencil, Plus,
+  Ban, Box, Boxes, Check, CheckSquare, Clock, FolderOpen, Globe, Loader2, MessagesSquare, Pencil, Plus,
   RotateCcw, Search, Square, Trash2, X,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { MemoryBank, MemoryConfig, MemoryItem, MemoryScopes } from "@/lib/types";
 import { useConfirm } from "@/components/ConfirmDialog";
 
-type Tab = "global" | "model" | "chat" | "bank";
+type Tab = "global" | "model" | "chat" | "project" | "bank";
 
 const WRITE_LABEL: Record<string, string> = {
   global: "Global", model: "Do modelo", chat: "Do chat", off: "Não salvar",
@@ -36,6 +36,7 @@ export default function MemoryView() {
   const [tab, setTab] = useState<Tab>("global");
   const [selModel, setSelModel] = useState<string>("");
   const [selChat, setSelChat] = useState<string>("");
+  const [selProject, setSelProject] = useState<string>("");
   const [banks, setBanks] = useState<MemoryBank[]>([]);
   const [selBank, setSelBank] = useState<string>("");
   const [newBank, setNewBank] = useState<{ name: string; description: string } | null>(null);
@@ -68,26 +69,30 @@ export default function MemoryView() {
   useEffect(() => {
     if (tab === "model" && !selModel && scopes?.models.length) setSelModel(scopes.models[0].id);
     if (tab === "chat" && !selChat && scopes?.chats.length) setSelChat(scopes.chats[0].id);
+    if (tab === "project" && !selProject && scopes?.projects.length) setSelProject(scopes.projects[0].id);
     if (tab === "bank" && !selBank && banks.length) setSelBank(banks[0].id);
-  }, [tab, scopes, banks, selModel, selChat, selBank]);
+  }, [tab, scopes, banks, selModel, selChat, selProject, selBank]);
 
   const activeModelId = tab === "model" ? selModel : "";
   const activeChatId = tab === "chat" ? selChat : "";
+  const activeProjectId = tab === "project" ? selProject : "";
   const activeBankId = tab === "bank" ? selBank : "";
 
   const loadItems = useCallback(async () => {
     if (tab === "model" && !activeModelId) { setItems([]); return; }
     if (tab === "chat" && !activeChatId) { setItems([]); return; }
+    if (tab === "project" && !activeProjectId) { setItems([]); return; }
     if (tab === "bank" && !activeBankId) { setItems([]); return; }
     setItems(null);
     const p = new URLSearchParams({ scope: tab });
     if (activeModelId) p.set("model_id", activeModelId);
     if (activeChatId) p.set("chat_id", activeChatId);
+    if (activeProjectId) p.set("project_id", activeProjectId);
     if (activeBankId) p.set("bank_id", activeBankId);
     if (q.trim()) p.set("q", q.trim());
     setSel(new Set());
     try { setItems(await api.get<MemoryItem[]>(`/memory?${p}`)); } catch { setItems([]); }
-  }, [tab, activeModelId, activeChatId, activeBankId, q]);
+  }, [tab, activeModelId, activeChatId, activeProjectId, activeBankId, q]);
 
   useEffect(() => { loadItems(); }, [loadItems]);
 
@@ -125,7 +130,7 @@ export default function MemoryView() {
       await api.post("/memory", {
         text: newText.trim(), scope: tab,
         model_id: activeModelId || undefined, chat_id: activeChatId || undefined,
-        bank_id: activeBankId || undefined,
+        project_id: activeProjectId || undefined, bank_id: activeBankId || undefined,
       });
       setNewText(""); setAdding(false);
       await Promise.all([loadItems(), loadScopes()]);
@@ -275,7 +280,7 @@ export default function MemoryView() {
 
       {/* Segmentado de escopo */}
       <div className="flex flex-wrap items-center gap-2">
-        {([["global", "Global", <Globe key="g" size={15} />], ["model", "Por modelo", <Box key="m" size={15} />], ["chat", "Por chat", <MessagesSquare key="c" size={15} />], ["bank", "Bancos", <Boxes key="b" size={15} />]] as const).map(
+        {([["global", "Global", <Globe key="g" size={15} />], ["model", "Por modelo", <Box key="m" size={15} />], ["chat", "Por chat", <MessagesSquare key="c" size={15} />], ["project", "Por projeto", <FolderOpen key="p" size={15} />], ["bank", "Bancos", <Boxes key="b" size={15} />]] as const).map(
           ([k, label, icon]) => (
             <button
               key={k}
@@ -306,6 +311,17 @@ export default function MemoryView() {
             {scopes?.chats.length ? scopes.chats.map((c) => (
               <option key={c.id} value={c.id}>{c.title} ({c.count})</option>
             )) : <option value="">Nenhum chat com memória</option>}
+          </select>
+        )}
+        {tab === "project" && (
+          <select
+            value={selProject}
+            onChange={(e) => setSelProject(e.target.value)}
+            className="max-w-[240px] rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
+          >
+            {scopes?.projects.length ? scopes.projects.map((p) => (
+              <option key={p.id} value={p.id}>{p.name} ({p.count})</option>
+            )) : <option value="">Nenhum projeto com memória</option>}
           </select>
         )}
         {tab === "bank" && (
@@ -380,7 +396,7 @@ export default function MemoryView() {
         </div>
         <button
           onClick={() => { setAdding((v) => !v); setNewText(""); }}
-          disabled={tab === "bank" && !activeBankId}
+          disabled={(tab === "bank" && !activeBankId) || (tab === "project" && !activeProjectId)}
           className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
         >
           <Plus size={15} /> Adicionar
@@ -437,6 +453,7 @@ export default function MemoryView() {
         <p className="rounded-2xl border border-dashed border-border px-4 py-14 text-center text-sm text-muted">
           {tab === "model" && !activeModelId ? "Selecione um modelo."
             : tab === "chat" && !activeChatId ? "Selecione um chat."
+            : tab === "project" && !activeProjectId ? "Nenhum projeto (pasta) com memória ainda."
             : tab === "bank" && !activeBankId ? "Crie um banco para começar."
             : "Nenhuma memória neste escopo ainda."}
         </p>
@@ -473,8 +490,8 @@ export default function MemoryView() {
                       {m.disabled && (
                         <span className="rounded-full bg-surface2 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted">Desativada</span>
                       )}
-                      {(m.model_name || m.chat_title) && (
-                        <span className="text-[11px] text-muted">{m.model_name ?? m.chat_title}</span>
+                      {(m.model_name || m.chat_title || m.project_name) && (
+                        <span className="text-[11px] text-muted">{m.model_name ?? m.chat_title ?? m.project_name}</span>
                       )}
                     </div>
                   </div>

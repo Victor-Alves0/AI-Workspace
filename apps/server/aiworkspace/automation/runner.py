@@ -20,7 +20,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from ..chat.routes import _load_skills, _usage_record
+from ..chat.routes import _code_mode, _load_skills, _usage_record
 from ..chat.orchestrator import run_turn
 from ..db import SessionLocal
 from ..models import Automation, AutomationRun, Chat, Message, ModelConfig, Notification, User, WhatsAppConnection
@@ -187,7 +187,8 @@ async def _run_scheduled(db, automation: Automation, user: User) -> dict[str, An
         params = {**params, "reasoning": {"effort": effort}}
     elif effort == "off":
         params = {k: v for k, v in params.items() if k != "reasoning"}
-    code_mode = bool(getattr(eff, "code_mode", False))
+    # respeita o off-switch global (allow_code_mode) + tools_enabled, como no chat
+    code_mode = _code_mode(eff)
     # sem navegador aqui: usa o tz_offset gravado no schedule (getTimezoneOffset do
     # navegador no momento em que a automação foi criada) p/ dar a hora local certa.
     try:

@@ -84,6 +84,9 @@ class ProfileIn(BaseModel):
     interface: dict[str, Any] | None = None
     # atalhos de teclado personalizados: { actionId: {keys: "mod+k", enabled: bool} }
     shortcuts: dict[str, Any] | None = None
+    # seção "Segurança": {confirm_actions: bool} — pedir confirmação antes de
+    # escritas sensíveis (e-mail/agenda/casa). Padrão desligado.
+    security: dict[str, Any] | None = None
     # orçamento pessoal opt-in: {enabled, monthly_usd, mode: "warn"|"pause"}
     budget: dict[str, Any] | None = None
     # concluiu (ou pulou) o wizard de primeiro uso

@@ -683,8 +683,16 @@ def _register_builtins(
 
         def _g_guard(summary: str, confirm: Any) -> dict | None:
             """Confirmação antes de escrever. Retorna ask, ou None p/ prosseguir.
-            (O bloqueio por operação é feito no `_op_on` de cada ação.)"""
-            if g_confirm and not _g_truthy(confirm):
+            (O bloqueio por operação é feito no `_op_on` de cada ação.)
+
+            NÃO migrar p/ o `on_risky` da SIFT 0.7: aquele hook é um GATE booleano
+            por-TOOL (nega = PermissionError seco). Este guard é por-AÇÃO (só as
+            escritas de uma tool consolidada) e INTERATIVO (devolve um ask_options
+            que vira card no chat; o usuário confirma e o modelo refaz com
+            confirm=true) — migrar perderia as duas coisas. Se um dia o on_risky
+            aceitar devolver um payload (ask) em vez de bool, aí sim."""
+            # em automações/canais (background) não há usuário p/ confirmar → executa direto
+            if g_confirm and not _g_truthy(confirm) and not toolctx.background.get():
                 from .interaction import ask_options
                 return ask_options(
                     summary,
@@ -903,7 +911,8 @@ def _register_builtins(
             return {"error": f"o dispositivo '{name}' não está liberado para este modelo."}
 
         def _t_guard(summary: str, confirm: Any) -> dict | None:
-            if t_confirm and not _t_truthy(confirm):
+            # background (automações/canais): sem usuário p/ confirmar → aciona direto
+            if t_confirm and not _t_truthy(confirm) and not toolctx.background.get():
                 from .interaction import ask_options
                 return ask_options(
                     summary,
@@ -1278,11 +1287,14 @@ def deep_config_from_secrets(
 
 
 def google_config_from_secrets(
-    user_id: str, accounts: list[dict] | None = None, google_prefs: dict | None = None
+    user_id: str, accounts: list[dict] | None = None, google_prefs: dict | None = None,
+    *, confirm_actions: bool = False,
 ) -> "GoogleConfig":
     """Config das tools Google. `accounts` = contas liberadas p/ este modelo
     ([{"id","email"}]); vazio → as tools existem mas respondem 'não conectado'.
-    Preferências (ops de ativação, confirmação, limites) vêm do config por-modelo."""
+    Confirmação de escritas (enviar/arquivar e-mail, mexer na agenda) é OPT-IN pelo
+    perfil global do usuário (`confirm_actions`, Configurações → Segurança); por padrão
+    a IA executa direto, sem pedir permissão."""
     p = google_prefs or {}
 
     def _int(k: str, d: int, lo: int, hi: int) -> int:
@@ -1293,7 +1305,7 @@ def google_config_from_secrets(
 
     return GoogleConfig(
         user_id=user_id,
-        require_confirm=p.get("require_confirm", True) is not False,
+        require_confirm=bool(confirm_actions),
         max_results=_int("max_results", 10, 1, 50),
         default_calendar=str(p.get("default_calendar") or "primary"),
         accounts=list(accounts or []),
@@ -1302,16 +1314,17 @@ def google_config_from_secrets(
 
 
 def tuya_config_from_secrets(
-    conn: dict | None, tuya_prefs: dict | None = None
+    conn: dict | None, tuya_prefs: dict | None = None, *, confirm_actions: bool = False,
 ) -> "TuyaConfig":
     """Config da tool Tuya. `conn` = conexão global (creds + catálogo) do app_settings;
-    None → a tool existe mas responde 'não conectado'. As prefs (dispositivos e ações
-    liberadas, confirmação) vêm do config por-modelo."""
+    None → a tool existe mas responde 'não conectado'. Confirmação antes de acionar
+    dispositivos é OPT-IN pelo perfil global (`confirm_actions`, Configurações →
+    Segurança); por padrão aciona direto."""
     p = tuya_prefs or {}
     return TuyaConfig(
         conn=conn or {},
         allowed_devices=[str(d) for d in (p.get("devices") or [])],
-        require_confirm=p.get("require_confirm", True) is not False,
+        require_confirm=bool(confirm_actions),
         ops=p.get("ops") if isinstance(p.get("ops"), dict) else {},
     )
 

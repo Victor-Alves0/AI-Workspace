@@ -22,7 +22,16 @@ from ..auth.deps import require_approved
 from ..config import get_settings
 from ..db import SessionLocal, get_db
 from .. import budget_service, crypto, extraction
-from ..models import Artifact, Chat, ChatCompaction, Message, ModelConfig, Skill, User
+from ..models import (
+    Artifact,
+    Chat,
+    ChatCompaction,
+    KnowledgeDoc,
+    Message,
+    ModelConfig,
+    Skill,
+    User,
+)
 from ..schemas.chat import (
     ChatCreate,
     ChatDetail,
@@ -270,6 +279,61 @@ async def delete_chat(
     return {"ok": True}
 
 
+@router.get("/{chat_id}/info")
+async def chat_info(
+    chat_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Painel "Informações" do chat: modelo, nº de mensagens, tokens (entrada/saída),
+    custo total, artefatos e quantas memórias estão vinculadas a esta conversa."""
+    chat = await _get_owned_chat(db, chat_id, user)
+
+    msgs = list(await db.scalars(select(Message).where(Message.chat_id == chat_id)))
+    tokens_in = tokens_out = 0
+    cost = 0.0
+    for m in msgs:
+        u = m.usage or {}
+        tokens_in += int(u.get("prompt_tokens", 0) or 0)
+        tokens_out += int(u.get("completion_tokens", 0) or 0)
+        cost += float(u.get("cost", 0.0) or (m.cost or 0.0))
+    convo_count = sum(1 for m in msgs if m.role in ("user", "assistant") and not m.is_summary)
+
+    arts = list(await db.scalars(
+        select(Artifact).where(Artifact.chat_id == chat_id).order_by(Artifact.updated_at.desc())
+    ))
+    artifacts = [
+        {"id": str(a.id), "identifier": a.identifier, "title": a.title or a.identifier,
+         "kind": a.kind, "version": a.version}
+        for a in arts
+    ]
+
+    # memórias vinculadas a este chat (escopo "chat") — melhor-esforço
+    memory_count = 0
+    try:
+        from ..memory import mem0_service
+        key = (await get_secret(db, user.id, OPENROUTER_KEY)) or "x"
+        rows = await run_in_threadpool(
+            lambda: mem0_service.list_memories(key, str(user.id), scope="chat", chat_id=str(chat_id))
+        )
+        memory_count = len(rows)
+    except Exception:  # noqa: BLE001
+        memory_count = 0
+
+    return {
+        "id": str(chat.id),
+        "title": chat.title,
+        "model": chat.model,
+        "tags": chat.tags or [],
+        "message_count": convo_count,
+        "tokens_in": tokens_in,
+        "tokens_out": tokens_out,
+        "cost": round(cost, 6),
+        "artifacts": artifacts,
+        "memory_count": memory_count,
+        "created_at": chat.created_at.isoformat() if chat.created_at else None,
+        "updated_at": chat.updated_at.isoformat() if chat.updated_at else None,
+    }
+
+
 @router.post("/{chat_id}/clone", response_model=ChatOut)
 async def clone_chat(
     chat_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
@@ -380,7 +444,14 @@ def _final_message_fields(collected: dict) -> tuple[str, dict | None]:
 
 # padrão de memória (novos chats): OPT-IN (desligada) — igual ao memory_routes.DEFAULT_MEMORY
 _DEFAULT_MEMORY = {"enabled": False, "write": "global",
-                   "read": {"global": True, "model": True, "chat": True}}
+                   "read": {"global": True, "model": True, "chat": True, "project": True}}
+
+
+def _mem_project(chat: Chat | None) -> str | None:
+    """Id do 'projeto' p/ a memória compartilhada = a pasta do chat (folder_id).
+    None quando o chat não está numa pasta (aí o escopo 'projeto' não se aplica)."""
+    fid = getattr(chat, "folder_id", None) if chat is not None else None
+    return str(fid) if fid else None
 
 
 def _user_profile_dict(user: User) -> dict[str, Any]:
@@ -445,7 +516,7 @@ def _resolve_memory(chat: Chat, model_config: ModelConfig | None, user: User) ->
     if chat.memory_config:
         cfg.update(chat.memory_config)
     if cfg.get("enabled") is False:
-        return {"global": False, "model": False, "chat": False}, "off", review
+        return {"global": False, "model": False, "chat": False, "project": False}, "off", review
     read = {**_DEFAULT_MEMORY["read"], **(cfg.get("read") or {})}
     write = cfg.get("write") or "global"
     return read, write, review
@@ -485,6 +556,40 @@ def _resolve_knowledge(chat: Chat | None, model_config: ModelConfig | None, user
             if b and str(b) not in bases:
                 bases.append(str(b))
     return {"bases": bases, "mode": (merged.get("mode") or "auto"), "k": int(merged.get("k") or 6)}
+
+
+async def _ref_docs(
+    db: AsyncSession, user: User, chat: Chat | None,
+    model_config: ModelConfig | None, ids: list[uuid.UUID],
+) -> list[dict]:
+    """Docs da Base de Conhecimento referenciados no compositor ("#") p/ ESTE turno.
+    GATE: só entram docs de bases ACOPLADAS ao modelo/chat (mesma resolução do RAG).
+    Devolve [{id, filename, base_id, text}] com o texto extraído (p/ o orchestrator
+    decidir texto-inteiro vs. trechos)."""
+    if not ids:
+        return []
+    from ..knowledge import ingest as kb_ingest
+
+    allowed = {str(b) for b in _resolve_knowledge(chat, model_config, user).get("bases") or []}
+    if not allowed:
+        return []
+    out: list[dict] = []
+    for did in ids:
+        d = await db.get(KnowledgeDoc, did)
+        if d is None or d.user_id != user.id or str(d.base_id) not in allowed:
+            continue
+        if not d.data:
+            continue
+        try:
+            text = await run_in_threadpool(kb_ingest.extract_text, d.filename, d.mime, bytes(d.data))
+        except Exception:  # noqa: BLE001
+            continue
+        if text and text.strip():
+            out.append({
+                "id": str(d.id), "filename": d.filename,
+                "base_id": str(d.base_id), "text": text,
+            })
+    return out
 
 
 def _image_output(model_config: ModelConfig | None) -> bool:
@@ -897,6 +1002,7 @@ async def ephemeral(
     user_id = str(user.id)
 
     async def event_stream():
+        final_usage: dict | None = None
         async for event in run_turn_guarded(
             guards=guards,
             api_key=api_key,
@@ -923,7 +1029,21 @@ async def ephemeral(
             ocr_engine=ocr_eng,
             ocr_lang=ocr_lang,
         ):
+            if isinstance(event, dict) and event.get("type") == "done":
+                final_usage = event.get("usage")
             yield _sse(event)
+        # o chat temporário NÃO é persistido, mas o custo real aconteceu: registra o
+        # uso no ledger (chat_id=None) p/ a analítica e o orçamento ficarem corretos.
+        if final_usage:
+            try:
+                rec = _usage_record(final_usage, model, model_config)
+                async with SessionLocal() as s:
+                    uev = usage_event_from_record(user.id, None, None, rec)
+                    if uev is not None:
+                        s.add(uev)
+                        await s.commit()
+            except Exception:  # noqa: BLE001 - ledger é best-effort
+                logger.warning("ephemeral: falha ao registrar uso no ledger")
 
     return StreamingResponse(
         event_stream(),
@@ -1089,6 +1209,7 @@ async def send_message(
         mem_write=mem_write,
         mem_review=mem_review,
         mem_banks=mem_banks,
+        mem_project=_mem_project(chat),
         user_profile=_user_profile_dict(user),
         skills=skills,
         use_context=_use_context(model_config),
@@ -1099,6 +1220,7 @@ async def send_message(
         genimage=genimage,
         image_output=_image_output(model_config),
         knowledge=_resolve_knowledge(chat, model_config, user),
+        ref_docs=await _ref_docs(db, user, chat, model_config, body.ref_doc_ids),
         ocr=ocr_on,
         ocr_engine=ocr_eng,
         ocr_lang=ocr_lang,
@@ -1331,6 +1453,7 @@ async def regenerate_message(
         mem_write=_mem[1],
         mem_review=_mem[2],
         mem_banks=_mem_banks(chat, model_config, user),
+        mem_project=_mem_project(chat),
         user_profile=_user_profile_dict(user),
         skills=skills,
         use_context=_use_context(model_config),
@@ -1469,6 +1592,7 @@ async def continue_message(
         mem_write=_mem[1],
         mem_review=_mem[2],
         mem_banks=_mem_banks(chat, model_config, user),
+        mem_project=_mem_project(chat),
         user_profile=_user_profile_dict(user),
         skills=skills,
         use_context=_use_context(model_config),
@@ -1833,11 +1957,17 @@ async def roundtable_run(
                 except Exception as exc:  # noqa: BLE001 - erro de um turno não derruba a mesa
                     logger.warning("Turno da mesa-redonda falhou: %s", exc)
                     yield _sse({"type": "error", "message": str(exc)})
-                mid = await _rt_persist(chat_id, user, r["mc"], r["p"]["model"], sp, text, usage, reasoning_obj)
-                convo.append({"role": "assistant", "content": text, "speaker": sid})
                 lp = sid
                 turns += 1
-                yield _sse({"type": "speaker_end", "speaker": sp, "message_id": str(mid)})
+                if text.strip():
+                    mid = await _rt_persist(chat_id, user, r["mc"], r["p"]["model"], sp, text, usage, reasoning_obj)
+                    convo.append({"role": "assistant", "content": text, "speaker": sid})
+                    yield _sse({"type": "speaker_end", "speaker": sp, "message_id": str(mid)})
+                else:
+                    # turno vazio (erro/sem saída): NÃO persiste nem entra no histórico
+                    # — uma mensagem de conteúdo vazio quebraria a próxima rodada em
+                    # provedores que rejeitam mensagens vazias no contexto.
+                    yield _sse({"type": "speaker_end", "speaker": sp, "message_id": None})
                 if body.steps == "one":
                     break
         finally:

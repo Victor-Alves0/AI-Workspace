@@ -27,6 +27,7 @@ class ChatUpdate(BaseModel):
     params: dict[str, Any] | None = None
     archived: bool | None = None
     pinned: bool | None = None
+    tags: list[str] | None = None
     folder_id: uuid.UUID | None = None
     model_config_id: uuid.UUID | None = None
     # memória por-chat: {"write": "...", "read": {...}} (null = herda modelo/perfil)
@@ -76,6 +77,7 @@ class ChatOut(BaseModel):
     params: dict[str, Any]
     archived: bool
     pinned: bool
+    tags: list[str] = Field(default_factory=list)
     # link público read-only (/shared/<public_id>); null = privado
     public_id: str | None = None
     # "Duração do Chat" (automações): view_once = o front apaga ao abrir e sair
@@ -116,6 +118,9 @@ class SendMessageIn(BaseModel):
     # "@" no promptbox: roteia SÓ ESTE turno a outro agente (ModelConfig), sem mudar
     # o modelo padrão do chat. None = usa o modelo do chat.
     agent_model_config_id: uuid.UUID | None = None
+    # "#" no promptbox: docs da Base de Conhecimento referenciados p/ ESTE turno
+    # (o modelo recebe o conteúdo). Gated às bases acopladas ao modelo/chat.
+    ref_doc_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
 class FolderCreate(BaseModel):

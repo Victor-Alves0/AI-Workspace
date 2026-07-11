@@ -95,7 +95,7 @@ export default function Roundtable({
   const editP = participants.find((p) => p.id === editing) || null;
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-2 rounded-2xl border border-border bg-surface/60 px-3 py-2.5">
+    <div className="mx-auto w-full max-w-3xl space-y-2 px-1 py-1">
       {/* participantes */}
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Mesa</span>

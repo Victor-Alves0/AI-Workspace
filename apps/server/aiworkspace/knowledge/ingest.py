@@ -106,6 +106,21 @@ def _tail(s: str) -> str:
     return s[-_OVERLAP_CHARS:] if len(s) > _OVERLAP_CHARS else s
 
 
+def _meta_prefix(meta: dict | None) -> str:
+    """Linha curta com título/tags do doc (metadados), p/ prefixar cada chunk.
+    Vazio quando não há metadados."""
+    if not meta:
+        return ""
+    parts: list[str] = []
+    title = (meta.get("title") or "").strip()
+    if title:
+        parts.append(title)
+    tags = [str(t).strip() for t in (meta.get("tags") or []) if str(t).strip()]
+    if tags:
+        parts.append("tags: " + ", ".join(tags))
+    return ("[" + " · ".join(parts) + "]\n") if parts else ""
+
+
 # --------------------------------------------------------------------------- #
 # Indexação (background)
 # --------------------------------------------------------------------------- #
@@ -134,6 +149,7 @@ async def index_doc(doc_id: uuid.UUID) -> None:
             doc.error = None
             await db.commit()
             filename, mime, base_id, user_id = doc.filename, doc.mime, doc.base_id, doc.user_id
+            meta_prefix = _meta_prefix(doc.meta)
             raw = bytes(doc.data)
 
         try:
@@ -141,6 +157,10 @@ async def index_doc(doc_id: uuid.UUID) -> None:
             chunks = chunk_text(text)
             if not chunks:
                 raise ValueError("nenhum texto extraído do arquivo")
+            # metadados (título/tags) viram prefixo de cada chunk: melhoram tanto o
+            # embedding (recuperação) quanto o trecho citado ao usuário.
+            if meta_prefix:
+                chunks = [meta_prefix + c for c in chunks]
             vecs = await run_in_threadpool(embeddings.embed_texts, chunks)
         except Exception as exc:  # noqa: BLE001
             logger.warning("index_doc extração/embedding falhou (%s): %s", doc_id, exc)

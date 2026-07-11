@@ -106,8 +106,8 @@ async def update_profile(
     prof.update(changed)
     user.profile = prof  # reatribui p/ o ORM detectar a mudança do JSONB
     await db.commit()
-    # a config de busca/finanças/deep search afeta a SIFT do usuário → invalida cache
-    if any(k in changed for k in ("web_search", "finance", "deep_search")):
+    # a config de busca/finanças/deep search/segurança afeta a SIFT do usuário → invalida cache
+    if any(k in changed for k in ("web_search", "finance", "deep_search", "security")):
         sift_service.invalidate(str(user.id))
     return {"ok": True, "profile": prof}
 

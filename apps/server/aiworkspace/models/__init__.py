@@ -17,7 +17,7 @@ from .telegram import TelegramConnection, TelegramThread
 from .push import PushSubscription
 from .artifact import Artifact, ArtifactVersion
 from .memory_bank import MemoryBank
-from .knowledge import KnowledgeBase, KnowledgeDoc, KnowledgeChunk
+from .knowledge import KnowledgeBase, KnowledgeFolder, KnowledgeDoc, KnowledgeChunk
 from .benchmark import Benchmark, BenchmarkRun
 
 __all__ = [
@@ -48,6 +48,7 @@ __all__ = [
     "ArtifactVersion",
     "MemoryBank",
     "KnowledgeBase",
+    "KnowledgeFolder",
     "KnowledgeDoc",
     "KnowledgeChunk",
     "Benchmark",

@@ -17,6 +17,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import ForeignKey, Integer, LargeBinary, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..db import Base
@@ -30,6 +31,29 @@ class KnowledgeBase(Base):
     )
     name: Mapped[str] = mapped_column(String(120), default="")
     description: Mapped[str] = mapped_column(Text, default="")
+    # etiquetas livres p/ organizar/filtrar bases (["fiscal", "2026", ...])
+    tags: Mapped[list] = mapped_column(JSONB, default=list)
+
+
+class KnowledgeFolder(Base):
+    """Pasta dentro de uma base — organiza os documentos como um explorador.
+
+    Aninhável via `parent_id` (self-FK, null = raiz da base). Espelha `Folder`
+    (chat.py). Excluir uma pasta faz docs/subpastas subirem p/ o pai (SET NULL).
+    """
+
+    __tablename__ = "knowledge_folders"
+
+    base_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("knowledge_bases.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str] = mapped_column(String(160), default="")
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("knowledge_folders.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 class KnowledgeDoc(Base):
@@ -41,6 +65,10 @@ class KnowledgeDoc(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
+    # pasta do explorador onde este doc vive (null = raiz da base)
+    folder_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("knowledge_folders.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     filename: Mapped[str] = mapped_column(String(255), default="")
     mime: Mapped[str] = mapped_column(String(128), default="")
     size: Mapped[int] = mapped_column(Integer, default=0)
@@ -50,6 +78,9 @@ class KnowledgeDoc(Base):
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
     # bytes originais — permite reindexar e baixar o arquivo (como generated_images)
     data: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    # metadados p/ melhorar a busca: {"title": str, "description": str, "tags": [...]}.
+    # Prefixados em cada chunk na indexação (ver knowledge/ingest.py).
+    meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 
 class KnowledgeChunk(Base):

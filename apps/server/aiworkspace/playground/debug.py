@@ -48,7 +48,7 @@ async def debug_turn(user: User, model: str, model_config_id, prompt: str, user_
     fecha ao retornar o StreamingResponse, então não pode ser usada dentro do stream
     (mesmo cuidado da mesa-redonda)."""
     # import tardio evita ciclo com chat.routes em tempo de import
-    from ..chat.routes import _get_model_config, _load_skills, _resolve_provider
+    from ..chat.routes import _code_mode, _get_model_config, _load_skills, _resolve_provider
     from ..chat.orchestrator import run_turn
 
     async with SessionLocal() as db:
@@ -72,7 +72,7 @@ async def debug_turn(user: User, model: str, model_config_id, prompt: str, user_
         skills = await _load_skills(db, user, mc)
         mc_system = mc.system_prompt if mc else None
         mc_params = (mc.params if mc else {}) or {}
-        mc_code = bool(getattr(mc, "code_mode", False)) if mc else False
+        mc_code = _code_mode(mc)
 
     if sift is None:
         yield {"type": "notice", "message": "O modelo escolhido não tem ferramentas ativas — o trace não terá chamadas."}

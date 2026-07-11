@@ -5,19 +5,22 @@ import { ChevronDown, ChevronRight, SlidersHorizontal, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { KnowledgeBase, KnowledgeConfig, MemoryConfig } from "@/lib/types";
 
-const MEM_WRITE: { value: string; label: string }[] = [
+const MEM_WRITE: { value: string; label: string; project?: boolean }[] = [
   { value: "global", label: "Global" },
   { value: "model", label: "Do modelo" },
+  { value: "project", label: "Do projeto (pasta)", project: true },
   { value: "chat", label: "Só este chat" },
   { value: "off", label: "Não salvar" },
 ];
-const MEM_READ: { key: "global" | "model" | "chat"; label: string }[] = [
+const MEM_READ: { key: "global" | "model" | "chat" | "project"; label: string; project?: boolean }[] = [
   { key: "global", label: "Global" },
   { key: "model", label: "Modelo" },
+  { key: "project", label: "Projeto", project: true },
   { key: "chat", label: "Chat" },
 ];
 const MEM_DEFAULT: Required<MemoryConfig> = {
-  enabled: true, write: "global", read: { global: true, model: true, chat: true }, banks: [], review: false,
+  enabled: true, write: "global",
+  read: { global: true, model: true, chat: true, project: true }, banks: [], review: false,
 };
 
 // Lista de parâmetros do painel (espelha o OpenWebUI). Os numéricos comuns
@@ -121,6 +124,7 @@ export default function Controls({
   params: initialParams,
   memory,
   memoryDefault,
+  hasProject,
   onMemoryChange,
   knowledge,
   onKnowledgeChange,
@@ -133,6 +137,8 @@ export default function Controls({
   memory?: MemoryConfig | null;
   /** padrão efetivo herdado (perfil/modelo) — p/ mostrar o estado quando herda */
   memoryDefault?: MemoryConfig;
+  /** o chat está numa pasta? habilita o escopo de memória "Projeto" */
+  hasProject?: boolean;
   onMemoryChange?: (cfg: MemoryConfig | null) => void;
   /** conhecimento do chat ativo (null = herda do modelo/perfil) */
   knowledge?: KnowledgeConfig | null;
@@ -222,13 +228,16 @@ export default function Controls({
                     onChange={(e) => patchMem({ write: e.target.value as MemoryConfig["write"] })}
                     className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
                   >
-                    {MEM_WRITE.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    {MEM_WRITE.filter((o) => !o.project || hasProject).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
+                  {!hasProject && (
+                    <p className="mt-1 text-[11px] text-muted">Mova este chat para uma pasta para compartilhar memória de projeto entre os chats dela.</p>
+                  )}
                 </div>
                 <div>
                   <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">Ler memórias de (união)</p>
                   <div className="flex flex-wrap gap-1.5">
-                    {MEM_READ.map((r) => {
+                    {MEM_READ.filter((r) => !r.project || hasProject).map((r) => {
                       const on = mem.read[r.key] !== false;
                       return (
                         <button

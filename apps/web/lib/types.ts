@@ -35,6 +35,8 @@ export interface Chat {
   params: Record<string, unknown>;
   archived: boolean;
   pinned: boolean;
+  /** etiquetas livres p/ organizar/filtrar conversas */
+  tags?: string[];
   /** link público read-only (/shared/<public_id>); null = privado */
   public_id?: string | null;
   /** "Duração do Chat" (automações): apagado quando o usuário abre e sai */
@@ -86,9 +88,9 @@ export interface Speaker {
 /** config de memória (perfil/modelo/chat). read = união dos escopos ligados. */
 export interface MemoryConfig {
   enabled?: boolean;
-  /** "bank:<id>" grava num banco compartilhado */
-  write?: "global" | "model" | "chat" | "off" | string;
-  read?: { global?: boolean; model?: boolean; chat?: boolean };
+  /** "project" grava na pasta (projeto); "bank:<id>" grava num banco compartilhado */
+  write?: "global" | "model" | "chat" | "project" | "off" | string;
+  read?: { global?: boolean; model?: boolean; chat?: boolean; project?: boolean };
   /** ids dos bancos de memória acoplados (lidos em união) */
   banks?: string[];
   /** revisar antes de salvar (padrão do perfil): novas memórias ficam pendentes */
@@ -111,27 +113,69 @@ export interface KnowledgeBase {
   id: string;
   name: string;
   description: string;
+  tags?: string[];
   doc_count: number;
   chunk_count: number;
+}
+
+/** uma pasta dentro de uma base (explorador) */
+export interface KnowledgeFolder {
+  id: string;
+  base_id: string;
+  name: string;
+  parent_id: string | null;
+}
+
+/** metadados de um documento (melhoram a busca; prefixados no índice) */
+export interface KnowledgeDocMeta {
+  title?: string;
+  description?: string;
+  tags?: string[];
 }
 
 /** um documento dentro de uma base */
 export interface KnowledgeDoc {
   id: string;
   base_id: string;
+  folder_id?: string | null;
   filename: string;
   mime: string;
   size: number;
   status: "pending" | "indexing" | "ready" | "error";
   error?: string | null;
   chunk_count: number;
+  meta?: KnowledgeDocMeta | null;
   created_at?: string | null;
+}
+
+/** árvore de referências ("#") — bases acessíveis com pastas + docs prontos */
+export interface KnowledgeRef {
+  id: string;
+  name: string;
+  folders: { id: string; name: string; parent_id: string | null }[];
+  docs: { id: string; filename: string; folder_id: string | null }[];
+}
+
+/** painel "Informações" do chat */
+export interface ChatInfo {
+  id: string;
+  title: string;
+  model: string;
+  tags: string[];
+  message_count: number;
+  tokens_in: number;
+  tokens_out: number;
+  cost: number;
+  artifacts: { id: string; identifier: string; title: string; kind: string; version: number }[];
+  memory_count: number;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface MemoryItem {
   id: string;
   text: string;
-  scope: "global" | "model" | "chat" | "bank";
+  scope: "global" | "model" | "chat" | "bank" | "project";
   disabled?: boolean;
   model_id?: string | null;
   model_name?: string | null;
@@ -139,6 +183,8 @@ export interface MemoryItem {
   chat_title?: string | null;
   bank_id?: string | null;
   bank_name?: string | null;
+  project_id?: string | null;
+  project_name?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -149,6 +195,7 @@ export interface MemoryScopes {
   models: { id: string; name: string; count: number }[];
   chats: { id: string; title: string; count: number }[];
   banks: { id: string; name: string; count: number }[];
+  projects: { id: string; name: string; count: number }[];
 }
 
 export interface MemoryBank {
@@ -532,7 +579,7 @@ export type ChatEvent =
   | { type: "audio_router"; status: "start" | "done"; engine?: string; count?: number }
   // mesa-redonda: início/fim da fala de um participante + fim da rodada
   | { type: "speaker_start"; speaker: Speaker }
-  | { type: "speaker_end"; speaker: Speaker; message_id: string }
+  | { type: "speaker_end"; speaker: Speaker; message_id: string | null }
   | { type: "roundtable_done"; reason?: string }
   | { type: "roundtable_paused" }
   | { type: "idle" }

@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { X } from "lucide-react";
 
 export function useClickOutside<T extends HTMLElement>(onClose: () => void) {
   const ref = useRef<T>(null);
@@ -161,6 +162,47 @@ export function MenuItem({
 
 export function MenuDivider() {
   return <div className="my-1 h-px bg-border" />;
+}
+
+/** Editor de etiquetas: chips removíveis + input (Enter/vírgula adiciona). */
+export function TagInput({
+  tags,
+  onChange,
+  placeholder = "Adicionar etiqueta…",
+}: {
+  tags: string[];
+  onChange: (t: string[]) => void;
+  placeholder?: string;
+}) {
+  const [v, setV] = useState("");
+  function add(raw: string) {
+    const t = raw.trim().slice(0, 40);
+    if (t && !tags.includes(t)) onChange([...tags, t].slice(0, 20));
+    setV("");
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-surface px-2 py-1.5">
+      {tags.map((t) => (
+        <span key={t} className="flex items-center gap-1 rounded-full bg-surface2 px-2 py-0.5 text-xs text-ink">
+          {t}
+          <button onClick={() => onChange(tags.filter((x) => x !== t))} className="text-muted transition-colors hover:text-red-400">
+            <X size={11} />
+          </button>
+        </span>
+      ))}
+      <input
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === ",") { e.preventDefault(); add(v); }
+          if (e.key === "Backspace" && !v && tags.length) onChange(tags.slice(0, -1));
+        }}
+        onBlur={() => v.trim() && add(v)}
+        placeholder={tags.length ? "" : placeholder}
+        className="min-w-[100px] flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
+      />
+    </div>
+  );
 }
 
 /** Toggle pequeno e elegante (accent quando ligado). */

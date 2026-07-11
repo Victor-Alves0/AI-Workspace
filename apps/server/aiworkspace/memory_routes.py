@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth.deps import require_approved
 from .db import get_db
 from .memory import mem0_service
-from .models import Chat, MemoryBank, ModelConfig, User
+from .models import Chat, Folder, MemoryBank, ModelConfig, User
 from .secrets_service import OPENROUTER_KEY, get_secret
 
 router = APIRouter(prefix="/memory", tags=["memory"])
@@ -49,16 +49,19 @@ class MemoryOut(BaseModel):
     chat_title: str | None = None
     bank_id: str | None = None
     bank_name: str | None = None
+    project_id: str | None = None
+    project_name: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
 
 class MemoryIn(BaseModel):
     text: str
-    scope: str = "global"  # global | model | chat | bank
+    scope: str = "global"  # global | model | chat | bank | project
     model_id: str | None = None
     chat_id: str | None = None
     bank_id: str | None = None
+    project_id: str | None = None
 
 
 class MemoryPatch(BaseModel):
@@ -135,6 +138,26 @@ async def _bank_names(db: AsyncSession, user: User, ids: list[str]) -> dict[str,
             out[str(b.id)] = b.name or "Banco"
     for i in ids:
         out.setdefault(i, "Banco removido")
+    return out
+
+
+async def _folder_names(db: AsyncSession, user: User, ids: list[str]) -> dict[str, str]:
+    """Projeto = pasta (folder_id). Resolve id → nome da pasta."""
+    out: dict[str, str] = {}
+    uuids: list[uuid.UUID] = []
+    for i in ids:
+        try:
+            uuids.append(uuid.UUID(i))
+        except ValueError:
+            out[i] = i
+    if uuids:
+        rows = await db.scalars(
+            select(Folder).where(Folder.user_id == user.id, Folder.id.in_(uuids))
+        )
+        for f in rows:
+            out[str(f.id)] = f.name or "Projeto"
+    for i in ids:
+        out.setdefault(i, "Projeto removido")
     return out
 
 
@@ -221,12 +244,14 @@ async def scopes(user: User = Depends(require_approved), db: AsyncSession = Depe
     mnames = await _model_names(db, user, list(summary["models"].keys()))
     ctitles = await _chat_titles(db, user, list(summary["chats"].keys()))
     bnames = await _bank_names(db, user, list(summary.get("banks", {}).keys()))
+    fnames = await _folder_names(db, user, list(summary.get("projects", {}).keys()))
     return {
         "global": summary["global"],
         "total": summary["total"],
         "models": [{"id": k, "name": mnames.get(k, k), "count": v} for k, v in summary["models"].items()],
         "chats": [{"id": k, "title": ctitles.get(k, k), "count": v} for k, v in summary["chats"].items()],
         "banks": [{"id": k, "name": bnames.get(k, k), "count": v} for k, v in summary.get("banks", {}).items()],
+        "projects": [{"id": k, "name": fnames.get(k, k), "count": v} for k, v in summary.get("projects", {}).items()],
     }
 
 
@@ -261,6 +286,7 @@ async def list_memories(
     model_id: str | None = None,
     chat_id: str | None = None,
     bank_id: str | None = None,
+    project_id: str | None = None,
     q: str = "",
     user: User = Depends(require_approved),
     db: AsyncSession = Depends(get_db),
@@ -268,23 +294,28 @@ async def list_memories(
     key = await _key(db, user)
     rows = await run_in_threadpool(
         lambda: mem0_service.list_memories(
-            key, str(user.id), scope=scope, chat_id=chat_id, agent_id=model_id, bank_id=bank_id, query=q
+            key, str(user.id), scope=scope, chat_id=chat_id, agent_id=model_id,
+            bank_id=bank_id, project_id=project_id, query=q,
         )
     )
     mids = {r["model_id"] for r in rows if r["model_id"]}
     cids = {r["chat_id"] for r in rows if r["chat_id"]}
     bids = {r.get("bank_id") for r in rows if r.get("bank_id")}
+    pids = {r.get("project_id") for r in rows if r.get("project_id")}
     mnames = await _model_names(db, user, list(mids))
     ctitles = await _chat_titles(db, user, list(cids))
     bnames = await _bank_names(db, user, list(bids))
+    fnames = await _folder_names(db, user, list(pids))
     return [
         MemoryOut(
             id=r["id"], text=r["text"], scope=r["scope"], disabled=r.get("disabled", False),
             model_id=r["model_id"], chat_id=r["chat_id"], bank_id=r.get("bank_id"),
+            project_id=r.get("project_id"),
             created_at=r["created_at"], updated_at=r["updated_at"],
             model_name=mnames.get(r["model_id"]) if r["model_id"] else None,
             chat_title=ctitles.get(r["chat_id"]) if r["chat_id"] else None,
             bank_name=bnames.get(r["bank_id"]) if r.get("bank_id") else None,
+            project_name=fnames.get(r["project_id"]) if r.get("project_id") else None,
         )
         for r in rows
     ]
@@ -297,8 +328,12 @@ async def add_memory(
     db: AsyncSession = Depends(get_db),
 ):
     key = await _key(db, user)
-    # escopo "bank": o agent_id da memória é o id do banco (add_manual prefixa)
-    agent = body.bank_id if body.scope == "bank" else body.model_id
+    # bank/project: o agent_id da memória é o id do banco/pasta (add_manual prefixa)
+    agent = (
+        body.bank_id if body.scope == "bank"
+        else body.project_id if body.scope == "project"
+        else body.model_id
+    )
     ok = await run_in_threadpool(
         lambda: mem0_service.add_manual(
             key, str(user.id), body.text, scope=body.scope,

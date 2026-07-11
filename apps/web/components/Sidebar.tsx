@@ -6,9 +6,11 @@ import {
   ChevronDown,
   ChevronRight,
   CalendarClock,
+  FileText,
   Folder as FolderIcon,
   FolderPlus,
   LayoutGrid,
+  MessagesSquare,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -19,8 +21,20 @@ import {
 } from "lucide-react";
 import type { Chat, Folder, ModelConfig, User } from "@/lib/types";
 import { api } from "@/lib/api";
+import { SHORTCUTS, resolveBinding, prettyCombo, type ShortcutMap } from "@/lib/shortcuts";
 import ChatItem, { ChatActions } from "./ChatItem";
 import UserMenu from "./UserMenu";
+
+/** teclas de um atalho renderizadas como <kbd> (ex.: ⌘ ⇧ O) */
+function Kbd({ combo }: { combo: string }) {
+  return (
+    <span className="flex items-center gap-0.5">
+      {prettyCombo(combo).map((k, i) => (
+        <kbd key={i} className="rounded bg-surface2 px-1 py-0.5 text-[10px] font-medium leading-none text-muted">{k}</kbd>
+      ))}
+    </span>
+  );
+}
 
 function groupByDate(chats: Chat[]): { label: string; chats: Chat[] }[] {
   const now = new Date();
@@ -46,19 +60,22 @@ function groupByDate(chats: Chat[]): { label: string; chats: Chat[] }[] {
 
 function SectionHeader({
   label,
+  icon,
   onToggle,
   action,
 }: {
   label: string;
+  icon?: React.ReactNode;
   onToggle: () => void;
   action?: React.ReactNode;
 }) {
   return (
-    <div className="group relative mt-2">
+    <div className="group relative mt-1">
       <button
         onClick={onToggle}
-        className="flex w-full items-center rounded-lg px-2 py-2 text-sm font-semibold tracking-wide text-muted transition-colors hover:bg-hover hover:text-ink-soft"
+        className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-semibold tracking-wide text-muted transition-colors hover:bg-hover hover:text-ink-soft"
       >
+        {icon && <span className="shrink-0 text-muted">{icon}</span>}
         {label}
       </button>
       {action && (
@@ -75,22 +92,25 @@ function NavButton({
   label,
   collapsed,
   onClick,
+  trailing,
 }: {
   icon: React.ReactNode;
   label: string;
   collapsed: boolean;
   onClick: () => void;
+  trailing?: React.ReactNode;
 }) {
   return (
     <button
       onClick={onClick}
       title={collapsed ? label : undefined}
-      className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-medium text-ink transition-colors hover:bg-hover ${
+      className={`group/nav flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-medium text-ink transition-colors hover:bg-hover ${
         collapsed ? "justify-center" : ""
       }`}
     >
       <span className="shrink-0 text-ink-soft">{icon}</span>
       {!collapsed && <span className="truncate">{label}</span>}
+      {!collapsed && trailing && <span className="ml-auto shrink-0">{trailing}</span>}
     </button>
   );
 }
@@ -114,6 +134,7 @@ export default function Sidebar({
   onToggleCollapse,
   onNewChat,
   onSearch,
+  onOpenConversations,
   chatActions,
   onCreateFolder,
   onRenameFolder,
@@ -137,6 +158,7 @@ export default function Sidebar({
   onToggleCollapse: () => void;
   onNewChat: () => void;
   onSearch: () => void;
+  onOpenConversations: () => void;
   chatActions: ChatActions;
   onCreateFolder: () => void;
   onRenameFolder: (id: string, name: string) => void;
@@ -151,6 +173,14 @@ export default function Sidebar({
   onLogout: () => void;
 }) {
   const [sections, setSections] = useState({ models: true, folders: true, chats: true });
+
+  // atalho do "Novo Chat" (custom do perfil > default) p/ mostrar no botão
+  const newChatCombo = useMemo(() => {
+    const a = SHORTCUTS.find((x) => x.id === "new_chat");
+    if (!a) return null;
+    const b = resolveBinding(user.profile?.shortcuts as ShortcutMap | undefined, a);
+    return b.enabled ? b.keys : null;
+  }, [user.profile?.shortcuts]);
 
   // preserva quais seções (Modelos/Pastas/Chats) estão expandidas entre sessões
   useEffect(() => {
@@ -207,6 +237,9 @@ export default function Sidebar({
         <button onClick={onNewChat} title="Novo Chat" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
           <SquarePen size={18} />
         </button>
+        <button onClick={onOpenConversations} title="Conversas" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
+          <MessagesSquare size={18} />
+        </button>
         <button onClick={onSearch} title="Pesquisar" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
           <Search size={18} />
         </button>
@@ -233,15 +266,26 @@ export default function Sidebar({
           <img src="/logo.png" alt="AI Workspace" className="h-6 w-6 shrink-0 rounded-md" />
           AI Workspace
         </span>
-        <button onClick={onToggleCollapse} title="Colapsar" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
-          <PanelLeftClose size={18} />
-        </button>
+        <div className="flex items-center gap-0.5">
+          <button onClick={onSearch} title="Pesquisar" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
+            <Search size={18} />
+          </button>
+          <button onClick={onToggleCollapse} title="Colapsar" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
+            <PanelLeftClose size={18} />
+          </button>
+        </div>
       </div>
 
       {/* nav principal */}
       <div className="space-y-0.5 px-2">
-        <NavButton icon={<SquarePen size={17} />} label="Novo Chat" collapsed={false} onClick={onNewChat} />
-        <NavButton icon={<Search size={17} />} label="Pesquisar" collapsed={false} onClick={onSearch} />
+        <NavButton
+          icon={<SquarePen size={17} />}
+          label="Novo Chat"
+          collapsed={false}
+          onClick={onNewChat}
+          trailing={newChatCombo ? <Kbd combo={newChatCombo} /> : undefined}
+        />
+        <NavButton icon={<MessagesSquare size={17} />} label="Conversas" collapsed={false} onClick={onOpenConversations} />
         <button
           onClick={onOpenAutomations}
           className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-medium text-ink transition-colors hover:bg-hover"
@@ -253,10 +297,12 @@ export default function Sidebar({
         <NavButton icon={<LayoutGrid size={17} />} label="Espaço de Trabalho" collapsed={false} onClick={onOpenWorkspace} />
       </div>
 
-      <div className="mt-1 flex-1 overflow-y-auto px-2 pb-2">
+      <div className="mt-2 flex-1 overflow-y-auto px-2 pb-2">
+        <p className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wider text-muted/70">Biblioteca</p>
         {/* Modelos */}
         <SectionHeader
           label="Modelos"
+          icon={<LayoutGrid size={16} />}
           onToggle={() => toggle("models")}
           action={
             <button onClick={onOpenWorkspace} title="Gerenciar" className="text-muted transition-colors hover:text-ink-soft">
@@ -287,6 +333,7 @@ export default function Sidebar({
         {/* Pastas */}
         <SectionHeader
           label="Pastas"
+          icon={<FolderIcon size={16} />}
           onToggle={() => toggle("folders")}
           action={
             <button onClick={onCreateFolder} title="Nova pasta" className="text-muted transition-colors hover:text-ink-soft">
@@ -315,7 +362,7 @@ export default function Sidebar({
         )}
 
         {/* Chats */}
-        <SectionHeader label="Chats" onToggle={() => toggle("chats")} />
+        <SectionHeader label="Chats" icon={<FileText size={16} />} onToggle={() => toggle("chats")} />
         {sections.chats && (
           <div
             className="mt-1"

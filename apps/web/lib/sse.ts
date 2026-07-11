@@ -76,6 +76,7 @@ export async function streamMessage(
   skillIds?: string[],
   attachments?: unknown[],
   agentModelConfigId?: string | null,
+  refDocIds?: string[],
 ): Promise<void> {
   const res = await authedFetch(`/chats/${chatId}/messages`, {
     method: "POST",
@@ -84,6 +85,7 @@ export async function streamMessage(
     body: JSON.stringify({
       content, skill_ids: skillIds ?? [], attachments: attachments ?? [],
       ...(agentModelConfigId ? { agent_model_config_id: agentModelConfigId } : {}),
+      ...(refDocIds && refDocIds.length ? { ref_doc_ids: refDocIds } : {}),
     }),
     signal,
   });

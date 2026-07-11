@@ -21,6 +21,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import get_settings
 from ..models import GoogleAccount, Tool, User
 from ..secrets_service import (
     ALPHAVANTAGE_KEY,
@@ -140,7 +141,11 @@ async def _assemble_configs(db: AsyncSession, user_id: uuid.UUID, model_config: 
     brave = await get_secret(db, user_id, BRAVE_KEY)
     # pesquisa na web em camadas: env < Conexões → Web (conta) < config do modelo
     u = await db.get(User, user_id)
-    user_ws = ((u.profile or {}).get("web_search") or {}) if u else {}
+    prof = (u.profile or {}) if u else {}
+    # confirmação antes de escritas sensíveis (e-mail/agenda/casa) é OPT-IN global
+    # (Configurações → Segurança). Padrão: desligado → a IA executa direto.
+    confirm_actions = bool((prof.get("security") or {}).get("confirm_actions", False))
+    user_ws = (prof.get("web_search") or {})
     model_ws = tools_cfg.get("web_search") or {}
     web_prefs = {**user_ws, **model_ws} or None
     cfg = sift_service.search_config_from_secrets(tavily, brave, web_prefs)
@@ -160,14 +165,18 @@ async def _assemble_configs(db: AsyncSession, user_id: uuid.UUID, model_config: 
         for a in g_rows
         if not allowed_ids or str(a.id) in allowed_ids
     ]
-    google_cfg = sift_service.google_config_from_secrets(str(user_id), g_accounts, g_prefs)
+    google_cfg = sift_service.google_config_from_secrets(
+        str(user_id), g_accounts, g_prefs, confirm_actions=confirm_actions
+    )
     # Tuya/Smart Life: conexão GLOBAL (app_settings) + gating por-modelo. Só busca a
     # conexão se este modelo de fato equipou a tool (evita ler config à toa).
     tuya_cfg = None
     if any(tid == f"{_BUILTIN_PREFIX}smartlife.tuya.devices" for tid in tool_ids):
         from ..integrations import tuya_service
         conn = await tuya_service.get_config(db, str(user_id))
-        tuya_cfg = sift_service.tuya_config_from_secrets(conn, tools_cfg.get("tuya"))
+        tuya_cfg = sift_service.tuya_config_from_secrets(
+            conn, tools_cfg.get("tuya"), confirm_actions=confirm_actions
+        )
     return cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg
 
 
@@ -208,42 +217,41 @@ async def get_sift_for_user(
     if full is None:
         return None
     sift_config = getattr(model_config, "sift_config", None) or {}
-    code_mode = bool(getattr(model_config, "code_mode", False))
+    # mesmo critério do chat (_code_mode): o flag do modelo SÓ vale com o off-switch
+    # global ligado — senão o turno roda em modo normal e os PINS devem valer.
+    code_mode = bool(getattr(model_config, "code_mode", False)) and get_settings().allow_code_mode
     try:
-        scope = full.scope(allow=allow)
-        # Pins: ferramentas "quentes" viram specs de 1a classe (sem discovery).
-        # Capturamos os specs pinados de forma SÍNCRONA (atômica no asyncio) e
-        # limpamos _pinned na hora — não deixa estado no Sift compartilhado.
-        pin_paths = _pinned_paths(sift_config.get("pinned") or [], rows)
-        if pin_paths and not code_mode:
-            try:
-                full._pinned[:] = pin_paths
-                scope._aw_openai_tools = scope.openai_tools()  # type: ignore[attr-defined]
-            except Exception as exc:  # noqa: BLE001 - path inexistente etc.: segue sem pin
-                logger.warning("Falha ao fixar tools SIFT (%s); sem pin", exc)
-            finally:
-                full._pinned.clear()
-        # Modo Código: promove as tools longas a 1ª classe (fora do sandbox).
+        # Pins POR-ESCOPO (SIFT >= 0.7): ferramentas "quentes" viram specs de 1ª
+        # classe (sem discovery) direto no scope — sem mutar estado do Sift
+        # compartilhado (substituiu o antigo hack de _pinned set/clear). No modo
+        # código, o MESMO mecanismo promove as tools longas (rodam fora do sandbox
+        # do run_code — o watchdog mataria e descartaria o resultado).
         if code_mode:
-            promote = [p for p in _CODE_MODE_PROMOTE if _allow_match(p, allow)]
-            if promote:
-                try:
-                    full._pinned[:] = promote
-                    specs = scope.openai_tools()
-                    scope._aw_code_extra_tools = [  # type: ignore[attr-defined]
-                        t for t in specs if "__" in ((t.get("function") or {}).get("name") or "")
-                    ]
-                except Exception as exc:  # noqa: BLE001 - segue sem promoção
-                    logger.warning("Falha ao promover tools longas no code mode (%s)", exc)
-                finally:
-                    full._pinned.clear()
-        # metadados p/ o orchestrator: modo de exposição + prompt "quando usar"
+            pin_paths = [p for p in _CODE_MODE_PROMOTE if _allow_match(p, allow)]
+        else:
+            pin_paths = _pinned_paths(sift_config.get("pinned") or [], rows)
         try:
-            scope._aw_tools = _tool_catalog(tool_ids, rows)  # type: ignore[attr-defined]
-            scope._aw_sift_mode = (sift_config.get("mode") or "prompt")  # type: ignore[attr-defined]
-            scope._aw_sift_prompt = (sift_config.get("prompt") or "")  # type: ignore[attr-defined]
-        except Exception:  # noqa: BLE001 - se o objeto não aceitar atributo, segue sem
-            pass
+            scope = full.scope(allow=allow, pin=pin_paths or None)
+        except Exception as exc:  # noqa: BLE001 - pin fora do allow etc.: segue sem pin
+            logger.warning("Falha ao fixar tools SIFT (%s); escopo sem pin", exc)
+            scope = full.scope(allow=allow)
+            pin_paths = []
+        # Modo Código: os specs pinados (nome flat com "__") entram como tools de
+        # 1ª classe AO LADO do run_code (code_tools() não inclui pins).
+        if code_mode and pin_paths:
+            try:
+                scope.meta["code_extra_tools"] = [
+                    t for t in scope.openai_tools()
+                    if "__" in ((t.get("function") or {}).get("name") or "")
+                ]
+            except Exception as exc:  # noqa: BLE001 - segue sem promoção
+                logger.warning("Falha ao promover tools longas no code mode (%s)", exc)
+        # metadados p/ o orchestrator (scope.meta, oficial na SIFT >= 0.7 —
+        # substituiu os antigos atributos injetados _aw_*): catálogo legível,
+        # modo de exposição e prompt "quando usar"
+        scope.meta["catalog"] = _tool_catalog(tool_ids, rows)
+        scope.meta["sift_mode"] = sift_config.get("mode") or "prompt"
+        scope.meta["sift_prompt"] = sift_config.get("prompt") or ""
         return scope
     except Exception as exc:  # noqa: BLE001
         logger.warning("Falha ao aplicar scope SIFT (%s); chat sem ferramentas", exc)

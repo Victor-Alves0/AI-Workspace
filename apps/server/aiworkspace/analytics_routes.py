@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth.deps import require_approved
 from .config import get_settings
 from .db import get_db
-from .models import UsageEvent, User
+from .models import Chat, UsageEvent, User
 from .providers.openrouter import _headers
 from .secrets_service import OPENROUTER_KEY, get_secret
 
@@ -176,10 +176,12 @@ async def overview(
     chat_ids: set = set()                # conversas com uso na janela
     win = {"tokens": 0, "cost": 0.0, "messages": 0, "prompt": 0, "completion": 0, "reasoning": 0}
     prev = {"tokens": 0, "cost": 0.0, "messages": 0}
-    activity_days: dict[str, int] = {}   # tokens por dia local — últimos 12 meses
+    activity_days: dict[str, int] = {}   # tokens por dia local — ano-calendário atual
     all_days: set[str] = set()           # dias com uso (streak, all-time)
     all_tokens = 0
-    activity_start = _sub_months(local_today, 12)
+    # heatmap = ano-calendário (1º de jan → 31 de dez do ano corrente), não janela móvel
+    activity_start = date(local_today.year, 1, 1)
+    activity_end = date(local_today.year, 12, 31)
 
     for model, model_name, model_config_id, tokens, prompt_t, completion_t, reason_t, cost, created_at, chat_id, provider in rows:
         tokens = int(tokens or 0)
@@ -262,7 +264,7 @@ async def overview(
         d["cost"] = round(d["cost"], 4)
         per_day_list.append(d)
 
-    # --- atividade (12 meses) + sequência de dias consecutivos (all-time) ---
+    # --- atividade (ano-calendário) + sequência de dias consecutivos (all-time) ---
     longest = run = 0
     prev_day: date | None = None
     for iso in sorted(all_days):
@@ -271,15 +273,20 @@ async def overview(
         longest = max(longest, run)
         prev_day = d
     act_total = sum(activity_days.values())
+    # média sobre o período ATIVO no ano (1º uso → hoje), não todo o calendário —
+    # senão quem começou há poucos dias vê uma média minúscula e enganosa.
     first_act = min((date.fromisoformat(k) for k in activity_days), default=local_today)
     act_span = max(1, (local_today - max(first_act, activity_start)).days + 1)
     activity = {
         "start": activity_start.isoformat(),
+        "end": activity_end.isoformat(),
+        "year": local_today.year,
         "days": [{"d": k, "t": v} for k, v in sorted(activity_days.items())],
         "longest_streak": longest,
         "avg_day": int(act_total / act_span),
         "avg_week": int(act_total / act_span * 7),
-        "total_tokens": int(all_tokens),
+        "year_tokens": int(act_total),     # total do ano-calendário (bate com o heatmap)
+        "total_tokens": int(all_tokens),   # all-time (usado só p/ detectar "sem dados")
     }
 
     api_key = await get_secret(db, user.id, OPENROUTER_KEY)
@@ -306,5 +313,145 @@ async def overview(
             "reasoning_tokens": win["reasoning"],
             "cost": round(win["cost"], 4),
             "avg_tokens": int(win["tokens"] / win["messages"]) if win["messages"] else 0,
+        },
+    }
+
+
+@router.get("/model")
+async def model_detail(
+    key: str = Query(..., description="id do modelo (model_config_id ou id base)"),
+    range_: str = Query("7d", alias="range", description="7d | 30d | 6m | 1y | all"),
+    tz_offset: int = Query(0, description="JS getTimezoneOffset() em minutos"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_approved),
+):
+    """Detalhe de UM modelo no período: entrada×saída, raciocínio, cache, custo,
+    série temporal, gasto por ferramenta e por conversa (interação).
+
+    Usa a MESMA chave estável do overview (`model_config_id or model`), então bate
+    com o que o usuário clicou em "Top modelos". Lê do ledger `usage_events`."""
+    rows = (
+        await db.execute(
+            select(
+                UsageEvent.model, UsageEvent.model_name, UsageEvent.model_config_id,
+                UsageEvent.total_tokens, UsageEvent.prompt_tokens,
+                UsageEvent.completion_tokens, UsageEvent.reasoning_tokens,
+                UsageEvent.cached_tokens, UsageEvent.cost, UsageEvent.created_at,
+                UsageEvent.chat_id, UsageEvent.provider, UsageEvent.tools_breakdown,
+            )
+            .where(UsageEvent.user_id == user.id)
+            .order_by(UsageEvent.created_at)
+        )
+    ).all()
+
+    range_key = range_ if range_ in _RANGES else "7d"
+    off = timedelta(minutes=tz_offset)
+    local_today = (datetime.now(timezone.utc) - off).date()
+
+    # eventos SÓ deste modelo (chave estável)
+    mine = [r for r in rows if str(r.model_config_id or r.model or "desconhecido") == key]
+
+    earliest: date | None = None
+    for r in mine:
+        if r.created_at is not None:
+            c0 = r.created_at if r.created_at.tzinfo else r.created_at.replace(tzinfo=timezone.utc)
+            earliest = (c0.astimezone(timezone.utc) - off).date()
+            break
+
+    start, gran = _range_start(range_key, local_today, earliest)
+    keys = _bucket_keys(start, local_today, gran)
+    per_day = {
+        d.isoformat(): {"date": d.isoformat(), "label": _bucket_label(d, gran, range_key),
+                        "tokens": 0, "cost": 0.0, "messages": 0}
+        for d in keys
+    }
+
+    name = key
+    provider = "openrouter"
+    vendor = "api"
+    tot = {"messages": 0, "tokens": 0, "prompt": 0, "completion": 0,
+           "reasoning": 0, "cached": 0, "cost": 0.0}
+    by_tool: dict[str, dict] = {}     # {path: {tokens, calls}}
+    by_chat: dict[str, dict] = {}     # {chat_id: {tokens, cost, messages}}
+
+    for r in mine:
+        if r.created_at is None:
+            continue
+        cdt = r.created_at if r.created_at.tzinfo else r.created_at.replace(tzinfo=timezone.utc)
+        local_date = (cdt.astimezone(timezone.utc) - off).date()
+        if local_date < start:
+            continue
+
+        name = (r.model_name or r.model or name).strip() or name
+        provider = "ollama" if (r.model or "").startswith("ollama/") else (r.provider or "openrouter")
+        vendor = "local" if provider == "ollama" else ((r.model or "").split("/")[0] or "api")
+
+        tokens = int(r.total_tokens or 0)
+        cost = float(r.cost or 0.0)
+        tot["messages"] += 1
+        tot["tokens"] += tokens
+        tot["prompt"] += int(r.prompt_tokens or 0)
+        tot["completion"] += int(r.completion_tokens or 0)
+        tot["reasoning"] += int(r.reasoning_tokens or 0)
+        tot["cached"] += int(r.cached_tokens or 0)
+        tot["cost"] += cost
+
+        bk = _bucket_key(local_date, gran).isoformat()
+        if bk in per_day:
+            b = per_day[bk]
+            b["tokens"] += tokens
+            b["cost"] += cost
+            b["messages"] += 1
+
+        for path, tk in (r.tools_breakdown or {}).items():
+            e = by_tool.setdefault(str(path), {"tool": str(path), "tokens": 0, "calls": 0})
+            e["tokens"] += int(tk or 0)
+            e["calls"] += 1
+
+        if r.chat_id is not None:
+            cid = str(r.chat_id)
+            c = by_chat.setdefault(cid, {"chat_id": cid, "tokens": 0, "cost": 0.0, "messages": 0})
+            c["tokens"] += tokens
+            c["cost"] += cost
+            c["messages"] += 1
+
+    per_day_list = [{**d, "cost": round(d["cost"], 4)} for d in per_day.values()]
+    tool_list = sorted(by_tool.values(), key=lambda x: x["tokens"], reverse=True)
+
+    # títulos das conversas (as apagadas viram "conversa removida")
+    chat_list = sorted(by_chat.values(), key=lambda x: x["tokens"], reverse=True)[:20]
+    if chat_list:
+        import uuid as _uuid
+        ids = [_uuid.UUID(c["chat_id"]) for c in chat_list]
+        titles = dict(
+            (str(cid), title)
+            for cid, title in (
+                await db.execute(select(Chat.id, Chat.title).where(Chat.id.in_(ids)))
+            ).all()
+        )
+        for c in chat_list:
+            c["title"] = titles.get(c["chat_id"]) or "conversa removida"
+            c["cost"] = round(c["cost"], 4)
+
+    return {
+        "key": key,
+        "model": name,
+        "provider": provider,
+        "vendor": "local" if provider == "ollama" else vendor,
+        "range": range_key,
+        "granularity": gran,
+        "per_day": per_day_list,
+        "by_tool": tool_list,
+        "by_chat": chat_list,
+        "totals": {
+            "messages": tot["messages"],
+            "tokens": int(tot["tokens"]),
+            "prompt_tokens": tot["prompt"],
+            "completion_tokens": tot["completion"],
+            "reasoning_tokens": tot["reasoning"],
+            "cached_tokens": tot["cached"],
+            "cost": round(tot["cost"], 4),
+            "avg_tokens": int(tot["tokens"] / tot["messages"]) if tot["messages"] else 0,
+            "avg_cost": round(tot["cost"] / tot["messages"], 6) if tot["messages"] else 0.0,
         },
     }

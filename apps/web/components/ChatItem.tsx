@@ -9,6 +9,7 @@ import {
   FileJson,
   FileText,
   FileType,
+  Info,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -26,6 +27,7 @@ export interface ChatActions {
   onArchive: (chat: Chat) => void;
   onDelete: (id: string) => void;
   onDownload: (chat: Chat, format: "json" | "txt" | "pdf") => void;
+  onInfo: (chat: Chat) => void;
 }
 
 export default function ChatItem({
@@ -118,6 +120,9 @@ export default function ChatItem({
                 </MenuItem>
               </div>
             )}
+            <MenuItem icon={<Info size={15} />} onClick={() => { actions.onInfo(chat); setMenuOpen(false); }}>
+              Informações
+            </MenuItem>
             <MenuItem icon={<Pencil size={15} />} onClick={() => { setRenaming(true); setMenuOpen(false); }}>
               Renomear
             </MenuItem>

@@ -30,7 +30,7 @@ const CARD_META: { key: Section; name: string; desc: string; icon: ReactNode; li
   { key: "Ferramentas", name: "Ferramentas", desc: "Tools e integrações MCP", icon: <Wrench size={22} />, live: true },
   { key: "Prompts", name: "Prompts", desc: "Atalhos de comando reutilizáveis", icon: <FileText size={22} />, live: true },
   { key: "Skills", name: "Skills", desc: "Habilidades do agente", icon: <Sparkles size={22} />, live: true },
-  { key: "Conhecimento", name: "Conhecimento", desc: "Documentos que a IA consulta (RAG)", icon: <BookOpen size={22} />, live: true },
+  { key: "Conhecimento", name: "Conhecimento", desc: "Banco de dados organizados", icon: <BookOpen size={22} />, live: true },
   { key: "Apps", name: "Apps", desc: "Mini-aplicações e automações", icon: <LayoutGrid size={22} />, live: false },
   { key: "Memoria", name: "Memória", desc: "O que a IA lembra de você", icon: <Brain size={22} />, live: true },
   { key: "Analítica", name: "Analítica", desc: "Uso, custos e desempenho", icon: <BarChart3 size={22} />, live: true },

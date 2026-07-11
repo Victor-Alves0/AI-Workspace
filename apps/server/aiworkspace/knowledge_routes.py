@@ -12,14 +12,22 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth.deps import require_approved
 from .db import get_db
 from .knowledge import ingest
 from .knowledge.links import sign_doc_url, verify_doc_token
-from .models import KnowledgeBase, KnowledgeChunk, KnowledgeDoc, User
+from .models import (
+    Chat,
+    KnowledgeBase,
+    KnowledgeChunk,
+    KnowledgeDoc,
+    KnowledgeFolder,
+    ModelConfig,
+    User,
+)
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -40,12 +48,14 @@ def _spawn_index(doc_id: uuid.UUID) -> None:
 class BaseIn(BaseModel):
     name: str
     description: str = ""
+    tags: list[str] | None = None
 
 
 class BaseOut(BaseModel):
     id: str
     name: str
     description: str
+    tags: list[str] = []
     doc_count: int = 0
     chunk_count: int = 0
 
@@ -53,20 +63,75 @@ class BaseOut(BaseModel):
 class DocOut(BaseModel):
     id: str
     base_id: str
+    folder_id: str | None = None
     filename: str
     mime: str
     size: int
     status: str
     error: str | None = None
     chunk_count: int
+    meta: dict | None = None
     created_at: str | None = None
+
+
+class FolderIn(BaseModel):
+    name: str
+    parent_id: str | None = None
+
+
+class FolderPatch(BaseModel):
+    name: str | None = None
+    parent_id: str | None = None
+    # sentinela p/ mover à raiz: `to_root=True` zera o parent_id
+    to_root: bool = False
+
+
+class FolderOut(BaseModel):
+    id: str
+    base_id: str
+    name: str
+    parent_id: str | None = None
+
+
+class TextDocIn(BaseModel):
+    filename: str
+    content: str = ""
+    folder_id: str | None = None
+
+
+class TextContentIn(BaseModel):
+    content: str = ""
+
+
+class DocPatch(BaseModel):
+    folder_id: str | None = None
+    to_root: bool = False
+    meta: dict | None = None
+
+
+def _is_text_doc(d: KnowledgeDoc) -> bool:
+    """Doc editável como texto: mime text/* ou extensão de texto conhecida."""
+    name = (d.filename or "").lower()
+    return (d.mime or "").startswith("text/") or name.endswith(
+        (".txt", ".md", ".markdown", ".csv", ".json", ".log", ".yaml", ".yml")
+    )
 
 
 def _doc_out(d: KnowledgeDoc) -> DocOut:
     return DocOut(
-        id=str(d.id), base_id=str(d.base_id), filename=d.filename, mime=d.mime,
+        id=str(d.id), base_id=str(d.base_id),
+        folder_id=str(d.folder_id) if d.folder_id else None,
+        filename=d.filename, mime=d.mime,
         size=d.size, status=d.status, error=d.error, chunk_count=d.chunk_count,
+        meta=d.meta or None,
         created_at=d.created_at.isoformat() if d.created_at else None,
+    )
+
+
+def _folder_out(f: KnowledgeFolder) -> FolderOut:
+    return FolderOut(
+        id=str(f.id), base_id=str(f.base_id), name=f.name,
+        parent_id=str(f.parent_id) if f.parent_id else None,
     )
 
 
@@ -82,6 +147,22 @@ async def _owned_doc(db: AsyncSession, user: User, doc_id: uuid.UUID) -> Knowled
     if d is None or d.user_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Documento não encontrado")
     return d
+
+
+async def _owned_folder(db: AsyncSession, user: User, folder_id: uuid.UUID) -> KnowledgeFolder:
+    f = await db.get(KnowledgeFolder, folder_id)
+    if f is None or f.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Pasta não encontrada")
+    return f
+
+
+def _clean_tags(raw) -> list[str]:
+    out: list[str] = []
+    for t in raw or []:
+        s = str(t).strip()[:40]
+        if s and s not in out:
+            out.append(s)
+    return out[:20]
 
 
 # --------------------------------------------------------------------------- #
@@ -103,7 +184,7 @@ async def list_bases(user: User = Depends(require_approved), db: AsyncSession = 
     counts = {r[0]: (r[1], r[2]) for r in rows}
     return [
         BaseOut(
-            id=str(b.id), name=b.name, description=b.description or "",
+            id=str(b.id), name=b.name, description=b.description or "", tags=b.tags or [],
             doc_count=counts.get(b.id, (0, 0))[0], chunk_count=counts.get(b.id, (0, 0))[1],
         )
         for b in bases
@@ -115,11 +196,12 @@ async def create_base(body: BaseIn, user: User = Depends(require_approved), db: 
     b = KnowledgeBase(
         user_id=user.id, name=(body.name or "Base").strip()[:120],
         description=(body.description or "").strip(),
+        tags=_clean_tags(body.tags),
     )
     db.add(b)
     await db.commit()
     await db.refresh(b)
-    return BaseOut(id=str(b.id), name=b.name, description=b.description or "")
+    return BaseOut(id=str(b.id), name=b.name, description=b.description or "", tags=b.tags or [])
 
 
 @router.patch("/bases/{base_id}", response_model=BaseOut)
@@ -130,8 +212,10 @@ async def update_base(
     b = await _owned_base(db, user, base_id)
     b.name = (body.name or "Base").strip()[:120]
     b.description = (body.description or "").strip()
+    if body.tags is not None:
+        b.tags = _clean_tags(body.tags)
     await db.commit()
-    return BaseOut(id=str(b.id), name=b.name, description=b.description or "")
+    return BaseOut(id=str(b.id), name=b.name, description=b.description or "", tags=b.tags or [])
 
 
 @router.delete("/bases/{base_id}")
@@ -156,10 +240,16 @@ async def list_docs(base_id: uuid.UUID, user: User = Depends(require_approved), 
 
 @router.post("/bases/{base_id}/docs", response_model=list[DocOut])
 async def upload_docs(
-    base_id: uuid.UUID, files: list[UploadFile],
+    base_id: uuid.UUID, files: list[UploadFile], folder_id: str | None = None,
     user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
 ):
     await _owned_base(db, user, base_id)
+    fid = None
+    if folder_id:
+        folder = await _owned_folder(db, user, uuid.UUID(folder_id))
+        if folder.base_id != base_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pasta de outra base")
+        fid = folder.id
     created: list[KnowledgeDoc] = []
     for f in files:
         data = await f.read()
@@ -168,7 +258,7 @@ async def upload_docs(
         if len(data) > _MAX_BYTES:
             raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, f"{f.filename}: arquivo acima de 25 MB")
         d = KnowledgeDoc(
-            base_id=base_id, user_id=user.id,
+            base_id=base_id, user_id=user.id, folder_id=fid,
             filename=(f.filename or "documento")[:255],
             mime=(f.content_type or "")[:128], size=len(data),
             status="pending", chunk_count=0, data=data,
@@ -180,6 +270,235 @@ async def upload_docs(
         await db.refresh(d)
         _spawn_index(d.id)
     return [_doc_out(d) for d in created]
+
+
+# --------------------------------------------------------------------------- #
+# Pastas (explorador)
+# --------------------------------------------------------------------------- #
+@router.get("/bases/{base_id}/folders", response_model=list[FolderOut])
+async def list_folders(base_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    await _owned_base(db, user, base_id)
+    folders = list(await db.scalars(
+        select(KnowledgeFolder).where(KnowledgeFolder.base_id == base_id).order_by(KnowledgeFolder.name)
+    ))
+    return [_folder_out(f) for f in folders]
+
+
+@router.post("/bases/{base_id}/folders", response_model=FolderOut)
+async def create_folder(
+    base_id: uuid.UUID, body: FolderIn,
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    await _owned_base(db, user, base_id)
+    parent_id = None
+    if body.parent_id:
+        parent = await _owned_folder(db, user, uuid.UUID(body.parent_id))
+        if parent.base_id != base_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pasta-pai de outra base")
+        parent_id = parent.id
+    f = KnowledgeFolder(
+        base_id=base_id, user_id=user.id,
+        name=(body.name or "Pasta").strip()[:160], parent_id=parent_id,
+    )
+    db.add(f)
+    await db.commit()
+    await db.refresh(f)
+    return _folder_out(f)
+
+
+@router.patch("/folders/{folder_id}", response_model=FolderOut)
+async def update_folder(
+    folder_id: uuid.UUID, body: FolderPatch,
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    f = await _owned_folder(db, user, folder_id)
+    if body.name is not None:
+        f.name = (body.name or "Pasta").strip()[:160]
+    if body.to_root:
+        f.parent_id = None
+    elif body.parent_id is not None:
+        if body.parent_id == str(folder_id):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pasta não pode ser pai de si mesma")
+        parent = await _owned_folder(db, user, uuid.UUID(body.parent_id))
+        if parent.base_id != f.base_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pasta-pai de outra base")
+        # impede ciclo: o novo pai não pode ser descendente de `f` (subiria em anel)
+        cur: KnowledgeFolder | None = parent
+        seen = 0
+        while cur is not None and seen < 100:
+            if cur.id == folder_id:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Não é possível mover uma pasta para dentro dela mesma")
+            cur = await db.get(KnowledgeFolder, cur.parent_id) if cur.parent_id else None
+            seen += 1
+        f.parent_id = parent.id
+    await db.commit()
+    return _folder_out(f)
+
+
+@router.delete("/folders/{folder_id}")
+async def delete_folder(folder_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    f = await _owned_folder(db, user, folder_id)
+    # docs e subpastas sobem para o pai (não some documento junto com a pasta)
+    await db.execute(
+        update(KnowledgeDoc).where(KnowledgeDoc.folder_id == folder_id).values(folder_id=f.parent_id)
+    )
+    await db.execute(
+        update(KnowledgeFolder).where(KnowledgeFolder.parent_id == folder_id).values(parent_id=f.parent_id)
+    )
+    await db.delete(f)
+    await db.commit()
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+# Documento de texto (criar/editar no próprio explorador)
+# --------------------------------------------------------------------------- #
+@router.post("/bases/{base_id}/docs/text", response_model=DocOut)
+async def create_text_doc(
+    base_id: uuid.UUID, body: TextDocIn,
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    await _owned_base(db, user, base_id)
+    folder_id = None
+    if body.folder_id:
+        folder = await _owned_folder(db, user, uuid.UUID(body.folder_id))
+        if folder.base_id != base_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pasta de outra base")
+        folder_id = folder.id
+    name = (body.filename or "documento").strip()[:255]
+    if "." not in name:
+        name += ".txt"
+    data = (body.content or "").encode("utf-8")
+    d = KnowledgeDoc(
+        base_id=base_id, user_id=user.id, folder_id=folder_id,
+        filename=name, mime="text/plain", size=len(data),
+        status="pending", chunk_count=0, data=data,
+    )
+    db.add(d)
+    await db.commit()
+    await db.refresh(d)
+    _spawn_index(d.id)
+    return _doc_out(d)
+
+
+@router.get("/docs/{doc_id}/text")
+async def get_doc_text(doc_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    d = await _owned_doc(db, user, doc_id)
+    if not _is_text_doc(d):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Este documento não é editável como texto")
+    content = bytes(d.data or b"").decode("utf-8", errors="replace")
+    return {"id": str(d.id), "filename": d.filename, "content": content}
+
+
+@router.put("/docs/{doc_id}/text", response_model=DocOut)
+async def update_doc_text(
+    doc_id: uuid.UUID, body: TextContentIn,
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    d = await _owned_doc(db, user, doc_id)
+    if not _is_text_doc(d):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Este documento não é editável como texto")
+    data = (body.content or "").encode("utf-8")
+    d.data = data
+    d.size = len(data)
+    d.status = "pending"
+    d.error = None
+    await db.commit()
+    await db.refresh(d)
+    _spawn_index(d.id)
+    return _doc_out(d)
+
+
+@router.patch("/docs/{doc_id}", response_model=DocOut)
+async def update_doc(
+    doc_id: uuid.UUID, body: DocPatch,
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    """Move um doc de pasta e/ou edita seus metadados (título/descrição/tags).
+    Mudar metadados dispara reindexação (o prefixo entra em cada chunk)."""
+    d = await _owned_doc(db, user, doc_id)
+    if body.to_root:
+        d.folder_id = None
+    elif body.folder_id is not None:
+        folder = await _owned_folder(db, user, uuid.UUID(body.folder_id))
+        if folder.base_id != d.base_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pasta de outra base")
+        d.folder_id = folder.id
+    reindex = False
+    if body.meta is not None:
+        d.meta = {
+            "title": str(body.meta.get("title") or "").strip()[:200],
+            "description": str(body.meta.get("description") or "").strip()[:1000],
+            "tags": _clean_tags(body.meta.get("tags")),
+        }
+        reindex = True
+    await db.commit()
+    await db.refresh(d)
+    if reindex and d.data:
+        d.status = "pending"
+        await db.commit()
+        _spawn_index(d.id)
+    return _doc_out(d)
+
+
+# --------------------------------------------------------------------------- #
+# Referências p/ o compositor ("#"): bases ACESSÍVEIS ao modelo/chat + árvore
+# --------------------------------------------------------------------------- #
+@router.get("/refs")
+async def list_refs(
+    chat_id: str | None = None, model_config_id: str | None = None,
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    """Bases que o modelo/chat pode consultar (mesmo gate do RAG) com pastas + docs
+    prontos, p/ o menu "#" do compositor. Só o que está ACOPLADO aparece."""
+    from .chat.routes import _resolve_knowledge  # lazy: evita ciclo de import
+
+    chat = None
+    if chat_id:
+        chat = await db.get(Chat, uuid.UUID(chat_id))
+        if chat is not None and chat.user_id != user.id:
+            chat = None
+    mc = None
+    mcid = model_config_id or (str(chat.model_config_id) if chat and chat.model_config_id else None)
+    if mcid:
+        mc = await db.get(ModelConfig, uuid.UUID(mcid))
+        if mc is not None and mc.user_id != user.id:
+            mc = None
+    kn = _resolve_knowledge(chat, mc, user)
+    base_ids = [uuid.UUID(b) for b in kn.get("bases") or []]
+    if not base_ids:
+        return []
+    bases = list(await db.scalars(
+        select(KnowledgeBase).where(
+            KnowledgeBase.id.in_(base_ids), KnowledgeBase.user_id == user.id
+        )
+    ))
+    folders = list(await db.scalars(
+        select(KnowledgeFolder).where(KnowledgeFolder.base_id.in_(base_ids))
+    ))
+    docs = list(await db.scalars(
+        select(KnowledgeDoc).where(
+            KnowledgeDoc.base_id.in_(base_ids), KnowledgeDoc.status == "ready"
+        )
+    ))
+    fol_by_base: dict[uuid.UUID, list] = {}
+    for f in folders:
+        fol_by_base.setdefault(f.base_id, []).append(
+            {"id": str(f.id), "name": f.name, "parent_id": str(f.parent_id) if f.parent_id else None}
+        )
+    doc_by_base: dict[uuid.UUID, list] = {}
+    for d in docs:
+        doc_by_base.setdefault(d.base_id, []).append(
+            {"id": str(d.id), "filename": d.filename, "folder_id": str(d.folder_id) if d.folder_id else None}
+        )
+    return [
+        {
+            "id": str(b.id), "name": b.name,
+            "folders": fol_by_base.get(b.id, []),
+            "docs": doc_by_base.get(b.id, []),
+        }
+        for b in bases
+    ]
 
 
 @router.post("/docs/{doc_id}/reindex", response_model=DocOut)

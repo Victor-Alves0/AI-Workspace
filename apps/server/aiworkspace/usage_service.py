@@ -46,4 +46,8 @@ def usage_event_from_record(user_id, chat_id, message_id, rec: dict) -> UsageEve
         reasoning_tokens=int(rec.get("reasoning_tokens") or 0),
         cached_tokens=int(rec.get("cached_tokens") or 0),
         cost=cost,
+        tools_breakdown={
+            str(k): int(v or 0)
+            for k, v in (rec.get("tools_breakdown") or {}).items()
+        },
     )

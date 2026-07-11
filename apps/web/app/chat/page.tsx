@@ -9,7 +9,7 @@ import { speak, startRecording, transcribe } from "@/lib/voice";
 import { browserNotify, playChime, requestNotifPermission } from "@/lib/notify";
 import { downloadJSON, downloadPDF, downloadTXT } from "@/lib/download";
 import { pickSuggestions, type Suggestion } from "@/lib/suggestions";
-import type { AskSpec, Attachment, Chat, ChatArtifact, Folder, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User } from "@/lib/types";
+import type { AskSpec, Attachment, Chat, ChatArtifact, Folder, KnowledgeRef, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User } from "@/lib/types";
 import { splitStreamArtifacts, type StreamArtifact } from "@/lib/artifacts";
 import ArtifactPanel from "@/components/ArtifactPanel";
 import Roundtable, { nextColor, RT_COLORS } from "@/components/Roundtable";
@@ -24,8 +24,10 @@ import SettingsModal from "@/components/SettingsModal";
 import OnboardingModal from "@/components/OnboardingModal";
 import CommandPalette, { type PaletteItem } from "@/components/CommandPalette";
 import ArchivedModal from "@/components/ArchivedModal";
+import ChatManager from "@/components/ChatManager";
+import ChatInfoModal from "@/components/ChatInfo";
 import CompactionHistory from "@/components/CompactionHistory";
-import PromptBox, { type ReasoningEffort } from "@/components/PromptBox";
+import PromptBox, { type ReasoningEffort, type RefDoc } from "@/components/PromptBox";
 import MessageItem from "@/components/MessageItem";
 import WorkspaceView, { type Section as WorkspaceSection } from "@/components/WorkspaceView";
 import AutomationsView from "@/components/AutomationsView";
@@ -83,6 +85,10 @@ export default function ChatPage() {
   const [skills, setSkills] = useState<Skill[]>([]);
   // skills anexadas ad-hoc ao próximo envio (via "$" no promptbox)
   const [attachedSkillIds, setAttachedSkillIds] = useState<string[]>([]);
+  // docs da Base de Conhecimento referenciados via "#" no próximo envio
+  const [refDocs, setRefDocs] = useState<RefDoc[]>([]);
+  // árvore de refs acessíveis (bases acopladas ao modelo/chat) p/ o menu "#"
+  const [knowledgeRefs, setKnowledgeRefs] = useState<KnowledgeRef[]>([]);
   // anexos (imagens/arquivos) do próximo envio
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [active, setActive] = useState<Chat | null>(null);
@@ -99,6 +105,8 @@ export default function ChatPage() {
   const [chatArtifacts, setChatArtifacts] = useState<ChatArtifact[]>([]);
   const [artifactOpen, setArtifactOpen] = useState<string | null>(null);
   const [liveArtifact, setLiveArtifact] = useState<StreamArtifact | null>(null);
+  // painel "Informações" do chat (menu dos 3 pontinhos)
+  const [infoChatId, setInfoChatId] = useState<string | null>(null);
   // Guarda de saída acionou uma re-tentativa (mostra um chip enquanto refaz)
   const [guardNote, setGuardNote] = useState<{ name: string; action: string; fallback_model?: string | null } | null>(null);
   // "@" no promptbox: agente (modelo custom) que recebe SÓ o próximo turno
@@ -151,6 +159,7 @@ export default function ChatPage() {
   const [settingsCat, setSettingsCat] = useState<string | undefined>(undefined);
   const openSettings = useCallback((cat?: string) => { setSettingsCat(cat); setShowSettings(true); }, []);
   const [showArchived, setShowArchived] = useState(false);
+  const [showChatMgr, setShowChatMgr] = useState(false);
   const [showCompactions, setShowCompactions] = useState(false);
 
   const [recording, setRecording] = useState(false);
@@ -392,6 +401,20 @@ export default function ChatPage() {
     [customModels],
   );
 
+  // refs "#" = bases de conhecimento ACESSÍVEIS ao chat/modelo atual (mesmo gate do RAG).
+  // Sem chat/modelo custom, ainda busca (o endpoint devolve as bases do PERFIL).
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (active?.id) params.set("chat_id", active.id);
+    if (curCustomId) params.set("model_config_id", curCustomId);
+    const qs = params.toString();
+    let alive = true;
+    api.get<KnowledgeRef[]>(`/knowledge/refs${qs ? `?${qs}` : ""}`)
+      .then((r) => { if (alive) setKnowledgeRefs(r); })
+      .catch(() => { if (alive) setKnowledgeRefs([]); });
+    return () => { alive = false; };
+  }, [active?.id, active?.knowledge_config, curCustomId]);
+
   // ferramentas que o modelo ATIVO pode usar (embutidas + do usuário), resolvidas
   // a nome+descrição para o menu da chave inglesa na promptbox.
   const modelTools = useMemo(() => {
@@ -420,12 +443,19 @@ export default function ChatPage() {
   // ---------------------------------------------------------------------------
   // Mesa-redonda (multi-modelo): modelos conversam entre si; o usuário guia.
   // ---------------------------------------------------------------------------
-  const isRoundtable = active?.mode === "roundtable";
+  // barra da mesa visível? o botão vira um toggle on/off quando já está na mesa
+  const [rtBarOpen, setRtBarOpen] = useState(true);
+  // RASCUNHO da mesa: entra na mesa SEM criar o chat; só materializa no 1º envio/rodar
+  const [draftRt, setDraftRt] = useState<{ participants: RoundtableParticipant[]; config: RoundtableConfig } | null>(null);
+  const isRoundtable = active ? active.mode === "roundtable" : !!draftRt;
   const participants = useMemo<RoundtableParticipant[]>(
-    () => (active?.participants as RoundtableParticipant[]) ?? [],
-    [active],
+    () => (active ? (active.participants as RoundtableParticipant[]) ?? [] : draftRt?.participants ?? []),
+    [active, draftRt],
   );
-  const rtConfig = useMemo<RoundtableConfig>(() => (active?.roundtable_config as RoundtableConfig) ?? {}, [active]);
+  const rtConfig = useMemo<RoundtableConfig>(
+    () => (active ? (active.roundtable_config as RoundtableConfig) ?? {} : draftRt?.config ?? {}),
+    [active, draftRt],
+  );
   const rid = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `p-${Date.now()}-${Math.random()}`);
 
   // aplica um patch no chat da mesa (mode/participants/config) — otimista + PATCH
@@ -435,20 +465,55 @@ export default function ChatPage() {
     try { await api.patch(`/chats/${active.id}`, patch); } catch { /* ignore */ }
   }, [active]);
 
-  async function enterRoundtable() {
-    let chat = active;
-    if (!chat) {
-      if (!curModel) { alert("Selecione um modelo primeiro."); return; }
-      chat = await api.post<Chat>("/chats", { title: "Mesa-redonda", model: curModel, model_config_id: curCustomId });
-      setActive(chat);
-      refreshChats();
+  function enterRoundtable() {
+    if (active) {
+      // chat já existe: liga o modo mesa nele (mantém o comportamento antigo)
+      const seed: RoundtableParticipant[] = active.participants && active.participants.length
+        ? active.participants
+        : [{ id: rid(), model: active.model || curModel, model_config_id: active.model_config_id ?? curCustomId, name: modelLabel || "Modelo 1", color: RT_COLORS[0] }];
+      const cfg = active.roundtable_config ?? { turn_policy: "round_robin" as const, max_rounds: 6 };
+      setActive({ ...active, mode: "roundtable", participants: seed, roundtable_config: cfg });
+      api.patch(`/chats/${active.id}`, { mode: "roundtable", participants: seed, roundtable_config: cfg }).catch(() => {});
+      return;
     }
-    const seed: RoundtableParticipant[] = chat.participants && chat.participants.length
-      ? chat.participants
-      : [{ id: rid(), model: chat.model || curModel, model_config_id: chat.model_config_id ?? curCustomId, name: modelLabel || "Modelo 1", color: RT_COLORS[0] }];
-    const cfg = chat.roundtable_config ?? { turn_policy: "round_robin" as const, max_rounds: 6 };
-    setActive({ ...chat, mode: "roundtable", participants: seed, roundtable_config: cfg });
-    try { await api.patch(`/chats/${chat.id}`, { mode: "roundtable", participants: seed, roundtable_config: cfg }); } catch { /* ignore */ }
+    // SEM chat: só um RASCUNHO — nada é criado até o 1º envio/rodar
+    if (!curModel) { alert("Selecione um modelo primeiro."); return; }
+    setDraftRt({
+      participants: [{ id: rid(), model: curModel, model_config_id: curCustomId, name: modelLabel || "Modelo 1", color: RT_COLORS[0] }],
+      config: { turn_policy: "round_robin", max_rounds: 6 },
+    });
+  }
+
+  // materializa o chat da mesa a partir do rascunho (no 1º envio/rodar)
+  async function ensureRoundtableChat(): Promise<Chat | null> {
+    if (active) return active;
+    if (!draftRt) return null;
+    if (!curModel) { alert("Selecione um modelo primeiro."); return null; }
+    const chat = await api.post<Chat>("/chats", { title: "Mesa-redonda", model: curModel, model_config_id: curCustomId });
+    const full = { ...chat, mode: "roundtable" as const, participants: draftRt.participants, roundtable_config: draftRt.config };
+    setActive(full);
+    setDraftRt(null);
+    try { await api.patch(`/chats/${chat.id}`, { mode: "roundtable", participants: draftRt.participants, roundtable_config: draftRt.config }); } catch { /* ignore */ }
+    refreshChats();
+    return full;
+  }
+
+  // aplica um patch de mesa no chat (se existe) OU no rascunho (se ainda não existe)
+  function patchRt(next: { participants?: RoundtableParticipant[]; config?: RoundtableConfig; exit?: boolean }) {
+    if (active) {
+      const patch: Partial<Chat> = {};
+      if (next.participants) patch.participants = next.participants;
+      if (next.config) patch.roundtable_config = next.config;
+      if (next.exit) patch.mode = "single";
+      patchRoundtable(patch);
+    } else if (next.exit) {
+      setDraftRt(null);
+    } else {
+      setDraftRt((d) => ({
+        participants: next.participants ?? d?.participants ?? [],
+        config: next.config ?? d?.config ?? { turn_policy: "round_robin", max_rounds: 6 },
+      }));
+    }
   }
 
   function addParticipant(p: { model: string; model_config_id?: string | null; name: string; avatar?: string | null }) {
@@ -456,17 +521,17 @@ export default function ChatPage() {
       id: rid(), model: p.model, model_config_id: p.model_config_id ?? null,
       name: p.name, avatar: p.avatar ?? null, color: nextColor(participants.map((x) => x.color)),
     };
-    patchRoundtable({ participants: [...participants, part] });
+    patchRt({ participants: [...participants, part] });
   }
   function removeParticipant(id: string) {
     const next = participants.filter((p) => p.id !== id);
-    patchRoundtable({ participants: next, ...(next.length === 0 ? { mode: "single" } : {}) } as Partial<Chat>);
+    patchRt(next.length === 0 ? { participants: next, exit: true } : { participants: next });
   }
   function updateParticipant(id: string, patch: Partial<RoundtableParticipant>) {
-    patchRoundtable({ participants: participants.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
+    patchRt({ participants: participants.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
   }
   function updateRtConfig(patch: Partial<RoundtableConfig>) {
-    patchRoundtable({ roundtable_config: { ...rtConfig, ...patch } });
+    patchRt({ config: { ...rtConfig, ...patch } });
   }
 
   function makeRtHandler() {
@@ -480,7 +545,8 @@ export default function ChatPage() {
         setRtStreaming((s) => (s ? { ...s, reasoning: s.reasoning + (ev.text || "") } : s));
       } else if (ev.type === "speaker_end") {
         setRtStreaming((s) => {
-          if (s) {
+          // turno vazio (o backend não persistiu): não adiciona bolha vazia
+          if (s && s.content.trim()) {
             setMessages((m) => [...m, {
               id: ev.message_id || `a-${Date.now()}`, role: "assistant", content: s.content,
               reasoning: s.reasoning ? { text: s.reasoning } : null, speaker: ev.speaker,
@@ -496,7 +562,10 @@ export default function ChatPage() {
   }
 
   async function runRoundtable(steps: "auto" | "one", content?: string) {
-    if (!active || rtRunning) return;
+    if (rtRunning) return;
+    // 1º rodar/enviar num rascunho de mesa → cria o chat agora (não antes)
+    const chat = await ensureRoundtableChat();
+    if (!chat) return;
     setRtRunning(true);
     setAtBottom(true);
     if (content && content.trim()) {
@@ -506,7 +575,7 @@ export default function ChatPage() {
     rtAbort.current = ac;
     try {
       await streamRoundtable(
-        active.id,
+        chat.id,
         { content: content ?? "", steps, next: rtConfig.turn_policy === "manual" ? rtConfig.next ?? null : null },
         makeRtHandler(),
         ac.signal,
@@ -516,7 +585,7 @@ export default function ChatPage() {
       setRtRunning(false);
       setRtStreaming(null);
       rtAbort.current = null;
-      reloadMessages(active.id);
+      reloadMessages(chat.id);
       refreshChats();
     }
   }
@@ -546,6 +615,7 @@ export default function ChatPage() {
   function goHome() {
     leaveViewOnce();
     setActive(null);
+    setDraftRt(null);
     setMessages([]);
     setStreaming("");
     setStreamingReasoning("");
@@ -719,6 +789,7 @@ export default function ChatPage() {
     setAutomationsOpen(false);
     setPlaygroundOpen(false);
     leaveViewOnce(id);
+    setDraftRt(null);
     const detail = await api.get<Chat & { messages: Message[] }>(`/chats/${id}`);
     setActive(detail);
     setMessages(detail.messages ?? []);
@@ -830,6 +901,7 @@ export default function ChatPage() {
       else if (format === "txt") downloadTXT(detail, msgs);
       else downloadPDF(detail, msgs);
     },
+    onInfo: (c) => setInfoChatId(c.id),
   };
 
   const createFolder = async () => {
@@ -850,12 +922,31 @@ export default function ChatPage() {
     await refreshChats();
   };
 
+  // ações em LOTE do menu "Conversas" (ChatManager)
+  const bulkMoveChats = async (ids: string[], folderId: string | null) => {
+    await Promise.all(ids.map((id) => api.patch(`/chats/${id}`, { folder_id: folderId }).catch(() => {})));
+    await refreshChats();
+  };
+  const bulkDeleteChats = async (ids: string[]) => {
+    const ok = await confirm({
+      title: ids.length === 1 ? "Excluir conversa?" : "Excluir conversas?",
+      body: <>Isso vai excluir <span className="font-medium text-ink">{ids.length}</span> {ids.length === 1 ? "conversa" : "conversas"}. Não dá para desfazer.</>,
+      confirmLabel: "Excluir",
+      danger: true,
+    });
+    if (!ok) return;
+    await Promise.all(ids.map((id) => api.del(`/chats/${id}`).catch(() => {})));
+    if (active && ids.includes(active.id)) goHome();
+    await refreshChats();
+  };
+
   async function send(textArg?: string) {
     // textArg vem dos seletores de opção (kind:"ask"); senão usa o campo de texto
     const override = typeof textArg === "string";
     const text = (override ? textArg : input).trim();
     // mesa-redonda: a mensagem do usuário GUIA a conversa; roda os participantes.
-    if (isRoundtable && active) {
+    // (funciona no rascunho: runRoundtable cria o chat no 1º envio)
+    if (isRoundtable) {
       if (rtRunning) return;
       if (!override) setInput("");
       await runRoundtable("auto", text);
@@ -876,6 +967,8 @@ export default function ChatPage() {
     if (!override) setAttachments([]);
     const turnAgentId = override ? null : agentId;
     if (!override) setAgentId(null);
+    const turnRefDocIds = override ? [] : refDocs.map((r) => r.id);
+    if (!override) setRefDocs([]);
     setMessages((m) => [...m, { id: `tmp-${Date.now()}`, role: "user", content: text, attachments: turnAttachments, created_at: new Date().toISOString() }]);
     setAtBottom(true); // enviar re-engata o auto-scroll (acompanhar a resposta)
     setStreaming("");
@@ -923,7 +1016,7 @@ export default function ChatPage() {
         // persistente: o servidor cancela a geração e salva o parcial
         const cid = chat.id;
         stopRef.current = () => { api.post(`/chats/${cid}/stop`).catch(() => {}); };
-        await streamMessage(chat.id, text, onEvent, undefined, turnSkillIds, turnAttachments, turnAgentId);
+        await streamMessage(chat.id, text, onEvent, undefined, turnSkillIds, turnAttachments, turnAgentId, turnRefDocIds);
         setStreaming("");
         setStreamingReasoning("");
         refreshChats();
@@ -1292,6 +1385,7 @@ export default function ChatPage() {
           onToggleCollapse={isMobile ? () => setMobileNav(false) : toggleCollapse}
           onNewChat={() => { newChat(); setMobileNav(false); }}
           onSearch={() => { setShowPalette(true); setMobileNav(false); }}
+          onOpenConversations={() => { setShowChatMgr(true); setMobileNav(false); }}
           chatActions={{ ...chatActions, onSelect: (id: string) => { chatActions.onSelect(id); setMobileNav(false); } }}
           onCreateFolder={createFolder}
           onRenameFolder={renameFolder}
@@ -1332,9 +1426,9 @@ export default function ChatPage() {
               {picker}
               {!temporary && (
                 <button
-                  onClick={enterRoundtable}
-                  title="Mesa-redonda: fazer os modelos conversarem entre si"
-                  className={`rounded-lg p-1.5 transition-colors ${isRoundtable ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
+                  onClick={() => { if (isRoundtable) setRtBarOpen((v) => !v); else { enterRoundtable(); setRtBarOpen(true); } }}
+                  title={isRoundtable ? (rtBarOpen ? "Ocultar a mesa" : "Mostrar a mesa") : "Mesa-redonda: fazer os modelos conversarem entre si"}
+                  className={`rounded-lg p-1.5 transition-colors ${isRoundtable && rtBarOpen ? "bg-accent/15 text-accent-hover" : isRoundtable ? "text-accent-hover hover:bg-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
                 >
                   <Users size={18} />
                 </button>
@@ -1374,8 +1468,8 @@ export default function ChatPage() {
             </button>
           </div>
         </div>
-        {isRoundtable && (
-          <div className="border-b border-border px-4 py-2">
+        {isRoundtable && rtBarOpen && (
+          <div className="px-4 py-2">
             <Roundtable
               participants={participants}
               config={rtConfig}
@@ -1409,21 +1503,22 @@ export default function ChatPage() {
             {!hasConversation ? (
               /* HOME centralizada */
               <div className="animate-fade-up flex flex-1 flex-col items-center justify-center px-4">
-                <div className="mb-7 flex flex-col items-center gap-3">
+                <div className="mb-7 flex flex-col items-center gap-4">
                   {curCustom?.avatar_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={curCustom.avatar_url} alt="" className="h-11 w-11 rounded-2xl object-cover" />
+                    <img src={curCustom.avatar_url} alt="" className="h-20 w-20 rounded-3xl object-cover shadow-lg" />
                   ) : (
-                    <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-accent/25 to-accent/5 text-base font-semibold text-accent-hover ring-1 ring-accent/20">
+                    <span className="flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-br from-accent/25 to-accent/5 text-3xl font-semibold text-accent-hover shadow-lg ring-1 ring-accent/20">
                       {(modelLabel || "AI")[0]?.toUpperCase()}
                     </span>
                   )}
-                  <h1 className="text-2xl font-semibold tracking-tight text-ink">
-                    {modelLabel || "AI Workspace"}
-                  </h1>
+                  <div className="text-center leading-snug">
+                    <h1 className="text-2xl font-semibold tracking-tight text-ink-soft">Good to See You!</h1>
+                    <p className="text-2xl font-semibold tracking-tight text-muted">How Can I be an Assistance?</p>
+                  </div>
                 </div>
                 <div className="w-full max-w-3xl">
-                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} />
+                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} />
                 </div>
                 {/* menu do "+" abre para baixo aqui (há espaço); na conversa abre para cima */}
                 {temporary && <p className="mt-2 text-xs text-muted">Chat temporário — esta conversa não será salva.</p>}
@@ -1572,7 +1667,7 @@ export default function ChatPage() {
                       {showAsk && askSpec && (
                         <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                       )}
-                      <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
+                      <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
                     </div>
                   </div>
                 </div>
@@ -1610,6 +1705,7 @@ export default function ChatPage() {
               params={active ? active.params : draftParams}
               memory={active ? active.memory_config ?? null : undefined}
               memoryDefault={memoryDefault}
+              hasProject={!!active?.folder_id}
               onMemoryChange={active ? (cfg) => patchActive({ memory_config: cfg }) : undefined}
               knowledge={active ? active.knowledge_config ?? null : undefined}
               onKnowledgeChange={active ? (cfg) => patchActive({ knowledge_config: cfg }) : undefined}
@@ -1651,6 +1747,23 @@ export default function ChatPage() {
       )}
       {showPalette && <CommandPalette items={paletteItems} onClose={() => setShowPalette(false)} />}
       {showArchived && <ArchivedModal onChanged={refreshChats} onClose={() => setShowArchived(false)} />}
+      {showChatMgr && (
+        <ChatManager
+          chats={chats}
+          folders={folders}
+          onSelect={(id) => selectChat(id).catch(() => {})}
+          onMove={bulkMoveChats}
+          onDelete={bulkDeleteChats}
+          onClose={() => setShowChatMgr(false)}
+        />
+      )}
+      {infoChatId && (
+        <ChatInfoModal
+          chatId={infoChatId}
+          onOpenArtifact={(ident) => { setInfoChatId(null); setArtifactOpen(ident); }}
+          onClose={() => setInfoChatId(null)}
+        />
+      )}
       {showCompactions && active && (
         <CompactionHistory
           chatId={active.id}

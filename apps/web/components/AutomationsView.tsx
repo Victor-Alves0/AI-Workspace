@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { AlertTriangle, Bell, BellOff, BellRing, CalendarClock, Check, Clock, Eye, History, Loader2, Minus, Pause, Play, Plus, Trash2, X, Zap } from "lucide-react";
+import { AlertTriangle, Bell, BellOff, BellRing, CalendarClock, Check, Clock, Eye, History, Loader2, Minus, Pause, Play, Plus, Search, Trash2, X, Zap } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { AppNotification, Automation, AutomationRun } from "@/lib/types";
 import { disablePush, enablePush, pushEnabled, pushSupported } from "@/lib/push";
@@ -58,6 +58,7 @@ export default function AutomationsView({
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [historyFor, setHistoryFor] = useState<Automation | null>(null);
+  const [query, setQuery] = useState("");
   const [pushOn, setPushOn] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
   const pushOk = pushSupported();
@@ -157,6 +158,10 @@ export default function AutomationsView({
   }
 
   const unread = notes.filter((n) => !n.read).length;
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? items.filter((a) => a.title.toLowerCase().includes(q) || scheduleLabel(a).toLowerCase().includes(q))
+    : items;
 
   return (
     <div className="flex h-full flex-1 flex-col bg-bg">
@@ -175,13 +180,38 @@ export default function AutomationsView({
         <div className="mx-auto grid max-w-5xl grid-cols-1 gap-6 px-6 py-6 lg:grid-cols-3">
           {/* lista de automações */}
           <div className="space-y-3 lg:col-span-2">
+            {items.length > 1 && (
+              <div className="relative">
+                <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                <input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Buscar automações…"
+                  className="w-full rounded-xl border border-border bg-surface py-2 pl-9 pr-9 text-sm text-ink placeholder:text-muted focus:border-accent/50 focus:outline-none"
+                />
+                {query && (
+                  <button
+                    onClick={() => setQuery("")}
+                    title="Limpar busca"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted transition-colors hover:bg-hover hover:text-ink"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            )}
             {items.length === 0 ? (
               <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border py-16 text-center">
                 <CalendarClock size={32} className="text-muted" />
                 <p className="text-sm text-muted">Nenhuma automação ainda.</p>
               </div>
+            ) : filtered.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border py-12 text-center">
+                <Search size={28} className="text-muted" />
+                <p className="text-sm text-muted">Nenhuma automação encontrada para “{query}”.</p>
+              </div>
             ) : (
-              items.map((a) => (
+              filtered.map((a) => (
                 <div key={a.id} className="rounded-2xl border border-border bg-surface p-4 transition-colors hover:border-accent/40">
                   <div className="flex items-start gap-3">
                     <button

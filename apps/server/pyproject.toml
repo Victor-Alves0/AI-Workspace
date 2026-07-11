@@ -28,10 +28,12 @@ dependencies = [
     "pdf2image>=1.17",
     "pillow>=11.0",
     # blocos do usuário
-    # v0.5: 2 meta-tools + scope() p/ gating por modelo, sandbox de code-mode,
-    # e pin() (ferramentas "quentes" viram specs de 1a classe, sem discovery).
+    # v0.7: 2 meta-tools (search_tools+execute_tool; run_code exposto via
+    # code_tools()), scope(pin=[...]) POR-ESCOPO (substituiu o hack _pinned),
+    # adispatch/aexecute_tool no scope, erros estruturados com hint, coerção de
+    # tipos nos params e hooks observer/on_risky/on_result.
     # Integração em tools/sift_service.py + tools/loader.py.
-    "sift-tools>=0.5.0,<0.6",
+    "sift-tools>=0.7.0,<0.8",
     # fixado na linha 0.1.x: é a API (Memory.from_config + config de provider)
     # contra a qual o serviço de memória foi escrito.
     "mem0ai>=0.1.40,<0.2",
