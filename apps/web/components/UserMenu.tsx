@@ -22,6 +22,7 @@ export default function UserMenu({
   onArchived,
   onOpenWorkspace,
   onOpenAnalytics,
+  onOpenPlayground,
   onLogout,
 }: {
   user: User;
@@ -30,6 +31,7 @@ export default function UserMenu({
   onArchived: () => void;
   onOpenWorkspace?: () => void;
   onOpenAnalytics?: () => void;
+  onOpenPlayground?: () => void;
   onLogout: () => void;
 }) {
   const router = useRouter();
@@ -81,7 +83,7 @@ export default function UserMenu({
             <MenuItem icon={<CalendarClock size={16} />} onClick={() => { router.push("/automations"); setOpen(false); }}>
               Automações
             </MenuItem>
-            <MenuItem icon={<FlaskConical size={16} />} onClick={() => { router.push("/playground"); setOpen(false); }}>
+            <MenuItem icon={<FlaskConical size={16} />} onClick={() => { onOpenPlayground ? onOpenPlayground() : router.push("/playground"); setOpen(false); }}>
               Playground
             </MenuItem>
             <MenuDivider />

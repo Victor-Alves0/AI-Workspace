@@ -82,9 +82,14 @@ function collectSources(events: ToolEvent[]): Source[] {
   const out: Source[] = [];
   const seen = new Set<string>();
   const add = (title: unknown, url: unknown) => {
-    if (typeof url !== "string" || !/^https?:\/\//i.test(url) || seen.has(url)) return;
-    seen.add(url);
-    out.push({ title: typeof title === "string" && title.trim() ? title.trim() : url, url });
+    if (typeof url !== "string" || !url) return;
+    // fontes da Base de Conhecimento vêm com URL relativa à API (/knowledge/docs/…)
+    let u = url;
+    if (u.startsWith("/")) u = API_URL + u;
+    else if (!/^https?:\/\//i.test(u)) return;
+    if (seen.has(u)) return;
+    seen.add(u);
+    out.push({ title: typeof title === "string" && title.trim() ? title.trim() : u, url: u });
   };
   // varre um resultado procurando fontes conhecidas (funciona aninhado no run_code)
   const scan = (node: unknown, wantDeep: boolean, depth = 0): void => {
@@ -94,6 +99,10 @@ function collectSources(events: ToolEvent[]): Source[] {
     const o = node as Record<string, unknown>;
     if (wantDeep) {
       if (o.kind === "deep_research" && Array.isArray(o.sources)) {
+        for (const s of o.sources as Record<string, unknown>[]) add(s?.title, s?.url);
+      }
+      // Base de Conhecimento: fontes (documentos) na ordem citada [n]
+      if (o.kind === "knowledge" && Array.isArray(o.sources)) {
         for (const s of o.sources as Record<string, unknown>[]) add(s?.title, s?.url);
       }
     } else {
@@ -139,26 +148,33 @@ function SourcesBar({ sources }: { sources: Source[] }) {
   return (
     <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
       <span className="mr-0.5 text-[11px] font-medium uppercase tracking-wider text-muted">Fontes</span>
-      {shown.map((s, i) => (
-        <a
-          key={s.url}
-          href={s.url}
-          target="_blank"
-          rel="noreferrer noopener"
-          title={s.title}
-          className="flex max-w-[240px] items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1 text-xs text-ink-soft transition-colors hover:border-accent/40 hover:text-ink"
-        >
-          <span className="text-[10px] tabular-nums text-muted">{i + 1}</span>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={`https://www.google.com/s2/favicons?sz=32&domain=${srcHost(s.url)}`}
-            alt=""
-            loading="lazy"
-            className="h-3.5 w-3.5 rounded-sm"
-          />
-          <span className="truncate">{srcHost(s.url)}</span>
-        </a>
-      ))}
+      {shown.map((s, i) => {
+        const isDoc = s.url.includes("/knowledge/docs/");
+        return (
+          <a
+            key={s.url}
+            href={s.url}
+            target="_blank"
+            rel="noreferrer noopener"
+            title={s.title}
+            className="flex max-w-[240px] items-center gap-1.5 rounded-full border border-border bg-surface px-2.5 py-1 text-xs text-ink-soft transition-colors hover:border-accent/40 hover:text-ink"
+          >
+            <span className="text-[10px] tabular-nums text-muted">{i + 1}</span>
+            {isDoc ? (
+              <FileText size={13} className="shrink-0 text-muted" />
+            ) : (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={`https://www.google.com/s2/favicons?sz=32&domain=${srcHost(s.url)}`}
+                alt=""
+                loading="lazy"
+                className="h-3.5 w-3.5 rounded-sm"
+              />
+            )}
+            <span className="truncate">{isDoc ? s.title : srcHost(s.url)}</span>
+          </a>
+        );
+      })}
       {sources.length > 6 && (
         <button onClick={() => setAll((v) => !v)} className="text-xs text-muted transition-colors hover:text-ink">
           {all ? "menos" : `+${sources.length - 6}`}
@@ -744,11 +760,19 @@ function UsagePanel({ u }: { u: NonNullable<Message["usage"]> }) {
     ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, []);
 
+  // detalhe do "extra" por origem (só no modo Extenso, aninhado sob a linha)
+  const EXTRA_LABELS: Record<string, string> = {
+    artifacts: "Artefatos (instruções + conteúdo)",
+    channel: "Canal (WhatsApp/Telegram)",
+    guards: "Guardas de saída (reforços acionados)",
+  };
+  const perExtra = Object.entries(u.extra_breakdown ?? {}).sort((a, b) => b[1] - a[1]);
   const inputParts = [
     { label: "Usuário (mensagem atual)", value: inb?.user ?? 0 },
     { label: "Contexto (histórico do chat)", value: inb?.context ?? 0 },
     { label: "Prompt do sistema", value: inb?.system ?? 0 },
-    { label: "Instruções do canal/guardas", value: inb?.extra ?? 0 },
+    { label: "Instruções extras (artefatos/canal/guardas)", value: inb?.extra ?? 0 },
+    ...(full ? perExtra.map(([k, v]) => ({ label: EXTRA_LABELS[k] ?? k, value: v, sub: true })) : []),
     { label: "Memória (mem0)", value: inb?.memory ?? 0 },
     { label: "Ferramentas (instruções + schemas)", value: inb?.tools ?? 0 },
     { label: "Skills", value: inb?.skills ?? 0 },
@@ -918,6 +942,10 @@ export default function MessageItem({
                       <a key={i} href={a.url} target="_blank" rel="noreferrer" title={a.name}>
                         <img src={a.url} alt={a.name} className="max-h-52 max-w-[85%] rounded-xl border border-border object-cover" />
                       </a>
+                    ) : a.type === "audio" && a.url ? (
+                      // nota de voz/áudio anexado → player nativo compacto
+                      // eslint-disable-next-line jsx-a11y/media-has-caption
+                      <audio key={i} src={a.url} controls preload="none" className="h-9 max-w-[240px]" />
                     ) : (
                       <span key={i} className="flex items-center gap-1.5 rounded-lg border border-border bg-surface2 px-2.5 py-1 text-xs text-ink-soft">
                         <FileText size={13} className="shrink-0 text-muted" />

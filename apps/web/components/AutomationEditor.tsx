@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import type { Automation, AutomationOptions, Chat, Model, ModelConfig, SystemTool, Tool, WhatsAppConnection } from "@/lib/types";
+import type { Automation, AutomationOptions, Chat, Model, ModelConfig, SystemTool, TelegramConnection, Tool, WhatsAppConnection } from "@/lib/types";
 import ModelField from "./ModelField";
 import TransferModal, { type TransferItem } from "./TransferModal";
 
@@ -143,6 +143,65 @@ function WhatsAppDelivery({ value, connections, onChange }: {
   );
 }
 
+/** Entrega do resultado ao Telegram: bot conectado + destino (todas as conversas
+ * ou um chat_id específico). Guardado em target.telegram. */
+type TgDelivery = { enabled?: boolean; connection_id?: string | null; mode?: "threads" | "chat"; chat_id?: string };
+
+function TelegramDelivery({ value, connections, onChange }: {
+  value: TgDelivery;
+  connections: TelegramConnection[];
+  onChange: (v: TgDelivery) => void;
+}) {
+  const v = value ?? {};
+  const on = !!v.enabled;
+  const set = (p: Partial<TgDelivery>) => onChange({ ...v, ...p });
+  const mode = v.mode ?? "threads";
+  const conn = connections.find((c) => c.id === v.connection_id);
+  return (
+    <div className="space-y-2 rounded-xl border border-border bg-surface px-3 py-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm text-ink">Enviar para o Telegram</p>
+          <p className="text-xs text-muted">Entrega o resultado por um bot conectado</p>
+        </div>
+        <Toggle on={on} onClick={() => set({ enabled: !on })} />
+      </div>
+      {on && (
+        <div className="space-y-2 border-t border-border pt-2.5">
+          {connections.length === 0 ? (
+            <p className="text-xs text-amber-400/80">Nenhum bot conectado. Conecte em Configurações → Integrações → Telegram.</p>
+          ) : (
+            <>
+              <label className="block text-sm">
+                <span className="text-xs text-muted">Bot que envia</span>
+                <select value={v.connection_id ?? ""} onChange={(e) => set({ connection_id: e.target.value || null })} className={WA_INPUT}>
+                  <option value="">Selecione…</option>
+                  {connections.map((c) => (
+                    <option key={c.id} value={c.id}>{c.label || `@${c.bot_username}`}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm">
+                <span className="text-xs text-muted">Enviar para</span>
+                <select value={mode} onChange={(e) => set({ mode: e.target.value as TgDelivery["mode"] })} className={WA_INPUT}>
+                  <option value="threads">Todas as conversas do bot{conn ? ` (${conn.threads ?? 0})` : ""}</option>
+                  <option value="chat">Um chat específico (id)</option>
+                </select>
+              </label>
+              {mode === "chat" && (
+                <label className="block text-sm">
+                  <span className="text-xs text-muted">chat_id do Telegram</span>
+                  <input value={v.chat_id ?? ""} onChange={(e) => set({ chat_id: e.target.value })} placeholder="123456789" className={`${WA_INPUT} font-mono text-xs`} />
+                </label>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AutomationEditor({
   automation,
   onClose,
@@ -176,6 +235,7 @@ export default function AutomationEditor({
   const [extModels, setExtModels] = useState<Model[]>([]);
   const [chats, setChats] = useState<Chat[]>([]);
   const [waConns, setWaConns] = useState<WhatsAppConnection[]>([]);
+  const [tgConns, setTgConns] = useState<TelegramConnection[]>([]);
   const [tools, setTools] = useState<Tool[]>([]);
   const [systemTools, setSystemTools] = useState<SystemTool[]>([]);
   const [toolsModal, setToolsModal] = useState(false);
@@ -203,6 +263,7 @@ export default function AutomationEditor({
     ]).then(([ext, local]) => setExtModels([...ext, ...local])).catch(() => {});
     api.get<Chat[]>("/chats").then(setChats).catch(() => {});
     api.get<{ connections: WhatsAppConnection[] }>("/integrations/whatsapp").then((r) => setWaConns(r.connections ?? [])).catch(() => {});
+    api.get<TelegramConnection[]>("/integrations/telegram/connections").then(setTgConns).catch(() => {});
     api.get<Tool[]>("/tools").then(setTools).catch(() => {});
     api.get<SystemTool[]>("/tools/system").then(setSystemTools).catch(() => {});
   }, []);
@@ -533,6 +594,13 @@ export default function AutomationEditor({
             value={d.target.whatsapp ?? {}}
             connections={waConns}
             onChange={(wa) => set("target", { ...d.target, whatsapp: wa })}
+          />
+
+          {/* enviar o resultado para o Telegram */}
+          <TelegramDelivery
+            value={d.target.telegram ?? {}}
+            connections={tgConns}
+            onChange={(tg) => set("target", { ...d.target, telegram: tg })}
           />
 
           {/* opções do chat */}

@@ -8,12 +8,14 @@ import {
   CopyPlus,
   Download,
   Eye,
+  FolderOpen,
   History,
   Link2,
   Loader2,
   Maximize2,
   Minimize2,
   Pencil,
+  Search,
   Trash2,
   X,
 } from "lucide-react";
@@ -48,6 +50,19 @@ function fileName(a: { title: string; kind: string; language: string }) {
 
 // kinds com pré-visualização própria (os demais só têm a visão de código)
 const PREVIEWABLE = new Set(["markdown", "html", "svg", "mermaid", "csv"]);
+
+/** Linha leve do explorador (GET /artifacts — sem conteúdo). */
+interface ExplorerItem {
+  id: string;
+  chat_id: string;
+  chat_title: string;
+  identifier: string;
+  title: string;
+  kind: string;
+  language: string;
+  version: number;
+  updated_at: string | null;
+}
 
 /* ------------------------------------------------------------------------- */
 /* Pré-visualizações                                                          */
@@ -163,8 +178,34 @@ export default function ArtifactPanel({
   /** recarrega a lista após editar/restaurar/duplicar/excluir */
   onChanged: () => Promise<void>;
 }) {
-  const current = artifacts.find((a) => a.identifier === openIdentifier) ?? artifacts[0] ?? null;
+  // artefato de OUTRO chat aberto via explorador (buscado por id, com conteúdo)
+  const [external, setExternal] = useState<ChatArtifact | null>(null);
+  const current = external ?? artifacts.find((a) => a.identifier === openIdentifier) ?? artifacts[0] ?? null;
   const showingLive = live != null;
+
+  // ---------------- explorador (substitui as abas) ----------------
+  const [explorerOpen, setExplorerOpen] = useState(false);
+  const [explorerScope, setExplorerScope] = useState<"chat" | "all">("chat");
+  const [explorerQ, setExplorerQ] = useState("");
+  const [allItems, setAllItems] = useState<ExplorerItem[] | null>(null);
+  const explorerRef = useClickOutside<HTMLDivElement>(() => setExplorerOpen(false));
+
+  const loadAll = useCallback(async () => {
+    try { setAllItems(await api.get<ExplorerItem[]>("/artifacts")); } catch { setAllItems([]); }
+  }, []);
+
+  async function pickFromExplorer(item: ExplorerItem) {
+    setExplorerOpen(false);
+    const local = artifacts.find((a) => a.id === item.id);
+    if (local) {
+      setExternal(null);
+      onSelect(local.identifier);
+      return;
+    }
+    try {
+      setExternal(await api.get<ChatArtifact>(`/artifacts/${item.id}`));
+    } catch { /* some artefato apagado entre a listagem e o clique */ }
+  }
   const kind = showingLive ? live.kind : current?.kind ?? "text";
   const title = showingLive ? live.title : current?.title ?? "";
   const content = showingLive ? live.content : current?.content ?? "";
@@ -206,8 +247,9 @@ export default function ArtifactPanel({
     setSaving(true);
     setErr(null);
     try {
-      await api.patch(`/artifacts/${current.id}`, { content: draft });
-      await onChanged();
+      const updated = await api.patch<ChatArtifact>(`/artifacts/${current.id}`, { content: draft });
+      if (external) setExternal(updated);
+      else await onChanged();
       setDraft(null);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Falha ao salvar");
@@ -250,8 +292,8 @@ export default function ArtifactPanel({
     if (!current) return;
     try {
       const dup = await api.post<ChatArtifact>(`/artifacts/${current.id}/duplicate`);
-      await onChanged();
-      onSelect(dup.identifier);
+      if (external) setExternal(dup);
+      else { await onChanged(); onSelect(dup.identifier); }
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Falha ao duplicar");
     }
@@ -261,8 +303,14 @@ export default function ArtifactPanel({
     if (!current) return;
     try {
       await api.del(`/artifacts/${current.id}`);
-      await onChanged();
-      if (artifacts.length <= 1) onClose();
+      if (external) {
+        setExternal(null);
+        if (artifacts.length === 0) onClose();
+      } else {
+        await onChanged();
+        if (artifacts.length <= 1) onClose();
+      }
+      setAllItems(null); // lista do explorador ficou stale
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Falha ao excluir");
     }
@@ -271,8 +319,9 @@ export default function ArtifactPanel({
   async function rename() {
     if (!current || !nameDraft.trim()) { setRenaming(false); return; }
     try {
-      await api.patch(`/artifacts/${current.id}`, { title: nameDraft.trim() });
-      await onChanged();
+      const updated = await api.patch<ChatArtifact>(`/artifacts/${current.id}`, { title: nameDraft.trim() });
+      if (external) setExternal(updated);
+      else await onChanged();
     } catch { /* mantém o título anterior */ }
     setRenaming(false);
   }
@@ -298,7 +347,8 @@ export default function ArtifactPanel({
     if (!current || !viewingVersion) return;
     try {
       await api.post(`/artifacts/${current.id}/restore`, { version: viewingVersion.version });
-      await onChanged();
+      if (external) setExternal(await api.get<ChatArtifact>(`/artifacts/${current.id}`));
+      else await onChanged();
       setViewingVersion(null);
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Falha ao restaurar");
@@ -312,27 +362,72 @@ export default function ArtifactPanel({
 
   const body = (
     <div className={`pt-safe pb-safe flex min-w-0 flex-col border-border bg-bg ${full ? "fixed inset-0 z-[80]" : "h-full w-full border-l"}`}>
-      {/* abas (vários artefatos no mesmo chat) */}
-      {artifacts.length > 1 && !showingLive && (
-        <div className="flex gap-1 overflow-x-auto border-b border-border px-2 pt-2">
-          {artifacts.map((a) => (
-            <button
-              key={a.id}
-              onClick={() => onSelect(a.identifier)}
-              className={`shrink-0 rounded-t-lg border-x border-t px-3 py-1.5 text-xs transition-colors ${
-                a.identifier === current?.identifier
-                  ? "border-border bg-surface text-ink"
-                  : "border-transparent text-muted hover:text-ink"
-              }`}
-            >
-              {a.title || a.identifier}
-            </button>
-          ))}
-        </div>
-      )}
-
       {/* cabeçalho */}
       <div className="flex items-center gap-1.5 border-b border-border px-3 py-2">
+        {/* explorador de artefatos (substitui as abas — escala p/ N artefatos) */}
+        {!showingLive && (
+          <div className="relative" ref={explorerRef}>
+            <button
+              onClick={() => { setExplorerOpen((v) => !v); if (!explorerOpen && allItems === null) loadAll(); }}
+              title="Explorador de artefatos"
+              className={`rounded-lg p-1.5 transition-colors ${explorerOpen || external ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
+            >
+              <FolderOpen size={15} />
+            </button>
+            {explorerOpen && (
+              <div className="animate-pop absolute left-0 top-9 z-30 w-72 rounded-xl border border-border bg-surface shadow-menu">
+                <div className="flex items-center gap-1 border-b border-border p-1.5">
+                  {(["chat", "all"] as const).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => { setExplorerScope(s); if (s === "all" && allItems === null) loadAll(); }}
+                      className={`rounded-lg px-2.5 py-1 text-xs transition-colors ${explorerScope === s ? "bg-surface2 font-medium text-ink" : "text-muted hover:text-ink"}`}
+                    >
+                      {s === "chat" ? "Este chat" : "Todos"}
+                    </button>
+                  ))}
+                  <div className="ml-auto flex items-center gap-1 pr-1">
+                    <Search size={12} className="text-muted" />
+                    <input
+                      value={explorerQ}
+                      onChange={(e) => setExplorerQ(e.target.value)}
+                      placeholder="Filtrar…"
+                      className="w-24 bg-transparent text-xs text-ink outline-none placeholder:text-muted"
+                    />
+                  </div>
+                </div>
+                <div className="max-h-72 overflow-y-auto p-1.5">
+                  {(() => {
+                    const base: ExplorerItem[] = explorerScope === "chat"
+                      ? artifacts.map((a) => ({ id: a.id, chat_id: a.chat_id, chat_title: "", identifier: a.identifier, title: a.title, kind: a.kind, language: a.language, version: a.version, updated_at: a.updated_at ?? null }))
+                      : (allItems ?? []);
+                    const q = explorerQ.trim().toLowerCase();
+                    const rows = q ? base.filter((r) => `${r.title} ${r.chat_title}`.toLowerCase().includes(q)) : base;
+                    if (explorerScope === "all" && allItems === null) return <p className="px-2 py-4 text-center text-xs text-muted">Carregando…</p>;
+                    if (rows.length === 0) return <p className="px-2 py-4 text-center text-xs text-muted">Nenhum artefato.</p>;
+                    return rows.map((r) => (
+                      <button
+                        key={r.id}
+                        onClick={() => pickFromExplorer(r)}
+                        className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-hover ${current?.id === r.id ? "bg-accent/10" : ""}`}
+                      >
+                        <Code2 size={13} className="shrink-0 text-muted" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-xs text-ink">{r.title || r.identifier}</span>
+                          {explorerScope === "all" && (
+                            <span className="block truncate text-[10px] text-muted">{r.chat_title || "sem título"}</span>
+                          )}
+                        </span>
+                        <span className="shrink-0 text-[10px] text-muted">v{r.version}</span>
+                        {current?.id === r.id && <Check size={12} className="shrink-0 text-accent-hover" />}
+                      </button>
+                    ));
+                  })()}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
         {renaming ? (
           <input
             autoFocus
@@ -354,6 +449,9 @@ export default function ArtifactPanel({
             ) : (
               <>
                 <span className="shrink-0 text-[11px] text-muted">v{current!.version}</span>
+                {external && (
+                  <span className="shrink-0 rounded-full bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">outro chat</span>
+                )}
                 <Pencil size={11} className="shrink-0 text-muted opacity-0 transition-opacity group-hover:opacity-100" />
               </>
             )}
@@ -417,7 +515,7 @@ export default function ArtifactPanel({
         <button onClick={() => setFull((v) => !v)} title={full ? "Reduzir" : "Expandir"} className={btn}>
           {full ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </button>
-        <button onClick={() => { setFull(false); onClose(); }} title="Fechar" className={btn}><X size={15} /></button>
+        <button onClick={() => { setFull(false); setExternal(null); onClose(); }} title="Fechar" className={btn}><X size={15} /></button>
       </div>
 
       {/* aviso de versão antiga */}

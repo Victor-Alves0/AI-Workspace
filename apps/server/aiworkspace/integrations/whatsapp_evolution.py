@@ -135,9 +135,24 @@ async def delete_instance(instance: str) -> None:
         logger.warning("falha ao apagar instância %s no Evolution: %s", instance, exc)
 
 
+async def get_media_base64(instance: str, msg_id: str) -> tuple[str, str]:
+    """Baixa a mídia de uma mensagem (áudio/imagem) como (base64, mimetype).
+    Usa o getBase64FromMediaMessage do Evolution — a mídia mora nos servidores do
+    WhatsApp; o Evolution a descriptografa e devolve pronta."""
+    async with _client() as c:
+        r = await c.post(
+            f"/chat/getBase64FromMediaMessage/{instance}",
+            json={"message": {"key": {"id": msg_id}}, "convertToMp4": False},
+        )
+        r.raise_for_status()
+        data = r.json()
+    return data.get("base64") or "", data.get("mimetype") or "audio/ogg"
+
+
 def parse_webhook(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    """Normaliza um webhook MESSAGES_UPSERT do Evolution em mensagens de texto:
-    [{jid, text, sender_name, from_me, is_group, msg_id}]. Ignora não-texto."""
+    """Normaliza um webhook MESSAGES_UPSERT do Evolution em mensagens:
+    [{jid, text, sender_name, from_me, is_group, msg_id, has_audio}].
+    Texto e ÁUDIO (nota de voz/arquivo — o Audio Router transcreve); ignora o resto."""
     if (payload.get("event") or "").replace(".", "_").lower() != "messages_upsert":
         return []
     data = payload.get("data") or {}
@@ -152,7 +167,8 @@ def parse_webhook(payload: dict[str, Any]) -> list[dict[str, Any]]:
             or (msg.get("extendedTextMessage") or {}).get("text")
             or ""
         )
-        if not jid or not str(text).strip():
+        audio = msg.get("audioMessage") or {}
+        if not jid or (not str(text).strip() and not audio):
             continue
         out.append(
             {
@@ -164,6 +180,9 @@ def parse_webhook(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "from_me": bool(key.get("fromMe")),
                 "is_group": jid.endswith("@g.us"),
                 "msg_id": key.get("id") or "",
+                # áudio presente → o service baixa a mídia se o modelo tiver Audio Router
+                "has_audio": bool(audio),
+                "audio_seconds": int(audio.get("seconds") or 0) if audio else 0,
                 # unix (s) do envio — usado p/ descartar histórico reenviado na
                 # reconexão (o Baileys re-emite MESSAGES_UPSERT do histórico)
                 "ts": _to_unix(it.get("messageTimestamp")),

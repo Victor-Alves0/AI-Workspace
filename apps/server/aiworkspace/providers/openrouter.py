@@ -75,6 +75,62 @@ async def complete(
     return (choices[0].get("message") or {}).get("content") or ""
 
 
+async def complete_verbose(
+    api_key: str,
+    model: str,
+    messages: list[dict[str, Any]],
+    *,
+    params: dict[str, Any] | None = None,
+    timeout: float = 120.0,
+    base_url: str | None = None,
+) -> dict[str, Any]:
+    """Completion NÃO-streaming que devolve texto + métricas (tokens, custo, latência).
+
+    Usada pelo Playground (benchmarks/comparações) onde o que importa é medir cada
+    resposta. Nunca levanta p/ fora: em erro devolve {"error": ...}. `cost` só existe
+    no OpenRouter (extensão `usage.include`); em compat (Ollama) fica None."""
+    import time
+
+    settings = get_settings()
+    _RESERVED = {"model", "messages", "stream", "stream_options", "usage", "tools", "tool_choice"}
+    safe_params = {k: v for k, v in (params or {}).items() if k not in _RESERVED}
+    if base_url:
+        safe_params.pop("reasoning", None)  # não é padrão OpenAI; Ollama pode rejeitar
+    payload: dict[str, Any] = {
+        "model": _compat_model(model, base_url),
+        "messages": messages,
+        "stream": False,
+        **safe_params,
+    }
+    if not base_url:
+        payload["usage"] = {"include": True}  # custo (extensão do OpenRouter)
+    t0 = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(
+                f"{(base_url or settings.openrouter_base_url)}/chat/completions",
+                headers=_headers(api_key),
+                json=payload,
+            )
+        latency_ms = int((time.monotonic() - t0) * 1000)
+        if resp.status_code >= 400:
+            body = resp.text[:300]
+            return {"error": f"HTTP {resp.status_code}: {body}", "latency_ms": latency_ms}
+        data = resp.json()
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc), "latency_ms": int((time.monotonic() - t0) * 1000)}
+    choices = data.get("choices") or []
+    text = "" if not choices else ((choices[0].get("message") or {}).get("content") or "")
+    usage = data.get("usage") or {}
+    return {
+        "text": text,
+        "prompt_tokens": usage.get("prompt_tokens"),
+        "completion_tokens": usage.get("completion_tokens"),
+        "cost": usage.get("cost"),
+        "latency_ms": latency_ms,
+    }
+
+
 async def stream_chat(
     api_key: str,
     model: str,

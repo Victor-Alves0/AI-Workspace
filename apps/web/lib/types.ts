@@ -35,12 +35,16 @@ export interface Chat {
   params: Record<string, unknown>;
   archived: boolean;
   pinned: boolean;
+  /** link público read-only (/shared/<public_id>); null = privado */
+  public_id?: string | null;
   /** "Duração do Chat" (automações): apagado quando o usuário abre e sai */
   view_once?: boolean;
   folder_id: string | null;
   model_config_id: string | null;
   /** memória por-chat (null = herda do modelo/perfil) */
   memory_config?: MemoryConfig | null;
+  /** base de conhecimento por-chat (null = herda do modelo/perfil) */
+  knowledge_config?: KnowledgeConfig | null;
   /** modo do chat: "single" (normal) | "roundtable" (mesa-redonda multi-modelo) */
   mode?: "single" | "roundtable";
   /** participantes da mesa-redonda */
@@ -89,6 +93,39 @@ export interface MemoryConfig {
   banks?: string[];
   /** revisar antes de salvar (padrão do perfil): novas memórias ficam pendentes */
   review?: boolean;
+}
+
+/** config da Base de Conhecimento (perfil/modelo/chat). bases = união das camadas. */
+export interface KnowledgeConfig {
+  enabled?: boolean;
+  /** ids das bases de conhecimento acopladas */
+  bases?: string[];
+  /** "auto" = injeta trechos + cita; "tool" = o modelo busca via search_knowledge */
+  mode?: "auto" | "tool";
+  /** nº de trechos recuperados por turno */
+  k?: number;
+}
+
+/** uma Base de Conhecimento (coleção de documentos indexados) */
+export interface KnowledgeBase {
+  id: string;
+  name: string;
+  description: string;
+  doc_count: number;
+  chunk_count: number;
+}
+
+/** um documento dentro de uma base */
+export interface KnowledgeDoc {
+  id: string;
+  base_id: string;
+  filename: string;
+  mime: string;
+  size: number;
+  status: "pending" | "indexing" | "ready" | "error";
+  error?: string | null;
+  chunk_count: number;
+  created_at?: string | null;
 }
 
 export interface MemoryItem {
@@ -169,6 +206,8 @@ export interface MessageUsage {
   output_breakdown?: { output: number; thinking: number };
   /** tokens de resultado POR ferramenta (soma ≈ input_breakdown.tool_results) */
   tools_breakdown?: Record<string, number>;
+  /** detalhe do `extra` por origem: artifacts | channel | guards (soma ≈ extra) */
+  extra_breakdown?: Record<string, number>;
 }
 
 export interface ToolEvent {
@@ -179,9 +218,9 @@ export interface ToolEvent {
 
 // anexo de mensagem: imagem (data URL), arquivo de texto, ou doc p/ extração
 export interface Attachment {
-  type: "image" | "file";
+  type: "image" | "file" | "audio";
   name: string;
-  url?: string; // imagem: data URL
+  url?: string; // imagem/áudio: data URL
   text?: string; // arquivo: conteúdo textual (já extraído/lido)
   data?: string; // doc binário (base64) p/ extração server-side
   mime?: string;
@@ -330,6 +369,13 @@ export interface AutomationTarget {
     to?: "number" | "contacts" | "threads";
     number?: string;
   };
+  /** entrega do resultado ao Telegram (opcional) */
+  telegram?: {
+    enabled?: boolean;
+    connection_id?: string | null;
+    mode?: "threads" | "chat";
+    chat_id?: string;
+  };
 }
 
 // agendamento de uma automação por tempo. Modos:
@@ -356,6 +402,21 @@ export interface WhatsAppFilters {
   block: string[];
   groups: boolean;
   trigger: string;
+}
+
+export interface TelegramConnection {
+  id: string;
+  label: string;
+  bot_username: string;
+  model_config_id: string | null;
+  model: string;
+  filters: { allow?: string[]; block?: string[]; groups?: boolean; trigger?: string };
+  memory: "local" | "global";
+  system_prompt: string;
+  humanize: { enabled?: boolean; typing?: boolean; split?: boolean; min_seconds?: number; max_seconds?: number };
+  enabled: boolean;
+  state: { status?: string; last_error?: string | null };
+  threads: number;
 }
 
 export interface WhatsAppConnection {
@@ -419,6 +480,19 @@ export interface Automation {
   updated_at: string;
 }
 
+/** uma execução do histórico de uma automação */
+export interface AutomationRun {
+  id: string;
+  status: "ok" | "error" | "no_change" | "skipped";
+  trigger: "scheduled" | "manual";
+  text: string | null;
+  error: string | null;
+  chat_id: string | null;
+  message_id: string | null;
+  cost: number | null;
+  created_at: string;
+}
+
 export interface AppNotification {
   id: string;
   automation_id: string | null;
@@ -454,6 +528,8 @@ export type ChatEvent =
   | { type: "reasoning"; text: string }
   | { type: "title"; title: string }
   | { type: "image_gen"; status: "start" | "error"; prompt?: string }
+  | { type: "knowledge"; status: "start"; query?: string }
+  | { type: "audio_router"; status: "start" | "done"; engine?: string; count?: number }
   // mesa-redonda: início/fim da fala de um participante + fim da rodada
   | { type: "speaker_start"; speaker: Speaker }
   | { type: "speaker_end"; speaker: Speaker; message_id: string }

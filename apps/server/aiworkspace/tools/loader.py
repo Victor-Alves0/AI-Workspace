@@ -130,24 +130,11 @@ def _allow_patterns(tool_ids: list[str], rows: list[Any]) -> list[str]:
     return sorted(set(patterns))
 
 
-async def get_sift_for_user(
-    db: AsyncSession,
-    user_id: uuid.UUID,
-    model_config: Any | None = None,
-):
-    # sem modelo personalizado, ou com SIFT desligada => sem ferramentas
-    if model_config is None or not getattr(model_config, "tools_enabled", False):
-        return None
-    tool_ids = model_config.tool_ids or []
-    if not tool_ids:
-        return None  # SIFT ligada mas nada marcado => sem ferramentas
-
-    rows = list(await db.scalars(select(Tool).where(Tool.user_id == user_id)))
-    allow = _allow_patterns(tool_ids, rows)
-    if not allow:
-        return None
-
-    # config das ferramentas é POR-MODELO (filter_config.tools), não do perfil global
+async def _assemble_configs(db: AsyncSession, user_id: uuid.UUID, model_config: Any | None, tool_ids: list):
+    """Monta as configs das ferramentas de sistema (busca web, finanças, deep search,
+    Google, Tuya) a partir dos segredos + prefs POR-MODELO (filter_config.tools) e do
+    perfil global. Compartilhado por `get_sift_for_user` (scoped) e
+    `build_full_sift_for_user` (completo, p/ o Debug de Tools)."""
     tools_cfg = tool_config(model_config)
     tavily = await get_secret(db, user_id, TAVILY_KEY)
     brave = await get_secret(db, user_id, BRAVE_KEY)
@@ -181,6 +168,40 @@ async def get_sift_for_user(
         from ..integrations import tuya_service
         conn = await tuya_service.get_config(db, str(user_id))
         tuya_cfg = sift_service.tuya_config_from_secrets(conn, tools_cfg.get("tuya"))
+    return cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg
+
+
+async def build_full_sift_for_user(db: AsyncSession, user_id: uuid.UUID):
+    """Instância SIFT COMPLETA e SEM escopo do usuário (builtins + tools dele), para o
+    Debug de Tools chamar qualquer ferramenta direto (`sift.execute_tool(path, params)`).
+    Usa as configs globais do usuário (sem gating por-modelo). None se a SIFT falhar."""
+    rows = list(await db.scalars(select(Tool).where(Tool.user_id == user_id)))
+    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg = await _assemble_configs(db, user_id, None, [])
+    return await run_in_threadpool(
+        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg
+    )
+
+
+async def get_sift_for_user(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    model_config: Any | None = None,
+):
+    # sem modelo personalizado, ou com SIFT desligada => sem ferramentas
+    if model_config is None or not getattr(model_config, "tools_enabled", False):
+        return None
+    tool_ids = model_config.tool_ids or []
+    if not tool_ids:
+        return None  # SIFT ligada mas nada marcado => sem ferramentas
+
+    rows = list(await db.scalars(select(Tool).where(Tool.user_id == user_id)))
+    allow = _allow_patterns(tool_ids, rows)
+    if not allow:
+        return None
+
+    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg = await _assemble_configs(
+        db, user_id, model_config, tool_ids
+    )
     full = await run_in_threadpool(
         sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg
     )

@@ -33,7 +33,7 @@ from ..schemas.chat import (
     SendMessageIn,
 )
 from ..integrations import ollama_service
-from ..secrets_service import IMAGEGEN_KEY, OPENROUTER_KEY, get_secret
+from ..secrets_service import IMAGEGEN_KEY, OPENROUTER_KEY, VOICE_KEY, get_secret
 from ..tools.loader import get_sift_for_user, tool_config
 from ..usage_service import usage_event_from_record
 from . import artifacts as artifacts_service
@@ -235,6 +235,31 @@ async def update_chat(
     return chat
 
 
+@router.post("/{chat_id}/share")
+async def share_chat(
+    chat_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Cria (ou retorna) o link público read-only do chat. Idempotente: reusa o
+    public_id existente. Devolve o token — o front monta a URL /shared/<token>."""
+    import secrets as _secrets
+    chat = await _get_owned_chat(db, chat_id, user)
+    if not chat.public_id:
+        chat.public_id = _secrets.token_urlsafe(12)[:24]
+        await db.commit()
+    return {"public_id": chat.public_id}
+
+
+@router.delete("/{chat_id}/share")
+async def unshare_chat(
+    chat_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Revoga o link público (o chat volta a ser privado)."""
+    chat = await _get_owned_chat(db, chat_id, user)
+    chat.public_id = None
+    await db.commit()
+    return {"ok": True}
+
+
 @router.delete("/{chat_id}")
 async def delete_chat(
     chat_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
@@ -388,6 +413,17 @@ async def _artifacts_extra(db: AsyncSession, chat_id: uuid.UUID, user: User) -> 
     return artifacts_service.system_block(rows)
 
 
+async def _artifacts_kwargs(db: AsyncSession, chat_id: uuid.UUID, user: User, arts_on: bool) -> dict:
+    """kwargs de artefatos p/ o run_turn: o bloco de instruções (extra_system) + o
+    rótulo "artifacts" no detalhamento de uso (painel Extenso)."""
+    if not arts_on:
+        return {}
+    txt = await _artifacts_extra(db, chat_id, user)
+    if not txt:
+        return {}
+    return {"extra_system": txt, "extra_breakdown": {"artifacts": len(txt)}}
+
+
 def _mem_agent_id(model_config: ModelConfig | None, model: str) -> str:
     """Chave do escopo "por modelo" (agent_id): o id do preset quando há um; senão
     o modelo base prefixado (`base:<model>`), estável entre chats."""
@@ -431,6 +467,26 @@ def _mem_banks(chat: Chat, model_config: ModelConfig | None, user: User) -> list
     return [str(b) for b in banks if b]
 
 
+def _resolve_knowledge(chat: Chat | None, model_config: ModelConfig | None, user: User) -> dict:
+    """Config EFETIVA da Base de Conhecimento no turno. As bases acopladas são a
+    UNIÃO de perfil + modelo + chat (o usuário pode acoplar por-modelo E por-chat);
+    `mode`/`k` seguem a camada mais específica. `enabled: False` (mais específico)
+    desliga tudo. `chat=None` (chat efêmero) usa só perfil+modelo. Retorna
+    {bases, mode, k} p/ o orchestrator."""
+    prof = (user.profile or {}).get("knowledge") or {}
+    mc = ((model_config.capabilities or {}).get("knowledge") or {}) if model_config is not None else {}
+    chat_cfg = (chat.knowledge_config or {}) if chat is not None else {}
+    merged = {**prof, **mc, **chat_cfg}
+    if merged.get("enabled") is False:
+        return {"bases": [], "mode": "auto", "k": 6}
+    bases: list[str] = []
+    for src in (prof, mc, chat_cfg):
+        for b in src.get("bases") or []:
+            if b and str(b) not in bases:
+                bases.append(str(b))
+    return {"bases": bases, "mode": (merged.get("mode") or "auto"), "k": int(merged.get("k") or 6)}
+
+
 def _image_output(model_config: ModelConfig | None) -> bool:
     """Capacidade "Geração de Imagens": o modelo gera imagens NATIVAMENTE (inline,
     ex.: nano banana / gemini-2.5-flash-image) — via modalities=["image","text"].
@@ -456,6 +512,31 @@ def _vision_router_model(model_config: ModelConfig | None) -> str | None:
         return None
     cfg = (model_config.filter_config or {}).get("vision_router") or {}
     return (cfg.get("model") or "").strip() or None
+
+
+async def _audio_router_config(
+    db: AsyncSession, user: User, model_config: ModelConfig | None
+) -> dict | None:
+    """Config do filtro Audio Router (transcreve áudios anexados p/ o modelo
+    'ouvir'). Espelha o Vision Router; resolve as credenciais AQUI para o dict ser
+    autossuficiente no orchestrator (que não tem db). Motores:
+      - "stt" (padrão): provedor de voz global (Whisper) — precisa da chave de voz.
+      - "model": um modelo multimodal de áudio via OpenRouter."""
+    if model_config is None:
+        return None
+    caps = model_config.capabilities or {}
+    if not caps.get("filter:audio_router"):
+        return None
+    cfg = (model_config.filter_config or {}).get("audio_router") or {}
+    engine = (cfg.get("engine") or "stt").strip()
+    if engine == "model":
+        model = (cfg.get("model") or "").strip()
+        return {"engine": "model", "model": model} if model else None
+    key = await get_secret(db, user.id, VOICE_KEY)
+    if not key:
+        return None  # sem chave de voz → segue sem transcrição (nota avisa o modelo)
+    s = get_settings()
+    return {"engine": "stt", "base_url": s.voice_base_url, "api_key": key, "model": s.stt_model}
 
 
 async def _genimage_config(
@@ -713,11 +794,11 @@ def _clean_attachments(raw: Any) -> list[dict]:
         if not isinstance(a, dict):
             continue
         t = a.get("type")
-        if t == "image" and isinstance(a.get("url"), str) and a["url"].startswith("data:"):
+        if t in ("image", "audio") and isinstance(a.get("url"), str) and a["url"].startswith("data:"):
             total += len(a["url"])
             if total > _MAX_ATTACH_TOTAL:
                 break
-            out.append({"type": "image", "name": str(a.get("name") or "")[:255], "url": a["url"]})
+            out.append({"type": t, "name": str(a.get("name") or "")[:255], "url": a["url"]})
         elif t == "file" and isinstance(a.get("text"), str) and a["text"]:
             text = a["text"][:200_000]
             total += len(text)
@@ -741,11 +822,11 @@ async def _prepare_attachments(raw: Any, model_config: ModelConfig | None) -> li
         if not isinstance(a, dict):
             continue
         t = a.get("type")
-        if t == "image" and isinstance(a.get("url"), str) and a["url"].startswith("data:"):
+        if t in ("image", "audio") and isinstance(a.get("url"), str) and a["url"].startswith("data:"):
             total += len(a["url"])
             if total > _MAX_ATTACH_TOTAL:
                 break
-            out.append({"type": "image", "name": str(a.get("name") or "")[:255], "url": a["url"]})
+            out.append({"type": t, "name": str(a.get("name") or "")[:255], "url": a["url"]})
             continue
         if t != "file":
             continue
@@ -834,8 +915,10 @@ async def ephemeral(
             attachments=attachments,
             vision=_has_vision(model_config),
             vision_router_model=_vision_router_model(model_config),
+            audio_router=await _audio_router_config(db, user, model_config),
             genimage=genimage,
             image_output=_image_output(model_config),
+            knowledge=_resolve_knowledge(None, model_config, user),
             ocr=ocr_on,
             ocr_engine=ocr_eng,
             ocr_lang=ocr_lang,
@@ -997,7 +1080,7 @@ async def send_message(
         user_id=user_id,
         user_tz=user_tz,
         base_url=base_url,
-        extra_system=await _artifacts_extra(db, chat_id, user) if arts_on else None,
+        **(await _artifacts_kwargs(db, chat_id, user, arts_on)),
         sift=sift,
         code_mode=_code_mode(model_config),
         chat_id=str(chat_id),
@@ -1012,8 +1095,10 @@ async def send_message(
         attachments=attachments,
         vision=_has_vision(model_config),
         vision_router_model=_vision_router_model(model_config),
+        audio_router=await _audio_router_config(db, user, model_config),
         genimage=genimage,
         image_output=_image_output(model_config),
+        knowledge=_resolve_knowledge(chat, model_config, user),
         ocr=ocr_on,
         ocr_engine=ocr_eng,
         ocr_lang=ocr_lang,
@@ -1237,7 +1322,7 @@ async def regenerate_message(
         user_id=user_id,
         user_tz=user_tz,
         base_url=base_url,
-        extra_system=await _artifacts_extra(db, chat_id, user) if arts_on else None,
+        **(await _artifacts_kwargs(db, chat_id, user, arts_on)),
         sift=sift,
         code_mode=_code_mode(model_config),
         chat_id=str(chat_id),
@@ -1252,8 +1337,10 @@ async def regenerate_message(
         attachments=user_attachments,
         vision=_has_vision(model_config),
         vision_router_model=_vision_router_model(model_config),
+        audio_router=await _audio_router_config(db, user, model_config),
         genimage=genimage,
         image_output=_image_output(model_config),
+        knowledge=_resolve_knowledge(chat, model_config, user),
         ocr=ocr_on,
         ocr_engine=ocr_eng,
         ocr_lang=ocr_lang,
@@ -1373,7 +1460,7 @@ async def continue_message(
         user_id=user_id,
         user_tz=user_tz,
         base_url=base_url,
-        extra_system=await _artifacts_extra(db, chat_id, user) if arts_on else None,
+        **(await _artifacts_kwargs(db, chat_id, user, arts_on)),
         sift=sift,
         code_mode=_code_mode(model_config),
         chat_id=str(chat_id),
@@ -1387,6 +1474,7 @@ async def continue_message(
         use_context=_use_context(model_config),
         genimage=genimage,
         image_output=_image_output(model_config),
+        knowledge=_resolve_knowledge(chat, model_config, user),
     )
     gen = generation.start(str(chat_id), source, _finish)
     return _sse_stream(_subscribe(gen))

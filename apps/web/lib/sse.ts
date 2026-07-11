@@ -154,6 +154,40 @@ export async function streamContinue(
   await readSSE(res, onEvent);
 }
 
+// Playground — Comparações: mesmo prompt em N modelos, streaming lado a lado.
+// Eventos: {type:"cols",cols}, {col,type:"delta",text}, {col,type:"done",...}, {col,type:"error",message}, {type:"all_done"}.
+export async function streamCompare(
+  body: { models: { model: string; model_config_id?: string | null; label?: string }[]; prompt: string; system?: string },
+  onEvent: (e: unknown) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await authedFetch(`/playground/compare`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  await readSSE(res, onEvent as (e: ChatEvent) => void);
+}
+
+// Playground — Debug de Tools (Trace): roda um turno com ferramentas e emite os
+// eventos do orquestrador (tool_call / tool_result / token / done / error / notice).
+export async function streamToolTrace(
+  body: { model: string; model_config_id?: string | null; prompt: string },
+  onEvent: (e: unknown) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await authedFetch(`/playground/tool/trace`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  await readSSE(res, onEvent as (e: ChatEvent) => void);
+}
+
 // Chat temporário: streama um turno sem persistir nada.
 export async function streamEphemeral(
   body: {

@@ -123,6 +123,7 @@ export default function Sidebar({
   onShowArchived,
   onOpenWorkspace,
   onOpenAutomations,
+  onOpenPlayground,
   onOpenAnalytics,
   onLogout,
 }: {
@@ -145,6 +146,7 @@ export default function Sidebar({
   onShowArchived: () => void;
   onOpenWorkspace: () => void;
   onOpenAutomations: () => void;
+  onOpenPlayground: () => void;
   onOpenAnalytics: () => void;
   onLogout: () => void;
 }) {
@@ -208,15 +210,15 @@ export default function Sidebar({
         <button onClick={onSearch} title="Pesquisar" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
           <Search size={18} />
         </button>
-        <button onClick={onOpenWorkspace} title="Espaço de Trabalho" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
-          <LayoutGrid size={18} />
-        </button>
         <button onClick={onOpenAutomations} title="Automações" className="relative rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
           <CalendarClock size={18} />
           {unread > 0 && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-accent" />}
         </button>
+        <button onClick={onOpenWorkspace} title="Espaço de Trabalho" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
+          <LayoutGrid size={18} />
+        </button>
         <div className="mt-auto">
-          <UserMenu user={user} collapsed onSettings={onOpenSettings} onArchived={onShowArchived} onOpenWorkspace={onOpenWorkspace} onOpenAnalytics={onOpenAnalytics} onLogout={onLogout} />
+          <UserMenu user={user} collapsed onSettings={onOpenSettings} onArchived={onShowArchived} onOpenWorkspace={onOpenWorkspace} onOpenAnalytics={onOpenAnalytics} onOpenPlayground={onOpenPlayground} onLogout={onLogout} />
         </div>
       </aside>
     );
@@ -337,7 +339,7 @@ export default function Sidebar({
 
       {/* rodapé: usuário */}
       <div className="p-2">
-        <UserMenu user={user} onSettings={onOpenSettings} onArchived={onShowArchived} onOpenWorkspace={onOpenWorkspace} onOpenAnalytics={onOpenAnalytics} onLogout={onLogout} />
+        <UserMenu user={user} onSettings={onOpenSettings} onArchived={onShowArchived} onOpenWorkspace={onOpenWorkspace} onOpenAnalytics={onOpenAnalytics} onOpenPlayground={onOpenPlayground} onLogout={onLogout} />
       </div>
     </aside>
   );

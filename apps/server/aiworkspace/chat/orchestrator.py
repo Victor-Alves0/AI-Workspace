@@ -25,11 +25,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import httpx
 from fastapi.concurrency import run_in_threadpool
 
 from .. import extraction
 from ..config import get_settings
 from ..db import SessionLocal
+from ..knowledge import retrieval as kb_retrieval
+from ..knowledge.links import sign_doc_url
 from ..memory import mem0_service
 from ..models import GeneratedImage
 from ..providers import image_gen, openrouter
@@ -185,6 +188,69 @@ async def _describe_images(
     return (text or "").strip()
 
 
+# formato exigido pela API de áudio (input_audio.format) a partir do mime do data URL
+_AUDIO_FMT = {
+    "audio/mpeg": "mp3", "audio/mp3": "mp3", "audio/wav": "wav", "audio/x-wav": "wav",
+    "audio/webm": "webm", "audio/ogg": "ogg", "audio/opus": "ogg",
+    "audio/mp4": "m4a", "audio/m4a": "m4a", "audio/x-m4a": "m4a", "audio/aac": "aac",
+}
+
+
+def _audio_url_parts(url: str | None) -> tuple[str, str] | None:
+    """(mime, base64) de um data URL de áudio; None se malformado."""
+    if not url or not isinstance(url, str) or "," not in url:
+        return None
+    head, b64 = url.split(",", 1)
+    mime = head.removeprefix("data:").split(";", 1)[0].strip().lower() or "audio/mpeg"
+    return mime, b64
+
+
+async def _transcribe_audios(
+    cfg: dict[str, Any], audios: list[dict[str, Any]], api_key: str
+) -> str:
+    """Audio Router: transcreve os áudios anexados p/ o modelo 'ouvir' em texto.
+
+    Dois motores (espelha o Vision Router):
+      - "stt":   provedor de voz global (Whisper, /audio/transcriptions) — cfg traz
+                 base_url/api_key/model resolvidos pela rota (aqui não há db).
+      - "model": um modelo multimodal de áudio via OpenRouter (partes input_audio).
+    Falha em um áudio não derruba os demais; devolve as transcrições unidas."""
+    texts: list[str] = []
+    for a in audios:
+        parts = _audio_url_parts(a.get("url"))
+        if parts is None:
+            continue
+        mime, b64 = parts
+        try:
+            if cfg.get("engine") == "model":
+                fmt = _AUDIO_FMT.get(mime, "mp3")
+                text = await openrouter.complete(api_key, cfg["model"], [{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Transcribe this audio verbatim. Output ONLY the transcription, in the audio's language."},
+                        {"type": "input_audio", "input_audio": {"data": b64, "format": fmt}},
+                    ],
+                }])
+            else:  # stt (Whisper OpenAI-compat)
+                raw = base64.b64decode(b64, validate=False)
+                ext = _AUDIO_FMT.get(mime, "mp3")
+                async with httpx.AsyncClient(timeout=90) as client:
+                    resp = await client.post(
+                        f"{cfg['base_url']}/audio/transcriptions",
+                        headers={"Authorization": f"Bearer {cfg['api_key']}"},
+                        files={"file": (a.get("name") or f"audio.{ext}", raw, mime)},
+                        data={"model": cfg.get("model") or "whisper-1"},
+                    )
+                resp.raise_for_status()
+                text = (resp.json().get("text") or "").strip()
+        except Exception as exc:  # noqa: BLE001 - um áudio ruim não derruba o turno
+            logger.warning("Audio Router: transcrição falhou (%s)", exc)
+            text = ""
+        if text:
+            texts.append(text)
+    return "\n---\n".join(texts)
+
+
 def _view_skill_tool() -> dict[str, Any]:
     """Meta-ferramenta que entrega o conteúdo completo de uma skill sob demanda."""
     return {
@@ -261,6 +327,46 @@ def _generate_image_tool() -> dict[str, Any]:
             },
         },
     }
+
+
+def _search_knowledge_tool() -> dict[str, Any]:
+    """Tool injetada no modo 'ferramenta' da Base de Conhecimento: o modelo busca
+    trechos dos documentos do usuário quando julga precisar (premissa SIFT)."""
+    return {
+        "type": "function",
+        "function": {
+            "name": "search_knowledge",
+            "description": (
+                "Search the user's knowledge base (their uploaded documents) for passages "
+                "relevant to a question. Use whenever the answer may depend on the user's own "
+                "documents/files. Returns numbered passages — cite the source you used with [n]."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "what to look up, in the document's language"},
+                },
+                "required": ["query"],
+            },
+        },
+    }
+
+
+def _knowledge_block_and_sources(results: list[dict]) -> tuple[str, list[dict[str, str]]]:
+    """Dos trechos recuperados, monta (a) o bloco numerado por FONTE (documento) p/ o
+    modelo e (b) a lista de fontes [{title, url}] (uma por documento, ordem de 1ª
+    aparição) — a numeração [n] bate entre os dois, e a UI (`SourcesBar`/
+    `linkifyCitations`) transforma [n] em link p/ o documento original assinado."""
+    sources: list[dict[str, str]] = []
+    idx: dict[str, int] = {}
+    lines: list[str] = []
+    for r in results:
+        did = r["doc_id"]
+        if did not in idx:
+            idx[did] = len(sources) + 1
+            sources.append({"title": r.get("filename") or "documento", "url": sign_doc_url(did)})
+        lines.append(f"[{idx[did]}] {r.get('text') or ''}")
+    return "\n\n".join(lines), sources
 
 
 async def _save_generated_image(
@@ -448,12 +554,19 @@ async def run_turn(
     attachments: list[dict[str, Any]] | None = None,
     vision: bool = False,
     vision_router_model: str | None = None,
+    # Audio Router: transcreve áudios anexados p/ o modelo (dict resolvido pela
+    # rota: {"engine":"stt", base_url, api_key, model} ou {"engine":"model", model})
+    audio_router: dict[str, Any] | None = None,
     ocr: bool = False,
     ocr_engine: str = "tesseract",
     ocr_lang: str = "por+eng",
     genimage: dict[str, Any] | None = None,
     image_output: bool = False,
+    knowledge: dict[str, Any] | None = None,
     extra_system: str | None = None,
+    # detalhamento (em chars) das origens do extra_system, p/ o painel de uso:
+    # {"artifacts": n, "channel": n, "guards": n} — só rotula, não muda o prompt
+    extra_breakdown: dict[str, int] | None = None,
     subagents: list[dict[str, Any]] | None = None,
     run_subagent: Any | None = None,
     subagent_mode: str = "sequential",
@@ -497,6 +610,37 @@ async def run_turn(
     memories = [m["text"] for m in mem_items]
     if mem_items:
         yield {"type": "memory", "count": len(mem_items), "items": mem_items}
+
+    # 1b. Base de Conhecimento (RAG). Duas formas de uso (escolha do usuário):
+    #   - "auto": recupera os trechos relevantes JÁ e injeta no system (com citações);
+    #   - "tool": expõe `search_knowledge` p/ o modelo buscar sob demanda (mais abaixo).
+    kb = knowledge or {}
+    kb_bases = [str(b) for b in (kb.get("bases") or []) if b]
+    kb_mode = (kb.get("mode") or "auto").lower()
+    kb_k = int(kb.get("k") or 6)
+    kb_on = bool(kb_bases)
+    knowledge_block = ""
+    auto_knowledge_event: dict[str, Any] | None = None
+    if kb_on and kb_mode == "auto":
+        yield {"type": "knowledge", "status": "start", "query": user_text[:120]}
+        try:
+            auto_kres = await kb_retrieval.search(user_id, kb_bases, user_text, kb_k)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("busca na base de conhecimento falhou: %s", exc)
+            auto_kres = []
+        _blk, auto_sources = _knowledge_block_and_sources(auto_kres)
+        if auto_kres:
+            knowledge_block = (
+                "## Base de conhecimento\n"
+                "Trechos recuperados dos documentos do usuário (numerados por fonte). Baseie a "
+                "resposta neles quando pertinente e CITE a fonte usada com [n]. Se a resposta "
+                "não estiver nos trechos, diga que não encontrou na base.\n\n" + _blk
+            )
+        auto_knowledge_event = {
+            "kind": "knowledge", "query": user_text[:200],
+            "sources": auto_sources, "count": len(auto_kres),
+        }
+        yield {"type": "tool_result", "name": "knowledge", "result": auto_knowledge_event}
 
     # 2. montagem — em code mode o modelo recebe run_code (orquestra várias
     # tools escrevendo Python numa chamada só) em vez de execute_tool
@@ -546,6 +690,12 @@ async def run_turn(
     if genimage_on:
         tools = list(tools) + [_generate_image_tool()]
 
+    # Base de Conhecimento no modo "ferramenta": o modelo ganha `search_knowledge`
+    # (independe da SIFT — como o view_skill), buscando os documentos sob demanda.
+    kb_tool_on = kb_on and kb_mode == "tool"
+    if kb_tool_on:
+        tools = list(tools) + [_search_knowledge_tool()]
+
     # Subagentes: com a permissão ligada + um time resolvido, o modelo (orquestrador)
     # ganha a tool `delegate` p/ acionar operários (cada um um ModelConfig próprio).
     subagents = subagents or []
@@ -560,6 +710,9 @@ async def run_turn(
     if skills_block:
         static_system = (static_system + "\n\n" + skills_block).strip()
     mem_block = _memory_block(memories)
+    # bloco de contexto por-turno (fora do prefixo cacheado): memória + conhecimento
+    # recuperado (modo auto). Ambos variam a cada turno conforme a pergunta.
+    context_block = "\n\n".join(b for b in (mem_block, knowledge_block) if b)
     time_note = _temporal_note(user_tz, user_tz_offset)
     # `extra_system` = instruções de ALTA PRIORIDADE: reforço de um Guarda de saída
     # (retry) OU instruções do canal (ex.: WhatsApp). Vão para o FIM do system, DEPOIS
@@ -568,16 +721,18 @@ async def run_turn(
     # cada tentativa; assim o prefixo grande e estável continua sendo reaproveitado).
     # Ver run_turn_guarded.
     messages: list[dict[str, Any]] = [
-        _system_message(static_system, mem_block, model, time_note, extra_system)
+        _system_message(static_system, context_block, model, time_note, extra_system)
     ]
     # capacidade "Contexto do Chat": quando desligada, o modelo NÃO recebe o
     # histórico (turno stateless — só system + mensagem atual).
     if use_context:
         messages.extend(history)
 
-    # Anexos: imagens (visão nativa OU Vision Router) e arquivos de texto.
+    # Anexos: imagens (visão nativa OU Vision Router), áudios (Audio Router) e
+    # arquivos de texto.
     attachments = attachments or []
     images = [a for a in attachments if a.get("type") == "image" and a.get("url")]
+    audios = [a for a in attachments if a.get("type") == "audio" and a.get("url")]
     files = [a for a in attachments if a.get("type") == "file" and a.get("text")]
     file_blocks = "\n\n".join(
         f"[Arquivo anexado: {a.get('name') or 'arquivo'}]\n{a['text']}" for a in files
@@ -586,11 +741,34 @@ async def run_turn(
     if file_blocks:
         base_text = (base_text + "\n\n" + file_blocks).strip() if base_text else file_blocks
 
+    # Audio Router: transcreve os áudios ANTES do tratamento de imagens, para a
+    # transcrição entrar no texto-base em qualquer um dos ramos abaixo.
+    audio_note = ""
+    if audios and audio_router:
+        yield {"type": "audio_router", "status": "start", "engine": audio_router.get("engine"), "count": len(audios)}
+        try:
+            tx = await _transcribe_audios(audio_router, audios, api_key)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Audio Router falhou (%s); seguindo sem transcrição", exc)
+            tx = ""
+        yield {"type": "audio_router", "status": "done", "count": len(audios)}
+        audio_note = (
+            f"[O usuário enviou {len(audios)} áudio(s). Transcrição:\n{tx}]"
+            if tx else "[O usuário enviou áudio(s), mas não foi possível transcrevê-los.]"
+        )
+    elif audios:
+        audio_note = "[O usuário enviou áudio(s), mas este modelo não tem Audio Router configurado.]"
+    if audio_note:
+        attach_note_len = len(audio_note)
+        base_text = (base_text + "\n\n" + audio_note).strip() if base_text else audio_note
+    else:
+        attach_note_len = 0
+
     # precedência do tratamento de imagens (modelo sem visão nativa):
     #  - motor "tesseract" (ou "vision" sem router configurado) → OCR local
     #  - motor "vision" com Vision Router → o modelo de visão descreve/transcreve
     use_tesseract = bool(images and ocr and (ocr_engine == "tesseract" or not vision_router_model))
-    attach_chars = len(file_blocks)
+    attach_chars = len(file_blocks) + attach_note_len
     if images and vision:
         # visão nativa: manda as imagens como partes image_url (multipart OpenAI)
         parts: list[dict[str, Any]] = []
@@ -666,6 +844,7 @@ async def run_turn(
         "system": len(chat_system_prompt or "") + len(time_note),
         "extra": len(extra_system or ""),
         "memory": len(mem_block),
+        "knowledge": len(knowledge_block),
         "tools": len(sift_prompt) + (len(json.dumps(tools)) if tools else 0),
         "skills": len(skills_block),
         "tool_results": 0,  # preenchido conforme as tools respondem no loop (inclui view_skill)
@@ -689,6 +868,10 @@ async def run_turn(
     }
     # registro dos usos de ferramenta neste turno (p/ embutir na mensagem)
     tool_events: list[dict[str, Any]] = []
+    # modo "auto" da Base de Conhecimento: registra as fontes recuperadas (já
+    # emitidas acima) p/ persistirem na mensagem (SourcesBar após F5).
+    if auto_knowledge_event is not None:
+        tool_events.append({"kind": "result", "name": "knowledge", "data": auto_knowledge_event})
     # imagens GERADAS NATIVAMENTE pelo modelo (capability image_generation, ex.: nano
     # banana). Deduplicadas por conteúdo — o stream pode repetir a mesma imagem.
     # NÃO emitimos "image_gen start" aqui: a capability ligada não significa que ESTA
@@ -871,6 +1054,28 @@ async def run_turn(
                         logger.warning("Falha ao gerar imagem: %s", exc)
                         yield {"type": "image_gen", "status": "error"}
                         result = {"error": f"não foi possível gerar a imagem: {exc}"}
+            elif name == "search_knowledge":
+                # Base de Conhecimento (modo ferramenta): busca os documentos e devolve
+                # os trechos numerados; a UI mostra as fontes (via kind:"knowledge").
+                query = str(args.get("query") or "").strip() or user_text
+                if not kb_tool_on:
+                    result = {"error": "base de conhecimento não está ativa neste modelo"}
+                else:
+                    yield {"type": "knowledge", "status": "start", "query": query[:120]}
+                    try:
+                        kres = await kb_retrieval.search(user_id, kb_bases, query, kb_k)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("search_knowledge falhou: %s", exc)
+                        kres = []
+                    _blk, ksrc = _knowledge_block_and_sources(kres)
+                    model_txt = (
+                        "Trechos da base de conhecimento (cite a fonte usada com [n]):\n\n" + _blk
+                        if kres else "Nenhum trecho relevante encontrado na base de conhecimento."
+                    )
+                    result = {
+                        "kind": "knowledge", "query": query[:200],
+                        "sources": ksrc, "count": len(kres), "_model": model_txt,
+                    }
             elif name == "delegate":
                 if not subagents_on:
                     result = {"error": "subagentes não habilitados neste modelo"}
@@ -942,6 +1147,11 @@ async def run_turn(
                     "note": "An editable email draft was shown to the user to review and send. "
                             "Do NOT claim the email was sent; the user will send it from the composer.",
                 })
+            # base de conhecimento: o modelo recebe os TRECHOS (`_model`); a UI/persistência
+            # recebem só as fontes (o texto dos trechos não incha o tool_events salvo).
+            if isinstance(event_result, dict) and event_result.get("kind") == "knowledge":
+                content = event_result.get("_model") or ""
+                event_result = {k: v for k, v in event_result.items() if k != "_model"}
             yield {"type": "tool_result", "name": name, "result": event_result}
             tool_events.append({"kind": "result", "name": name, "data": event_result})
 
@@ -994,6 +1204,12 @@ async def run_turn(
     if prompt_total and weight_total and tool_result_chars:
         total_usage["tools_breakdown"] = {
             k: round(prompt_total * v / weight_total) for k, v in tool_result_chars.items()
+        }
+    # detalhe do "extra" por origem (artefatos/canal/guardas) — soma ≈ extra
+    if prompt_total and weight_total and extra_breakdown:
+        total_usage["extra_breakdown"] = {
+            k: round(prompt_total * v / weight_total)
+            for k, v in extra_breakdown.items() if v
         }
 
     has_usage = total_usage["total_tokens"] > 0 or total_usage["cost"] > 0
@@ -1132,7 +1348,7 @@ def _merge_done_usage(acc: dict | None, u: dict | None) -> dict | None:
     for k in ("prompt_tokens", "completion_tokens", "total_tokens", "reasoning_tokens", "cached_tokens"):
         acc[k] = int(acc.get(k, 0) or 0) + int(u.get(k, 0) or 0)
     acc["cost"] = float(acc.get("cost", 0.0) or 0.0) + float(u.get("cost", 0.0) or 0.0)
-    for grp in ("input_breakdown", "output_breakdown", "tools_breakdown"):
+    for grp in ("input_breakdown", "output_breakdown", "tools_breakdown", "extra_breakdown"):
         merged = dict(acc.get(grp) or {})
         for k, v in (u.get(grp) or {}).items():
             merged[k] = int(merged.get(k, 0) or 0) + int(v or 0)
@@ -1170,6 +1386,7 @@ async def run_turn_guarded(
     guard_log: list[dict[str, Any]] = []
     attempt = 0
 
+    base_breakdown = dict(turn_kwargs.get("extra_breakdown") or {})
     while True:
         attempt += 1
         # o extra do canal (base_extra) SEMPRE entra; reforços de guarda são somados
@@ -1178,10 +1395,15 @@ async def run_turn_guarded(
             if base_extra and extra_system
             else (extra_system or base_extra)
         )
+        # rotula o reforço do guarda no detalhamento de uso (painel "Extenso")
+        combined_breakdown = (
+            {**base_breakdown, "guards": len(extra_system)} if extra_system else base_breakdown
+        )
         kw = {
             **turn_kwargs,
             "model": cur_model, "api_key": cur_key, "base_url": cur_base,
             "extra_system": combined_extra,
+            "extra_breakdown": combined_breakdown or None,
         }
         final_done: dict | None = None
         last_error: dict | None = None

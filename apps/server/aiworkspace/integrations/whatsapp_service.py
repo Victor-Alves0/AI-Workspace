@@ -454,7 +454,8 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
     """Um turno completo para UMA mensagem aprovada (sessão própria)."""
     from ..chat.orchestrator import run_turn_guarded
     from ..chat.routes import (
-        _load_skills, _resolve_guards, _resolve_provider, _usage_record, _user_profile_dict,
+        _audio_router_config, _load_skills, _resolve_guards, _resolve_provider,
+        _usage_record, _user_profile_dict,
     )
     from ..tools.loader import get_sift_for_user
 
@@ -509,6 +510,23 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
         if trigger and text.lower().startswith(trigger.lower()):
             text = text[len(trigger):].strip() or text
 
+        # Nota de voz/áudio → baixa a mídia e deixa o Audio Router do modelo
+        # transcrever (mesmo fluxo do chat). Sem router configurado, o orchestrator
+        # avisa o modelo que chegou um áudio não-transcrevível.
+        attachments: list[dict[str, Any]] = []
+        audio_router = None
+        if m.get("has_audio") and conn.provider == "evolution":
+            audio_router = await _audio_router_config(db, user, mc)
+            try:
+                b64, mime = await evolution.get_media_base64(conn.instance, m["msg_id"])
+                if b64:
+                    attachments.append({
+                        "type": "audio", "name": "voz.ogg", "mime": mime,
+                        "url": f"data:{mime};base64,{b64}",
+                    })
+            except Exception as exc:  # noqa: BLE001 - áudio indisponível não trava o turno
+                logger.warning("whatsapp: falha ao baixar áudio (%s): %s", conn.id, exc)
+
         # histórico = o próprio chat da conversa (limitado)
         rows = list(await db.scalars(
             select(Message)
@@ -518,8 +536,9 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
         ))
         history = [{"role": r.role, "content": r.content} for r in reversed(rows) if r.content]
 
-        # transcrição legível: em grupo, marca quem falou
-        shown = f"{m['sender_name']}: {text}" if m.get("is_group") and m.get("sender_name") else text
+        # transcrição legível: em grupo, marca quem falou; áudio sem texto → marcador
+        display = text or ("[Mensagem de voz]" if attachments else text)
+        shown = f"{m['sender_name']}: {display}" if m.get("is_group") and m.get("sender_name") else display
         db.add(Message(chat_id=chat.id, role="user", content=shown))
 
         sift = await get_sift_for_user(db, user.id, mc)
@@ -558,6 +577,8 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
                 background=True,  # autônomo: sem revisão interativa de tools
                 sift=sift, code_mode=bool(getattr(mc, "code_mode", False)),
                 skills=skills, use_context=True, extra_system=extra_system,
+                extra_breakdown={"channel": len(extra_system)},
+                attachments=attachments or None, audio_router=audio_router,
                 user_profile=_user_profile_dict(user),
                 **_memory_kwargs(conn, chat, mc, model),
             ):

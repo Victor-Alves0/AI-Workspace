@@ -31,6 +31,8 @@ class ChatUpdate(BaseModel):
     model_config_id: uuid.UUID | None = None
     # memória por-chat: {"write": "...", "read": {...}} (null = herda modelo/perfil)
     memory_config: dict[str, Any] | None = None
+    # base de conhecimento por-chat: {"enabled": b, "bases": [...], "mode": "auto|tool", "k": int}
+    knowledge_config: dict[str, Any] | None = None
     # mesa-redonda (multi-modelo)
     mode: str | None = None
     participants: list[dict[str, Any]] | None = None
@@ -74,11 +76,14 @@ class ChatOut(BaseModel):
     params: dict[str, Any]
     archived: bool
     pinned: bool
+    # link público read-only (/shared/<public_id>); null = privado
+    public_id: str | None = None
     # "Duração do Chat" (automações): view_once = o front apaga ao abrir e sair
     view_once: bool = False
     folder_id: uuid.UUID | None
     model_config_id: uuid.UUID | None
     memory_config: dict[str, Any] | None = None
+    knowledge_config: dict[str, Any] | None = None
     mode: str = "single"
     participants: list[dict[str, Any]] = Field(default_factory=list)
     roundtable_config: dict[str, Any] | None = None
@@ -91,9 +96,10 @@ class ChatDetail(ChatOut):
 
 
 class Attachment(BaseModel):
-    type: str = Field(pattern=r"^(image|file)$")
+    type: str = Field(pattern=r"^(image|file|audio)$")
     name: str = Field(default="", max_length=255)
-    url: str | None = Field(default=None, max_length=8_000_000)  # data URL (imagem)
+    # data URL (imagem/áudio) — áudio (voz) fica maior que imagem redimensionada
+    url: str | None = Field(default=None, max_length=25_000_000)
     text: str | None = Field(default=None, max_length=200_000)  # conteúdo (arquivo texto)
     # doc binário p/ extração server-side (PDF/DOCX/XLSX/PPTX): base64 + mime
     data: str | None = Field(default=None, max_length=16_000_000)

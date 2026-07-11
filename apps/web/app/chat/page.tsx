@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUpRight, Bell, GitBranch, Image as ImageIcon, Menu, MessageSquareDashed, Search, Scissors, ShieldAlert, SlidersHorizontal, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
+import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, Copy, FlaskConical, GitBranch, Image as ImageIcon, Link2, Menu, MessageSquareDashed, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamResume, streamRoundtable } from "@/lib/sse";
 import { speak, startRecording, transcribe } from "@/lib/voice";
@@ -29,6 +29,7 @@ import PromptBox, { type ReasoningEffort } from "@/components/PromptBox";
 import MessageItem from "@/components/MessageItem";
 import WorkspaceView, { type Section as WorkspaceSection } from "@/components/WorkspaceView";
 import AutomationsView from "@/components/AutomationsView";
+import PlaygroundView from "@/components/PlaygroundView";
 import type { ChatActions } from "@/components/ChatItem";
 import { SHORTCUTS, eventToCombo, resolveBinding, comboHasModifier, type ShortcutMap } from "@/lib/shortcuts";
 
@@ -91,6 +92,8 @@ export default function ChatPage() {
   const [streamingReasoning, setStreamingReasoning] = useState("");
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const [generatingImage, setGeneratingImage] = useState(false);
+  const [consultingKnowledge, setConsultingKnowledge] = useState(false);
+  const [transcribingAudio, setTranscribingAudio] = useState(false);
   // Artefatos (janela dedicada): lista do chat + qual está aberto + o "ao vivo"
   // (bloco <artifact> ainda chegando no streaming)
   const [chatArtifacts, setChatArtifacts] = useState<ChatArtifact[]>([]);
@@ -130,12 +133,16 @@ export default function ChatPage() {
   const [workspaceKey, setWorkspaceKey] = useState(0);
   // tela de Automações embutida (mantém a barra lateral visível)
   const [automationsOpen, setAutomationsOpen] = useState(false);
+  // tela de Playground embutida (benchmarks / comparações / debug de tools)
+  const [playgroundOpen, setPlaygroundOpen] = useState(false);
+  const [playgroundKey, setPlaygroundKey] = useState(0);
   // quando != null, o Espaço de Trabalho abre direto no editor deste modelo
   const [editModelTarget, setEditModelTarget] = useState<ModelConfig | null>(null);
   // quando != null, o Espaço de Trabalho abre direto nesta seção (ex.: Analítica)
   const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [showControls, setShowControls] = useState(false);
+  const [showShare, setShowShare] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   // mobile: drawer da barra lateral + detecção de tela pequena (< md)
   const [mobileNav, setMobileNav] = useState(false);
@@ -549,6 +556,7 @@ export default function ChatPage() {
     setSuggestions(pickSuggestions(3));
     setWorkspaceOpen(false);
     setAutomationsOpen(false);
+    setPlaygroundOpen(false);
   }
 
   const reloadMessages = useCallback(async (chatId: string) => {
@@ -623,8 +631,13 @@ export default function ChatPage() {
         state.tools.push(t);
         setToolEvents((x) => [...x, t]);
         setGeneratingImage(false); // a imagem (ou o erro) chegou
+        setConsultingKnowledge(false); // os trechos/fontes chegaram
       } else if (ev.type === "image_gen") {
         setGeneratingImage(ev.status === "start");
+      } else if (ev.type === "knowledge") {
+        setConsultingKnowledge(ev.status === "start");
+      } else if (ev.type === "audio_router") {
+        setTranscribingAudio(ev.status === "start");
       } else if (ev.type === "subagent") {
         // orquestrador delegou a um operário — mostra/atualiza os chips
         if (ev.status === "start") setSubagents((s) => (ev.agent && !s.some((x) => x.name === ev.agent) ? [...s, { name: ev.agent, ctx: ev.ctx, mem: ev.mem }] : s));
@@ -637,10 +650,14 @@ export default function ChatPage() {
         state.acc = ""; state.reason = ""; state.tools = [];
         setToolEvents([]);
         setGeneratingImage(false);
+        setConsultingKnowledge(false);
+        setTranscribingAudio(false);
         flush();
       } else if (ev.type === "error") {
         state.acc += `\n\n⚠️ Erro: ${ev.message}`;
         setGeneratingImage(false);
+        setConsultingKnowledge(false);
+        setTranscribingAudio(false);
         flush();
       } else if (ev.type === "artifacts") {
         // resposta persistida criou/atualizou artefatos: abre o último no painel
@@ -700,6 +717,7 @@ export default function ChatPage() {
     setTemporary(false);
     setWorkspaceOpen(false);
     setAutomationsOpen(false);
+    setPlaygroundOpen(false);
     leaveViewOnce(id);
     const detail = await api.get<Chat & { messages: Message[] }>(`/chats/${id}`);
     setActive(detail);
@@ -1159,8 +1177,9 @@ export default function ChatPage() {
     command_palette: () => setShowPalette(true),
     toggle_sidebar: () => toggleCollapse(),
     toggle_controls: () => setShowControls((v) => !v),
-    workspace: () => { setWorkspaceSection(null); setWorkspaceOpen(true); setAutomationsOpen(false); },
-    automations: () => { setAutomationsOpen(true); setWorkspaceOpen(false); },
+    workspace: () => { setWorkspaceSection(null); setWorkspaceOpen(true); setAutomationsOpen(false); setPlaygroundOpen(false); },
+    automations: () => { setAutomationsOpen(true); setWorkspaceOpen(false); setPlaygroundOpen(false); },
+    playground: () => { setPlaygroundKey((k) => k + 1); setPlaygroundOpen(true); setWorkspaceOpen(false); setAutomationsOpen(false); },
     settings: () => setShowSettings(true),
     archived: () => setShowArchived(true),
     dictate: () => toggleMic(),
@@ -1208,7 +1227,8 @@ export default function ChatPage() {
     { id: "act-temp", group: "Ações", label: "Chat temporário", keywords: "privado incógnito não salvar", icon: <MessageSquareDashed size={16} />, run: () => { if (!temporary) toggleTemporary(); } },
     { id: "act-round", group: "Ações", label: "Mesa-redonda", keywords: "multi modelo debate", icon: <Users size={16} />, run: () => enterRoundtable() },
     { id: "act-ws", group: "Ações", label: "Espaço de Trabalho", keywords: "modelos ferramentas prompts skills", icon: <Wrench size={16} />, run: () => { setWorkspaceSection(null); setWorkspaceOpen(true); setAutomationsOpen(false); } },
-    { id: "act-auto", group: "Ações", label: "Automações", keywords: "agendar monitor", icon: <Bell size={16} />, run: () => { setAutomationsOpen(true); setWorkspaceOpen(false); } },
+    { id: "act-auto", group: "Ações", label: "Automações", keywords: "agendar monitor", icon: <Bell size={16} />, run: () => { setAutomationsOpen(true); setWorkspaceOpen(false); setPlaygroundOpen(false); } },
+    { id: "act-play", group: "Ações", label: "Playground", keywords: "benchmark comparar modelos debug ferramentas tools", icon: <FlaskConical size={16} />, run: () => { setPlaygroundKey((k) => k + 1); setPlaygroundOpen(true); setWorkspaceOpen(false); setAutomationsOpen(false); } },
     { id: "act-archived", group: "Ações", label: "Chats arquivados", keywords: "arquivo", icon: <Search size={16} />, run: () => setShowArchived(true) },
     ...(user.role === "admin" ? [{ id: "act-admin", group: "Ações", label: "Painel do Admin", keywords: "usuarios rede backup", icon: <ShieldAlert size={16} />, run: () => router.push("/admin") } as PaletteItem] : []),
     { id: "act-logout", group: "Ações", label: "Sair", keywords: "logout desconectar sair", icon: <X size={16} />, run: () => logout() },
@@ -1279,9 +1299,10 @@ export default function ChatPage() {
           onMoveChat={moveChat}
           onOpenSettings={() => { setShowSettings(true); setMobileNav(false); }}
           onShowArchived={() => { setShowArchived(true); setMobileNav(false); }}
-          onOpenWorkspace={() => { setEditModelTarget(null); setWorkspaceSection(null); setWorkspaceKey((k) => k + 1); setWorkspaceOpen(true); setAutomationsOpen(false); setMobileNav(false); }}
-          onOpenAutomations={() => { setAutomationsOpen(true); setWorkspaceOpen(false); setMobileNav(false); }}
-          onOpenAnalytics={() => { setEditModelTarget(null); setWorkspaceSection("Analítica"); setWorkspaceKey((k) => k + 1); setWorkspaceOpen(true); setAutomationsOpen(false); setMobileNav(false); }}
+          onOpenWorkspace={() => { setEditModelTarget(null); setWorkspaceSection(null); setWorkspaceKey((k) => k + 1); setWorkspaceOpen(true); setAutomationsOpen(false); setPlaygroundOpen(false); setMobileNav(false); }}
+          onOpenAutomations={() => { setAutomationsOpen(true); setWorkspaceOpen(false); setPlaygroundOpen(false); setMobileNav(false); }}
+          onOpenPlayground={() => { setPlaygroundKey((k) => k + 1); setPlaygroundOpen(true); setWorkspaceOpen(false); setAutomationsOpen(false); setMobileNav(false); }}
+          onOpenAnalytics={() => { setEditModelTarget(null); setWorkspaceSection("Analítica"); setWorkspaceKey((k) => k + 1); setWorkspaceOpen(true); setAutomationsOpen(false); setPlaygroundOpen(false); setMobileNav(false); }}
           onLogout={logout}
         />
       </div>
@@ -1297,6 +1318,8 @@ export default function ChatPage() {
           />
         ) : automationsOpen ? (
           <AutomationsView onOpenChat={(cid) => { setAutomationsOpen(false); selectChat(cid).catch(() => {}); }} />
+        ) : playgroundOpen ? (
+          <PlaygroundView key={playgroundKey} onClose={() => setPlaygroundOpen(false)} />
         ) : (
         <>
         {/* barra superior */}
@@ -1326,6 +1349,15 @@ export default function ChatPage() {
             )}
           </div>
           <div className="flex items-center gap-1">
+            {active && !temporary && (
+              <button
+                onClick={() => setShowShare(true)}
+                title="Compartilhar conversa (link público)"
+                className={`rounded-lg p-2 transition-colors ${active.public_id ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
+              >
+                <Share2 size={18} />
+              </button>
+            )}
             <button
               onClick={toggleTemporary}
               title="Chat temporário"
@@ -1506,7 +1538,7 @@ export default function ChatPage() {
                     </div>
                   )}
                   {isRoundtable && rtRunning && !rtStreaming && <Thinking />}
-                  {!isRoundtable && (streaming || streamingReasoning || generatingImage || (sending && toolEvents.length > 0) ? (
+                  {!isRoundtable && (streaming || streamingReasoning || generatingImage || consultingKnowledge || transcribingAudio || (sending && toolEvents.length > 0) ? (
                     <MessageBubble
                       role="assistant"
                       content={streaming}
@@ -1515,7 +1547,7 @@ export default function ChatPage() {
                       reasoning={streamingReasoning ? { text: streamingReasoning } : null}
                       reasoningLive={!streaming}
                       toolEvents={toolEvents.length ? toolEvents : undefined}
-                      footer={generatingImage ? <GeneratingImage /> : undefined}
+                      footer={generatingImage ? <GeneratingImage /> : consultingKnowledge ? <ConsultingKnowledge /> : transcribingAudio ? <TranscribingAudio /> : undefined}
                     />
                   ) : (
                     sending && <Thinking />
@@ -1579,6 +1611,8 @@ export default function ChatPage() {
               memory={active ? active.memory_config ?? null : undefined}
               memoryDefault={memoryDefault}
               onMemoryChange={active ? (cfg) => patchActive({ memory_config: cfg }) : undefined}
+              knowledge={active ? active.knowledge_config ?? null : undefined}
+              onKnowledgeChange={active ? (cfg) => patchActive({ knowledge_config: cfg }) : undefined}
               onSave={(sp, params) => {
                 if (active) patchActive({ system_prompt: sp, params });
                 else {
@@ -1590,6 +1624,14 @@ export default function ChatPage() {
             />
           </div>
         </>
+      )}
+
+      {showShare && active && (
+        <ShareModal
+          chat={active}
+          onClose={() => setShowShare(false)}
+          onChange={(publicId) => setActive((a) => (a ? { ...a, public_id: publicId } : a))}
+        />
       )}
 
       {showSettings && (
@@ -1845,6 +1887,85 @@ function GeneratingImage() {
     <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-ink-soft">
       <ImageIcon size={14} className="animate-pulse text-accent-hover" />
       Gerando imagem…
+    </div>
+  );
+}
+
+/** Compartilhar conversa: cria/mostra o link público read-only e permite revogar. */
+function ShareModal({
+  chat, onClose, onChange,
+}: {
+  chat: Chat;
+  onClose: () => void;
+  onChange: (publicId: string | null) => void;
+}) {
+  const [publicId, setPublicId] = useState<string | null>(chat.public_id ?? null);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const url = publicId ? `${typeof window !== "undefined" ? window.location.origin : ""}/shared/${publicId}` : "";
+
+  // ao abrir sem link, cria um automaticamente
+  useEffect(() => {
+    if (publicId) return;
+    setBusy(true);
+    api.post<{ public_id: string }>(`/chats/${chat.id}/share`)
+      .then((r) => { setPublicId(r.public_id); onChange(r.public_id); })
+      .catch(() => {})
+      .finally(() => setBusy(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function copy() {
+    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+  }
+  async function revoke() {
+    setBusy(true);
+    try { await api.del(`/chats/${chat.id}/share`); setPublicId(null); onChange(null); onClose(); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-border bg-surface p-5 shadow-2xl">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="flex items-center gap-2 text-sm font-semibold text-ink"><Share2 size={16} className="text-accent-hover" /> Compartilhar conversa</span>
+          <button onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={16} /></button>
+        </div>
+        <p className="mb-3 text-xs text-muted">
+          Qualquer pessoa com o link vê esta conversa em modo leitura (título e mensagens). Novas mensagens aparecem quando a pessoa recarrega. Revogue quando quiser.
+        </p>
+        <div className="flex items-center gap-2 rounded-xl border border-border bg-surface2 px-3 py-2">
+          <Link2 size={14} className="shrink-0 text-muted" />
+          <input readOnly value={busy && !url ? "Gerando link…" : url} className="min-w-0 flex-1 bg-transparent text-xs text-ink outline-none" />
+          <button onClick={copy} disabled={!url} title="Copiar" className="shrink-0 rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink disabled:opacity-40">
+            {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
+          </button>
+        </div>
+        <div className="mt-4 flex justify-end">
+          <button onClick={revoke} disabled={busy || !publicId} className="rounded-lg px-3 py-1.5 text-sm text-rose-400 transition-colors hover:bg-hover disabled:opacity-40">
+            Parar de compartilhar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Indicador "Consultando base de conhecimento…" (RAG em andamento). */
+function ConsultingKnowledge() {
+  return (
+    <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-ink-soft">
+      <BookOpen size={14} className="animate-pulse text-accent-hover" />
+      Consultando base de conhecimento…
+    </div>
+  );
+}
+
+/** Indicador "Transcrevendo áudio…" (Audio Router em andamento). */
+function TranscribingAudio() {
+  return (
+    <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-ink-soft">
+      <Volume2 size={14} className="animate-pulse text-accent-hover" />
+      Transcrevendo áudio…
     </div>
   );
 }

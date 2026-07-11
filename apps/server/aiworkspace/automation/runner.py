@@ -23,7 +23,7 @@ from sqlalchemy import select
 from ..chat.routes import _load_skills, _usage_record
 from ..chat.orchestrator import run_turn
 from ..db import SessionLocal
-from ..models import Automation, Chat, Message, ModelConfig, Notification, User, WhatsAppConnection
+from ..models import Automation, AutomationRun, Chat, Message, ModelConfig, Notification, User, WhatsAppConnection
 from ..providers import openrouter
 from ..search import web_search
 from ..secrets_service import (
@@ -252,7 +252,10 @@ async def _run_scheduled(db, automation: Automation, user: User) -> dict[str, An
             message_id=msg.id,
         )
     )
-    return {"chat_id": str(chat.id), "message_id": str(msg.id), "text": assistant_content}
+    return {
+        "chat_id": str(chat.id), "message_id": str(msg.id),
+        "text": assistant_content, "cost": rec["cost"] or None,
+    }
 
 
 async def _run_reminder(db, automation: Automation, user: User) -> dict[str, Any]:
@@ -386,13 +389,62 @@ async def _deliver_whatsapp(db, automation: Automation, user: User, text: str | 
     asyncio.create_task(whatsapp_service.broadcast(conn.id, recipients, text.strip()))
 
 
-async def run_automation(automation_id: uuid.UUID) -> dict[str, Any]:
+async def _deliver_telegram(db, automation: Automation, user: User, text: str | None) -> None:
+    """Entrega ao Telegram (se configurado): resolve a conexão + destinatários e
+    dispara o envio em background. Espelha `_deliver_whatsapp`."""
+    tg = (automation.target or {}).get("telegram") or {}
+    if not tg.get("enabled") or not tg.get("connection_id") or not (text or "").strip():
+        return
+    from ..integrations import telegram_service
+    from ..models import TelegramConnection
+    try:
+        conn = await db.get(TelegramConnection, uuid.UUID(str(tg["connection_id"])))
+    except (ValueError, TypeError):
+        return
+    if conn is None or conn.user_id != user.id or not conn.enabled:
+        logger.warning("automação %s: conexão Telegram inválida/desligada", automation.id)
+        return
+    recipients = await telegram_service.resolve_recipients(db, conn, tg)
+    if not recipients:
+        logger.info("automação %s: sem destinatários no Telegram", automation.id)
+        return
+    asyncio.create_task(telegram_service.broadcast(conn.id, recipients, text.strip()))
+
+
+async def _record_run(
+    automation_id: uuid.UUID, user_id: uuid.UUID, *, status: str, trigger: str,
+    text: str | None = None, error: str | None = None,
+    chat_id: str | None = None, message_id: str | None = None, cost: float | None = None,
+) -> None:
+    """Grava uma linha no histórico de execuções (sessão própria — sobrevive a
+    rollback do disparo). Best-effort: nunca deve derrubar a automação."""
+    def _uuid(v):
+        try:
+            return uuid.UUID(str(v)) if v else None
+        except (ValueError, TypeError):
+            return None
+    try:
+        async with SessionLocal() as db:
+            db.add(AutomationRun(
+                automation_id=automation_id, user_id=user_id,
+                status=status, trigger=trigger,
+                text=(text or None) and text[:2000], error=(error or None) and error[:2000],
+                chat_id=_uuid(chat_id), message_id=_uuid(message_id), cost=cost,
+            ))
+            await db.commit()
+    except Exception:  # noqa: BLE001
+        logger.exception("falha ao gravar histórico da automação %s", automation_id)
+
+
+async def run_automation(automation_id: uuid.UUID, *, trigger: str = "scheduled") -> dict[str, Any]:
     """Executa uma automação pelo id (sessão própria). Levanta em caso de erro —
     o chamador (scheduler/rota) decide como registrar. Guardado contra execução
-    sobreposta (scheduler + /run manual simultâneos)."""
+    sobreposta (scheduler + /run manual simultâneos). `trigger` distingue o disparo
+    agendado do manual ("Testar") no histórico."""
     if automation_id in _running:
         return {"skipped": "already_running"}
     _running.add(automation_id)
+    user_id: uuid.UUID | None = None
     try:
         async with SessionLocal() as db:
             automation = await db.get(Automation, automation_id)
@@ -401,21 +453,45 @@ async def run_automation(automation_id: uuid.UUID) -> dict[str, Any]:
             user = await db.get(User, automation.user_id)
             if user is None:
                 return {"skipped": "no_user"}
+            user_id = user.id
 
-            if automation.kind == "monitor":
-                result = await _run_monitor(db, automation, user)
-            elif automation.kind == "reminder":
-                result = await _run_reminder(db, automation, user)
-            else:
-                result = await _run_scheduled(db, automation, user)
+            try:
+                if automation.kind == "monitor":
+                    result = await _run_monitor(db, automation, user)
+                elif automation.kind == "reminder":
+                    result = await _run_reminder(db, automation, user)
+                else:
+                    result = await _run_scheduled(db, automation, user)
+                await db.commit()
+            except Exception as exc:  # registra a falha no histórico e re-levanta
+                await _record_run(
+                    automation_id, user.id, status="error", trigger=trigger,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                raise
 
-            await db.commit()
-            # entrega ao WhatsApp (se configurado) — monitor só quando houve mudança
+            # histórico do disparo bem-sucedido (monitor sem mudança = "no_change")
+            no_change = automation.kind == "monitor" and not result.get("changed")
+            await _record_run(
+                automation_id, user.id,
+                status="no_change" if no_change else "ok", trigger=trigger,
+                text=result.get("text"), chat_id=result.get("chat_id"),
+                message_id=result.get("message_id"), cost=result.get("cost"),
+            )
+            # entrega + notificação (monitor só quando houve mudança)
             if automation.kind != "monitor" or result.get("changed"):
                 try:
                     await _deliver_whatsapp(db, automation, user, result.get("text"))
                 except Exception:  # noqa: BLE001 - entrega não pode falhar a automação
                     logger.exception("automação %s: falha ao entregar no WhatsApp", automation_id)
+                try:
+                    await _deliver_telegram(db, automation, user, result.get("text"))
+                except Exception:  # noqa: BLE001
+                    logger.exception("automação %s: falha ao entregar no Telegram", automation_id)
+                # notificação push no navegador (best-effort, em background)
+                if result.get("text"):
+                    from ..push_service import send_to_user
+                    asyncio.create_task(send_to_user(user.id, automation.title, result["text"], "/"))
             return result
     finally:
         _running.discard(automation_id)

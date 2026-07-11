@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, SlidersHorizontal, X } from "lucide-react";
-import type { MemoryConfig } from "@/lib/types";
+import { api } from "@/lib/api";
+import type { KnowledgeBase, KnowledgeConfig, MemoryConfig } from "@/lib/types";
 
 const MEM_WRITE: { value: string; label: string }[] = [
   { value: "global", label: "Global" },
@@ -121,6 +122,8 @@ export default function Controls({
   memory,
   memoryDefault,
   onMemoryChange,
+  knowledge,
+  onKnowledgeChange,
   onSave,
   onClose,
 }: {
@@ -131,12 +134,24 @@ export default function Controls({
   /** padrão efetivo herdado (perfil/modelo) — p/ mostrar o estado quando herda */
   memoryDefault?: MemoryConfig;
   onMemoryChange?: (cfg: MemoryConfig | null) => void;
+  /** conhecimento do chat ativo (null = herda do modelo/perfil) */
+  knowledge?: KnowledgeConfig | null;
+  onKnowledgeChange?: (cfg: KnowledgeConfig | null) => void;
   onSave: (systemPrompt: string | null, params: Record<string, unknown>) => void;
   onClose: () => void;
 }) {
   const [systemPrompt, setSystemPrompt] = useState(initialSystemPrompt ?? "");
   const [params, setParams] = useState<Record<string, unknown>>(initialParams ?? {});
-  const [open, setOpen] = useState({ system: true, advanced: true, memory: true });
+  const [open, setOpen] = useState({ system: true, advanced: true, memory: true, knowledge: true });
+
+  // Base de Conhecimento por-chat: acopla bases extras (união com as do modelo).
+  const [kbBases, setKbBases] = useState<KnowledgeBase[]>([]);
+  useEffect(() => {
+    if (onKnowledgeChange) api.get<KnowledgeBase[]>("/knowledge/bases").then(setKbBases).catch(() => {});
+  }, [onKnowledgeChange]);
+  const kb: KnowledgeConfig = { mode: "auto", k: 6, bases: [], ...(knowledge ?? {}) };
+  const kbBasesSel = kb.bases ?? [];
+  const patchKb = (p: Partial<KnowledgeConfig>) => onKnowledgeChange?.({ ...kb, ...p });
 
   // memória do chat: memory=null → herda o padrão (memoryDefault). `mem` é a config
   // EFETIVA mostrada; ao mexer, materializa uma config explícita (com enabled:true
@@ -227,6 +242,50 @@ export default function Controls({
                     })}
                   </div>
                 </div>
+              </div>
+            )}
+          </Section>
+        )}
+
+        {onKnowledgeChange && (
+          <Section title="Conhecimento" open={open.knowledge} onToggle={() => setOpen({ ...open, knowledge: !open.knowledge })}>
+            {kbBases.length === 0 ? (
+              <p className="text-xs text-muted">Nenhuma base criada. Suba documentos em <span className="text-ink-soft">Espaço → Conhecimento</span>.</p>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-muted">Bases consultadas só neste chat (além das do modelo).</p>
+                  {kbBasesSel.length > 0 && (
+                    <button onClick={() => onKnowledgeChange(null)} className="text-xs text-muted hover:text-ink">Limpar</button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {kbBases.map((b) => {
+                    const on = kbBasesSel.includes(b.id);
+                    return (
+                      <button
+                        key={b.id}
+                        onClick={() => patchKb({ bases: on ? kbBasesSel.filter((x) => x !== b.id) : [...kbBasesSel, b.id] })}
+                        className={`rounded-full border px-3 py-1 text-xs transition-colors ${on ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border bg-surface text-muted hover:text-ink"}`}
+                      >
+                        {b.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                {kbBasesSel.length > 0 && (
+                  <div>
+                    <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">Modo</p>
+                    <select
+                      value={kb.mode || "auto"}
+                      onChange={(e) => patchKb({ mode: e.target.value as "auto" | "tool" })}
+                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
+                    >
+                      <option value="auto">Automático (injeta + cita)</option>
+                      <option value="tool">Ferramenta (a IA busca)</option>
+                    </select>
+                  </div>
+                )}
               </div>
             )}
           </Section>

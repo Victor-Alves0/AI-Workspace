@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Bell, CalendarClock, Clock, Eye, Loader2, Pause, Play, Plus, Trash2, Zap } from "lucide-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { AlertTriangle, Bell, BellOff, BellRing, CalendarClock, Check, Clock, Eye, History, Loader2, Minus, Pause, Play, Plus, Trash2, X, Zap } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import type { AppNotification, Automation } from "@/lib/types";
+import type { AppNotification, Automation, AutomationRun } from "@/lib/types";
+import { disablePush, enablePush, pushEnabled, pushSupported } from "@/lib/push";
 import AutomationEditor from "@/components/AutomationEditor";
 import { useConfirm } from "@/components/ConfirmDialog";
 
@@ -56,6 +57,21 @@ export default function AutomationsView({
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [historyFor, setHistoryFor] = useState<Automation | null>(null);
+  const [pushOn, setPushOn] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const pushOk = pushSupported();
+
+  useEffect(() => { pushEnabled().then(setPushOn); }, []);
+  async function togglePush() {
+    setPushBusy(true);
+    try {
+      if (pushOn) { await disablePush(); setPushOn(false); }
+      else { await enablePush(); setPushOn(true); }
+    } catch (e) {
+      setToast(e instanceof Error ? e.message : "Falha ao alterar notificações");
+    } finally { setPushBusy(false); }
+  }
 
   const reload = useCallback(() => {
     api.get<Automation[]>("/automations").then(setItems).catch(() => {});
@@ -188,8 +204,11 @@ export default function AutomationsView({
                       </div>
                     </button>
                     <div className="flex shrink-0 items-center gap-1">
-                      <button onClick={() => runNow(a)} disabled={busy === a.id} title="Rodar agora" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink disabled:opacity-50">
+                      <button onClick={() => runNow(a)} disabled={busy === a.id} title="Testar agora" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink disabled:opacity-50">
                         {busy === a.id ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />}
+                      </button>
+                      <button onClick={() => setHistoryFor(a)} title="Histórico de execuções" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
+                        <History size={15} />
                       </button>
                       <button onClick={() => toggle(a)} title={a.enabled ? "Pausar" : "Ativar"} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
                         {a.enabled ? <Pause size={15} /> : <Play size={15} />}
@@ -211,6 +230,16 @@ export default function AutomationsView({
                 <Bell size={15} /> Notificações {unread > 0 && <span className="rounded-full bg-accent px-1.5 text-[11px] font-medium text-white">{unread}</span>}
               </p>
               <div className="flex items-center gap-2">
+                {pushOk && (
+                  <button
+                    onClick={togglePush}
+                    disabled={pushBusy}
+                    title={pushOn ? "Notificações push ativas neste dispositivo — clique para desativar" : "Ativar notificações push neste dispositivo"}
+                    className={`rounded-lg p-1 transition-colors disabled:opacity-50 ${pushOn ? "text-accent-hover hover:bg-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
+                  >
+                    {pushBusy ? <Loader2 size={15} className="animate-spin" /> : pushOn ? <BellRing size={15} /> : <BellOff size={15} />}
+                  </button>
+                )}
                 {unread > 0 && <button onClick={readAll} className="text-xs text-muted hover:text-ink">Marcar todas</button>}
                 {notes.length > 0 && (
                   <button onClick={clearAll} title="Apagar todas as notificações" className="rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-red-400">
@@ -253,6 +282,80 @@ export default function AutomationsView({
           onSaved={() => { setCreating(false); setEditing(null); reload(); }}
         />
       )}
+
+      {historyFor && (
+        <RunHistoryModal
+          automation={historyFor}
+          onOpenChat={(id) => { setHistoryFor(null); onOpenChat(id); }}
+          onClose={() => setHistoryFor(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+const RUN_STATUS: Record<string, { label: string; cls: string; icon: ReactNode }> = {
+  ok: { label: "OK", cls: "text-emerald-500", icon: <Check size={13} /> },
+  error: { label: "Erro", cls: "text-rose-500", icon: <AlertTriangle size={13} /> },
+  no_change: { label: "Sem novidades", cls: "text-muted", icon: <Minus size={13} /> },
+  skipped: { label: "Pulada", cls: "text-muted", icon: <Minus size={13} /> },
+};
+
+/** Histórico de execuções de uma automação (agendadas + testes manuais). */
+function RunHistoryModal({
+  automation, onOpenChat, onClose,
+}: {
+  automation: Automation;
+  onOpenChat: (chatId: string) => void;
+  onClose: () => void;
+}) {
+  const [runs, setRuns] = useState<AutomationRun[] | null>(null);
+  useEffect(() => {
+    api.get<AutomationRun[]>(`/automations/${automation.id}/runs`).then(setRuns).catch(() => setRuns([]));
+  }, [automation.id]);
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <span className="flex items-center gap-2 text-sm font-semibold text-ink">
+            <History size={16} className="text-muted" /> Histórico — {automation.title}
+          </span>
+          <button onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={16} /></button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {runs === null ? (
+            <p className="flex items-center justify-center gap-2 py-10 text-sm text-muted"><Loader2 size={14} className="animate-spin" /> carregando…</p>
+          ) : runs.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted">Nenhuma execução ainda.</p>
+          ) : (
+            <ul className="space-y-1">
+              {runs.map((r) => {
+                const s = RUN_STATUS[r.status] ?? RUN_STATUS.ok;
+                const clickable = !!r.chat_id;
+                return (
+                  <li key={r.id}>
+                    <button
+                      onClick={() => r.chat_id && onOpenChat(r.chat_id)}
+                      disabled={!clickable}
+                      className={`w-full rounded-xl border border-border px-3 py-2 text-left transition-colors ${clickable ? "hover:border-accent/40 hover:bg-hover" : "cursor-default"}`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`flex items-center gap-1 text-xs font-medium ${s.cls}`}>{s.icon} {s.label}</span>
+                        {r.trigger === "manual" && <span className="rounded-full bg-surface2 px-1.5 text-[10px] text-muted">teste</span>}
+                        <span className="ml-auto text-[11px] text-muted">{fmtWhen(r.created_at)}</span>
+                      </div>
+                      {(r.error || r.text) && (
+                        <p className={`mt-1 line-clamp-2 text-xs ${r.error ? "text-rose-400" : "text-muted"}`}>{r.error || r.text}</p>
+                      )}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

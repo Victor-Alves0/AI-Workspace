@@ -1,8 +1,13 @@
 "use client";
 
-import { FlaskConical } from "lucide-react";
-import ComingSoon from "@/components/ComingSoon";
+import { useRouter } from "next/navigation";
+import PlaygroundView from "@/components/PlaygroundView";
 
 export default function PlaygroundPage() {
-  return <ComingSoon title="Playground" icon={<FlaskConical size={40} />} />;
+  const router = useRouter();
+  return (
+    <div className="flex h-full">
+      <PlaygroundView onClose={() => router.push("/chat")} />
+    </div>
+  );
 }

@@ -586,18 +586,18 @@ def _register_builtins(
                 "local time from the temporal context. `message` is the exact text to send. "
                 "This delivers IN-APP (chat + notification). If the user wants it on their "
                 "AGENDA/calendar instead, use the Google Calendar tool. If the user did NOT say "
-                "where to receive it, OMIT `target`: this returns a quick-pick selector — just "
-                "show it and end your turn. Only set target='current' (this chat) or 'new' (a "
-                "fresh chat) when the user already made it clear."
+                "where to receive it, just OMIT `target` — it defaults to THIS chat; do NOT ask. "
+                "Set target='new' only if they clearly want it in a fresh chat. Just create it and "
+                "confirm briefly."
             ),
             params={
                 "message": "string:o::the reminder text to deliver, e.g. 'lembre-se de dormir'",
                 "in_minutes": "number:o::delay from now in minutes (use this for 'in X min/hours')",
                 "at": "string:o::local clock time 'HH:MM' or 'YYYY-MM-DD HH:MM' (user's timezone); alternative to in_minutes",
-                "target": "string:o::where to deliver: 'current' (this chat) or 'new'; OMIT to let the user pick",
+                "target": "string:o::where to deliver: 'current' (this chat) or 'new' (fresh chat); OMIT to deliver in THIS chat (default)",
                 "title": "string:o::short title for the reminder (optional)",
             },
-            returns=["ok", "reminder_id", "title", "when", "kind", "question", "options", "allow_custom", "custom_label", "error"],
+            returns=["ok", "reminder_id", "title", "when", "error"],
         )
         def _reminder_create(
             message: str = "", in_minutes: Any = None, at: str = "",
@@ -605,27 +605,19 @@ def _register_builtins(
         ) -> dict[str, Any]:
             if not user_id:
                 return {"error": "reminder creation unavailable (no user context)"}
-            # sem destino explícito → pergunta ao usuário (opções de acesso rápido)
-            if not (target or "").strip():
-                if not (message or "").strip():
-                    return {"error": "reminder requires a `message`"}
-                from .interaction import ask_options
-                return ask_options(
-                    "Onde você quer receber esse lembrete?",
-                    [
-                        {"label": "Na minha agenda (Google Calendar)",
-                         "value": "Coloque na minha agenda do Google Calendar como um evento (use a ferramenta de calendário; se não estiver conectada, me avise)."},
-                        {"label": "Aqui neste chat", "value": "Manda o lembrete aqui neste mesmo chat"},
-                        {"label": "Em um novo chat", "value": "Manda o lembrete em um chat novo"},
-                    ],
-                    allow_custom=False,
-                )
+            if not (message or "").strip():
+                return {"error": "reminder requires a `message`"}
             from ..automation import creator
             chat_id = toolctx.current_chat_id.get()
+            # sem destino explícito → entrega AQUI (chat atual) por padrão; sem chat
+            # atual (contexto sem conversa) cai num chat novo. Nada de perguntar: o
+            # lembrete é in-app e barato, então a pergunta só gastava tokens e um
+            # round-trip. Quem quiser a agenda usa a ferramenta do Google Calendar.
+            tgt = (target or "").strip() or ("current" if chat_id else "new")
             try:
                 return asyncio.run(creator.create_reminder(
                     user_id, message=message, in_minutes=in_minutes, at=at,
-                    target=target, chat_id=chat_id, title=title,
+                    target=tgt, chat_id=chat_id, title=title,
                     tz=toolctx.user_tz.get(),
                 ))
             except Exception as exc:  # noqa: BLE001
@@ -740,7 +732,7 @@ def _register_builtins(
                     "account": _ACCOUNT_PARAM,
                 },
                 returns=["messages", "count", "note", "from", "subject", "date", "snippet", "body", "id", "ok", "action", "error",
-                         "kind", "draft_id", "to", "cc", "subject", "body", "account", "account_email", *_ASK_KEYS],
+                         "kind", "draft_id", "to", "cc", "account", "account_email", *_ASK_KEYS],
                 risk=True,
                 examples=["read my last email", "any unread emails?", "send an email to bob", "archive this message"],
             )

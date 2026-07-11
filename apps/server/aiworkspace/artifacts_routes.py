@@ -64,6 +64,46 @@ async def list_artifacts(
     return [_serialize(a) for a in rows]
 
 
+@router.get("/artifacts")
+async def list_all_artifacts(
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    """Explorador: TODOS os artefatos do usuário (metadados leves, sem conteúdo),
+    com o título do chat de origem — a UI filtra por "chat atual" ou "todos"."""
+    rows = list(await db.execute(
+        select(Artifact, Chat.title)
+        .join(Chat, Chat.id == Artifact.chat_id)
+        .where(Artifact.user_id == user.id)
+        .order_by(Artifact.updated_at.desc())
+        .limit(500)
+    ))
+    return [
+        {
+            "id": str(a.id),
+            "chat_id": str(a.chat_id),
+            "chat_title": chat_title or "",
+            "identifier": a.identifier,
+            "title": a.title,
+            "kind": a.kind,
+            "language": a.language,
+            "version": a.version,
+            "updated_at": a.updated_at.isoformat() if a.updated_at else None,
+        }
+        for a, chat_title in rows
+    ]
+
+
+@router.get("/artifacts/{artifact_id}")
+async def get_artifact(
+    artifact_id: uuid.UUID,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    """Um artefato completo (com conteúdo) — abre itens de OUTROS chats no explorador."""
+    return _serialize(await _owned(db, artifact_id, user))
+
+
 class ArtifactUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=255)
     content: str | None = None

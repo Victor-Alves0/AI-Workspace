@@ -270,15 +270,14 @@ export default function PromptBox({
   const fileRef = useRef<HTMLInputElement>(null);
   const [attachErr, setAttachErr] = useState<string | null>(null);
 
-  // upload liberado quando o modelo pode ver imagens ou receber arquivos
+  // upload liberado quando o modelo pode ver imagens, ouvir áudios ou receber arquivos
   const canVision = !!capabilities.vision || !!capabilities["filter:vision_router"];
   const canFiles = !!capabilities.file_upload;
-  const canAttach = canVision || canFiles;
+  const canAudio = !!capabilities["filter:audio_router"];
+  const canAttach = canVision || canFiles || canAudio;
 
-  async function pickFiles(e: React.ChangeEvent<HTMLInputElement>) {
+  async function addFiles(files: File[]) {
     setAttachErr(null);
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = "";
     if (!files.length) return;
     const next: Attachment[] = [...attachments];
     for (const f of files) {
@@ -286,7 +285,11 @@ export default function PromptBox({
       try {
         if (f.type.startsWith("image/")) {
           if (!canVision) { setAttachErr("Este modelo não tem Visão nem Vision Router — habilite em Capacidades/Filtros."); continue; }
-          next.push({ type: "image", name: f.name, url: await fileToImageDataUrl(f) });
+          next.push({ type: "image", name: f.name || "imagem.png", url: await fileToImageDataUrl(f) });
+        } else if (f.type.startsWith("audio/")) {
+          if (!canAudio) { setAttachErr("Este modelo não tem Audio Router — habilite em Filtros p/ transcrever áudios."); continue; }
+          if (f.size > 15 * 1024 * 1024) { setAttachErr(`Áudio muito grande: ${f.name} (máx. 15MB).`); continue; }
+          next.push({ type: "audio", name: f.name || "audio", mime: f.type || undefined, url: `data:${f.type || "audio/mpeg"};base64,${await fileToBase64(f)}` });
         } else if (canFiles && DOC_RE.test(f.name)) {
           // doc binário → o servidor extrai o texto (config em Integrações › Extração de Texto)
           next.push({ type: "file", name: f.name, mime: f.type || undefined, data: await fileToBase64(f) });
@@ -300,6 +303,22 @@ export default function PromptBox({
       }
     }
     onAttachmentsChange?.(next.slice(0, 6));
+  }
+  async function pickFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    await addFiles(files);
+  }
+  // colar imagem (Ctrl+V) direto no campo → vira anexo (não polui o texto)
+  async function onPaste(e: React.ClipboardEvent) {
+    const imgs = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
+    if (imgs.length) { e.preventDefault(); await addFiles(imgs); }
+  }
+  // arrastar-e-soltar arquivos sobre o campo
+  const [dragOver, setDragOver] = useState(false);
+  async function onDrop(e: React.DragEvent) {
+    const files = Array.from(e.dataTransfer?.files ?? []);
+    if (files.length) { e.preventDefault(); setDragOver(false); await addFiles(files); }
   }
   function removeAttachment(i: number) {
     onAttachmentsChange?.(attachments.filter((_, idx) => idx !== i));
@@ -422,7 +441,17 @@ export default function PromptBox({
 
   return (
     <div className="px-4 pb-5 pt-2">
-      <div className="relative mx-auto max-w-3xl rounded-3xl border border-border bg-surface px-3 py-2.5 shadow-prompt transition-colors duration-200 focus-within:border-accent/50 hover:border-accent/30">
+      <div
+        onDragOver={(e) => { if (canAttach) { e.preventDefault(); setDragOver(true); } }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={canAttach ? onDrop : undefined}
+        className={`relative mx-auto max-w-3xl rounded-3xl border bg-surface px-3 py-2.5 shadow-prompt transition-colors duration-200 focus-within:border-accent/50 hover:border-accent/30 ${dragOver ? "border-accent border-dashed" : "border-border"}`}
+      >
+        {dragOver && (
+          <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-3xl bg-accent/5 text-sm font-medium text-accent-hover">
+            Solte para anexar
+          </div>
+        )}
         {promptMenuOpen && (
           <div className="animate-pop absolute bottom-full left-3 right-3 z-50 mb-2 overflow-hidden rounded-xl border border-border bg-surface shadow-menu">
             <p className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">Prompts</p>
@@ -543,7 +572,7 @@ export default function PromptBox({
                     </span>
                   ) : (
                     <span key={i} className="flex max-w-[200px] items-center gap-1.5 rounded-lg border border-border bg-surface2 px-2.5 py-1 text-xs text-ink">
-                      <FileText size={13} className="shrink-0 text-muted" />
+                      {a.type === "audio" ? <Mic size={13} className="shrink-0 text-accent-hover" /> : <FileText size={13} className="shrink-0 text-muted" />}
                       <span className="truncate">{a.name}</span>
                       <button onClick={() => removeAttachment(i)} className="text-muted transition-colors hover:text-red-300">
                         <X size={12} />
@@ -563,6 +592,7 @@ export default function PromptBox({
           value={value}
           onChange={(e) => { onChange(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length); }}
           onSelect={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
+          onPaste={canAttach ? onPaste : undefined}
           onKeyDown={(e) => {
             // menu ativo: prompts ("/"), skills ("$") ou agentes ("@") — nunca juntos
             const count = promptMenuOpen ? promptMatches.length : skillMenuOpen ? skillMatches.length : agentMenuOpen ? agentMatches.length : 0;

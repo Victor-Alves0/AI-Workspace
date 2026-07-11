@@ -47,6 +47,7 @@ import ModelField from "./ModelField";
 import GoogleWorkspacePanel from "./GoogleWorkspacePanel";
 import TuyaPanel from "./TuyaPanel";
 import WhatsAppPanel from "./WhatsAppPanel";
+import TelegramPanel from "./TelegramPanel";
 import OllamaPanel from "./OllamaPanel";
 import VoicePanel from "./VoicePanel";
 import { WebSearchPanel } from "./toolPanels";
@@ -449,6 +450,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                 <TuyaPanel onBack={() => setIntegView(null)} />
               ) : integView === "whatsapp" ? (
                 <WhatsAppPanel onBack={() => setIntegView(null)} />
+              ) : integView === "telegram" ? (
+                <TelegramPanel onBack={() => setIntegView(null)} />
               ) : (
                 <div>
                   <Heading>Integrações</Heading>
@@ -483,10 +486,19 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       <span className="text-sm font-medium text-ink">WhatsApp</span>
                       <span className="text-xs leading-4 text-muted">Contato Pessoal</span>
                     </button>
+                    <button
+                      onClick={() => setIntegView("telegram")}
+                      className="group flex flex-col items-center gap-2.5 rounded-2xl border border-border bg-surface px-4 py-7 text-center transition-all duration-150 hover:border-accent/40 hover:bg-hover"
+                    >
+                      <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
+                        <SiTelegram size={22} />
+                      </span>
+                      <span className="text-sm font-medium text-ink">Telegram</span>
+                      <span className="text-xs leading-4 text-muted">Bot conversacional</span>
+                    </button>
                     {[
                       { name: "Discord", icon: <SiDiscord size={22} /> },
                       { name: "Slack", icon: <Blocks size={22} /> },
-                      { name: "Telegram", icon: <SiTelegram size={22} /> },
                       { name: "Notion", icon: <SiNotion size={22} /> },
                       { name: "GitHub", icon: <SiGithub size={22} /> },
                       { name: "Google Drive", icon: <SiGoogledrive size={22} /> },

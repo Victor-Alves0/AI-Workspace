@@ -14,6 +14,11 @@ from .admin_routes import router as admin_router
 from .analytics_routes import router as analytics_router
 from .artifacts_routes import router as artifacts_router
 from .memory_routes import router as memory_router
+from .knowledge_routes import router as knowledge_router
+from .share_routes import router as share_router
+from .telegram_routes import router as telegram_router
+from .push_routes import router as push_router
+from .playground_routes import router as playground_router
 from .auth.routes import router as auth_router
 from .automation_routes import router as automation_router
 from .automation import scheduler as automation_scheduler
@@ -61,10 +66,21 @@ async def lifespan(app: FastAPI):
         automation_scheduler.start()
     except Exception as exc:  # noqa: BLE001 - o app sobe mesmo se o scheduler falhar
         logger.warning("Não foi possível iniciar o scheduler de automações (%s)", exc)
+    # long-polling dos bots do Telegram conectados (uma task por conexão)
+    try:
+        from .integrations import telegram_poller
+        await telegram_poller.start()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Não foi possível iniciar os pollers do Telegram (%s)", exc)
     try:
         yield
     finally:
         await automation_scheduler.stop()
+        try:
+            from .integrations import telegram_poller
+            await telegram_poller.stop()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _client_ip(request: Request, trust_proxy: bool) -> str | None:
@@ -146,6 +162,11 @@ def create_app() -> FastAPI:
     app.include_router(analytics_router)
     app.include_router(artifacts_router)
     app.include_router(memory_router)
+    app.include_router(knowledge_router)
+    app.include_router(share_router)
+    app.include_router(telegram_router)
+    app.include_router(push_router)
+    app.include_router(playground_router)
     return app
 
 

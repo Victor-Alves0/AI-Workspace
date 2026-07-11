@@ -44,6 +44,9 @@ dependencies = [
     # assinado com pyjwt (já presente). Puxa google-auth-httplib2/httplib2.
     "google-api-python-client>=2.150",
     "google-auth>=2.36",
+    # Web Push (notificações do navegador): pywebpush + py-vapid (usam cryptography,
+    # já presente). Chaves VAPID geradas uma vez e guardadas em app_settings.
+    "pywebpush>=2.0",
 ]
 
 [project.optional-dependencies]

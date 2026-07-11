@@ -15,7 +15,7 @@ from .auth.deps import require_approved
 from .automation import scheduler
 from .automation.runner import run_automation
 from .db import get_db
-from .models import Automation, Notification, User
+from .models import Automation, AutomationRun, Notification, User
 
 router = APIRouter(tags=["automations"])
 
@@ -82,6 +82,19 @@ class AutomationOut(BaseModel):
     last_error: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class AutomationRunOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    status: str
+    trigger: str
+    text: str | None
+    error: str | None
+    chat_id: uuid.UUID | None
+    message_id: uuid.UUID | None
+    cost: float | None
+    created_at: datetime
 
 
 class NotificationOut(BaseModel):
@@ -201,10 +214,27 @@ async def run_now(
     o resultado ou o erro."""
     await _owned(db, automation_id, user)  # valida posse
     try:
-        result = await run_automation(automation_id)
+        result = await run_automation(automation_id, trigger="manual")
         return {"ok": True, "result": result}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+@router.get("/automations/{automation_id}/runs", response_model=list[AutomationRunOut])
+async def list_runs(
+    automation_id: uuid.UUID,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    """Histórico de execuções (mais recentes primeiro)."""
+    await _owned(db, automation_id, user)
+    rows = await db.scalars(
+        select(AutomationRun)
+        .where(AutomationRun.automation_id == automation_id)
+        .order_by(AutomationRun.created_at.desc())
+        .limit(50)
+    )
+    return list(rows)
 
 
 # --------------------------------------------------------------------------- #

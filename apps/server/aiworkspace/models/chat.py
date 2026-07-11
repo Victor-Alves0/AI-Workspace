@@ -54,8 +54,16 @@ class Chat(Base):
     # memória por-chat (nullable = herda do modelo/perfil):
     #   {"write": "global|model|chat|off", "read": {"global": b, "model": b, "chat": b}}
     memory_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # conhecimento por-chat (nullable = herda do modelo/perfil):
+    #   {"enabled": b, "bases": [<knowledge_base id>], "mode": "auto|tool", "k": int}
+    knowledge_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    # compartilhamento: quando setado, o chat tem um link público read-only
+    # (/shared/<public_id>). None = privado. Revogar = voltar a None.
+    public_id: Mapped[str | None] = mapped_column(
+        String(32), nullable=True, unique=True, index=True
+    )
     # "Duração do Chat" (chats criados por automações): apagado pelo scheduler
     # quando expires_at vence; view_once = apagado quando o usuário abre e sai.
     expires_at: Mapped[datetime | None] = mapped_column(

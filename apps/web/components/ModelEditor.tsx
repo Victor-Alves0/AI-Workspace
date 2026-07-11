@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Box, Brain, Camera, ChevronDown, ChevronRight, FileText, Gauge, Info, Pin, Plus, Search, Settings, ShieldAlert, Sliders, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Box, Brain, Camera, ChevronDown, ChevronRight, FileText, Gauge, Info, Pin, Plus, Search, Settings, ShieldAlert, Sliders, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { fileToAvatarDataUrl } from "@/lib/image";
-import type { MemoryBank, Model, ModelConfig, Skill, SystemTool, Tool } from "@/lib/types";
+import type { KnowledgeBase, MemoryBank, Model, ModelConfig, Skill, SystemTool, Tool } from "@/lib/types";
 import TransferModal, { type TransferItem } from "./TransferModal";
 import ModelField from "./ModelField";
 import { Toggle } from "./ui";
@@ -276,6 +276,7 @@ const DEFAULT_TOOL_PROMPT =
 // filtros disponíveis (espelham as caixas do OpenWebUI). Mais podem ser adicionados.
 const FILTERS: { key: string; label: string }[] = [
   { key: "vision_router", label: "Vision Router" },
+  { key: "audio_router", label: "Audio Router" },
   { key: "genimage_router", label: "GenImage Router" },
   { key: "output_guard", label: "Guarda de saída" },
 ];
@@ -309,6 +310,9 @@ const MEM_READ_OPTS: { key: "global" | "model" | "chat"; label: string }[] = [
 const MEM_CFG_DEFAULT: Required<MemoryCfg> = {
   enabled: true, write: "global", read: { global: true, model: true, chat: true }, banks: [],
 };
+
+// Base de Conhecimento por-modelo (capabilities.knowledge). bases vazio = desligado.
+type KnowledgeCfg = { bases?: string[]; mode?: "auto" | "tool"; k?: number };
 
 function slugify(s: string) {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -430,8 +434,14 @@ export default function ModelEditor({
   const [subOn, setSubOn] = useState<boolean>((model?.capabilities as Record<string, unknown> | undefined)?.subagents === true);
   const [myModels, setMyModels] = useState<ModelConfig[]>([]);
   const [memBanks, setMemBanks] = useState<MemoryBank[]>([]);
+  // Base de Conhecimento POR-MODELO (capabilities.knowledge): bases acopladas + modo
+  const [kb, setKb] = useState<KnowledgeCfg>(
+    ((model?.capabilities as Record<string, unknown> | undefined)?.knowledge as KnowledgeCfg) ?? { bases: [], mode: "auto", k: 6 },
+  );
+  const [kbBases, setKbBases] = useState<KnowledgeBase[]>([]);
   useEffect(() => { api.get<ModelConfig[]>("/models").then(setMyModels).catch(() => {}); }, []);
   useEffect(() => { api.get<MemoryBank[]>("/memory/banks").then(setMemBanks).catch(() => {}); }, []);
+  useEffect(() => { api.get<KnowledgeBase[]>("/knowledge/bases").then(setKbBases).catch(() => {}); }, []);
   const [toolsEnabled, setToolsEnabled] = useState(model?.tools_enabled ?? false);
   const [toolIds, setToolIds] = useState<string[]>(model?.tool_ids ?? []);
   const [codeMode, setCodeMode] = useState(model?.code_mode ?? false);
@@ -626,6 +636,10 @@ export default function ModelEditor({
     for (const f of filters) capabilities[`filter:${f}`] = true;
     // memória por-modelo (objeto aninhado): só grava quando personalizada
     if (mem) capabilities.memory = mem;
+    // base de conhecimento por-modelo: só grava quando há base(s) acoplada(s)
+    if (kb.bases && kb.bases.length > 0) {
+      capabilities.knowledge = { bases: kb.bases, mode: kb.mode || "auto", k: Number(kb.k) || 6 };
+    }
     // aviso de uso alto por-modelo (override do perfil); vazio/0 = herda o perfil
     if (tokenWarn !== "" && Number(tokenWarn) > 0) capabilities.token_warn = Number(tokenWarn);
     // permissão de delegar a subagentes (capability)
@@ -1024,11 +1038,6 @@ export default function ModelEditor({
             )}
           </Section>
 
-          {/* Conhecimento (stub) */}
-          <Section title="Conhecimento" icon={<Sparkles size={15} />} hint="Anexar bases de conhecimento (RAG) a este modelo. Em breve.">
-            <p className="text-xs text-muted">Em breve — anexar bases de conhecimento a este modelo.</p>
-          </Section>
-
           {/* Capacidades — o que o modelo PODE fazer (config base) */}
           <div className="mt-8 border-t border-border pt-7">
             <SelectorField
@@ -1122,6 +1131,67 @@ export default function ModelEditor({
                 </div>
               </div>
             )}
+          </div>
+
+          {/* Base de Conhecimento — documentos que este modelo consulta (RAG) */}
+          <div className="mt-8 border-t border-border pt-7">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
+              <span className="text-muted"><BookOpen size={15} /></span>
+              Conhecimento
+              <InfoHint text="Acople Bases de Conhecimento (documentos) a este modelo. Ele passa a consultá-las nas conversas. Crie/suba documentos em Espaço → Conhecimento." />
+            </h2>
+            <div className="mt-3 space-y-4">
+              {kbBases.length === 0 ? (
+                <p className="text-xs text-muted">Nenhuma base criada. Crie em <span className="text-ink-soft">Espaço → Conhecimento</span>.</p>
+              ) : (
+                <>
+                  <div>
+                    <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Bases acopladas</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {kbBases.map((b) => {
+                        const on = (kb.bases ?? []).includes(b.id);
+                        return (
+                          <button
+                            key={b.id}
+                            onClick={() => {
+                              const cur = kb.bases ?? [];
+                              setKb({ ...kb, bases: on ? cur.filter((x) => x !== b.id) : [...cur, b.id] });
+                            }}
+                            className={`rounded-full border px-3 py-1 text-xs transition-colors ${on ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border text-muted hover:text-ink"}`}
+                          >
+                            {b.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {(kb.bases ?? []).length > 0 && (
+                    <div className="flex flex-wrap items-center gap-4">
+                      <label className="flex items-center gap-2 text-xs text-muted">
+                        Modo
+                        <select
+                          value={kb.mode || "auto"}
+                          onChange={(e) => setKb({ ...kb, mode: e.target.value as "auto" | "tool" })}
+                          className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-ink outline-none focus:border-accent"
+                        >
+                          <option value="auto">Automático (injeta + cita)</option>
+                          <option value="tool">Ferramenta (a IA busca)</option>
+                        </select>
+                        <InfoHint text="Automático: a cada mensagem busco os trechos relevantes e injeto no contexto, com citações. Ferramenta: a IA decide quando buscar (chama search_knowledge)." />
+                      </label>
+                      <label className="flex items-center gap-2 text-xs text-muted">
+                        Trechos
+                        <input
+                          type="number" min={1} max={20} value={kb.k ?? 6}
+                          onChange={(e) => setKb({ ...kb, k: Math.max(1, Math.min(20, Number(e.target.value) || 6)) })}
+                          className="w-16 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-right text-sm text-ink outline-none focus:border-accent"
+                        />
+                      </label>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
 
           {/* Guarda de tokens — aviso de uso alto POR-MODELO (override do perfil) */}
@@ -1247,7 +1317,7 @@ export default function ModelEditor({
               <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
                 <span className="text-muted"><Sliders size={15} /></span>
                 Filtros
-                <InfoHint text="Filtros do sistema aplicados ao turno. O Vision Router redireciona as imagens para um modelo com visão, que as descreve para o modelo em uso (mesmo que ele não enxergue)." />
+                <InfoHint text="Filtros do sistema aplicados ao turno. O Vision Router redireciona as imagens para um modelo com visão, que as descreve para o modelo em uso (mesmo que ele não enxergue). O Audio Router transcreve áudios enviados (voz→texto) para o modelo 'ouvir'." />
               </h2>
               <ManageBtn icon={<Sliders size={13} />} label="Gerenciar" onClick={() => setFiltersModal(true)} />
             </div>
@@ -1258,9 +1328,10 @@ export default function ModelEditor({
                 {filters.map((f) => {
                   const cfgOpen = openFilterCfg === f;
                   const isVisionRouter = f === "vision_router";
+                  const isAudioRouter = f === "audio_router";
                   const isGenImage = f === "genimage_router";
                   const isGuard = f === "output_guard";
-                  const hasCfg = isVisionRouter || isGenImage || isGuard;
+                  const hasCfg = isVisionRouter || isAudioRouter || isGenImage || isGuard;
                   const fc = filterConfig[f] || {};
                   const target = fc.model || "";
                   const guardCount = isGuard ? (Array.isArray(fc.guards) ? fc.guards.length : 0) : 0;
@@ -1305,6 +1376,35 @@ export default function ModelEditor({
                             onChange={(v) => setCfg({ model: v })}
                             placeholder="Selecione um modelo com visão…"
                           />
+                        </div>
+                      )}
+                      {isAudioRouter && cfgOpen && (
+                        <div className="space-y-2 border-t border-border px-3 py-2.5">
+                          <p className="text-xs text-muted">
+                            Transcreve os <span className="text-ink-soft">áudios enviados</span> (chat, WhatsApp, Telegram) para o
+                            modelo em uso &quot;ouvir&quot; em texto.
+                          </p>
+                          <div className="flex items-center gap-2 text-sm">
+                            <span className="shrink-0 text-ink-soft">Motor</span>
+                            <select
+                              value={fc.engine || "stt"}
+                              onChange={(e) => setCfg({ engine: e.target.value })}
+                              className="rounded-lg border border-border bg-surface2 px-2 py-1 text-sm text-ink outline-none focus:border-accent"
+                            >
+                              <option value="stt">Provedor de voz (Whisper)</option>
+                              <option value="model">Modelo multimodal (OpenRouter)</option>
+                            </select>
+                          </div>
+                          {(fc.engine || "stt") === "model" ? (
+                            <ModelField
+                              models={baseModels}
+                              value={target}
+                              onChange={(v) => setCfg({ model: v })}
+                              placeholder="Modelo que aceita áudio (ex.: gemini-2.5-flash)…"
+                            />
+                          ) : (
+                            <p className="text-[11px] text-muted">Usa a chave do provedor de voz (Configurações → Conexões).</p>
+                          )}
                         </div>
                       )}
                       {isGenImage && cfgOpen && (
