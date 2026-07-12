@@ -26,7 +26,8 @@ class ModelIn(BaseModel):
     avatar_url: str | None = None
     system_prompt: str | None = None
     params: dict[str, Any] = Field(default_factory=dict)
-    capabilities: dict[str, bool] = Field(default_factory=dict)
+    # flags booleanas + objetos aninhados (memory/knowledge/brain/token_warn…)
+    capabilities: dict[str, Any] = Field(default_factory=dict)
     filter_config: dict[str, Any] = Field(default_factory=dict)
     tools_enabled: bool = False
     tool_ids: list[str] = Field(default_factory=list)
@@ -46,7 +47,7 @@ class ModelUpdate(BaseModel):
     avatar_url: str | None = None
     system_prompt: str | None = None
     params: dict[str, Any] | None = None
-    capabilities: dict[str, bool] | None = None
+    capabilities: dict[str, Any] | None = None
     filter_config: dict[str, Any] | None = None
     tools_enabled: bool | None = None
     tool_ids: list[str] | None = None
@@ -67,7 +68,7 @@ class ModelOut(BaseModel):
     avatar_url: str | None
     system_prompt: str | None
     params: dict[str, Any]
-    capabilities: dict[str, bool]
+    capabilities: dict[str, Any]
     filter_config: dict[str, Any] = Field(default_factory=dict)
     tools_enabled: bool
     tool_ids: list[str]

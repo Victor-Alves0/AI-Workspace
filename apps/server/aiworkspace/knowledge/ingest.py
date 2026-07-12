@@ -9,6 +9,7 @@ o threadpool p/ não travar o event loop.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import re
@@ -28,6 +29,16 @@ logger = logging.getLogger(__name__)
 _CHUNK_CHARS = 1000
 _OVERLAP_CHARS = 150
 _MAX_CHUNKS = 2000  # teto de segurança por documento
+
+# mantém referência das tasks de indexação em voo (evita GC prematuro)
+_TASKS: set[asyncio.Task] = set()
+
+
+def spawn_index(doc_id: uuid.UUID) -> None:
+    """Agenda a indexação de um doc em background (fire-and-forget seguro)."""
+    t = asyncio.create_task(index_doc(doc_id))
+    _TASKS.add(t)
+    t.add_done_callback(_TASKS.discard)
 
 
 # --------------------------------------------------------------------------- #

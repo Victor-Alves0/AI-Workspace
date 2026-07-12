@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Mail, Pencil, Play, RotateCcw, Send, ShieldAlert, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench } from "lucide-react";
-import type { ChartSpec, ChatArtifact, DeepResearch, Message, StockQuote, ToolEvent } from "@/lib/types";
+import type { BrainNoteEvent, ChartSpec, ChatArtifact, DeepResearch, Message, SkillProposal, StockQuote, ToolEvent } from "@/lib/types";
 import { api, ApiError, API_URL } from "@/lib/api";
 import Markdown from "./Markdown";
 import ExcalidrawCanvas from "./ExcalidrawCanvas";
@@ -21,7 +21,9 @@ type Artifact =
   | { kind: "stock_card"; data: StockQuote }
   | { kind: "deep_research"; data: DeepResearch }
   | { kind: "image"; data: { url: string; prompt?: string } }
-  | { kind: "email_draft"; data: EmailDraft };
+  | { kind: "email_draft"; data: EmailDraft }
+  | { kind: "skill_proposal"; data: SkillProposal }
+  | { kind: "brain_note"; data: BrainNoteEvent };
 
 type EmailDraft = {
   draft_id: string; to: string; cc?: string; subject?: string;
@@ -59,6 +61,15 @@ function collect(node: unknown, out: Artifact[], seen: Set<string>, depth = 0): 
   }
   if (kind === "email_draft" && typeof o.draft_id === "string") {
     if (!seen.has("e:" + o.draft_id)) { seen.add("e:" + o.draft_id); out.push({ kind, data: o as unknown as EmailDraft }); }
+    return;
+  }
+  if (kind === "skill_proposal" && typeof o.proposal_id === "string") {
+    if (!seen.has("sp:" + o.proposal_id)) { seen.add("sp:" + o.proposal_id); out.push({ kind, data: o as unknown as SkillProposal }); }
+    return;
+  }
+  if (kind === "brain_note" && typeof o.doc_id === "string") {
+    const key = "bn:" + o.doc_id + ":" + (o.action ?? "") + ":" + String(o.preview ?? "").slice(0, 60);
+    if (!seen.has(key)) { seen.add(key); out.push({ kind, data: o as unknown as BrainNoteEvent }); }
     return;
   }
   for (const v of Object.values(o)) collect(v, out, seen, depth + 1);
@@ -195,6 +206,10 @@ function renderArtifact(a: Artifact, key: React.Key) {
     <ImageCard key={key} url={a.data.url} prompt={a.data.prompt} />
   ) : a.kind === "email_draft" ? (
     <EmailComposer key={key} draft={a.data} />
+  ) : a.kind === "skill_proposal" ? (
+    <SkillProposalCard key={key} proposal={a.data} />
+  ) : a.kind === "brain_note" ? (
+    <BrainNoteCard key={key} note={a.data} />
   ) : (
     <ChartView key={key} spec={a.data} />
   );
@@ -337,6 +352,149 @@ function EmailComposer({ draft }: { draft: EmailDraft }) {
         >
           <Send size={14} /> {status === "sending" ? "Enviando…" : "Enviar"}
         </button>
+      </div>
+    </div>
+  );
+}
+
+/** Proposta de skill do /learn: card editável (proposal-only — quem salva é o
+ *  usuário via POST /skills). Estado "Aprovada/Descartada" no localStorage. */
+function SkillProposalCard({ proposal }: { proposal: SkillProposal }) {
+  const savedKey = "skill_saved:" + proposal.proposal_id;
+  const dismissKey = "skill_dismissed:" + proposal.proposal_id;
+  const [name, setName] = useState(proposal.name || "");
+  const [slug, setSlug] = useState(proposal.slug || "");
+  const [description, setDescription] = useState(proposal.description || "");
+  const [content, setContent] = useState(proposal.content || "");
+  const [tags, setTags] = useState((proposal.tags || []).join(", "));
+  const [open, setOpen] = useState(false);
+  const [err, setErr] = useState("");
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "dismissed">(() => {
+    if (typeof window === "undefined") return "idle";
+    if (localStorage.getItem(savedKey)) return "saved";
+    if (localStorage.getItem(dismissKey)) return "dismissed";
+    return "idle";
+  });
+
+  async function approve() {
+    if (status === "saving" || !name.trim() || !content.trim()) return;
+    setStatus("saving");
+    setErr("");
+    try {
+      await api.post("/skills", {
+        slug: slug.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 64) || "skill",
+        name: name.trim(),
+        description: description.trim(),
+        content,
+        tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+        enabled: true,
+      });
+      try { localStorage.setItem(savedKey, "1"); } catch { /* ignore */ }
+      setStatus("saved");
+    } catch (e) {
+      setErr(
+        e instanceof ApiError && e.status === 409
+          ? "Já existe uma skill com este identificador — troque o slug."
+          : e instanceof ApiError ? e.message : "Falha ao salvar a skill",
+      );
+      setStatus("idle");
+    }
+  }
+
+  function dismiss() {
+    try { localStorage.setItem(dismissKey, "1"); } catch { /* ignore */ }
+    setStatus("dismissed");
+  }
+
+  if (status === "saved" || status === "dismissed") {
+    return (
+      <div className="my-2 max-w-xl rounded-xl border border-border bg-surface px-4 py-3">
+        <p className={`flex items-center gap-2 text-sm ${status === "saved" ? "text-green-400" : "text-muted"}`}>
+          {status === "saved" ? <Check size={16} /> : <Ban size={16} />}
+          {status === "saved" ? "Skill aprovada" : "Proposta descartada"}
+          <span className="truncate text-muted">· {name || proposal.name}</span>
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="my-2 max-w-xl overflow-hidden rounded-xl border border-border bg-surface">
+      <div className="flex items-center gap-2 border-b border-border px-4 py-2">
+        <BookmarkPlus size={15} className="text-accent-hover" />
+        <span className="text-sm font-medium text-ink">Proposta de skill</span>
+        <span className="ml-auto text-xs text-muted">revise e aprove</span>
+      </div>
+      <div className="divide-y divide-border">
+        <label className="flex items-center gap-2 px-4 py-2 text-sm">
+          <span className="w-24 shrink-0 text-muted">Nome</span>
+          <input value={name} onChange={(e) => setName(e.target.value)} className="flex-1 bg-transparent font-medium text-ink outline-none" />
+        </label>
+        <label className="flex items-center gap-2 px-4 py-2 text-sm">
+          <span className="w-24 shrink-0 text-muted">Identificador</span>
+          <span className="text-muted">$</span>
+          <input value={slug} onChange={(e) => setSlug(e.target.value)} className="flex-1 bg-transparent font-mono text-xs text-ink outline-none" />
+        </label>
+        <label className="flex items-start gap-2 px-4 py-2 text-sm">
+          <span className="w-24 shrink-0 pt-0.5 text-muted">Quando usar</span>
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="flex-1 resize-none bg-transparent text-ink outline-none" />
+        </label>
+        <label className="flex items-center gap-2 px-4 py-2 text-sm">
+          <span className="w-24 shrink-0 text-muted">Tags</span>
+          <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="separadas por vírgula" className="flex-1 bg-transparent text-ink outline-none placeholder:text-muted" />
+        </label>
+        <div className="px-4 py-2">
+          <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1 text-xs text-muted transition-colors hover:text-ink">
+            {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Como fazer ({content.length} chars)
+          </button>
+          {open && (
+            <textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              rows={12}
+              className="mt-2 w-full resize-y rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs leading-relaxed text-ink outline-none"
+            />
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-3 border-t border-border px-4 py-2">
+        {err && <span className="truncate text-xs text-red-400">{err}</span>}
+        <button onClick={dismiss} className="ml-auto rounded-full px-3 py-1.5 text-sm text-muted transition-colors hover:text-ink">
+          Descartar
+        </button>
+        <button
+          onClick={approve}
+          disabled={!name.trim() || !content.trim() || status === "saving"}
+          className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
+        >
+          <Check size={14} /> {status === "saving" ? "Salvando…" : "Aprovar skill"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Nota escrita no cérebro pela IA neste turno (card compacto com preview). */
+function BrainNoteCard({ note }: { note: BrainNoteEvent }) {
+  const href = note.url?.startsWith("/") ? API_URL + note.url : note.url;
+  return (
+    <div className="my-2 max-w-xl overflow-hidden rounded-xl border border-border bg-surface">
+      <div className="flex items-center gap-2 border-b border-border px-4 py-2">
+        <Brain size={15} className="text-accent-hover" />
+        <span className="text-sm font-medium text-ink">
+          {note.action === "updated" ? "Nota atualizada no cérebro" : "Nota criada no cérebro"}
+        </span>
+        {href && (
+          <a href={href} target="_blank" rel="noreferrer noopener" className="ml-auto text-xs text-muted transition-colors hover:text-ink">
+            Abrir
+          </a>
+        )}
+      </div>
+      <div className="px-4 py-3">
+        <p className="text-sm font-medium text-ink">{note.title}</p>
+        {note.preview && (
+          <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-xs leading-relaxed text-muted">{note.preview}</p>
+        )}
       </div>
     </div>
   );

@@ -44,6 +44,26 @@ def test_shape_email_draft_note():
     assert event["kind"] == "email_draft"
 
 
+def test_shape_skill_proposal_note():
+    """Proposta de skill: o modelo recebe só a nota (não pode afirmar que salvou);
+    o card completo (editável) vai à UI."""
+    result = {"kind": "skill_proposal", "proposal_id": "p1", "slug": "s",
+              "name": "N", "description": "d", "content": "# passos", "tags": []}
+    content, event = orch._shape_tool_result(result)
+    assert "Do NOT claim the skill was saved" in content
+    assert "# passos" not in content  # o conteúdo não volta ao modelo
+    assert event["kind"] == "skill_proposal" and event["content"] == "# passos"
+
+
+def test_shape_brain_note_note():
+    result = {"kind": "brain_note", "doc_id": "d", "title": "Decisões",
+              "action": "updated", "preview": "p", "url": "/s/d"}
+    content, event = orch._shape_tool_result(result)
+    parsed = json.loads(content)
+    assert parsed["ok"] is True and "Decisões" in parsed["note"] and "updated" in parsed["note"]
+    assert event["kind"] == "brain_note" and event["url"] == "/s/d"
+
+
 def test_shape_knowledge_splits_model_vs_ui():
     """Conhecimento: modelo recebe os TRECHOS (_model); a UI só as fontes."""
     result = {"kind": "knowledge", "sources": [{"n": 1}], "_model": "trecho X", "count": 1}

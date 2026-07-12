@@ -2,14 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, ArrowLeft, BookOpen, Check, ChevronRight, FilePlus2, FileText,
+  AlertTriangle, ArrowLeft, BookOpen, Brain, Check, ChevronRight, FilePlus2, FileText,
   Folder, FolderInput, FolderPlus, Home, Loader2, Pencil, Plus, RotateCcw, Tag,
-  Trash2, Upload, X,
+  Trash2, Upload, Waypoints, X,
 } from "lucide-react";
 import { api, API_URL } from "@/lib/api";
 import type { KnowledgeBase, KnowledgeDoc, KnowledgeDocMeta, KnowledgeFolder } from "@/lib/types";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { AnchoredMenu, MenuDivider, MenuItem, TagInput } from "./ui";
+import NoteEditor from "./NoteEditor";
+import BrainGraph from "./BrainGraph";
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -79,8 +81,13 @@ function MoveMenu({
 
 /** Base de Conhecimento (RAG) — explorador: pastas, arquivos, criar `.txt`,
  *  metadados e tags. Fica em Espaço → Conhecimento. Acople as bases a um modelo
- *  (editor de modelos) ou a um chat (Controles) para a IA consultá-las. */
-export default function KnowledgeView() {
+ *  (editor de modelos) ou a um chat (Controles) para a IA consultá-las.
+ *
+ *  Com `kind="brain"` vira o explorador de CÉREBROS (Espaço → Cérebros): notas
+ *  markdown [[interligadas]] que a IA lê/escreve, com vista de Grafo e editor
+ *  de nota com preview/navegação por wikilink. */
+export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }) {
+  const isBrain = kind === "brain";
   const confirm = useConfirm();
   const [bases, setBases] = useState<KnowledgeBase[]>([]);
   const [sel, setSel] = useState<string | null>(null);
@@ -102,10 +109,12 @@ export default function KnowledgeView() {
   const [renameVal, setRenameVal] = useState("");
   const [moveFor, setMoveFor] = useState<{ kind: "doc" | "folder"; id: string } | null>(null);
   const moveAnchor = useRef<HTMLButtonElement>(null);
+  // vista do cérebro: lista de notas (files) ou grafo de [[wikilinks]]
+  const [brainView, setBrainView] = useState<"files" | "graph">("files");
 
   const loadBases = useCallback(async () => {
-    try { setBases(await api.get<KnowledgeBase[]>("/knowledge/bases")); } catch {}
-  }, []);
+    try { setBases(await api.get<KnowledgeBase[]>(`/knowledge/bases?kind=${kind}`)); } catch {}
+  }, [kind]);
   const loadDocs = useCallback(async (baseId: string) => {
     try { setDocs(await api.get<KnowledgeDoc[]>(`/knowledge/bases/${baseId}/docs`)); } catch {}
   }, []);
@@ -114,7 +123,7 @@ export default function KnowledgeView() {
   }, []);
 
   useEffect(() => { loadBases(); }, [loadBases]);
-  useEffect(() => { if (sel) { loadDocs(sel); loadFolders(sel); setCwd(null); } }, [sel, loadDocs, loadFolders]);
+  useEffect(() => { if (sel) { loadDocs(sel); loadFolders(sel); setCwd(null); setBrainView("files"); } }, [sel, loadDocs, loadFolders]);
 
   // enquanto houver doc indexando, atualiza a cada 2s (status + contagens)
   useEffect(() => {
@@ -129,7 +138,7 @@ export default function KnowledgeView() {
     const name = newName.trim();
     if (!name) return;
     try {
-      const b = await api.post<KnowledgeBase>("/knowledge/bases", { name });
+      const b = await api.post<KnowledgeBase>("/knowledge/bases", { name, kind });
       setNewName(""); setCreating(false);
       await loadBases();
       setSel(b.id);
@@ -137,8 +146,8 @@ export default function KnowledgeView() {
   }
   async function deleteBase(b: KnowledgeBase) {
     if (!(await confirm({
-      title: "Excluir base?",
-      body: <span className="text-muted">“{b.name}” e todos os seus documentos serão removidos.</span>,
+      title: isBrain ? "Excluir cérebro?" : "Excluir base?",
+      body: <span className="text-muted">“{b.name}” e {isBrain ? "todas as suas notas serão removidas" : "todos os seus documentos serão removidos"}.</span>,
       confirmLabel: "Excluir", danger: true,
     }))) return;
     try { await api.del(`/knowledge/bases/${b.id}`); } catch {}
@@ -188,7 +197,7 @@ export default function KnowledgeView() {
 
   async function saveTextDoc() {
     if (!sel || !editor) return;
-    const filename = editor.filename.trim() || "documento.txt";
+    const filename = editor.filename.trim() || (isBrain ? "nota" : "documento.txt");
     setSaving(true);
     try {
       if (editor.docId) {
@@ -205,6 +214,26 @@ export default function KnowledgeView() {
       const r = await api.get<{ content: string }>(`/knowledge/docs/${d.id}/text`);
       setEditor({ docId: d.id, filename: d.filename, content: r.content });
     } catch {}
+  }
+  async function openNoteById(docId: string) {
+    try {
+      const r = await api.get<{ filename: string; content: string }>(`/knowledge/docs/${docId}/text`);
+      setEditor({ docId, filename: r.filename, content: r.content });
+    } catch {}
+  }
+  // clique num [[wikilink]] no preview: abre a nota alvo ou oferece criá-la
+  async function navigateWikilink(title: string) {
+    if (!sel) return;
+    try {
+      const r = await api.get<{ doc_id: string }>(`/brain/bases/${sel}/resolve?title=${encodeURIComponent(title)}`);
+      await openNoteById(r.doc_id);
+    } catch {
+      setEditor({ filename: title, content: "" });
+    }
+  }
+  function openGraphNode(node: { id: string; title: string; ghost: boolean }) {
+    if (node.ghost) setEditor({ filename: node.title, content: "" });
+    else openNoteById(node.id);
   }
   async function saveMeta(meta: KnowledgeDocMeta) {
     if (!sel || !metaDoc) return;
@@ -253,7 +282,7 @@ export default function KnowledgeView() {
         {/* breadcrumb + tags da base */}
         <div className="flex flex-wrap items-center gap-2">
           <button onClick={() => setSel(null)} className="flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-ink">
-            <ArrowLeft size={16} /> Bases
+            <ArrowLeft size={16} /> {isBrain ? "Cérebros" : "Bases"}
           </button>
           <span className="text-muted">/</span>
           <button onClick={() => setCwd(null)} className="text-sm font-semibold text-ink transition-colors hover:text-accent-hover">{current.name}</button>
@@ -263,11 +292,31 @@ export default function KnowledgeView() {
               <button onClick={() => setCwd(f.id)} className="text-sm text-ink-soft transition-colors hover:text-accent-hover">{f.name}</button>
             </span>
           ))}
+          {isBrain && (
+            <div className="ml-auto flex items-center rounded-lg border border-border p-0.5">
+              <button
+                onClick={() => setBrainView("files")}
+                className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs transition-colors ${brainView === "files" ? "bg-surface2 text-ink" : "text-muted hover:text-ink"}`}
+              >
+                <FileText size={12} /> Notas
+              </button>
+              <button
+                onClick={() => setBrainView("graph")}
+                className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs transition-colors ${brainView === "graph" ? "bg-surface2 text-ink" : "text-muted hover:text-ink"}`}
+              >
+                <Waypoints size={12} /> Grafo
+              </button>
+            </div>
+          )}
         </div>
 
+        {isBrain && brainView === "graph" ? (
+          <BrainGraph baseId={current.id} onOpenNote={openGraphNode} />
+        ) : (
+        <>
         <div className="rounded-xl border border-border bg-surface p-3">
-          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted"><Tag size={12} /> Etiquetas da base</p>
-          <TagInput tags={current.tags || []} onChange={saveBaseTags} placeholder="Ex.: manuais, fiscal…" />
+          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted"><Tag size={12} /> {isBrain ? "Etiquetas do cérebro" : "Etiquetas da base"}</p>
+          <TagInput tags={current.tags || []} onChange={saveBaseTags} placeholder={isBrain ? "Ex.: projetos, estudos…" : "Ex.: manuais, fiscal…"} />
         </div>
 
         {/* barra de ações */}
@@ -275,8 +324,8 @@ export default function KnowledgeView() {
           <button onClick={() => setNewFolder(true)} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-ink transition-colors hover:bg-hover">
             <FolderPlus size={15} /> Nova pasta
           </button>
-          <button onClick={() => setEditor({ filename: "novo.txt", content: "" })} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-ink transition-colors hover:bg-hover">
-            <FilePlus2 size={15} /> Novo arquivo de texto
+          <button onClick={() => setEditor({ filename: isBrain ? "" : "novo.txt", content: "" })} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-ink transition-colors hover:bg-hover">
+            <FilePlus2 size={15} /> {isBrain ? "Nova nota" : "Novo arquivo de texto"}
           </button>
           <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-ink transition-colors hover:bg-hover">
             <Upload size={15} /> Enviar arquivos
@@ -306,7 +355,9 @@ export default function KnowledgeView() {
           className={`min-h-[120px] rounded-2xl border ${dragOver ? "border-accent border-dashed bg-accent/5" : "border-border"}`}
         >
           {shownFolders.length === 0 && shownDocs.length === 0 ? (
-            <p className="py-14 text-center text-sm text-muted">Pasta vazia. Arraste arquivos aqui, crie uma subpasta ou um arquivo de texto.</p>
+            <p className="py-14 text-center text-sm text-muted">
+              {isBrain ? "Nenhuma nota aqui. Crie uma nota — ou peça à IA para anotar algo no cérebro." : "Pasta vazia. Arraste arquivos aqui, crie uma subpasta ou um arquivo de texto."}
+            </p>
           ) : (
             <ul className="flex flex-col gap-1 p-2">
               {shownFolders.map((f) => (
@@ -336,7 +387,10 @@ export default function KnowledgeView() {
               {shownDocs.map((d) => (
                 <li key={d.id} className="group flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-hover">
                   <FileText size={18} className="shrink-0 text-muted" />
-                  <div className="min-w-0 flex-1">
+                  <div
+                    className={`min-w-0 flex-1 ${isBrain && isTextDoc(d) ? "cursor-pointer" : ""}`}
+                    onClick={() => { if (isBrain && isTextDoc(d)) openTextEditor(d); }}
+                  >
                     <p className="truncate text-sm text-ink">{d.meta?.title || d.filename}</p>
                     <div className="flex flex-wrap items-center gap-2">
                       <StatusBadge d={d} />
@@ -372,8 +426,21 @@ export default function KnowledgeView() {
             onMove={(fid) => moveFor.kind === "doc" ? moveDoc(moveFor.id, fid) : moveFolder(moveFor.id, fid)}
           />
         )}
+        </>
+        )}
 
-        {editor && (
+        {editor && (isBrain ? (
+          <NoteEditor
+            filename={editor.filename}
+            content={editor.content}
+            isNew={!editor.docId}
+            saving={saving}
+            onChange={(patch) => setEditor((e) => (e ? { ...e, ...patch } : e))}
+            onSave={saveTextDoc}
+            onClose={() => setEditor(null)}
+            onNavigate={navigateWikilink}
+          />
+        ) : (
           <TextEditorModal
             filename={editor.filename}
             content={editor.content}
@@ -383,7 +450,7 @@ export default function KnowledgeView() {
             onSave={saveTextDoc}
             onClose={() => setEditor(null)}
           />
-        )}
+        ))}
         {metaDoc && (
           <MetaModal doc={metaDoc} saving={saving} onSave={saveMeta} onClose={() => setMetaDoc(null)} />
         )}
@@ -396,11 +463,13 @@ export default function KnowledgeView() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted">
-          Organize documentos em pastas, crie arquivos de texto e acople as bases a um modelo ou chat para a IA respondê-los com citações.
+          {isBrain
+            ? "Notas interligadas que a IA lê e escreve. Acople um cérebro a um modelo ou chat e ele passa a anotar e consultar o que aprende."
+            : "Organize documentos em pastas, crie arquivos de texto e acople as bases a um modelo ou chat para a IA respondê-los com citações."}
         </p>
         {!creating && (
           <button onClick={() => setCreating(true)} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover">
-            <Plus size={16} /> Nova base
+            <Plus size={16} /> {isBrain ? "Novo cérebro" : "Nova base"}
           </button>
         )}
       </div>
@@ -410,7 +479,7 @@ export default function KnowledgeView() {
           <input
             autoFocus value={newName} onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") createBase(); if (e.key === "Escape") { setCreating(false); setNewName(""); } }}
-            placeholder="Nome da base (ex.: Manuais, Contratos…)"
+            placeholder={isBrain ? "Nome do cérebro (ex.: Projetos, Estudos…)" : "Nome da base (ex.: Manuais, Contratos…)"}
             className="flex-1 bg-transparent px-1.5 text-sm text-ink outline-none placeholder:text-muted"
           />
           <button onClick={createBase} className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover">Criar</button>
@@ -420,9 +489,13 @@ export default function KnowledgeView() {
 
       {bases.length === 0 && !creating ? (
         <div className="flex flex-col items-center gap-2 py-12 text-center">
-          <BookOpen size={26} className="text-muted" />
-          <p className="text-sm text-ink">Nenhuma base ainda</p>
-          <p className="max-w-sm text-xs text-muted">Crie uma base, suba seus documentos e a IA poderá consultá-los nas conversas (RAG).</p>
+          {isBrain ? <Brain size={26} className="text-muted" /> : <BookOpen size={26} className="text-muted" />}
+          <p className="text-sm text-ink">{isBrain ? "Nenhum cérebro ainda" : "Nenhuma base ainda"}</p>
+          <p className="max-w-sm text-xs text-muted">
+            {isBrain
+              ? "Crie um cérebro e acople-o a um modelo: a IA passa a guardar e ligar o que aprende em notas [[interligadas]]."
+              : "Crie uma base, suba seus documentos e a IA poderá consultá-los nas conversas (RAG)."}
+          </p>
         </div>
       ) : (
         <ul className="grid gap-2 sm:grid-cols-2">
@@ -430,11 +503,11 @@ export default function KnowledgeView() {
             <li key={b.id} className="group flex items-center gap-3 rounded-xl border border-border bg-surface p-3.5 transition-colors hover:border-accent/40">
               <button onClick={() => setSel(b.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface2 text-accent-hover">
-                  <BookOpen size={18} />
+                  {isBrain ? <Brain size={18} /> : <BookOpen size={18} />}
                 </span>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-ink">{b.name}</p>
-                  <p className="text-xs text-muted">{b.doc_count} doc(s) · {b.chunk_count} trechos</p>
+                  <p className="text-xs text-muted">{isBrain ? `${b.doc_count} nota(s)` : `${b.doc_count} doc(s) · ${b.chunk_count} trechos`}</p>
                   {(b.tags || []).length > 0 && (
                     <div className="mt-1 flex flex-wrap gap-1">
                       {(b.tags || []).slice(0, 4).map((t) => (

@@ -286,11 +286,12 @@ const CAPS: { key: string; label: string }[] = [
   { key: "file_upload", label: "Upload de Arquivos" },
   { key: "image_generation", label: "Geração de Imagens" },
   { key: "chat_context", label: "Contexto do Chat" },
+  { key: "skill_learning", label: "Aprender skills (/learn)" },
 ];
 
 // capacidades que vêm LIGADAS por padrão (ausência = ligada). Para desligá-las é
 // preciso gravar explicitamente `false` (o orchestrator respeita chat_context).
-const CAPS_DEFAULT_ON = new Set<string>(["chat_context"]);
+const CAPS_DEFAULT_ON = new Set<string>(["chat_context", "skill_learning"]);
 
 // memória por-modelo (guardada em capabilities.memory; null = herda do perfil).
 // Ao personalizar, materializa com enabled:true (liga a memória p/ os chats deste
@@ -313,6 +314,9 @@ const MEM_CFG_DEFAULT: Required<MemoryCfg> = {
 
 // Base de Conhecimento por-modelo (capabilities.knowledge). bases vazio = desligado.
 type KnowledgeCfg = { bases?: string[]; mode?: "auto" | "tool"; k?: number };
+
+// Cérebro por-modelo (capabilities.brain). brains vazio = desligado.
+type BrainCfg = { brains?: string[]; write?: boolean; k?: number };
 
 function slugify(s: string) {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -439,9 +443,15 @@ export default function ModelEditor({
     ((model?.capabilities as Record<string, unknown> | undefined)?.knowledge as KnowledgeCfg) ?? { bases: [], mode: "auto", k: 6 },
   );
   const [kbBases, setKbBases] = useState<KnowledgeBase[]>([]);
+  // Cérebro POR-MODELO (capabilities.brain): cérebros acoplados + escrita pela IA
+  const [brainCfg, setBrainCfg] = useState<BrainCfg>(
+    ((model?.capabilities as Record<string, unknown> | undefined)?.brain as BrainCfg) ?? { brains: [], write: true, k: 6 },
+  );
+  const [brainBases, setBrainBases] = useState<KnowledgeBase[]>([]);
   useEffect(() => { api.get<ModelConfig[]>("/models").then(setMyModels).catch(() => {}); }, []);
   useEffect(() => { api.get<MemoryBank[]>("/memory/banks").then(setMemBanks).catch(() => {}); }, []);
   useEffect(() => { api.get<KnowledgeBase[]>("/knowledge/bases").then(setKbBases).catch(() => {}); }, []);
+  useEffect(() => { api.get<KnowledgeBase[]>("/knowledge/bases?kind=brain").then(setBrainBases).catch(() => {}); }, []);
   const [toolsEnabled, setToolsEnabled] = useState(model?.tools_enabled ?? false);
   const [toolIds, setToolIds] = useState<string[]>(model?.tool_ids ?? []);
   const [codeMode, setCodeMode] = useState(model?.code_mode ?? false);
@@ -633,12 +643,22 @@ export default function ModelEditor({
     for (const k of capSelected) capabilities[k] = true;
     // default-on desmarcada → false explícito (senão "ausente" seria tratado como on)
     for (const k of CAPS_DEFAULT_ON) if (!capSelected.includes(k)) capabilities[k] = false;
+    // skill_learning marcada = modo AUTO (ausente): o servidor injeta a tool só
+    // quando o turno já anuncia outras tools (True explícito forçaria `tools` num
+    // modelo sem tool-calling e quebraria o request)
+    if (capabilities.skill_learning === true) delete capabilities.skill_learning;
     for (const f of filters) capabilities[`filter:${f}`] = true;
     // memória por-modelo (objeto aninhado): só grava quando personalizada
     if (mem) capabilities.memory = mem;
     // base de conhecimento por-modelo: só grava quando há base(s) acoplada(s)
     if (kb.bases && kb.bases.length > 0) {
       capabilities.knowledge = { bases: kb.bases, mode: kb.mode || "auto", k: Number(kb.k) || 6 };
+    }
+    // cérebro por-modelo: só grava quando há cérebro(s) acoplado(s)
+    if (brainCfg.brains && brainCfg.brains.length > 0) {
+      capabilities.brain = {
+        brains: brainCfg.brains, write: brainCfg.write !== false, k: Number(brainCfg.k) || 6,
+      };
     }
     // aviso de uso alto por-modelo (override do perfil); vazio/0 = herda o perfil
     if (tokenWarn !== "" && Number(tokenWarn) > 0) capabilities.token_warn = Number(tokenWarn);
@@ -1188,6 +1208,55 @@ export default function ModelEditor({
                         />
                       </label>
                     </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Cérebro — notas [[interligadas]] que este modelo lê/escreve */}
+          <div className="mt-8 border-t border-border pt-7">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
+              <span className="text-muted"><Brain size={15} /></span>
+              Cérebro
+              <InfoHint text="Acople cérebros (notas interligadas) a este modelo. Ele lê/busca as notas e, com a escrita ligada, cria e atualiza notas sozinho durante as conversas. Crie cérebros em Espaço → Cérebros." />
+            </h2>
+            <div className="mt-3 space-y-4">
+              {brainBases.length === 0 ? (
+                <p className="text-xs text-muted">Nenhum cérebro criado. Crie em <span className="text-ink-soft">Espaço → Cérebros</span>.</p>
+              ) : (
+                <>
+                  <div>
+                    <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Cérebros acoplados</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {brainBases.map((b) => {
+                        const on = (brainCfg.brains ?? []).includes(b.id);
+                        return (
+                          <button
+                            key={b.id}
+                            onClick={() => {
+                              const cur = brainCfg.brains ?? [];
+                              setBrainCfg({ ...brainCfg, brains: on ? cur.filter((x) => x !== b.id) : [...cur, b.id] });
+                            }}
+                            className={`rounded-full border px-3 py-1 text-xs transition-colors ${on ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border text-muted hover:text-ink"}`}
+                          >
+                            {b.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {(brainCfg.brains ?? []).length > 0 && (
+                    <label className="flex items-center gap-2 text-xs text-muted">
+                      <input
+                        type="checkbox"
+                        checked={brainCfg.write !== false}
+                        onChange={(e) => setBrainCfg({ ...brainCfg, write: e.target.checked })}
+                        className="h-3.5 w-3.5 accent-accent"
+                      />
+                      Escrita pela IA (criar/atualizar notas)
+                      <InfoHint text="Com a escrita ligada, a IA grava notas direto (um card no chat mostra o que foi escrito). Desligada, o cérebro fica somente leitura." />
+                    </label>
                   )}
                 </>
               )}

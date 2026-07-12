@@ -71,6 +71,22 @@ function findAsk(events: ToolEvent[]): AskSpec | null {
   return null;
 }
 
+// Comando builtin "/learn": pede ao modelo p/ destilar uma skill do trabalho do
+// chat via propose_skill (proposal-only — o card editável é quem salva).
+const LEARN_BUILTIN: Prompt = {
+  id: "builtin-learn",
+  command: "learn",
+  title: "Aprender skill deste chat",
+  content:
+    "Review the work we completed in this conversation. If it contains a reusable " +
+    "multi-step procedure, distill it into a skill and call the propose_skill tool " +
+    "(short name, a when-to-use description, and complete step-by-step content in " +
+    "markdown). If nothing here is worth turning into a skill, say so briefly instead.",
+  enabled: true,
+  created_at: "",
+  updated_at: "",
+};
+
 export default function ChatPage() {
   const router = useRouter();
   const confirm = useConfirm();
@@ -263,7 +279,9 @@ export default function ChatPage() {
         refreshExtModels();
         api.get<Tool[]>("/tools").then(setTools).catch(() => {});
         api.get<SystemTool[]>("/tools/system").then(setSystemTools).catch(() => {});
-        api.get<Prompt[]>("/prompts").then(setPrompts).catch(() => {});
+        api.get<Prompt[]>("/prompts")
+          .then((ps) => setPrompts([...ps, LEARN_BUILTIN]))
+          .catch(() => setPrompts([LEARN_BUILTIN]));
         api.get<Skill[]>("/skills").then(setSkills).catch(() => {});
       })
       .catch((e) => {
@@ -1580,6 +1598,8 @@ export default function ChatPage() {
               onMemoryChange={active ? (cfg) => patchActive({ memory_config: cfg }) : undefined}
               knowledge={active ? active.knowledge_config ?? null : undefined}
               onKnowledgeChange={active ? (cfg) => patchActive({ knowledge_config: cfg }) : undefined}
+              brain={active ? active.brain_config ?? null : undefined}
+              onBrainChange={active ? (cfg) => patchActive({ brain_config: cfg }) : undefined}
               onSave={(sp, params) => {
                 if (active) patchActive({ system_prompt: sp, params });
                 else {

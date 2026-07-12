@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, SlidersHorizontal, X } from "lucide-react";
 import { api } from "@/lib/api";
-import type { KnowledgeBase, KnowledgeConfig, MemoryConfig } from "@/lib/types";
+import type { BrainConfig, KnowledgeBase, KnowledgeConfig, MemoryConfig } from "@/lib/types";
 
 const MEM_WRITE: { value: string; label: string; project?: boolean }[] = [
   { value: "global", label: "Global" },
@@ -128,6 +128,8 @@ export default function Controls({
   onMemoryChange,
   knowledge,
   onKnowledgeChange,
+  brain,
+  onBrainChange,
   onSave,
   onClose,
 }: {
@@ -143,12 +145,15 @@ export default function Controls({
   /** conhecimento do chat ativo (null = herda do modelo/perfil) */
   knowledge?: KnowledgeConfig | null;
   onKnowledgeChange?: (cfg: KnowledgeConfig | null) => void;
+  /** cérebro do chat ativo (null = herda do modelo/perfil) */
+  brain?: BrainConfig | null;
+  onBrainChange?: (cfg: BrainConfig | null) => void;
   onSave: (systemPrompt: string | null, params: Record<string, unknown>) => void;
   onClose: () => void;
 }) {
   const [systemPrompt, setSystemPrompt] = useState(initialSystemPrompt ?? "");
   const [params, setParams] = useState<Record<string, unknown>>(initialParams ?? {});
-  const [open, setOpen] = useState({ system: true, advanced: true, memory: true, knowledge: true });
+  const [open, setOpen] = useState({ system: true, advanced: true, memory: true, knowledge: true, brain: true });
 
   // Base de Conhecimento por-chat: acopla bases extras (união com as do modelo).
   const [kbBases, setKbBases] = useState<KnowledgeBase[]>([]);
@@ -158,6 +163,15 @@ export default function Controls({
   const kb: KnowledgeConfig = { mode: "auto", k: 6, bases: [], ...(knowledge ?? {}) };
   const kbBasesSel = kb.bases ?? [];
   const patchKb = (p: Partial<KnowledgeConfig>) => onKnowledgeChange?.({ ...kb, ...p });
+
+  // Cérebro por-chat: acopla cérebros extras (união com os do modelo).
+  const [brains, setBrains] = useState<KnowledgeBase[]>([]);
+  useEffect(() => {
+    if (onBrainChange) api.get<KnowledgeBase[]>("/knowledge/bases?kind=brain").then(setBrains).catch(() => {});
+  }, [onBrainChange]);
+  const br: BrainConfig = { write: true, k: 6, brains: [], ...(brain ?? {}) };
+  const brSel = br.brains ?? [];
+  const patchBrain = (p: Partial<BrainConfig>) => onBrainChange?.({ ...br, ...p });
 
   // memória do chat: memory=null → herda o padrão (memoryDefault). `mem` é a config
   // EFETIVA mostrada; ao mexer, materializa uma config explícita (com enabled:true
@@ -293,6 +307,43 @@ export default function Controls({
                       <option value="auto">Automático (injeta + cita)</option>
                       <option value="tool">Ferramenta (a IA busca)</option>
                     </select>
+                  </div>
+                )}
+              </div>
+            )}
+          </Section>
+        )}
+
+        {onBrainChange && (
+          <Section title="Cérebro" open={open.brain} onToggle={() => setOpen({ ...open, brain: !open.brain })}>
+            {brains.length === 0 ? (
+              <p className="text-xs text-muted">Nenhum cérebro criado. Crie um em <span className="text-ink-soft">Espaço → Cérebros</span>.</p>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-muted">Cérebros usados só neste chat (além dos do modelo).</p>
+                  {brSel.length > 0 && (
+                    <button onClick={() => onBrainChange(null)} className="text-xs text-muted hover:text-ink">Limpar</button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {brains.map((b) => {
+                    const on = brSel.includes(b.id);
+                    return (
+                      <button
+                        key={b.id}
+                        onClick={() => patchBrain({ brains: on ? brSel.filter((x) => x !== b.id) : [...brSel, b.id] })}
+                        className={`rounded-full border px-3 py-1 text-xs transition-colors ${on ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border bg-surface text-muted hover:text-ink"}`}
+                      >
+                        {b.name}
+                      </button>
+                    );
+                  })}
+                </div>
+                {brSel.length > 0 && (
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-ink">Escrita pela IA</p>
+                    <MemToggle on={br.write !== false} onClick={() => patchBrain({ write: br.write === false })} />
                   </div>
                 )}
               </div>

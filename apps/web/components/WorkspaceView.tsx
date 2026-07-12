@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft, BarChart3, BookOpen, Box, Brain, Code2, Copy, Download, FileText,
   LayoutGrid, MoreHorizontal, Pencil, Plug, Plus, Search, Settings, Sparkles,
-  Trash2, Upload, Wrench,
+  Trash2, Upload, Waypoints, Wrench,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { ModelConfig, Prompt, Skill, Tool, User } from "@/lib/types";
@@ -21,7 +21,7 @@ import MemoryView from "./MemoryView";
 import KnowledgeView from "./KnowledgePanel";
 
 export type Section =
-  | "Modelos" | "Conhecimento" | "Prompts" | "Skills"
+  | "Modelos" | "Conhecimento" | "Cerebros" | "Prompts" | "Skills"
   | "Ferramentas" | "Apps" | "Memoria" | "Analítica";
 
 // meta dos cards da grade inicial (a contagem é injetada em runtime)
@@ -31,6 +31,7 @@ const CARD_META: { key: Section; name: string; desc: string; icon: ReactNode; li
   { key: "Prompts", name: "Prompts", desc: "Atalhos de comando reutilizáveis", icon: <FileText size={22} />, live: true },
   { key: "Skills", name: "Skills", desc: "Habilidades do agente", icon: <Sparkles size={22} />, live: true },
   { key: "Conhecimento", name: "Conhecimento", desc: "Banco de dados organizados", icon: <BookOpen size={22} />, live: true },
+  { key: "Cerebros", name: "Cérebros", desc: "Notas interligadas da IA", icon: <Waypoints size={22} />, live: true },
   { key: "Apps", name: "Apps", desc: "Mini-aplicações e automações", icon: <LayoutGrid size={22} />, live: false },
   { key: "Memoria", name: "Memória", desc: "O que a IA lembra de você", icon: <Brain size={22} />, live: true },
   { key: "Analítica", name: "Analítica", desc: "Uso, custos e desempenho", icon: <BarChart3 size={22} />, live: true },
@@ -640,6 +641,11 @@ export default function WorkspaceView({
       {section === "Conhecimento" && (
         <SectionShell title="Conhecimento" onBack={backHome}>
           <KnowledgeView />
+        </SectionShell>
+      )}
+      {section === "Cerebros" && (
+        <SectionShell title="Cérebros" onBack={backHome}>
+          <KnowledgeView kind="brain" />
         </SectionShell>
       )}
       {section === "Apps" && (

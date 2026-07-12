@@ -41,9 +41,11 @@ from .turn_setup import (
     _ordered_messages,
     _prepare_attachments,
     _prepare_turn,
+    _brain_setup,
     _resolve_guards,
     _resolve_knowledge,
     _resolve_provider,
+    _skill_learning,
     _resolve_subagents,
     _ref_docs,
     _sse,
@@ -101,6 +103,7 @@ async def ephemeral(
     # resolvido ANTES do stream: a sessão `db` da request não deve ser usada
     # depois que a resposta começa a ser transmitida
     media = await _media_opts(db, user, model_config, attachments=attachments)
+    brain = await _brain_setup(db, user, None, model_config)
 
     async def event_stream():
         final_usage: dict | None = None
@@ -119,6 +122,8 @@ async def ephemeral(
             skills=skills,
             use_context=_use_context(model_config),
             knowledge=_resolve_knowledge(None, model_config, user),
+            brain=brain,
+            skill_learning=_skill_learning(model_config),
             media=media,
         ):
             if isinstance(event, dict) and event.get("type") == "done":
@@ -297,6 +302,8 @@ async def send_message(
         skills=skills,
         use_context=_use_context(model_config),
         knowledge=_resolve_knowledge(chat, model_config, user),
+        brain=await _brain_setup(db, user, chat, model_config),
+        skill_learning=_skill_learning(model_config),
         ref_docs=await _ref_docs(db, user, chat, model_config, body.ref_doc_ids),
         memory=_memory_opts(chat, model_config, user),
         media=await _media_opts(db, user, model_config, attachments=attachments),
@@ -500,6 +507,8 @@ async def regenerate_message(
         skills=skills,
         use_context=_use_context(model_config),
         knowledge=_resolve_knowledge(chat, model_config, user),
+        brain=await _brain_setup(db, user, chat, model_config),
+        skill_learning=_skill_learning(model_config),
         memory=_memory_opts(chat, model_config, user),
         media=await _media_opts(db, user, model_config, attachments=user_attachments),
         subagent=_subagent_opts(sub_specs, sub_conf, sub_runner),
@@ -621,6 +630,8 @@ async def continue_message(
         skills=skills,
         use_context=_use_context(model_config),
         knowledge=_resolve_knowledge(chat, model_config, user),
+        brain=await _brain_setup(db, user, chat, model_config),
+        skill_learning=_skill_learning(model_config),
         memory=_memory_opts(chat, model_config, user),
         media=await _media_opts(db, user, model_config),
     )

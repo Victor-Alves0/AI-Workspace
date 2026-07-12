@@ -65,11 +65,14 @@ def _chunk(*, content=None, reasoning=None, tool=None, finish=None, usage=None):
 
 
 def _fake_stream_from(scripts):
-    """Monkeypatch de openrouter.stream_chat: devolve um script por invocação."""
-    state = {"i": 0}
+    """Monkeypatch de openrouter.stream_chat: devolve um script por invocação.
+    Grava em `state` o que o "provedor" recebeu (tools anunciadas, mensagens)."""
+    state = {"i": 0, "tools": [], "messages": []}
 
     async def fake_stream(api_key, model, messages, *, tools=None, params=None,
                           modalities=None, base_url=None):
+        state["tools"].append(tools)
+        state["messages"].append(messages)
         script = scripts[min(state["i"], len(scripts) - 1)]
         state["i"] += 1
         for ch in script:
@@ -163,6 +166,90 @@ async def test_error_before_first_chunk_yields_error(monkeypatch):
     events = await _collect(run_turn(**_base_kwargs(FakeSift({}))))
     err = [e for e in events if e["type"] == "error"]
     assert err and "provider down" in err[0]["message"]
+
+
+def _tool_names(tools):
+    return [((t.get("function") or {}).get("name")) for t in (tools or [])]
+
+
+async def test_skill_proposal_flow(monkeypatch):
+    """iter 1: modelo chama propose_skill; iter 2: responde. O card vai à UI e o
+    MODELO recebe só a nota 'não afirme que salvou' (proposal-only)."""
+    args = json.dumps({"name": "Revisar PR", "description": "Quando revisar.",
+                       "content": "# Passos", "tags": ["git"]})
+    scripts = [
+        [_chunk(tool=("propose_skill", args), finish="tool_calls")],
+        [_chunk(content="Proposta enviada!", finish="stop",
+                usage={"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7})],
+    ]
+    fake, state = _fake_stream_from(scripts)
+    monkeypatch.setattr(orch.openrouter, "stream_chat", fake)
+    events = await _collect(run_turn(**_base_kwargs(FakeSift({}))))
+    result = [e for e in events if e["type"] == "tool_result"][0]["result"]
+    assert result["kind"] == "skill_proposal" and result["slug"] == "revisar_pr"
+    assert result["proposal_id"]
+    # a 2ª chamada ao provedor carrega a resposta da tool: só a NOTA, sem o conteúdo
+    tool_msg = [m for m in state["messages"][1] if m.get("role") == "tool"][0]
+    assert "Do NOT claim the skill was saved" in tool_msg["content"]
+    assert "# Passos" not in tool_msg["content"]
+
+
+async def test_brain_write_flow(monkeypatch):
+    """Com cérebro acoplado (write), o modelo grava uma nota: evento de progresso +
+    tool_result kind:brain_note + system com o bloco '## Second brain'."""
+    async def fake_write(user_id, base_id, title, content, mode):
+        return {"doc_id": "d1", "base_id": base_id, "title": title,
+                "action": "created", "size": len(content)}
+
+    monkeypatch.setattr(orch.brain_service, "write_note", fake_write)
+    monkeypatch.setattr(orch, "sign_doc_url", lambda did: f"/s/{did}")
+    args = json.dumps({"action": "write", "title": "Decisões", "content": "corpo [[X]]"})
+    scripts = [
+        [_chunk(tool=("brain", args), finish="tool_calls")],
+        [_chunk(content="Anotado.", finish="stop",
+                usage={"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6})],
+    ]
+    fake, state = _fake_stream_from(scripts)
+    monkeypatch.setattr(orch.openrouter, "stream_chat", fake)
+    kw = _base_kwargs(FakeSift({}))
+    kw["brain"] = {"brains": ["b1"], "names": ["Notas"], "write": True, "k": 6}
+    events = await _collect(run_turn(**kw))
+    assert any(e.get("type") == "brain" and e.get("status") == "start" for e in events)
+    result = [e for e in events if e["type"] == "tool_result"][0]["result"]
+    assert result["kind"] == "brain_note" and result["title"] == "Decisões"
+    # tool `brain` anunciada + bloco no system (com a fronteira p/ o mem0)
+    assert "brain" in _tool_names(state["tools"][0])
+    system = state["messages"][0][0]["content"]
+    assert "## Second brain" in system and "memory system" in system
+
+
+async def test_brain_not_injected_without_brains(monkeypatch):
+    fake, state = _fake_stream_from([[_chunk(content="oi", finish="stop")]])
+    monkeypatch.setattr(orch.openrouter, "stream_chat", fake)
+    await _collect(run_turn(**_base_kwargs(FakeSift({}))))
+    names = _tool_names(state["tools"][0])
+    assert "brain" not in names
+    # /learn em modo AUTO: com outras tools anunciadas (SIFT), propose_skill entra
+    assert "propose_skill" in names
+
+
+async def test_skill_learning_auto_skips_toolless_model(monkeypatch):
+    """Modelo sem NENHUMA tool (sem SIFT/skills/KB): o auto NÃO injeta propose_skill
+    (mandar `tools` p/ modelo sem tool-calling quebra o request)."""
+    fake, state = _fake_stream_from([[_chunk(content="oi", finish="stop")]])
+    monkeypatch.setattr(orch.openrouter, "stream_chat", fake)
+    kw = _base_kwargs(None)
+    kw["sift"] = None
+    await _collect(run_turn(**kw))
+    assert not _tool_names(state["tools"][0])
+    # …mas com skill_learning=True explícito (opt-in por modelo), entra mesmo assim
+    fake2, state2 = _fake_stream_from([[_chunk(content="oi", finish="stop")]])
+    monkeypatch.setattr(orch.openrouter, "stream_chat", fake2)
+    kw2 = _base_kwargs(None)
+    kw2["sift"] = None
+    kw2["skill_learning"] = True
+    await _collect(run_turn(**kw2))
+    assert _tool_names(state2["tools"][0]) == ["propose_skill"]
 
 
 async def test_usage_breakdown_present(monkeypatch):

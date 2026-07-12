@@ -32,6 +32,7 @@ from fastapi.concurrency import run_in_threadpool
 from .. import extraction
 from ..config import get_settings
 from ..db import SessionLocal
+from ..knowledge import brain as brain_service
 from ..knowledge import retrieval as kb_retrieval
 from ..knowledge.links import sign_doc_url
 from ..memory import mem0_service
@@ -371,6 +372,94 @@ def _search_knowledge_tool() -> dict[str, Any]:
     }
 
 
+def _brain_tool(write: bool) -> dict[str, Any]:
+    """Tool injetada quando há cérebros (second brain) acoplados: a IA lê/busca —
+    e, com `write` ligado, cria/atualiza — notas markdown [[interligadas]]."""
+    actions = ["list", "search", "read"] + (["write"] if write else [])
+    desc = (
+        "Access the user's second brain: interlinked markdown notes with durable, "
+        "structured knowledge. Actions: 'list' note titles; 'search' notes by meaning; "
+        "'read' a note by title (returns content and its links/backlinks)"
+    )
+    if write:
+        desc += (
+            "; 'write' to create or update a note (full markdown body; link related "
+            "notes with [[Note Title]]). Write when the conversation produces reusable "
+            "knowledge: concepts, decisions, research syntheses, project notes. Prefer "
+            "updating an existing note over duplicating it"
+        )
+    desc += (
+        ". Do NOT store short personal facts about the user here — the memory system "
+        "captures those automatically."
+    )
+    return {
+        "type": "function",
+        "function": {
+            "name": "brain",
+            "description": desc,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {"type": "string", "enum": actions},
+                    "query": {"type": "string", "description": "search: what to look for"},
+                    "title": {"type": "string", "description": "read/write: the note title"},
+                    "content": {
+                        "type": "string",
+                        "description": "write: full markdown body, with [[wikilinks]] to related notes",
+                    },
+                    "mode": {
+                        "type": "string", "enum": ["replace", "append"],
+                        "description": "write: replace the note (default) or append to it",
+                    },
+                    "brain": {
+                        "type": "string",
+                        "description": "brain name, when more than one is attached",
+                    },
+                },
+                "required": ["action"],
+            },
+        },
+    }
+
+
+def _propose_skill_tool() -> dict[str, Any]:
+    """Tool do /learn: o modelo DESTILA uma skill do trabalho do chat e a propõe.
+    Proposal-only — o card editável na UI é quem salva (POST /skills), nunca o modelo."""
+    return {
+        "type": "function",
+        "function": {
+            "name": "propose_skill",
+            "description": (
+                "Propose a new reusable skill distilled from work completed in this "
+                "conversation. Use when the user asks to learn/save a procedure, or — at "
+                "most once per conversation — right after finishing a multi-step task whose "
+                "procedure is genuinely reusable. The user reviews the proposal in an "
+                "editable card; the skill is NEVER saved automatically."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "short human-readable skill name"},
+                    "slug": {
+                        "type": "string",
+                        "description": "lowercase identifier (letters/digits/underscore), e.g. code_review",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "WHEN to use this skill, 1-3 sentences (always visible to the model)",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "HOW to do it: complete step-by-step instructions in markdown",
+                    },
+                    "tags": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["name", "description", "content"],
+            },
+        },
+    }
+
+
 def _knowledge_block_and_sources(results: list[dict]) -> tuple[str, list[dict[str, str]]]:
     """Dos trechos recuperados, monta (a) o bloco numerado por FONTE (documento) p/ o
     modelo e (b) a lista de fontes [{title, url}] (uma por documento, ordem de 1ª
@@ -426,6 +515,32 @@ def _skills_block(skills: list[dict[str, Any]]) -> str:
         "carregar as instruções completas ANTES de responder — não invente o conteúdo.\n"
         + "\n".join(lines)
     )
+
+
+def _brain_block(names: list[str], write: bool) -> str:
+    """Bloco (estável, cacheável) do second brain: diz que o cérebro existe, como
+    usar e a FRONTEIRA com o mem0 (fatos curtos do usuário = memória automática)."""
+    if not names:
+        return ""
+    listed = ", ".join(f"`{n}`" for n in names if n) or "`brain`"
+    lines = [
+        "## Second brain",
+        f"You maintain the user's second brain ({listed}): interlinked markdown notes "
+        "holding deliberate, durable knowledge. Use the `brain` tool to list, search and "
+        "read notes whenever past notes may inform the answer.",
+    ]
+    if write:
+        lines.append(
+            "When this conversation produces reusable knowledge — concepts, decisions, "
+            "research syntheses, project notes — write it down (action 'write'), linking "
+            "related notes with [[Note Title]]. Prefer atomic notes with descriptive "
+            "titles; update existing notes instead of duplicating them."
+        )
+    lines.append(
+        "Do NOT store short personal facts about the user in the brain — the memory "
+        "system captures those automatically."
+    )
+    return "\n".join(lines)
 
 
 def _memory_block(memories: list[str]) -> str:
@@ -730,6 +845,9 @@ class _AssembledTools:
     skills_by_slug: dict[str, dict[str, Any]] = field(default_factory=dict)
     genimage_on: bool = False
     kb_tool_on: bool = False
+    brain_on: bool = False
+    brain_write: bool = False
+    skill_learning_on: bool = False
     subagents_on: bool = False
     subagents_by_key: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -743,6 +861,8 @@ def _assemble_tools_and_prompt(
     genimage: dict[str, Any] | None,
     kb_on: bool,
     kb_mode: str,
+    brain: dict[str, Any] | None,
+    skill_learning: bool | None,
     subagents: list[dict[str, Any]],
     run_subagent: Any | None,
 ) -> _AssembledTools:
@@ -810,6 +930,21 @@ def _assemble_tools_and_prompt(
     a.kb_tool_on = kb_on and kb_mode == "tool"
     if a.kb_tool_on:
         a.tools = list(a.tools) + [_search_knowledge_tool()]
+
+    # Second brain: com cérebros acoplados, o modelo ganha a tool `brain`
+    # (list/search/read e, com escrita liberada, write) — independe da SIFT.
+    a.brain_on = bool(brain and brain.get("brains"))
+    a.brain_write = a.brain_on and bool(brain.get("write"))
+    if a.brain_on:
+        a.tools = list(a.tools) + [_brain_tool(a.brain_write)]
+
+    # /learn: proposta de skill destilada do trabalho do chat (proposal-only —
+    # o usuário aprova num card; o modelo NUNCA salva). Tri-state: True força,
+    # False desliga, None (default) = AUTO — só injeta se o turno JÁ anuncia outras
+    # tools (injetar `tools` num modelo sem suporte a tool-calling quebra o request).
+    a.skill_learning_on = skill_learning is True or (skill_learning is None and bool(a.tools))
+    if a.skill_learning_on:
+        a.tools = list(a.tools) + [_propose_skill_tool()]
 
     # Subagentes: com a permissão ligada + um time resolvido, o modelo (orquestrador)
     # ganha a tool `delegate` p/ acionar operários (cada um um ModelConfig próprio).
@@ -1002,6 +1137,12 @@ class _ToolDispatcher:
     kb_bases: list[str]
     kb_k: int
     user_text: str
+    brain_on: bool
+    brain_write: bool
+    brain_ids: list[str]
+    brain_names: list[str]
+    brain_k: int
+    skill_learning_on: bool
     subagents_on: bool
     subagents_by_key: dict[str, dict[str, Any]]
     subagent_max_calls: int
@@ -1021,6 +1162,11 @@ class _ToolDispatcher:
         elif name == "search_knowledge":
             async for ev in self._search_knowledge(args):
                 yield ev
+        elif name == "brain":
+            async for ev in self._brain(args):
+                yield ev
+        elif name == "propose_skill":
+            self.result = self._propose_skill(args)
         elif name == "delegate":
             async for ev in self._delegate(args, tc):
                 yield ev
@@ -1086,6 +1232,121 @@ class _ToolDispatcher:
         self.result = {
             "kind": "knowledge", "query": query[:200],
             "sources": ksrc, "count": len(kres), "_model": model_txt,
+        }
+
+    async def _brain(self, args: dict) -> AsyncGenerator[dict[str, Any], None]:
+        # Second brain: notas markdown [[interligadas]] (kind="brain" nas
+        # knowledge_bases). Leitura sempre; escrita só com `brain_write`.
+        action = str(args.get("action") or "").strip().lower()
+        if not self.brain_on:
+            self.result = {"error": "the second brain is not enabled for this model"}
+            return
+        if action == "list":
+            docs = await brain_service.load_brain_docs(self.brain_ids, self.user_id)
+            self.result = {
+                "count": len(docs),
+                "notes": [{"title": d["title"], "updated_at": d["updated_at"]} for d in docs],
+            }
+        elif action == "search":
+            query = str(args.get("query") or "").strip() or self.user_text
+            yield {"type": "knowledge", "status": "start", "query": query[:120]}
+            try:
+                kres = await kb_retrieval.search(self.user_id, self.brain_ids, query, self.brain_k)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("brain search falhou: %s", exc)
+                kres = []
+            _blk, ksrc = _knowledge_block_and_sources(kres)
+            model_txt = (
+                "Passages from the second brain (cite the source used with [n]):\n\n" + _blk
+                if kres else "No relevant notes found in the second brain."
+            )
+            self.result = {
+                "kind": "knowledge", "query": query[:200],
+                "sources": ksrc, "count": len(kres), "_model": model_txt,
+            }
+        elif action == "read":
+            title = str(args.get("title") or "").strip()
+            docs = await brain_service.load_brain_docs(self.brain_ids, self.user_id)
+            key = brain_service.note_key(title)
+            note = next(
+                (d for d in docs if brain_service.note_key(d["filename"]) == key), None
+            ) or next((d for d in docs if brain_service.note_key(d["title"]) == key), None)
+            if note is None:
+                known = ", ".join(d["title"] for d in docs[:40]) or "(no notes yet)"
+                self.result = {"error": f"note '{title}' not found. Known notes: {known}"}
+                return
+            backlinks = [
+                d["title"] for d in docs
+                if d["id"] != note["id"] and any(
+                    brain_service.note_key(t) in (key, brain_service.note_key(note["title"]))
+                    for t in brain_service.parse_links(d["text"])
+                )
+            ]
+            self.result = {
+                "title": note["title"], "content": note["text"],
+                "links": brain_service.parse_links(note["text"]), "backlinks": backlinks,
+            }
+        elif action == "write":
+            if not self.brain_write:
+                self.result = {"error": "writing to the second brain is disabled for this model"}
+                return
+            title = str(args.get("title") or "").strip()
+            content = str(args.get("content") or "")
+            if not title or not content.strip():
+                self.result = {"error": "`title` and `content` are required for write"}
+                return
+            # com vários cérebros, `brain` (nome) escolhe o destino; default = 1º
+            target = self.brain_ids[0] if self.brain_ids else None
+            want = str(args.get("brain") or "").strip().casefold()
+            if want:
+                for bid, bname in zip(self.brain_ids, self.brain_names):
+                    if (bname or "").casefold() == want:
+                        target = bid
+                        break
+            mode = "append" if str(args.get("mode") or "").lower() == "append" else "replace"
+            yield {"type": "brain", "status": "start", "title": title[:120]}
+            try:
+                res = await brain_service.write_note(
+                    self.user_id, target, title, content, mode
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("brain write falhou: %s", exc)
+                yield {"type": "brain", "status": "error"}
+                self.result = {"error": f"could not write the note: {exc}"}
+                return
+            self.result = {
+                "kind": "brain_note",
+                "doc_id": res["doc_id"], "base_id": res["base_id"],
+                "title": res["title"], "action": res["action"],
+                "preview": content.strip()[:280],
+                "url": sign_doc_url(res["doc_id"]),
+            }
+        else:
+            self.result = {"error": "unknown action; valid: list, search, read"
+                           + (", write" if self.brain_write else "")}
+
+    def _propose_skill(self, args: dict) -> Any:
+        # /learn — proposal-only: monta a proposta p/ o card editável da UI.
+        # NUNCA toca o banco; quem salva é o usuário (POST /skills no card).
+        if not self.skill_learning_on:
+            return {"error": "skill learning is not enabled for this model"}
+        name = str(args.get("name") or "").strip()[:255]
+        description = str(args.get("description") or "").strip()[:2000]
+        content = str(args.get("content") or "").strip()[:200_000]
+        if not name or not description or not content:
+            return {"error": "`name`, `description` and `content` are required"}
+        slug = re.sub(
+            r"[^a-z0-9]+", "_", str(args.get("slug") or name).lower().strip()
+        ).strip("_")[:64] or "skill"
+        tags: list[str] = []
+        for t in args.get("tags") or []:
+            s = str(t).strip()[:40]
+            if s and s not in tags:
+                tags.append(s)
+        return {
+            "kind": "skill_proposal", "proposal_id": str(uuid.uuid4()),
+            "slug": slug, "name": name, "description": description,
+            "content": content, "tags": tags[:10],
         }
 
     async def _delegate(self, args: dict, tc: dict) -> AsyncGenerator[dict[str, Any], None]:
@@ -1162,6 +1423,20 @@ def _shape_tool_result(result: Any) -> tuple[str, Any]:
             "note": "An editable email draft was shown to the user to review and send. "
                     "Do NOT claim the email was sent; the user will send it from the composer.",
         })
+    elif isinstance(event_result, dict) and event_result.get("kind") == "skill_proposal":
+        content = json.dumps({
+            "ok": True,
+            "note": "An editable skill proposal card was shown to the user to review "
+                    "and approve. Do NOT claim the skill was saved; the user decides "
+                    "in the card.",
+        })
+    elif isinstance(event_result, dict) and event_result.get("kind") == "brain_note":
+        content = json.dumps({
+            "ok": True,
+            "note": f"Note '{event_result.get('title')}' was "
+                    f"{'updated' if event_result.get('action') == 'updated' else 'created'} "
+                    "in the second brain and a card was shown to the user.",
+        })
     elif isinstance(event_result, dict) and event_result.get("kind") == "knowledge":
         content = event_result.get("_model") or ""
         event_result = {k: v for k, v in event_result.items() if k != "_model"}
@@ -1184,6 +1459,12 @@ async def run_turn(
     skills: list[dict[str, Any]] | None = None,
     use_context: bool = True,
     knowledge: dict[str, Any] | None = None,
+    # second brain: {"brains": [ids], "names": [nomes], "write": bool, "k": int}
+    # (de _resolve_brain + nomes). None/vazio = tool `brain` não é injetada.
+    brain: dict[str, Any] | None = None,
+    # /learn tri-state: True força a tool propose_skill, False desliga,
+    # None (default) = auto — injeta só se o turno já anuncia outras tools.
+    skill_learning: bool | None = None,
     # docs referenciados com "#" no compositor: [{id, filename, base_id, text}].
     # Injetados neste turno (híbrido: texto inteiro se pequeno, senão trechos).
     ref_docs: list[dict[str, Any]] | None = None,
@@ -1249,6 +1530,7 @@ async def run_turn(
     asm = _assemble_tools_and_prompt(
         sift=sift, use_tools=use_tools, code_mode=code_mode, skills=skills,
         genimage=genimage, kb_on=g.kb_on, kb_mode=g.kb_mode,
+        brain=brain, skill_learning=skill_learning,
         subagents=subagents, run_subagent=run_subagent,
     )
     tools: Any = asm.tools
@@ -1261,11 +1543,17 @@ async def run_turn(
     subagents_by_key = asm.subagents_by_key
     # despachante das tool_calls (contexto do turno agrupado; contador de
     # delegações compartilhado entre a delegação paralela e a sequencial)
+    _brain_cfg = brain or {}
     disp = _ToolDispatcher(
         sift=sift, code_mode=code_mode, api_key=api_key, user_id=user_id, chat_id=chat_id,
         skills=skills, skills_by_slug=skills_by_slug,
         genimage_on=genimage_on, genimage=genimage,
         kb_tool_on=kb_tool_on, kb_bases=kb_bases, kb_k=kb_k, user_text=user_text,
+        brain_on=asm.brain_on, brain_write=asm.brain_write,
+        brain_ids=[str(b) for b in _brain_cfg.get("brains") or []],
+        brain_names=[str(n) for n in _brain_cfg.get("names") or []],
+        brain_k=int(_brain_cfg.get("k") or 6),
+        skill_learning_on=asm.skill_learning_on,
         subagents_on=subagents_on, subagents_by_key=subagents_by_key,
         subagent_max_calls=subagent_max_calls,
         subagent_pass_context=subagent_pass_context,
@@ -1276,6 +1564,12 @@ async def run_turn(
     skills_block = _skills_block(skills)
     if skills_block:
         static_system = (static_system + "\n\n" + skills_block).strip()
+    brain_block = (
+        _brain_block(list(_brain_cfg.get("names") or []), asm.brain_write)
+        if asm.brain_on else ""
+    )
+    if brain_block:
+        static_system = (static_system + "\n\n" + brain_block).strip()
     mem_block = _memory_block(memories)
     # bloco de contexto por-turno (fora do prefixo cacheado): memória + conhecimento
     # recuperado (modo auto). Ambos variam a cada turno conforme a pergunta.
@@ -1325,7 +1619,7 @@ async def run_turn(
         "extra": len(extra_system or ""),
         "memory": len(mem_block),
         "knowledge": len(knowledge_block) + len(ref_block),
-        "tools": len(sift_prompt) + (len(json.dumps(tools)) if tools else 0),
+        "tools": len(sift_prompt) + (len(json.dumps(tools)) if tools else 0) + len(brain_block),
         "skills": len(skills_block),
         "tool_results": 0,  # preenchido conforme as tools respondem no loop (inclui view_skill)
         "file": attach_chars,

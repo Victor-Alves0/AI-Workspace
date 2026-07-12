@@ -33,6 +33,9 @@ class KnowledgeBase(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     # etiquetas livres p/ organizar/filtrar bases (["fiscal", "2026", ...])
     tags: Mapped[list] = mapped_column(JSONB, default=list)
+    # "kb" = RAG de documentos importados | "brain" = cérebro: notas markdown
+    # autorais [[interligadas]] que a IA lê/escreve (mesmas tabelas de docs/chunks)
+    kind: Mapped[str] = mapped_column(String(8), default="kb")
 
 
 class KnowledgeFolder(Base):

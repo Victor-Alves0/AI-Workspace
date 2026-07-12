@@ -28,7 +28,7 @@ from .. import extraction
 from ..config import get_settings
 from ..db import SessionLocal
 from ..integrations import ollama_service
-from ..models import Artifact, Chat, KnowledgeDoc, Message, ModelConfig, Skill, User
+from ..models import Artifact, Chat, KnowledgeBase, KnowledgeDoc, Message, ModelConfig, Skill, User
 from ..secrets_service import IMAGEGEN_KEY, OPENROUTER_KEY, VOICE_KEY, get_secret
 from ..tools.loader import get_sift_for_user, tool_config
 from ..usage_service import usage_event_from_record
@@ -395,6 +395,77 @@ def _resolve_knowledge(chat: Chat | None, model_config: ModelConfig | None, user
             if b and str(b) not in bases:
                 bases.append(str(b))
     return {"bases": bases, "mode": (merged.get("mode") or "auto"), "k": int(merged.get("k") or 6)}
+
+
+def _resolve_brain(chat: Chat | None, model_config: ModelConfig | None, user: User) -> dict:
+    """Config EFETIVA do second brain no turno (espelho do _resolve_knowledge,
+    acoplamento SEPARADO — cérebros têm semântica de ESCRITA pela IA). Os cérebros
+    são a UNIÃO de perfil + modelo + chat; `write`/`k` seguem a camada mais
+    específica. `enabled: False` (mais específico) desliga tudo. Retorna
+    {brains, write, k} p/ o orchestrator (vazio = tool não é injetada)."""
+    prof = (user.profile or {}).get("brain") or {}
+    mc = ((model_config.capabilities or {}).get("brain") or {}) if model_config is not None else {}
+    chat_cfg = (chat.brain_config or {}) if chat is not None else {}
+    merged = {**prof, **mc, **chat_cfg}
+    if merged.get("enabled") is False:
+        return {"brains": [], "write": False, "k": 6}
+    brains: list[str] = []
+    for src in (prof, mc, chat_cfg):
+        for b in src.get("brains") or []:
+            if b and str(b) not in brains:
+                brains.append(str(b))
+    return {
+        "brains": brains,
+        "write": bool(merged.get("write", True)),
+        "k": int(merged.get("k") or 6),
+    }
+
+
+async def _brain_setup(
+    db: AsyncSession, user: User, chat: Chat | None, model_config: ModelConfig | None,
+) -> dict | None:
+    """Resolve o cérebro do turno E valida os ids no banco (posse + kind="brain" —
+    ids arbitrários em brain_config não podem apontar p/ base de outro usuário nem
+    p/ uma base RAG comum). Anexa os NOMES (p/ o system e a escolha de destino no
+    write). None = tool `brain` não é injetada."""
+    cfg = _resolve_brain(chat, model_config, user)
+    raw = cfg.get("brains") or []
+    if not raw:
+        return None
+    ids: list[uuid.UUID] = []
+    for b in raw:
+        try:
+            ids.append(uuid.UUID(str(b)))
+        except (ValueError, TypeError):
+            continue
+    if not ids:
+        return None
+    rows = list(await db.scalars(
+        select(KnowledgeBase).where(
+            KnowledgeBase.id.in_(ids),
+            KnowledgeBase.user_id == user.id,
+            KnowledgeBase.kind == "brain",
+        )
+    ))
+    if not rows:
+        return None
+    return {
+        "brains": [str(b.id) for b in rows],
+        "names": [b.name or "Cérebro" for b in rows],
+        "write": bool(cfg.get("write")),
+        "k": int(cfg.get("k") or 6),
+    }
+
+
+def _skill_learning(model_config: ModelConfig | None) -> bool | None:
+    """Capacidade "Aprender skills" (/learn): o modelo ganha a tool `propose_skill`
+    (proposta-com-aprovação — NUNCA grava sozinha). Tri-state: True força, False
+    desliga, None = AUTO (o orchestrator injeta só se o turno já anuncia outras
+    tools — modelos sem tool-calling não recebem `tools` no request)."""
+    if model_config is None:
+        return None
+    v = (model_config.capabilities or {}).get("skill_learning")
+    return v if isinstance(v, bool) else None
 
 
 async def _ref_docs(

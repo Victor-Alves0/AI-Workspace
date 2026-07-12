@@ -57,6 +57,9 @@ class Chat(Base):
     # conhecimento por-chat (nullable = herda do modelo/perfil):
     #   {"enabled": b, "bases": [<knowledge_base id>], "mode": "auto|tool", "k": int}
     knowledge_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # cérebro (second brain) por-chat (nullable = herda do modelo/perfil):
+    #   {"enabled": b, "brains": [<knowledge_base id>], "write": b, "k": int}
+    brain_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # etiquetas livres p/ organizar/filtrar conversas (["trabalho", "ideias", ...])
     tags: Mapped[list] = mapped_column(JSONB, default=list)
     archived: Mapped[bool] = mapped_column(Boolean, default=False)

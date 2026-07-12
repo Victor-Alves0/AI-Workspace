@@ -13,7 +13,7 @@ def _user(profile=None):
 
 
 def _chat(**over):
-    d = dict(memory_config=None, knowledge_config=None, folder_id=None)
+    d = dict(memory_config=None, knowledge_config=None, brain_config=None, folder_id=None)
     d.update(over)
     return SimpleNamespace(**d)
 
@@ -88,6 +88,60 @@ def test_knowledge_ephemeral_chat_none():
     user = _user({"knowledge": {"bases": ["A"]}})
     res = ts._resolve_knowledge(None, _mc(), user)
     assert res["bases"] == ["A"]  # chat=None usa só perfil+modelo
+
+
+# ---------------------------- second brain -----------------------------------
+
+def test_brain_union_profile_model_chat():
+    """Cérebros acoplados = UNIÃO de perfil + modelo + chat (sem duplicar)."""
+    user = _user({"brain": {"brains": ["A"]}})
+    mc = _mc(capabilities={"brain": {"brains": ["B"], "write": False}})
+    chat = _chat(brain_config={"brains": ["B", "C"], "k": 4})
+    res = ts._resolve_brain(chat, mc, user)
+    assert set(res["brains"]) == {"A", "B", "C"}
+    assert res["write"] is False  # herdado do modelo (chat não sobrepôs)
+    assert res["k"] == 4
+
+
+def test_brain_disabled_most_specific_wins():
+    mc = _mc(capabilities={"brain": {"brains": ["A"]}})
+    chat = _chat(brain_config={"enabled": False})
+    assert ts._resolve_brain(chat, mc, _user())["brains"] == []
+
+
+def test_brain_write_most_specific_wins():
+    """`write` do chat sobrepõe o do modelo; default é True (escrita livre)."""
+    mc = _mc(capabilities={"brain": {"brains": ["A"], "write": False}})
+    chat = _chat(brain_config={"write": True})
+    assert ts._resolve_brain(chat, mc, _user())["write"] is True
+    assert ts._resolve_brain(_chat(), mc, _user())["write"] is False
+    mc2 = _mc(capabilities={"brain": {"brains": ["A"]}})
+    assert ts._resolve_brain(_chat(), mc2, _user())["write"] is True
+
+
+def test_brain_empty_without_config():
+    res = ts._resolve_brain(_chat(), _mc(), _user())
+    assert res["brains"] == []
+
+
+def test_brain_separate_from_knowledge():
+    """Acoplar uma base de CONHECIMENTO não acopla cérebro (e vice-versa)."""
+    user = _user({"knowledge": {"bases": ["KB1"]}, "brain": {"brains": ["BR1"]}})
+    assert ts._resolve_knowledge(None, _mc(), user)["bases"] == ["KB1"]
+    assert ts._resolve_brain(None, _mc(), user)["brains"] == ["BR1"]
+
+
+# ------------------------------- /learn --------------------------------------
+
+def test_skill_learning_tristate():
+    """Aprender skills é tri-state: None = auto (só com outras tools no turno),
+    True força, False desliga."""
+    assert ts._skill_learning(_mc()) is None
+    assert ts._skill_learning(None) is None
+    assert ts._skill_learning(_mc(capabilities={"skill_learning": False})) is False
+    assert ts._skill_learning(_mc(capabilities={"skill_learning": True})) is True
+    # valor não-booleano (lixo) cai no auto
+    assert ts._skill_learning(_mc(capabilities={"skill_learning": "x"})) is None
 
 
 # ------------------------------ code mode ------------------------------------

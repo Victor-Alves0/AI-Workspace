@@ -7,7 +7,6 @@ e o status do doc caminha pending → indexing → ready/error.
 """
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, status
@@ -32,14 +31,9 @@ from .models import (
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 _MAX_BYTES = 25 * 1024 * 1024  # 25 MB por arquivo
-# mantém referência das tasks de indexação em voo (evita GC prematuro)
-_TASKS: set[asyncio.Task] = set()
+_KINDS = ("kb", "brain")  # kb = RAG de documentos | brain = cérebro de notas
 
-
-def _spawn_index(doc_id: uuid.UUID) -> None:
-    t = asyncio.create_task(ingest.index_doc(doc_id))
-    _TASKS.add(t)
-    t.add_done_callback(_TASKS.discard)
+_spawn_index = ingest.spawn_index
 
 
 # --------------------------------------------------------------------------- #
@@ -49,6 +43,8 @@ class BaseIn(BaseModel):
     name: str
     description: str = ""
     tags: list[str] | None = None
+    # imutável após a criação (um cérebro não vira base RAG nem vice-versa)
+    kind: str = "kb"
 
 
 class BaseOut(BaseModel):
@@ -56,6 +52,7 @@ class BaseOut(BaseModel):
     name: str
     description: str
     tags: list[str] = []
+    kind: str = "kb"
     doc_count: int = 0
     chunk_count: int = 0
 
@@ -169,9 +166,16 @@ def _clean_tags(raw) -> list[str]:
 # Bases
 # --------------------------------------------------------------------------- #
 @router.get("/bases", response_model=list[BaseOut])
-async def list_bases(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+async def list_bases(
+    kind: str = "kb",
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    if kind not in _KINDS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tipo inválido")
     bases = list(await db.scalars(
-        select(KnowledgeBase).where(KnowledgeBase.user_id == user.id).order_by(KnowledgeBase.created_at)
+        select(KnowledgeBase).where(
+            KnowledgeBase.user_id == user.id, KnowledgeBase.kind == kind
+        ).order_by(KnowledgeBase.created_at)
     ))
     # contagens (docs + soma de chunks) por base, numa query
     rows = (await db.execute(
@@ -185,6 +189,7 @@ async def list_bases(user: User = Depends(require_approved), db: AsyncSession = 
     return [
         BaseOut(
             id=str(b.id), name=b.name, description=b.description or "", tags=b.tags or [],
+            kind=b.kind or "kb",
             doc_count=counts.get(b.id, (0, 0))[0], chunk_count=counts.get(b.id, (0, 0))[1],
         )
         for b in bases
@@ -193,15 +198,20 @@ async def list_bases(user: User = Depends(require_approved), db: AsyncSession = 
 
 @router.post("/bases", response_model=BaseOut)
 async def create_base(body: BaseIn, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    if body.kind not in _KINDS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tipo inválido")
     b = KnowledgeBase(
         user_id=user.id, name=(body.name or "Base").strip()[:120],
         description=(body.description or "").strip(),
-        tags=_clean_tags(body.tags),
+        tags=_clean_tags(body.tags), kind=body.kind,
     )
     db.add(b)
     await db.commit()
     await db.refresh(b)
-    return BaseOut(id=str(b.id), name=b.name, description=b.description or "", tags=b.tags or [])
+    return BaseOut(
+        id=str(b.id), name=b.name, description=b.description or "",
+        tags=b.tags or [], kind=b.kind,
+    )
 
 
 @router.patch("/bases/{base_id}", response_model=BaseOut)
@@ -214,8 +224,12 @@ async def update_base(
     b.description = (body.description or "").strip()
     if body.tags is not None:
         b.tags = _clean_tags(body.tags)
+    # `kind` é imutável: ignorado no PATCH
     await db.commit()
-    return BaseOut(id=str(b.id), name=b.name, description=b.description or "", tags=b.tags or [])
+    return BaseOut(
+        id=str(b.id), name=b.name, description=b.description or "",
+        tags=b.tags or [], kind=b.kind or "kb",
+    )
 
 
 @router.delete("/bases/{base_id}")
@@ -358,7 +372,7 @@ async def create_text_doc(
     base_id: uuid.UUID, body: TextDocIn,
     user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
 ):
-    await _owned_base(db, user, base_id)
+    base = await _owned_base(db, user, base_id)
     folder_id = None
     if body.folder_id:
         folder = await _owned_folder(db, user, uuid.UUID(body.folder_id))
@@ -367,11 +381,14 @@ async def create_text_doc(
         folder_id = folder.id
     name = (body.filename or "documento").strip()[:255]
     if "." not in name:
-        name += ".txt"
+        # num cérebro a criação inline é uma NOTA markdown; em base RAG, texto puro
+        name += ".md" if base.kind == "brain" else ".txt"
     data = (body.content or "").encode("utf-8")
     d = KnowledgeDoc(
         base_id=base_id, user_id=user.id, folder_id=folder_id,
-        filename=name, mime="text/plain", size=len(data),
+        filename=name,
+        mime="text/markdown" if name.lower().endswith((".md", ".markdown")) else "text/plain",
+        size=len(data),
         status="pending", chunk_count=0, data=data,
     )
     db.add(d)
@@ -470,7 +487,9 @@ async def list_refs(
         return []
     bases = list(await db.scalars(
         select(KnowledgeBase).where(
-            KnowledgeBase.id.in_(base_ids), KnowledgeBase.user_id == user.id
+            KnowledgeBase.id.in_(base_ids), KnowledgeBase.user_id == user.id,
+            # defesa: cérebros nunca aparecem no menu "#" (têm acoplamento próprio)
+            KnowledgeBase.kind == "kb",
         )
     ))
     folders = list(await db.scalars(

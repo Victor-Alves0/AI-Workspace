@@ -47,6 +47,8 @@ export interface Chat {
   memory_config?: MemoryConfig | null;
   /** base de conhecimento por-chat (null = herda do modelo/perfil) */
   knowledge_config?: KnowledgeConfig | null;
+  /** cérebro (second brain) por-chat; null = herda do modelo/perfil */
+  brain_config?: BrainConfig | null;
   /** modo do chat: "single" (normal) | "roundtable" (mesa-redonda multi-modelo) */
   mode?: "single" | "roundtable";
   /** participantes da mesa-redonda */
@@ -108,14 +110,60 @@ export interface KnowledgeConfig {
   k?: number;
 }
 
+/** config do cérebro (second brain) — perfil/modelo/chat; brains = união das camadas */
+export interface BrainConfig {
+  enabled?: boolean;
+  /** ids dos cérebros (knowledge_bases kind="brain") acoplados */
+  brains?: string[];
+  /** a IA pode criar/atualizar notas (action write da tool brain) */
+  write?: boolean;
+  /** nº de trechos recuperados na busca */
+  k?: number;
+}
+
 /** uma Base de Conhecimento (coleção de documentos indexados) */
 export interface KnowledgeBase {
   id: string;
   name: string;
   description: string;
   tags?: string[];
+  /** "kb" = RAG de documentos | "brain" = cérebro de notas [[interligadas]] */
+  kind?: "kb" | "brain";
   doc_count: number;
   chunk_count: number;
+}
+
+/** grafo de notas de um cérebro (nós + arestas de [[wikilinks]]) */
+export interface BrainGraphData {
+  nodes: {
+    id: string;
+    title: string;
+    links_out: number;
+    links_in: number;
+    /** nota "fantasma": [[link]] citado que ainda não existe */
+    ghost: boolean;
+  }[];
+  edges: { source: string; target: string }[];
+}
+
+/** proposta de skill do /learn (card editável; aprovar = POST /skills) */
+export interface SkillProposal {
+  proposal_id: string;
+  slug: string;
+  name: string;
+  description: string;
+  content: string;
+  tags: string[];
+}
+
+/** nota escrita no cérebro pela IA durante o turno (card no chat) */
+export interface BrainNoteEvent {
+  doc_id: string;
+  base_id: string;
+  title: string;
+  action: "created" | "updated";
+  preview: string;
+  url: string;
 }
 
 /** uma pasta dentro de uma base (explorador) */

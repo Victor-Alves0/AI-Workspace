@@ -34,6 +34,8 @@ class ChatUpdate(BaseModel):
     memory_config: dict[str, Any] | None = None
     # base de conhecimento por-chat: {"enabled": b, "bases": [...], "mode": "auto|tool", "k": int}
     knowledge_config: dict[str, Any] | None = None
+    # cérebro por-chat: {"enabled": b, "brains": [...], "write": b, "k": int}
+    brain_config: dict[str, Any] | None = None
     # mesa-redonda (multi-modelo)
     mode: str | None = None
     participants: list[dict[str, Any]] | None = None
@@ -86,6 +88,7 @@ class ChatOut(BaseModel):
     model_config_id: uuid.UUID | None
     memory_config: dict[str, Any] | None = None
     knowledge_config: dict[str, Any] | None = None
+    brain_config: dict[str, Any] | None = None
     mode: str = "single"
     participants: list[dict[str, Any]] = Field(default_factory=list)
     roundtable_config: dict[str, Any] | None = None
