@@ -48,8 +48,8 @@ async def debug_turn(user: User, model: str, model_config_id, prompt: str, user_
     fecha ao retornar o StreamingResponse, então não pode ser usada dentro do stream
     (mesmo cuidado da mesa-redonda)."""
     # import tardio evita ciclo com chat.routes em tempo de import
-    from ..chat.routes import _code_mode, _get_model_config, _load_skills, _resolve_provider
-    from ..chat.orchestrator import run_turn
+    from ..chat.turn_setup import _code_mode, _get_model_config, _load_skills, _resolve_provider
+    from ..chat.orchestrator import TurnSession, run_turn
 
     async with SessionLocal() as db:
         mc = None
@@ -84,13 +84,11 @@ async def debug_turn(user: User, model: str, model_config_id, prompt: str, user_
         user_text=prompt,
         chat_system_prompt=mc_system,
         params=mc_params,
-        user_id=str(user.id),
-        user_tz=user_tz,
+        session=TurnSession(user_id=str(user.id), user_tz=user_tz),
         base_url=base_url,
         sift=sift,
         skills=skills,
         use_tools=True,
         code_mode=mc_code,
-        chat_id=None,
     ):
         yield ev

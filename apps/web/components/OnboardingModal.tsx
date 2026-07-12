@@ -68,7 +68,10 @@ export default function OnboardingModal({ user, onClose, onDone }: {
 
   return (
     <div className="pt-safe pb-safe fixed inset-0 z-[70] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm">
-      <div className="animate-pop flex w-full max-w-md flex-col overflow-hidden rounded-2xl border border-border bg-bg shadow-modal">
+      {/* SEM overflow-hidden: o dropdown do ModelField (absolute) precisa
+          transbordar o card — com clipping ele era cortado na borda e o seletor
+          parecia "preso" (busca/abas visíveis, lista invisível). */}
+      <div className="animate-pop flex w-full max-w-md flex-col rounded-2xl border border-border bg-bg shadow-modal">
         <div className="flex items-center justify-between px-5 py-3">
           <div className="flex items-center gap-2 text-sm font-medium text-ink">
             <Sparkles size={16} className="text-accent-hover" /> Configuração inicial

@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { Model, ModelConfig } from "@/lib/types";
-import type { BenchmarkCase, BenchmarkDetail, BenchmarkRun, BenchmarkSummary, RunCell } from "@/lib/playground";
+import type { BenchmarkCase, BenchmarkDetail, BenchmarkRun, BenchmarkSummary, RuleMode, RunCell } from "@/lib/playground";
 import { cellKey } from "@/lib/playground";
 import ModelField from "./ModelField";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -101,13 +101,19 @@ function BenchmarkEditor({ id, onBack, onSaved }: { id: string | null; onBack: (
             <textarea value={c.prompt} onChange={(e) => patchCase(i, { prompt: e.target.value })} rows={2} placeholder="Prompt do caso" className={inputCls} />
             <input value={c.system || ""} onChange={(e) => patchCase(i, { system: e.target.value })} placeholder="System prompt do caso (opcional)" className={inputCls} />
             <div className="flex flex-wrap items-center gap-2">
-              <select value={c.expected?.mode || "none"} onChange={(e) => patchCase(i, { expected: { mode: e.target.value as "none" | "contains" | "regex", value: c.expected?.value || "" } })} className="rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-ink outline-none focus:border-accent">
+              <select value={c.expected?.mode || "none"} onChange={(e) => patchCase(i, { expected: { mode: e.target.value as RuleMode, value: c.expected?.value || "" } })} className="rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-ink outline-none focus:border-accent">
                 <option value="none">Sem regra</option>
                 <option value="contains">Deve conter</option>
                 <option value="regex">Regex</option>
+                <option value="tool_called">Chamou a tool</option>
+                <option value="tool_not_called">NÃO chamou a tool</option>
+                <option value="no_tool">Sem nenhuma tool</option>
               </select>
-              {c.expected && c.expected.mode !== "none" && (
-                <input value={c.expected.value} onChange={(e) => patchCase(i, { expected: { mode: c.expected!.mode, value: e.target.value } })} placeholder={c.expected.mode === "regex" ? "expressão regular" : "texto esperado"} className="flex-1 rounded-lg border border-border bg-bg px-3 py-1.5 text-sm text-ink outline-none focus:border-accent" />
+              {c.expected && c.expected.mode !== "none" && c.expected.mode !== "no_tool" && (
+                <input value={c.expected.value} onChange={(e) => patchCase(i, { expected: { mode: c.expected!.mode, value: e.target.value } })} placeholder={c.expected.mode === "regex" ? "expressão regular" : c.expected.mode === "contains" ? "texto esperado" : "path da tool (ex.: web.search.query)"} className="flex-1 rounded-lg border border-border bg-bg px-3 py-1.5 text-sm text-ink outline-none focus:border-accent" />
+              )}
+              {c.expected && (c.expected.mode === "tool_called" || c.expected.mode === "tool_not_called" || c.expected.mode === "no_tool") && (
+                <span className="text-[10px] text-muted">regra de decisão — rode com “ferramentas” ligado no modelo</span>
               )}
             </div>
             <input value={c.judge_criteria || ""} onChange={(e) => patchCase(i, { judge_criteria: e.target.value })} placeholder="Critério do juiz p/ este caso (opcional)" className={inputCls} />
@@ -135,6 +141,12 @@ function Cell({ cell }: { cell?: RunCell }) {
           <span className={`rounded px-1 py-0.5 text-[10px] font-medium ${cell.rule_pass ? "bg-green-500/15 text-green-500" : "bg-red-500/15 text-red-400"}`}>{cell.rule_pass ? "✔ regra" : "✗ regra"}</span>
         )}
         {typeof cell.judge_score === "number" && <span className="rounded bg-accent/15 px-1 py-0.5 text-[10px] font-medium text-accent-hover">{cell.judge_score}/100</span>}
+        {(cell.tools_used || []).map((t, k) => (
+          <span key={k} className="rounded bg-surface2 px-1 py-0.5 font-mono text-[10px] text-ink-soft">🔧 {t}</span>
+        ))}
+        {cell.tools_used && cell.tools_used.length === 0 && (
+          <span className="rounded bg-surface2 px-1 py-0.5 text-[10px] text-muted">sem tools</span>
+        )}
       </div>
       <div className="mt-1 flex flex-wrap gap-x-2 text-[10px] text-muted">
         <span>{cell.latency_ms ?? "—"}ms</span>
@@ -213,6 +225,10 @@ function RunPanel({ bench, onBack }: { bench: BenchmarkSummary; onBack: () => vo
   const [ext, setExt] = useState<Model[]>([]);
   const [custom, setCustom] = useState<ModelConfig[]>([]);
   const [slots, setSlots] = useState<string[]>([""]);
+  // por slot: rodar como turno agêntico (suíte de decisão) — só p/ presets custom.
+  // Array PARALELO a `slots` (mesmo índice): mantido alinhado em add/remove, senão
+  // remover um slot desalinha o flag (o 🔧 vazava p/ o slot errado / se perdia).
+  const [slotTools, setSlotTools] = useState<boolean[]>([false]);
   const [run, setRun] = useState<BenchmarkRun | null>(null);
   const [history, setHistory] = useState<BenchmarkRun[]>([]);
   const [starting, setStarting] = useState(false);
@@ -247,13 +263,15 @@ function RunPanel({ bench, onBack }: { bench: BenchmarkSummary; onBack: () => vo
 
   async function start() {
     setErr(null);
-    const chosen = slots.filter((s) => s);
+    // usa o índice REAL do slot (não indexOf — quebraria com modelos repetidos)
+    const chosen = slots.map((s, i) => ({ s, i })).filter(({ s }) => s);
     if (chosen.length < 1) { setErr("Escolha ao menos 1 modelo."); return; }
     setStarting(true);
-    const models = chosen.map((s) => {
+    const models = chosen.map(({ s, i }) => {
       const m = splitModel(s);
       const label = s.startsWith("custom:") ? custom.find((c) => c.id === s.slice(7))?.name : ext.find((x) => x.id === s)?.name;
-      return { ...m, label: label || m.model };
+      const tools = s.startsWith("custom:") && !!slotTools[i];
+      return { ...m, label: (label || m.model) + (tools ? " 🔧" : ""), tools };
     });
     try {
       const { run_id } = await api.post<{ run_id: string }>(`/playground/benchmarks/${bench.id}/run`, { models });
@@ -275,10 +293,19 @@ function RunPanel({ bench, onBack }: { bench: BenchmarkSummary; onBack: () => vo
           {slots.map((s, i) => (
             <div key={i} className="flex items-center gap-2">
               <ModelField models={ext} custom={custom} includeCustom value={s} onChange={(v) => setSlots((sl) => sl.map((x, j) => (j === i ? v : x)))} className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none transition-colors hover:border-accent/50" />
-              {slots.length > 1 && <button onClick={() => setSlots((sl) => sl.filter((_, j) => j !== i))} className="rounded-lg p-2 text-muted hover:bg-hover hover:text-red-400"><X size={15} /></button>}
+              {s.startsWith("custom:") && (
+                <button
+                  onClick={() => setSlotTools((a) => a.map((v, j) => (j === i ? !v : v)))}
+                  title="Rodar com as ferramentas do preset (suíte de decisão: as regras de tool valem aqui)"
+                  className={`shrink-0 rounded-lg border px-2 py-2 text-xs transition-colors ${slotTools[i] ? "border-accent/50 bg-accent/15 text-accent-hover" : "border-border text-muted hover:text-ink"}`}
+                >
+                  🔧
+                </button>
+              )}
+              {slots.length > 1 && <button onClick={() => { setSlots((sl) => sl.filter((_, j) => j !== i)); setSlotTools((a) => a.filter((_, j) => j !== i)); }} className="rounded-lg p-2 text-muted hover:bg-hover hover:text-red-400"><X size={15} /></button>}
             </div>
           ))}
-          {slots.length < 5 && <button onClick={() => setSlots((sl) => [...sl, ""])} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-muted hover:text-ink"><Plus size={14} /> Adicionar modelo</button>}
+          {slots.length < 5 && <button onClick={() => { setSlots((sl) => [...sl, ""]); setSlotTools((a) => [...a, false]); }} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-muted hover:text-ink"><Plus size={14} /> Adicionar modelo</button>}
         </div>
         {err && <p className="mt-2 text-xs text-red-400">{err}</p>}
         <button onClick={start} disabled={starting || run?.status === "running"} className="mt-3 flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50">

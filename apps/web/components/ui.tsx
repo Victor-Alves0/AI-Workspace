@@ -4,6 +4,19 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
+/** Ponteiro fino (mouse)? Em telas de toque, autoFocus abre o teclado na hora — o
+ *  iOS desloca a viewport p/ revelar o input e o scroll interno de menus fica
+ *  errático. Nesses casos o foco fica para quando o usuário tocar no campo. */
+export const finePointer = () =>
+  typeof window !== "undefined" && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
+/** Fecha o teclado virtual ao arrastar uma lista (padrão "dismiss on drag" do iOS):
+ *  com o teclado aberto, o scroll de listas dentro de popovers trava/desalinha. */
+export function dismissKeyboard() {
+  const el = document.activeElement;
+  if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) el.blur();
+}
+
 export function useClickOutside<T extends HTMLElement>(onClose: () => void) {
   const ref = useRef<T>(null);
   useEffect(() => {

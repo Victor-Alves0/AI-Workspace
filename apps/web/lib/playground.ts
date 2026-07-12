@@ -1,11 +1,15 @@
 // Tipos do Playground (Benchmarks / Comparações / Debug de Tools).
 // Mantidos aqui (fora de lib/types.ts) para isolar o módulo.
 
+// modos de regra: texto (contains/regex) ou DECISÃO de tool use
+// (tool_called/tool_not_called/no_tool — exigem rodar o modelo com ferramentas)
+export type RuleMode = "none" | "contains" | "regex" | "tool_called" | "tool_not_called" | "no_tool";
+
 export interface BenchmarkCase {
   id?: string;
   prompt: string;
   system?: string;
-  expected?: { mode: "none" | "contains" | "regex"; value: string };
+  expected?: { mode: RuleMode; value: string };
   judge_criteria?: string;
 }
 
@@ -30,6 +34,8 @@ export interface RunModelRef {
   model: string;
   model_config_id?: string | null;
   label?: string;
+  // suíte de decisão: roda os casos como turno agêntico com as tools do preset
+  tools?: boolean;
 }
 
 export interface RunCell {
@@ -41,6 +47,8 @@ export interface RunCell {
   rule_pass?: boolean;
   judge_score?: number;
   judge_reason?: string;
+  // suíte de decisão: quais tools o modelo chamou neste caso
+  tools_used?: string[];
   error?: string;
 }
 

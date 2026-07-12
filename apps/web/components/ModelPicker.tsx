@@ -15,7 +15,7 @@ import {
   Star,
 } from "lucide-react";
 import type { Model, ModelConfig } from "@/lib/types";
-import { AnchoredMenu, MenuItem, useClickOutside } from "./ui";
+import { AnchoredMenu, MenuItem, dismissKeyboard, finePointer, useClickOutside } from "./ui";
 
 interface Row {
   key: string; // "ext:<id>" | "custom:<id>"
@@ -119,12 +119,14 @@ export default function ModelPicker({
         <ChevronDown size={18} className="shrink-0 text-muted" />
       </button>
 
+      {/* mobile: fixed na largura da tela (ancorado no botão ele estoura a borda
+          direita — o gatilho não está no x=0); desktop: ancorado como antes */}
       {open && (
-        <div className="absolute left-0 top-11 z-50 w-[380px] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-border bg-surface shadow-menu animate-pop">
+        <div className="fixed inset-x-3 top-14 z-50 overflow-hidden rounded-2xl border border-border bg-surface shadow-menu animate-pop sm:absolute sm:inset-x-auto sm:left-0 sm:top-11 sm:w-[380px] sm:max-w-[calc(100vw-1.5rem)]">
           <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
             <Search size={16} className="text-muted" />
             <input
-              autoFocus
+              autoFocus={finePointer()}
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Pesquisar um modelo"
@@ -153,7 +155,9 @@ export default function ModelPicker({
               </button>
             ))}
           </div>
-          <div className="max-h-80 overflow-y-auto p-1.5">
+          {/* max-h em dvh: no celular a lista não passa por baixo do teclado;
+              onTouchMove fecha o teclado ao arrastar (senão o scroll trava no iOS) */}
+          <div onTouchMove={dismissKeyboard} className="max-h-[min(20rem,55dvh)] overflow-y-auto overscroll-contain p-1.5">
             {rows.map((r) => (
               <div key={r.key} className="group relative flex items-center gap-2 rounded-lg px-2 py-2 transition-colors hover:bg-hover">
                 <button

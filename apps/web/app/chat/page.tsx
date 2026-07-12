@@ -4,13 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, Copy, FlaskConical, GitBranch, Image as ImageIcon, Link2, Menu, MessageSquareDashed, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamResume, streamRoundtable } from "@/lib/sse";
+import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamRoundtable } from "@/lib/sse";
 import { speak, startRecording, transcribe } from "@/lib/voice";
 import { browserNotify, playChime, requestNotifPermission } from "@/lib/notify";
 import { downloadJSON, downloadPDF, downloadTXT } from "@/lib/download";
 import { pickSuggestions, type Suggestion } from "@/lib/suggestions";
 import type { AskSpec, Attachment, Chat, ChatArtifact, Folder, KnowledgeRef, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User } from "@/lib/types";
-import { splitStreamArtifacts, type StreamArtifact } from "@/lib/artifacts";
 import ArtifactPanel from "@/components/ArtifactPanel";
 import Roundtable, { nextColor, RT_COLORS } from "@/components/Roundtable";
 import Markdown from "@/components/Markdown";
@@ -34,6 +33,7 @@ import AutomationsView from "@/components/AutomationsView";
 import PlaygroundView from "@/components/PlaygroundView";
 import type { ChatActions } from "@/components/ChatItem";
 import { SHORTCUTS, eventToCombo, resolveBinding, comboHasModifier, type ShortcutMap } from "@/lib/shortcuts";
+import { useGeneration } from "./useGeneration";
 
 // varre os resultados de ferramenta em busca de um artefato "kind:ask" (o seletor
 // de opções). Recursivo (execute_tool no topo ou run_code aninhado em `output`).
@@ -94,30 +94,28 @@ export default function ChatPage() {
   const [active, setActive] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [streaming, setStreaming] = useState("");
-  const [streamingReasoning, setStreamingReasoning] = useState("");
-  const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
-  const [generatingImage, setGeneratingImage] = useState(false);
-  const [consultingKnowledge, setConsultingKnowledge] = useState(false);
-  const [transcribingAudio, setTranscribingAudio] = useState(false);
-  // Artefatos (janela dedicada): lista do chat + qual está aberto + o "ao vivo"
-  // (bloco <artifact> ainda chegando no streaming)
+  // Subsistema de GERAÇÃO (streaming/tools/imagem/conhecimento/áudio/subagentes/
+  // guardas/artefato ao vivo + parser SSE + retomada + parar) — extraído p/ um hook.
+  // getDeps é lido pós-render, então as deps podem ser declaradas mais abaixo.
+  const gen = useGeneration(() => ({
+    artifactsEnabled, temporary, setArtifactOpen, setActive,
+    reloadMessages, reloadArtifacts, refreshChats,
+  }));
+  const {
+    streaming, setStreaming, streamingReasoning, setStreamingReasoning,
+    toolEvents, setToolEvents, generatingImage, setGeneratingImage,
+    consultingKnowledge, setConsultingKnowledge, transcribingAudio, setTranscribingAudio,
+    subagents, setSubagents, guardNote, setGuardNote, liveArtifact, setLiveArtifact,
+    sending, setSending, stopRef, makeStreamHandler, resumeStream, handleStop,
+  } = gen;
+  // Artefatos (janela dedicada): lista do chat + qual está aberto (o "ao vivo"
+  // vive no hook de geração)
   const [chatArtifacts, setChatArtifacts] = useState<ChatArtifact[]>([]);
   const [artifactOpen, setArtifactOpen] = useState<string | null>(null);
-  const [liveArtifact, setLiveArtifact] = useState<StreamArtifact | null>(null);
   // painel "Informações" do chat (menu dos 3 pontinhos)
   const [infoChatId, setInfoChatId] = useState<string | null>(null);
-  // Guarda de saída acionou uma re-tentativa (mostra um chip enquanto refaz)
-  const [guardNote, setGuardNote] = useState<{ name: string; action: string; fallback_model?: string | null } | null>(null);
   // "@" no promptbox: agente (modelo custom) que recebe SÓ o próximo turno
   const [agentId, setAgentId] = useState<string | null>(null);
-  // subagentes trabalhando neste turno (orquestrador delegou) — mostra chips.
-  // ctx/mem indicam se o operário roda com contexto do chat / memória própria.
-  const [subagents, setSubagents] = useState<{ name: string; ctx?: boolean; mem?: boolean }[]>([]);
-  const [sending, setSending] = useState(false);
-  // "Parar" durante a geração: como interromper o turno atual (cancel no servidor
-  // p/ chats persistentes; abort local p/ temporários). null = nada para parar.
-  const stopRef = useRef<(() => void) | null>(null);
   // mesa-redonda: rodando + fala em streaming do participante atual
   const [rtRunning, setRtRunning] = useState(false);
   const [rtStreaming, setRtStreaming] = useState<{ speaker: Speaker; content: string; reasoning: string } | null>(null);
@@ -659,130 +657,6 @@ export default function ChatPage() {
   const artifactsEnabled =
     ((user?.profile as Record<string, any> | undefined)?.interface as Record<string, unknown> | undefined)?.artifacts !== false;
 
-  // handler comum de eventos SSE (tokens, reasoning, tools, erro)
-  function makeStreamHandler() {
-    const state = { acc: "", reason: "", tools: [] as ToolEvent[] };
-    // Artefatos ao vivo: blocos <artifact> saem da bolha e vão pro painel.
-    // (desativado em chats temporários — o servidor não injeta as instruções lá)
-    const artsLive = artifactsEnabled && !temporary;
-    // throttle: renderiza no MÁXIMO a cada ~70ms (não por token). Re-parsear o
-    // markdown inteiro a cada token travava a UI em respostas longas (O(n²)). Sem
-    // timer pendente — o tail final chega pelo reloadMessages ao fim do stream.
-    let lastFlush = 0;
-    const flush = () => {
-      lastFlush = Date.now();
-      if (artsLive && state.acc.includes("<artifact")) {
-        const { text, live } = splitStreamArtifacts(state.acc);
-        setStreaming(text);
-        if (live) {
-          setLiveArtifact(live);
-          setArtifactOpen(live.identifier);
-        }
-      } else {
-        setStreaming(state.acc);
-      }
-      setStreamingReasoning(state.reason);
-    };
-    const maybeFlush = () => { if (Date.now() - lastFlush >= 70) flush(); };
-    const handler = (ev: any) => {
-      if (ev.type === "token") {
-        if (state.acc === "") setGeneratingImage(false); // 1º token = respondendo em texto
-        state.acc += ev.text;
-        maybeFlush();
-      } else if (ev.type === "reasoning") {
-        state.reason += ev.text;
-        maybeFlush();
-      } else if (ev.type === "tool_call") {
-        const t: ToolEvent = { kind: "call", name: ev.name, data: ev.arguments };
-        state.tools.push(t);
-        setToolEvents((x) => [...x, t]);
-      } else if (ev.type === "tool_result") {
-        const t: ToolEvent = { kind: "result", name: ev.name, data: ev.result };
-        state.tools.push(t);
-        setToolEvents((x) => [...x, t]);
-        setGeneratingImage(false); // a imagem (ou o erro) chegou
-        setConsultingKnowledge(false); // os trechos/fontes chegaram
-      } else if (ev.type === "image_gen") {
-        setGeneratingImage(ev.status === "start");
-      } else if (ev.type === "knowledge") {
-        setConsultingKnowledge(ev.status === "start");
-      } else if (ev.type === "audio_router") {
-        setTranscribingAudio(ev.status === "start");
-      } else if (ev.type === "subagent") {
-        // orquestrador delegou a um operário — mostra/atualiza os chips
-        if (ev.status === "start") setSubagents((s) => (ev.agent && !s.some((x) => x.name === ev.agent) ? [...s, { name: ev.agent, ctx: ev.ctx, mem: ev.mem }] : s));
-        else if (ev.status === "done") setSubagents((s) => s.filter((x) => x.name !== ev.agent));
-      } else if (ev.type === "guard") {
-        // um Guarda de saída detectou algo e vai refazer a resposta
-        setGuardNote({ name: ev.name, action: ev.action, fallback_model: ev.fallback_model });
-      } else if (ev.type === "guard_reset") {
-        // descarta a tentativa anterior — a resposta boa vem na próxima
-        state.acc = ""; state.reason = ""; state.tools = [];
-        setToolEvents([]);
-        setGeneratingImage(false);
-        setConsultingKnowledge(false);
-        setTranscribingAudio(false);
-        flush();
-      } else if (ev.type === "error") {
-        state.acc += `\n\n⚠️ Erro: ${ev.message}`;
-        setGeneratingImage(false);
-        setConsultingKnowledge(false);
-        setTranscribingAudio(false);
-        flush();
-      } else if (ev.type === "artifacts") {
-        // resposta persistida criou/atualizou artefatos: abre o último no painel
-        const ids: string[] = ev.ids ?? [];
-        if (ids.length) setArtifactOpen(ids[ids.length - 1]);
-        setLiveArtifact(null);
-      } else if (ev.type === "done") {
-        // fluxo dos guardas de saída vem só no done (não é streamado como tool_call);
-        // captura p/ o chat temporário mostrar o escudo (o persistente recarrega do banco)
-        const g = ((ev.tool_events ?? []) as ToolEvent[]).filter((t) => t.kind === "guard");
-        if (g.length) state.tools = [...g, ...state.tools.filter((t) => t.kind !== "guard")];
-      } else if (ev.type === "title") {
-        // título gerado por IA na 1ª troca: atualiza o cabeçalho na hora
-        setActive((a) => (a && ev.title ? { ...a, title: ev.title } : a));
-      }
-    };
-    return { handler, state };
-  }
-
-  // Re-assina uma geração ainda em andamento no chat (ex.: o usuário deu F5 no
-  // meio de uma resposta). A geração roda em background no servidor; aqui a UI só
-  // volta a "ouvir". Só liga o estado "gerando" quando chega o 1º evento real —
-  // o servidor manda {type:"idle"} quando não há nada rodando.
-  async function resumeStream(id: string) {
-    let started = false;
-    const { handler } = makeStreamHandler();
-    try {
-      await streamResume(id, (ev) => {
-        if (ev.type === "idle") return;
-        if (!started) {
-          started = true;
-          setSending(true);
-          setStreaming("");
-          setStreamingReasoning("");
-          setToolEvents([]);
-          // geração retomada (pós-F5) também pode ser parada
-          stopRef.current = () => { api.post(`/chats/${id}/stop`).catch(() => {}); };
-        }
-        handler(ev);
-      });
-    } catch {
-      /* falha ao re-assinar: ignora — as mensagens persistidas já estão na tela */
-    }
-    if (started) {
-      stopRef.current = null;
-      setStreaming("");
-      setStreamingReasoning("");
-      setLiveArtifact(null);
-      setSending(false);
-      await reloadMessages(id);
-      await reloadArtifacts(id);
-      refreshChats();
-    }
-  }
-
   async function selectChat(id: string) {
     setTemporary(false);
     setWorkspaceOpen(false);
@@ -1041,11 +915,6 @@ export default function ChatPage() {
       setSending(false);
       refreshBudget(); // atualiza o gasto do mês (mantém o banner em dia)
     }
-  }
-
-  // botão "Parar" do composer: interrompe o turno em geração (o parcial fica)
-  function handleStop() {
-    stopRef.current?.();
   }
 
   async function editMessage(id: string, content: string) {
@@ -1499,7 +1368,9 @@ export default function ChatPage() {
           </button>
         )}
         <div className="flex flex-1 overflow-hidden">
-          <div className="relative flex flex-1 flex-col">
+          {/* min-w-0: sem ele, conteúdo largo nas mensagens (código/tabela) empurra a
+              coluna além da viewport — o pai overflow-hidden corta e o mobile "sai da tela" */}
+          <div className="relative flex min-w-0 flex-1 flex-col">
             {!hasConversation ? (
               /* HOME centralizada */
               <div className="animate-fade-up flex flex-1 flex-col items-center justify-center px-4">

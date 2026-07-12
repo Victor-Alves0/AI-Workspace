@@ -14,8 +14,10 @@ request — mesmo padrão de `automation/creator.py`.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
+import time
 import uuid
 from typing import Any
 
@@ -51,13 +53,37 @@ async def _resolve(db, user: User, model: str) -> tuple[str | None, str | None, 
     return key, None, None
 
 
-def _apply_rule(expected: dict | None, text: str) -> bool | None:
-    """pass/fail da regra do caso; None = sem regra (nada a checar)."""
+def _apply_rule(expected: dict | None, text: str, tools_used: list[str] | None = None,
+                tool_blobs: str = "") -> bool | None:
+    """pass/fail da regra do caso; None = sem regra (nada a checar).
+
+    Regras de TEXTO: contains/regex sobre a resposta final.
+    Regras de DECISÃO (suíte de tool use): avaliam O QUE o modelo chamou —
+      - tool_called:     `value` aparece no nome de alguma tool chamada OU dentro
+                         do código passado ao run_code (code mode chama a tool real
+                         por dentro do sandbox);
+      - tool_not_called: negação da anterior;
+      - no_tool:         nenhuma tool foi chamada (search_tools/descoberta não
+                         conta — descobrir e decidir NÃO usar é decisão correta)."""
     if not isinstance(expected, dict):
         return None
     mode = (expected.get("mode") or "none").lower()
     value = str(expected.get("value") or "")
-    if mode == "none" or not value:
+    if mode == "none":
+        return None
+    if mode in ("tool_called", "tool_not_called", "no_tool"):
+        used = [t for t in (tools_used or []) if t]
+        real = [t for t in used if t not in ("search_tools",)]
+        if mode == "no_tool":
+            return not real
+        if not value:
+            return None
+        # normaliza p/ casar "research.deep.run" com o nome flat "research__deep__run"
+        needle = value.lower().replace(".", "__")
+        hay = " ".join(used).lower().replace(".", "__") + " " + tool_blobs.lower().replace(".", "__")
+        hit = needle in hay
+        return hit if mode == "tool_called" else not hit
+    if not value:
         return None
     if mode == "contains":
         return value.lower() in (text or "").lower()
@@ -67,6 +93,72 @@ def _apply_rule(expected: dict | None, text: str) -> bool | None:
         except re.error:
             return None
     return None
+
+
+# teto de parede de uma célula com tools (turno agêntico pode iterar várias vezes)
+_TOOL_CELL_TIMEOUT = 240
+
+
+async def _tool_cell(db, user: User, r: dict, prompt: str, case_sys: str) -> dict[str, Any]:
+    """Roda UM caso como turno agêntico REAL (com as tools do preset) e devolve a
+    célula: texto final + latência + usage + `tools_used` (nomes chamados) +
+    `tool_blobs` (args do run_code, p/ as regras de decisão enxergarem a tool real
+    chamada por dentro do sandbox). É a suíte de DECISÃO: mede o que o modelo
+    escolheu chamar, não só o que respondeu."""
+    from ..chat.orchestrator import TurnSession, run_turn
+    from ..chat.turn_setup import _code_mode, _load_skills
+    from ..tools.loader import get_sift_for_user
+
+    mc = r["mc"]
+    sift = await get_sift_for_user(db, user.id, mc)
+    skills = await _load_skills(db, user, mc)
+    sys_parts = [p for p in [(mc.system_prompt if mc else ""), case_sys] if p]
+
+    text = ""
+    usage: dict[str, Any] = {}
+    tools_used: list[str] = []
+    blobs: list[str] = []
+    t0 = time.monotonic()
+
+    # segura o gerador p/ fechá-lo explicitamente no timeout — senão o stream do
+    # OpenRouter (e a tool no threadpool) continuaria rodando/pagando após o corte.
+    gen = run_turn(
+        api_key=r["key"], model=r["model"], history=[], user_text=prompt,
+        chat_system_prompt="\n\n".join(sys_parts) or None,
+        params=(mc.params if mc else {}) or {},
+        session=TurnSession(user_id=str(user.id), background=True),
+        base_url=r["base_url"], sift=sift, code_mode=_code_mode(mc),
+        skills=skills, use_context=False,
+    )
+
+    async def _drive():
+        nonlocal text, usage
+        async for ev in gen:
+            t = ev.get("type")
+            if t == "tool_call":
+                name = str(ev.get("name") or "")
+                tools_used.append(name)
+                if name == "run_code":
+                    blobs.append(str((ev.get("arguments") or {}).get("code") or ""))
+            elif t == "done":
+                text = ev.get("content") or text
+                usage = ev.get("usage") or {}
+            elif t == "error":
+                raise RuntimeError(ev.get("message") or "falha no modelo")
+
+    try:
+        await asyncio.wait_for(_drive(), timeout=_TOOL_CELL_TIMEOUT)
+    finally:
+        await gen.aclose()  # encerra o turno subjacente (no-op se já terminou)
+    return {
+        "text": text,
+        "latency_ms": int((time.monotonic() - t0) * 1000),
+        "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+        "completion_tokens": int(usage.get("completion_tokens") or 0),
+        "cost": float(usage.get("cost") or 0.0),
+        "tools_used": tools_used,
+        "_tool_blobs": " ".join(blobs),
+    }
 
 
 _SCORE_RE = re.compile(r"score\s*[:=]?\s*(\d{1,3})", re.IGNORECASE)
@@ -173,11 +265,10 @@ async def run_benchmark(run_id: uuid.UUID | str) -> None:
             judge_model = (bench.judge_model or "").strip()
             results: dict[str, Any] = dict(run.results or {})
 
-            # pré-resolve provedor + preset de cada modelo (uma vez)
+            # pré-resolve preset + provedor de cada modelo (uma vez). Preset SEM
+            # modelo base explícito (slot "custom:") usa o base_model do preset.
             resolved: list[dict] = []
             for m in models:
-                mstr = m.get("model") or ""
-                key, base_url, err = await _resolve(db, user, mstr)
                 mc = None
                 if m.get("model_config_id"):
                     try:
@@ -186,8 +277,14 @@ async def run_benchmark(run_id: uuid.UUID | str) -> None:
                             mc = None
                     except (ValueError, TypeError):
                         mc = None
+                mstr = (m.get("model") or "") or (mc.base_model if mc else "")
+                key, base_url, err = await _resolve(db, user, mstr)
+                if not mstr and not err:
+                    err = "modelo não definido"
                 resolved.append({"model": mstr, "key": key, "base_url": base_url,
-                                 "err": err, "mc": mc, "mc_id": m.get("model_config_id")})
+                                 "err": err, "mc": mc, "mc_id": m.get("model_config_id"),
+                                 # suíte de decisão: célula roda como turno agêntico
+                                 "tools": bool(m.get("tools")) and mc is not None})
 
             try:
                 for c in cases:
@@ -204,20 +301,46 @@ async def run_benchmark(run_id: uuid.UUID | str) -> None:
                             await db.commit()
                             continue
                         mc = r["mc"]
-                        sys_parts = [p for p in [(mc.system_prompt if mc else ""), case_sys] if p]
-                        msgs: list[dict] = []
-                        if sys_parts:
-                            msgs.append({"role": "system", "content": "\n\n".join(sys_parts)})
-                        msgs.append({"role": "user", "content": prompt})
-                        res = await openrouter.complete_verbose(
-                            r["key"], r["model"], msgs,
-                            params=(mc.params if mc else {}) or {}, base_url=r["base_url"],
-                        )
-                        if res.get("error"):
-                            results[cell_key] = {"error": res["error"], "latency_ms": res.get("latency_ms")}
+                        # modo TOOLS (suíte de decisão): turno agêntico real com as
+                        # ferramentas do preset; senão, completion pura (mais barato)
+                        if r.get("tools") and mc is not None:
+                            try:
+                                cell = await _tool_cell(db, user, r, prompt, case_sys)
+                            except Exception as exc:  # noqa: BLE001 - célula não derruba a run
+                                results[cell_key] = {"error": str(exc)[:400]}
+                                run.results = dict(results)
+                                flag_modified(run, "results")
+                                await db.commit()
+                                continue
+                            text = cell.get("text") or ""
+                            tool_blobs = cell.pop("_tool_blobs", "")
+                            _log_usage(db, user.id, r["model"], r["mc_id"], cell)
+                            rule = _apply_rule(
+                                c.get("expected"), text,
+                                tools_used=cell.get("tools_used"), tool_blobs=tool_blobs,
+                            )
+                            if rule is not None:
+                                cell["rule_pass"] = rule
                         else:
+                            sys_parts = [p for p in [(mc.system_prompt if mc else ""), case_sys] if p]
+                            msgs: list[dict] = []
+                            if sys_parts:
+                                msgs.append({"role": "system", "content": "\n\n".join(sys_parts)})
+                            msgs.append({"role": "user", "content": prompt})
+                            res = await openrouter.complete_verbose(
+                                r["key"], r["model"], msgs,
+                                params=(mc.params if mc else {}) or {}, base_url=r["base_url"],
+                            )
+                            if res.get("error"):
+                                results[cell_key] = {"error": res["error"], "latency_ms": res.get("latency_ms")}
+                                run.results = dict(results)
+                                flag_modified(run, "results")
+                                run.aggregates = _aggregate(models, cases, results)
+                                flag_modified(run, "aggregates")
+                                await db.commit()
+                                continue
                             text = res.get("text") or ""
-                            cell: dict[str, Any] = {
+                            cell = {
                                 "text": text,
                                 "latency_ms": res.get("latency_ms"),
                                 "prompt_tokens": res.get("prompt_tokens"),
@@ -232,16 +355,17 @@ async def run_benchmark(run_id: uuid.UUID | str) -> None:
                             rule = _apply_rule(c.get("expected"), text)
                             if rule is not None:
                                 cell["rule_pass"] = rule
-                            if judge_model:
-                                score, reason, jusage = await _judge(
-                                    db, user, judge_model, prompt, text, str(c.get("judge_criteria") or "")
-                                )
-                                if score is not None:
-                                    cell["judge_score"] = score
-                                cell["judge_reason"] = reason
-                                if jusage:
-                                    _log_usage(db, user.id, judge_model, None, jusage)
-                            results[cell_key] = cell
+                        # juiz + gravação valem p/ os DOIS ramos (tools e completion)
+                        if judge_model:
+                            score, reason, jusage = await _judge(
+                                db, user, judge_model, prompt, text, str(c.get("judge_criteria") or "")
+                            )
+                            if score is not None:
+                                cell["judge_score"] = score
+                            cell["judge_reason"] = reason
+                            if jusage:
+                                _log_usage(db, user.id, judge_model, None, jusage)
+                        results[cell_key] = cell
                         run.results = dict(results)
                         flag_modified(run, "results")
                         run.aggregates = _aggregate(models, cases, results)

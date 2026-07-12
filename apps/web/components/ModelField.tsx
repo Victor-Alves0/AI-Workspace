@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Check, ChevronDown, Cpu, Link2, Search } from "lucide-react";
 import type { Model, ModelConfig } from "@/lib/types";
-import { useClickOutside } from "./ui";
+import { dismissKeyboard, finePointer, useClickOutside } from "./ui";
 
 interface Row {
   key: string; // id externo, ou "custom:<id>"
@@ -82,7 +82,7 @@ export default function ModelField({
           <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
             <Search size={16} className="text-muted" />
             <input
-              autoFocus
+              autoFocus={finePointer()}
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Pesquisar um modelo"
@@ -103,7 +103,9 @@ export default function ModelField({
               </button>
             ))}
           </div>
-          <div className="max-h-72 overflow-y-auto p-1.5">
+          {/* dvh + dismissKeyboard: ver ModelPicker — scroll de lista com teclado
+              aberto trava no iOS */}
+          <div onTouchMove={dismissKeyboard} className="max-h-[min(18rem,55dvh)] overflow-y-auto overscroll-contain p-1.5">
             {rows.map((r) => (
               <button
                 key={r.key}

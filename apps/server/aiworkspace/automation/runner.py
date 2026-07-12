@@ -20,8 +20,8 @@ from typing import Any
 
 from sqlalchemy import select
 
-from ..chat.routes import _code_mode, _load_skills, _usage_record
-from ..chat.orchestrator import run_turn
+from ..chat.turn_setup import _code_mode, _load_skills, _usage_record
+from ..chat.orchestrator import TurnSession, run_turn
 from ..db import SessionLocal
 from ..models import Automation, AutomationRun, Chat, Message, ModelConfig, Notification, User, WhatsAppConnection
 from ..providers import openrouter
@@ -207,12 +207,11 @@ async def _run_scheduled(db, automation: Automation, user: User) -> dict[str, An
         user_text=instructions,
         chat_system_prompt=system_prompt,
         params=params,
-        user_id=str(user.id),
-        user_tz_offset=tz_off,
-        background=True,  # autônomo: tools pulam revisão interativa (ex.: e-mail)
+        # autônomo: tools pulam revisão interativa; chat_id=None => sem mem0 em
+        # jobs de fundo (mais barato/previsível)
+        session=TurnSession(user_id=str(user.id), user_tz_offset=tz_off, background=True),
         sift=sift,
         code_mode=code_mode,
-        chat_id=None,  # sem mem0 em jobs de fundo (mais barato/previsível)
         skills=skills,
         use_context=use_context,
     ):

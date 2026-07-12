@@ -57,6 +57,10 @@ class ModelRef(BaseModel):
     model: str = ""
     model_config_id: str | None = None
     label: str = ""
+    # suíte de DECISÃO: roda os casos como turno agêntico com as tools do preset
+    # (exige model_config_id) — as regras tool_called/tool_not_called/no_tool
+    # avaliam o que o modelo CHAMOU, não só o texto final
+    tools: bool = False
 
 
 class BenchmarkIn(BaseModel):
@@ -170,8 +174,11 @@ def _normalize_cases(cases: list[dict]) -> list[dict]:
         if c.get("system"):
             case["system"] = str(c["system"])
         exp = c.get("expected")
-        if isinstance(exp, dict) and (exp.get("mode") or "none") != "none" and exp.get("value"):
-            case["expected"] = {"mode": exp.get("mode"), "value": str(exp.get("value"))}
+        if isinstance(exp, dict):
+            mode = exp.get("mode") or "none"
+            # "no_tool" não tem valor (a regra é "não chamou NENHUMA tool real")
+            if mode == "no_tool" or (mode != "none" and exp.get("value")):
+                case["expected"] = {"mode": mode, "value": str(exp.get("value") or "")}
         if c.get("judge_criteria"):
             case["judge_criteria"] = str(c["judge_criteria"])
         out.append(case)
@@ -239,7 +246,7 @@ async def compare(body: CompareIn, user: User = Depends(require_approved), db: A
     if not (body.prompt or "").strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Escreva um prompt")
     await budget_service.enforce_or_raise(db, user)
-    from .chat.routes import _get_model_config, _resolve_provider
+    from .chat.turn_setup import _get_model_config, _resolve_provider
 
     cols: list[dict] = []
     for m in body.models:

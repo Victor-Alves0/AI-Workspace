@@ -451,7 +451,7 @@ async def list_refs(
 ):
     """Bases que o modelo/chat pode consultar (mesmo gate do RAG) com pastas + docs
     prontos, p/ o menu "#" do compositor. Só o que está ACOPLADO aparece."""
-    from .chat.routes import _resolve_knowledge  # lazy: evita ciclo de import
+    from .chat.turn_setup import _resolve_knowledge  # lazy: evita ciclo de import
 
     chat = None
     if chat_id:

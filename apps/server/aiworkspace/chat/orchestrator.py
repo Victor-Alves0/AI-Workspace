@@ -21,6 +21,7 @@ import re
 import time
 import uuid
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -109,6 +110,18 @@ TOOL_ACTION_GUARD = (
     "confirming. If you haven't located a suitable tool yet, call search_tools FIRST — "
     "acting without a tool is impossible. NEVER say an action was done, sent or scheduled "
     "unless a tool actually returned success; if no tool covers it, say you can't do it."
+)
+
+# Modo Código: tools longas promovidas a specs de 1ª classe ao lado do run_code
+# ficam "vitrine" — sem enquadramento, o modelo as usa como caminho padrão de busca
+# (ex.: research__deep__run disparada sem o usuário pedir pesquisa profunda).
+_PROMOTED_TOOLS_NOTE = (
+    "IMPORTANT — the directly-exposed tool(s) {names} are LONG-RUNNING specialists, "
+    "surfaced beside run_code only because they cannot run inside its sandbox. They are "
+    "NOT the default path for looking things up. For ordinary lookups (news, prices, "
+    "quotes, quick facts, reading a page) use run_code with web.search.query / "
+    "web.page.read. Call {names} ONLY in the cases its own description allows — e.g. "
+    "deep research the user EXPLICITLY requested."
 )
 
 # O índice de descoberta é inglês-first (embedder EN + descrições em EN). Queries no
@@ -532,131 +545,143 @@ def _accumulate_tool_calls(buffer: dict[int, dict], deltas: list[dict]) -> None:
             slot["function"]["arguments"] += fn["arguments"]
 
 
-async def run_turn(
+# --------------------------------------------------------------------------- #
+# Opções do turno — grupos coesos no lugar dos ~40 kwargs soltos de antes.
+# `model`/`api_key`/`base_url`/`extra_system`/`extra_breakdown`/`user_text`
+# continuam FLAT de propósito: o run_turn_guarded os sobrescreve entre tentativas.
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class TurnSession:
+    """Identidade e ambiente do turno (quem, onde, fuso, autônomo?)."""
+    user_id: str
+    user_tz: str = ""
+    user_tz_offset: int | None = None
+    chat_id: str | None = None
+    agent_id: str | None = None
+    # execução autônoma (automação/canal): tools pulam fases interativas
+    background: bool = False
+    user_profile: dict[str, Any] | None = None
+
+
+@dataclass
+class MemoryOpts:
+    """Memória (mem0): escopos de leitura, destino de escrita, bancos e projeto."""
+    read: dict[str, bool] | None = None
+    write: str = "off"
+    review: bool = False
+    banks: list[str] | None = None
+    # id do "projeto" (a pasta do chat) p/ o escopo de memória compartilhado
+    project: str | None = None
+
+
+@dataclass
+class MediaOpts:
+    """Anexos e roteadores de mídia (visão, áudio, OCR, geração de imagem)."""
+    attachments: list[dict[str, Any]] | None = None
+    vision: bool = False
+    vision_router_model: str | None = None
+    # Audio Router: {"engine":"stt", base_url, api_key, model} ou {"engine":"model", model}
+    audio_router: dict[str, Any] | None = None
+    ocr: bool = False
+    ocr_engine: str = "tesseract"
+    ocr_lang: str = "por+eng"
+    genimage: dict[str, Any] | None = None
+    image_output: bool = False
+
+
+@dataclass
+class SubagentOpts:
+    """Delegação a operários (tool `delegate`)."""
+    agents: list[dict[str, Any]] | None = None
+    run: Any | None = None  # closure run_subagent(key, task) -> dict
+    mode: str = "sequential"
+    max_calls: int = 4
+    pass_context: bool = False
+    worker_memory: bool = False
+
+
+# --------------------------------------------------------------------------- #
+# Fases do turno (extraídas do corpo do run_turn; o loop agêntico fica nele)
+# --------------------------------------------------------------------------- #
+
+@dataclass
+class _GatheredContext:
+    """Estado produzido pela fase de contexto (memória + conhecimento + #refs)."""
+    mem_items: list[dict[str, str]] = field(default_factory=list)
+    memories: list[str] = field(default_factory=list)
+    knowledge_block: str = ""
+    ref_block: str = ""
+    auto_knowledge_event: dict[str, Any] | None = None
+    ref_knowledge_event: dict[str, Any] | None = None
+    kb_bases: list[str] = field(default_factory=list)
+    kb_mode: str = "auto"
+    kb_k: int = 6
+    kb_on: bool = False
+
+
+async def _gather_context(
+    g: _GatheredContext,
     *,
     api_key: str,
-    model: str,
-    history: list[dict[str, Any]],
     user_text: str,
-    chat_system_prompt: str | None,
-    params: dict[str, Any],
-    user_id: str,
-    user_tz: str = "",
-    user_tz_offset: int | None = None,
-    background: bool = False,
-    base_url: str | None = None,
-    sift: Any | None = None,
-    use_tools: bool = True,
-    code_mode: bool = False,
-    chat_id: str | None = None,
-    agent_id: str | None = None,
-    mem_read: dict[str, bool] | None = None,
-    mem_write: str = "off",
-    mem_review: bool = False,
-    mem_banks: list[str] | None = None,
-    # id do "projeto" (a pasta do chat) p/ o escopo de memória compartilhado
-    mem_project: str | None = None,
-    user_profile: dict[str, Any] | None = None,
-    skills: list[dict[str, Any]] | None = None,
-    use_context: bool = True,
-    attachments: list[dict[str, Any]] | None = None,
-    vision: bool = False,
-    vision_router_model: str | None = None,
-    # Audio Router: transcreve áudios anexados p/ o modelo (dict resolvido pela
-    # rota: {"engine":"stt", base_url, api_key, model} ou {"engine":"model", model})
-    audio_router: dict[str, Any] | None = None,
-    ocr: bool = False,
-    ocr_engine: str = "tesseract",
-    ocr_lang: str = "por+eng",
-    genimage: dict[str, Any] | None = None,
-    image_output: bool = False,
-    knowledge: dict[str, Any] | None = None,
-    # docs referenciados com "#" no compositor: [{id, filename, base_id, text}].
-    # Injetados neste turno (híbrido: texto inteiro se pequeno, senão trechos).
-    ref_docs: list[dict[str, Any]] | None = None,
-    extra_system: str | None = None,
-    # detalhamento (em chars) das origens do extra_system, p/ o painel de uso:
-    # {"artifacts": n, "channel": n, "guards": n} — só rotula, não muda o prompt
-    extra_breakdown: dict[str, int] | None = None,
-    subagents: list[dict[str, Any]] | None = None,
-    run_subagent: Any | None = None,
-    subagent_mode: str = "sequential",
-    subagent_max_calls: int = 4,
-    subagent_pass_context: bool = False,
-    subagent_worker_memory: bool = False,
+    session: TurnSession,
+    memory: MemoryOpts,
+    knowledge: dict[str, Any] | None,
+    ref_docs: list[dict[str, Any]] | None,
 ) -> AsyncGenerator[dict[str, Any], None]:
-    settings = get_settings()
+    """Fase 1 — memória (mem0), Base de Conhecimento (modo auto) e arquivos "#".
 
-    # Raciocínio: "Desligado" na UI apaga a chave => sem isto, modelos híbridos
-    # (DeepSeek V4 etc.) raciocinam POR PADRÃO e o usuário vê "Pensando…" com o
-    # seletor em off. Ausência de config = desligado de verdade. Quem escolhe um
-    # esforço na UI manda {"effort": ...} e passa intacto.
-    params = dict(params or {})
-    auto_reasoning_off = "reasoning" not in params
-    if auto_reasoning_off:
-        params["reasoning"] = {"enabled": False}
+    Emite os eventos de progresso e deixa os blocos/fontes em `g`."""
+    user_id, chat_id, agent_id = session.user_id, session.chat_id, session.agent_id
 
-    # torna o chat atual visível às ferramentas (ex.: lembrete "no chat atual").
-    # contextvar é isolado por task async e herdado pelo threadpool do dispatch.
-    toolctx.current_chat_id.set(chat_id)
-    # fuso do usuário visível às ferramentas (lembrete/agenda interpretam horários locais)
-    toolctx.user_tz.set(user_tz or "")
-    # execução autônoma (automação): tools pulam fases interativas (ex.: revisão de e-mail)
-    toolctx.background.set(bool(background))
-    # perfil do usuário visível à tool user.profile.get (nome, sobre, nascimento…)
-    toolctx.user_profile.set(user_profile or {})
-
-    # 1. memória — UNIÃO dos escopos ligados em `mem_read` ({global, model, chat}).
+    # 1. memória — UNIÃO dos escopos ligados em `memory.read` ({global, model, chat}).
     # Leak-safe: só global (compartilhado) + as do modelo atual + as deste chat —
     # nunca de outros chats/modelos. Ver memory/mem0_service.search_for_turn.
-    mem_items: list[dict[str, str]] = []
-    if (mem_read and any(mem_read.values())) or mem_banks:
-        mem_items = await run_in_threadpool(
+    if (memory.read and any(memory.read.values())) or memory.banks:
+        g.mem_items = await run_in_threadpool(
             lambda: mem0_service.search_for_turn(
                 api_key, user_text, user_id,
                 chat_id=chat_id, agent_id=agent_id,
-                read=mem_read or {}, banks=mem_banks, project_id=mem_project, limit=6,
+                read=memory.read or {}, banks=memory.banks,
+                project_id=memory.project, limit=6,
             )
         )
-    memories = [m["text"] for m in mem_items]
-    if mem_items:
-        yield {"type": "memory", "count": len(mem_items), "items": mem_items}
+    g.memories = [m["text"] for m in g.mem_items]
+    if g.mem_items:
+        yield {"type": "memory", "count": len(g.mem_items), "items": g.mem_items}
 
     # 1b. Base de Conhecimento (RAG). Duas formas de uso (escolha do usuário):
     #   - "auto": recupera os trechos relevantes JÁ e injeta no system (com citações);
-    #   - "tool": expõe `search_knowledge` p/ o modelo buscar sob demanda (mais abaixo).
+    #   - "tool": expõe `search_knowledge` p/ o modelo buscar sob demanda (no loop).
     kb = knowledge or {}
-    kb_bases = [str(b) for b in (kb.get("bases") or []) if b]
-    kb_mode = (kb.get("mode") or "auto").lower()
-    kb_k = int(kb.get("k") or 6)
-    kb_on = bool(kb_bases)
-    knowledge_block = ""
-    auto_knowledge_event: dict[str, Any] | None = None
-    if kb_on and kb_mode == "auto":
+    g.kb_bases = [str(b) for b in (kb.get("bases") or []) if b]
+    g.kb_mode = (kb.get("mode") or "auto").lower()
+    g.kb_k = int(kb.get("k") or 6)
+    g.kb_on = bool(g.kb_bases)
+    if g.kb_on and g.kb_mode == "auto":
         yield {"type": "knowledge", "status": "start", "query": user_text[:120]}
         try:
-            auto_kres = await kb_retrieval.search(user_id, kb_bases, user_text, kb_k)
+            auto_kres = await kb_retrieval.search(user_id, g.kb_bases, user_text, g.kb_k)
         except Exception as exc:  # noqa: BLE001
             logger.warning("busca na base de conhecimento falhou: %s", exc)
             auto_kres = []
         _blk, auto_sources = _knowledge_block_and_sources(auto_kres)
         if auto_kres:
-            knowledge_block = (
+            g.knowledge_block = (
                 "## Base de conhecimento\n"
                 "Trechos recuperados dos documentos do usuário (numerados por fonte). Baseie a "
                 "resposta neles quando pertinente e CITE a fonte usada com [n]. Se a resposta "
                 "não estiver nos trechos, diga que não encontrou na base.\n\n" + _blk
             )
-        auto_knowledge_event = {
+        g.auto_knowledge_event = {
             "kind": "knowledge", "query": user_text[:200],
             "sources": auto_sources, "count": len(auto_kres),
         }
-        yield {"type": "tool_result", "name": "knowledge", "result": auto_knowledge_event}
+        yield {"type": "tool_result", "name": "knowledge", "result": g.auto_knowledge_event}
 
     # 1c. Arquivos referenciados com "#" no compositor. HÍBRIDO: doc pequeno entra
     # inteiro; doc grande cai p/ os trechos mais relevantes (retrieval no próprio doc).
-    ref_block = ""
-    ref_knowledge_event: dict[str, Any] | None = None
     ref_list = ref_docs or []
     if ref_list:
         ref_results: list[dict[str, Any]] = []
@@ -684,83 +709,568 @@ async def run_turn(
                     })
         if ref_results:
             _rblk, ref_sources = _knowledge_block_and_sources(ref_results)
-            ref_block = (
+            g.ref_block = (
                 "## Arquivos referenciados\n"
                 "O usuário anexou estes arquivos com \"#\" (numerados por fonte). Use-os como "
                 "base principal da resposta e CITE a fonte com [n] quando aplicável.\n\n" + _rblk
             )
-            ref_knowledge_event = {
+            g.ref_knowledge_event = {
                 "kind": "knowledge", "query": user_text[:200],
                 "sources": ref_sources, "count": len(ref_results),
             }
-            yield {"type": "tool_result", "name": "knowledge", "result": ref_knowledge_event}
+            yield {"type": "tool_result", "name": "knowledge", "result": g.ref_knowledge_event}
 
-    # 2. montagem — em code mode o modelo recebe run_code (orquestra várias
-    # tools escrevendo Python numa chamada só) em vez de execute_tool
-    has_tools = sift is not None and use_tools
+
+@dataclass
+class _AssembledTools:
+    """Saída da fase de montagem: specs de tools + seção de ferramentas do system."""
+    tools: list[Any] = field(default_factory=list)
+    sift_prompt: str = ""
+    has_tools: bool = False
+    skills_by_slug: dict[str, dict[str, Any]] = field(default_factory=dict)
+    genimage_on: bool = False
+    kb_tool_on: bool = False
+    subagents_on: bool = False
+    subagents_by_key: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+
+def _assemble_tools_and_prompt(
+    *,
+    sift: Any | None,
+    use_tools: bool,
+    code_mode: bool,
+    skills: list[dict[str, Any]],
+    genimage: dict[str, Any] | None,
+    kb_on: bool,
+    kb_mode: str,
+    subagents: list[dict[str, Any]],
+    run_subagent: Any | None,
+) -> _AssembledTools:
+    """Fase 2 — monta a lista de tools anunciadas ao modelo e a seção de
+    ferramentas do system prompt (SIFT + skills + genimage + KB-tool + delegate)."""
+    a = _AssembledTools()
+    # em code mode o modelo recebe run_code (orquestra várias tools escrevendo
+    # Python numa chamada só) em vez de execute_tool
+    a.has_tools = sift is not None and use_tools
     # metadados do integrador no escopo (scope.meta, oficial na SIFT >= 0.7):
     # catálogo legível, modo de exposição, prompt "quando usar", tools promovidas
-    sift_meta: dict[str, Any] = (getattr(sift, "meta", None) or {}) if has_tools else {}
-    if has_tools and code_mode:
-        sift_prompt = sift.code_system_prompt
-        tools = list(sift.code_tools())
+    sift_meta: dict[str, Any] = (getattr(sift, "meta", None) or {}) if a.has_tools else {}
+    if a.has_tools and code_mode:
+        a.sift_prompt = sift.code_system_prompt
+        a.tools = list(sift.code_tools())
         # tools LONGAS promovidas a 1ª classe (rodam fora do sandbox do run_code —
         # o watchdog de parede mataria o filho e descartaria o resultado)
         extra = sift_meta.get("code_extra_tools")
         if extra:
-            tools += list(extra)
-    elif has_tools:
-        sift_prompt = sift.system_prompt
+            a.tools += list(extra)
+            # Sem esta nota, a tool promovida é a ÚNICA "de busca" visível direto e o
+            # modelo a usava p/ QUALQUER pesquisa (ex.: deep research sem ser pedida) —
+            # a alternativa barata (web.search dentro do run_code) fica invisível.
+            names = ", ".join(
+                n for n in (
+                    ((t.get("function") or {}).get("name") or "") for t in extra
+                ) if n
+            )
+            if names:
+                a.sift_prompt += "\n\n" + _PROMOTED_TOOLS_NOTE.format(names=names)
+    elif a.has_tools:
+        a.sift_prompt = sift.system_prompt
         # SIFT >= 0.7: pins são por-escopo — openai_tools() do scope já inclui as
         # ferramentas fixadas como specs de 1ª classe (nome flat)
-        tools = sift.openai_tools()
-    else:
-        sift_prompt = ""
-        tools = []
+        a.tools = list(sift.openai_tools())
 
     # Como o SIFT é apresentado ao modelo — o "QUANDO usar" (o "COMO usar" já é
     # resolvido pelas meta-ferramentas). O catálogo é injetado nos dois modos (o modelo
     # precisa saber o que tem); "list" reforça o texto. O guard de ação é sempre anexado.
-    if has_tools:
+    if a.has_tools:
         mode = sift_meta.get("sift_mode") or "prompt"
         catalog = sift_meta.get("catalog") or []
         meta = "run_code" if code_mode else "execute_tool"
         custom = (sift_meta.get("sift_prompt") or "").strip() or DEFAULT_TOOL_PROMPT
-        sift_prompt = _compose_tool_prompt(sift_prompt, catalog, mode, custom, meta)
+        a.sift_prompt = _compose_tool_prompt(a.sift_prompt, catalog, mode, custom, meta)
 
     # Skills (independentes do SIFT): o modelo vê só nome+descrição e carrega o
-    # conteúdo completo sob demanda via view_skill. Adiciona a meta-ferramenta
-    # mesmo sem SIFT — basta ter ao menos uma skill equipada/invocada.
-    skills = skills or []
-    skills_by_slug: dict[str, dict[str, Any]] = {}
+    # conteúdo completo sob demanda via view_skill.
     if skills:
-        tools = list(tools) + [_view_skill_tool()]
+        a.tools = list(a.tools) + [_view_skill_tool()]
         for s in skills:
-            skills_by_slug[str(s.get("slug"))] = s
+            a.skills_by_slug[str(s.get("slug"))] = s
             nm = str(s.get("name") or "").strip().lower()
             if nm:
-                skills_by_slug.setdefault(nm, s)
+                a.skills_by_slug.setdefault(nm, s)
 
     # GenImage Router: com o filtro ativo + modelo configurado, o modelo ganha a
     # tool `generate_image` (independe da SIFT — como o view_skill).
-    genimage_on = bool(genimage and genimage.get("model"))
-    if genimage_on:
-        tools = list(tools) + [_generate_image_tool()]
+    a.genimage_on = bool(genimage and genimage.get("model"))
+    if a.genimage_on:
+        a.tools = list(a.tools) + [_generate_image_tool()]
 
     # Base de Conhecimento no modo "ferramenta": o modelo ganha `search_knowledge`
-    # (independe da SIFT — como o view_skill), buscando os documentos sob demanda.
-    kb_tool_on = kb_on and kb_mode == "tool"
-    if kb_tool_on:
-        tools = list(tools) + [_search_knowledge_tool()]
+    # (independe da SIFT), buscando os documentos sob demanda.
+    a.kb_tool_on = kb_on and kb_mode == "tool"
+    if a.kb_tool_on:
+        a.tools = list(a.tools) + [_search_knowledge_tool()]
 
     # Subagentes: com a permissão ligada + um time resolvido, o modelo (orquestrador)
     # ganha a tool `delegate` p/ acionar operários (cada um um ModelConfig próprio).
+    a.subagents_by_key = {str(x.get("key")): x for x in subagents}
+    a.subagents_on = bool(subagents and run_subagent is not None)
+    if a.subagents_on:
+        a.tools = list(a.tools) + [_delegate_tool(subagents)]
+    return a
+
+
+async def _append_user_message(
+    st: dict[str, int],
+    messages: list[dict[str, Any]],
+    *,
+    user_text: str,
+    media: MediaOpts,
+    api_key: str,
+) -> AsyncGenerator[dict[str, Any], None]:
+    """Fase 3 — mensagem do usuário + anexos (arquivos, áudio, imagens).
+
+    Aplica os roteadores de mídia (Audio/Vision Router, OCR) e anexa a mensagem
+    final em `messages`; o total de chars de anexos sai em `st["attach_chars"]`."""
+    attachments = media.attachments or []
+    images = [a for a in attachments if a.get("type") == "image" and a.get("url")]
+    audios = [a for a in attachments if a.get("type") == "audio" and a.get("url")]
+    files = [a for a in attachments if a.get("type") == "file" and a.get("text")]
+    file_blocks = "\n\n".join(
+        f"[Arquivo anexado: {a.get('name') or 'arquivo'}]\n{a['text']}" for a in files
+    )
+    base_text = user_text
+    if file_blocks:
+        base_text = (base_text + "\n\n" + file_blocks).strip() if base_text else file_blocks
+
+    # Audio Router: transcreve os áudios ANTES do tratamento de imagens, para a
+    # transcrição entrar no texto-base em qualquer um dos ramos abaixo.
+    audio_note = ""
+    if audios and media.audio_router:
+        yield {"type": "audio_router", "status": "start", "engine": media.audio_router.get("engine"), "count": len(audios)}
+        try:
+            tx = await _transcribe_audios(media.audio_router, audios, api_key)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Audio Router falhou (%s); seguindo sem transcrição", exc)
+            tx = ""
+        yield {"type": "audio_router", "status": "done", "count": len(audios)}
+        audio_note = (
+            f"[O usuário enviou {len(audios)} áudio(s). Transcrição:\n{tx}]"
+            if tx else "[O usuário enviou áudio(s), mas não foi possível transcrevê-los.]"
+        )
+    elif audios:
+        audio_note = "[O usuário enviou áudio(s), mas este modelo não tem Audio Router configurado.]"
+    if audio_note:
+        base_text = (base_text + "\n\n" + audio_note).strip() if base_text else audio_note
+
+    # precedência do tratamento de imagens (modelo sem visão nativa):
+    #  - motor "tesseract" (ou "vision" sem router configurado) → OCR local
+    #  - motor "vision" com Vision Router → o modelo de visão descreve/transcreve
+    use_tesseract = bool(
+        images and media.ocr and (media.ocr_engine == "tesseract" or not media.vision_router_model)
+    )
+    attach_chars = len(file_blocks) + len(audio_note)
+    if images and media.vision:
+        # visão nativa: manda as imagens como partes image_url (multipart OpenAI)
+        parts: list[dict[str, Any]] = []
+        if base_text:
+            parts.append({"type": "text", "text": base_text})
+        for a in images:
+            parts.append({"type": "image_url", "image_url": {"url": a["url"]}})
+        messages.append({"role": "user", "content": parts})
+    elif images and media.vision_router_model and not use_tesseract:
+        # Vision Router: um modelo com visão descreve/transcreve as imagens em texto
+        yield {"type": "vision_router", "model": media.vision_router_model, "count": len(images)}
+        try:
+            desc = await _describe_images(api_key, media.vision_router_model, images)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Vision Router falhou (%s); seguindo sem descrição", exc)
+            desc = ""
+        note = (
+            f"[O usuário enviou {len(images)} imagem(ns). Um modelo de visão as descreveu:\n{desc}]"
+            if desc
+            else f"[O usuário enviou {len(images)} imagem(ns), mas não foi possível descrevê-las.]"
+        )
+        attach_chars += len(note)
+        combined = (base_text + "\n\n" + note).strip() if base_text else note
+        messages.append({"role": "user", "content": combined})
+    elif use_tesseract:
+        # OCR local (tesseract): lê o texto das imagens quando não há visão/router
+        yield {"type": "ocr", "count": len(images)}
+        texts: list[str] = []
+        for a in images:
+            raw = _decode_data_url(a.get("url"))
+            if not raw:
+                continue
+            try:
+                t = await run_in_threadpool(extraction.ocr_image_bytes, raw, media.ocr_lang)
+            except extraction.ExtractionError:
+                t = ""
+            if t.strip():
+                texts.append(t.strip())
+        note = (
+            "[Texto extraído por OCR das imagens enviadas:\n" + "\n---\n".join(texts) + "]"
+            if texts
+            else "[O usuário enviou imagens, mas o OCR não encontrou texto legível.]"
+        )
+        attach_chars += len(note)
+        combined = (base_text + "\n\n" + note).strip() if base_text else note
+        messages.append({"role": "user", "content": combined})
+    elif images:
+        note = "[O usuário enviou imagens, mas este modelo não tem Visão, Vision Router nem OCR configurado.]"
+        attach_chars += len(note)
+        combined = (base_text + "\n\n" + note).strip() if base_text else note
+        messages.append({"role": "user", "content": combined})
+    else:
+        messages.append({"role": "user", "content": base_text})
+    st["attach_chars"] = attach_chars
+
+
+def _finalize_usage(
+    total_usage: dict[str, float],
+    *,
+    input_chars: dict[str, int],
+    tool_result_chars: dict[str, int],
+    extra_breakdown: dict[str, int] | None,
+    reasoning_text: str,
+) -> None:
+    """Fase 5 — detalhamentos de uso (entrada/saída/por-tool/extra) em `total_usage`.
+
+    ENTRADA por categoria: distribui o total real de prompt_tokens proporcionalmente
+    ao tamanho (chars) de cada bloco. SAÍDA: visível vs raciocínio (thinking)."""
+    prompt_total = int(total_usage.get("prompt_tokens", 0) or 0)
+    weight_total = sum(input_chars.values())
+    if prompt_total and weight_total:
+        input_breakdown = {
+            k: round(prompt_total * v / weight_total) for k, v in input_chars.items()
+        }
+    else:
+        input_breakdown = {k: 0 for k in input_chars}
+
+    completion_total = int(total_usage.get("completion_tokens", 0) or 0)
+    reasoning_tokens = int(total_usage.get("reasoning_tokens", 0) or 0)
+    # fallback: se o provedor não separou, estima o thinking pelo texto capturado
+    if not reasoning_tokens and reasoning_text and completion_total:
+        est = round(len(reasoning_text) / 4)
+        reasoning_tokens = min(est, completion_total)
+    total_usage["input_breakdown"] = input_breakdown
+    total_usage["output_breakdown"] = {
+        "output": max(0, completion_total - reasoning_tokens),
+        "thinking": reasoning_tokens,
+    }
+    # por ferramenta (mesma distribuição proporcional; soma ≈ tool_results)
+    if prompt_total and weight_total and tool_result_chars:
+        total_usage["tools_breakdown"] = {
+            k: round(prompt_total * v / weight_total) for k, v in tool_result_chars.items()
+        }
+    # detalhe do "extra" por origem (artefatos/canal/guardas) — soma ≈ extra
+    if prompt_total and weight_total and extra_breakdown:
+        total_usage["extra_breakdown"] = {
+            k: round(prompt_total * v / weight_total)
+            for k, v in extra_breakdown.items() if v
+        }
+
+
+_SCOPE_ERROR_HINT = (
+    "This tool path does not exist here. Call search_tools with a short query to "
+    "discover the CORRECT path, then retry execute_tool — do not tell the user the "
+    "tool is unavailable."
+)
+
+
+@dataclass
+class _ToolDispatcher:
+    """Executa UMA tool_call do loop agêntico, emitindo os eventos de progresso na
+    ordem certa (streaming) e deixando o resultado CRU em `self.result`. Agrupa o
+    contexto do turno (SIFT, skills, genimage, KB, subagentes) construído uma vez
+    antes do loop. As tools "internas" (view_skill/generate_image/search_knowledge/
+    delegate) são tratadas aqui; o resto cai no dispatch da SIFT.
+
+    Uso: `async for ev in disp.run(name, args, tc): yield ev` e então `disp.result`.
+    O `delegations_used` persiste entre chamadas; `delegate_pre` (resultados da
+    delegação PARALELA) é setado por iteração antes de despachar."""
+    sift: Any
+    code_mode: bool
+    api_key: str
+    user_id: str
+    chat_id: str | None
+    skills: list[dict[str, Any]]
+    skills_by_slug: dict[str, dict[str, Any]]
+    genimage_on: bool
+    genimage: dict[str, Any] | None
+    kb_tool_on: bool
+    kb_bases: list[str]
+    kb_k: int
+    user_text: str
+    subagents_on: bool
+    subagents_by_key: dict[str, dict[str, Any]]
+    subagent_max_calls: int
+    subagent_pass_context: bool
+    subagent_worker_memory: bool
+    run_subagent: Any
+    delegations_used: int = 0
+    delegate_pre: dict[str, dict] = field(default_factory=dict)
+    result: Any = None
+
+    async def run(self, name: str, args: dict, tc: dict) -> AsyncGenerator[dict[str, Any], None]:
+        if name == "view_skill":
+            self.result = self._view_skill(args)
+        elif name == "generate_image":
+            async for ev in self._generate_image(args):
+                yield ev
+        elif name == "search_knowledge":
+            async for ev in self._search_knowledge(args):
+                yield ev
+        elif name == "delegate":
+            async for ev in self._delegate(args, tc):
+                yield ev
+        elif self.sift is None:
+            self.result = {"error": "ferramentas indisponíveis"}
+        elif name == "run_code" and not self.code_mode:
+            # run_code não foi anunciado a este modelo; não executa código
+            self.result = {"error": "run_code não está habilitado para este modelo"}
+        else:
+            self.result = await self._sift_dispatch(name, args)
+
+    def _view_skill(self, args: dict) -> Any:
+        slug = str(args.get("slug") or args.get("name") or "").strip().lower()
+        sk = self.skills_by_slug.get(slug)
+        if sk is None:
+            known = ", ".join(sorted({s["slug"] for s in self.skills})) or "(nenhuma)"
+            return {"error": f"skill '{slug}' não encontrada. Disponíveis: {known}"}
+        return {"slug": sk["slug"], "name": sk["name"], "content": sk.get("content") or ""}
+
+    async def _generate_image(self, args: dict) -> AsyncGenerator[dict[str, Any], None]:
+        # GenImage Router: gera a imagem, guarda os bytes e devolve uma URL assinada
+        # (pequena) — o base64 NUNCA vai ao contexto do modelo.
+        prompt = str(args.get("prompt") or "").strip()
+        if not self.genimage_on:
+            self.result = {"error": "GenImage Router não está ativo neste modelo"}
+            return
+        if not prompt:
+            self.result = {"error": "`prompt` é obrigatório"}
+            return
+        yield {"type": "image_gen", "status": "start", "prompt": prompt[:120]}
+        try:
+            keys = {"openrouter": self.api_key, "imagegen": (self.genimage or {}).get("imagegen_key")}
+            img_bytes, mime = await image_gen.generate(
+                self.genimage, keys, prompt, str(args.get("size") or "1024x1024")
+            )
+            image_id = await _save_generated_image(
+                self.user_id, self.chat_id, mime, img_bytes, prompt, (self.genimage or {}).get("model", "")
+            )
+            self.result = {"kind": "image", "url": image_gen.sign_image_url(image_id), "prompt": prompt}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Falha ao gerar imagem: %s", exc)
+            yield {"type": "image_gen", "status": "error"}
+            self.result = {"error": f"não foi possível gerar a imagem: {exc}"}
+
+    async def _search_knowledge(self, args: dict) -> AsyncGenerator[dict[str, Any], None]:
+        # Base de Conhecimento (modo ferramenta): busca os documentos e devolve os
+        # trechos numerados; a UI mostra as fontes (via kind:"knowledge").
+        query = str(args.get("query") or "").strip() or self.user_text
+        if not self.kb_tool_on:
+            self.result = {"error": "base de conhecimento não está ativa neste modelo"}
+            return
+        yield {"type": "knowledge", "status": "start", "query": query[:120]}
+        try:
+            kres = await kb_retrieval.search(self.user_id, self.kb_bases, query, self.kb_k)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("search_knowledge falhou: %s", exc)
+            kres = []
+        _blk, ksrc = _knowledge_block_and_sources(kres)
+        model_txt = (
+            "Trechos da base de conhecimento (cite a fonte usada com [n]):\n\n" + _blk
+            if kres else "Nenhum trecho relevante encontrado na base de conhecimento."
+        )
+        self.result = {
+            "kind": "knowledge", "query": query[:200],
+            "sources": ksrc, "count": len(kres), "_model": model_txt,
+        }
+
+    async def _delegate(self, args: dict, tc: dict) -> AsyncGenerator[dict[str, Any], None]:
+        if not self.subagents_on:
+            self.result = {"error": "subagentes não habilitados neste modelo"}
+            return
+        if tc["id"] in self.delegate_pre:  # já rodou em paralelo
+            self.result = self.delegate_pre[tc["id"]]
+            yield {"type": "subagent", "status": "done", "agent": (self.result.get("agent") if isinstance(self.result, dict) else None) or str(args.get("agent") or "")}
+            return
+        if self.delegations_used >= self.subagent_max_calls:
+            self.result = {"error": f"limite de {self.subagent_max_calls} delegações por turno atingido"}
+            return
+        key = str(args.get("agent") or "")
+        task = str(args.get("task") or "")
+        spec = self.subagents_by_key.get(key)
+        if spec is None:
+            self.result = {"error": f"subagente '{key}' não autorizado"}
+            return
+        yield {"type": "subagent", "status": "start", "agent": spec.get("name", key), "task": task[:200], "ctx": self.subagent_pass_context, "mem": self.subagent_worker_memory}
+        self.delegations_used += 1
+        try:
+            self.result = await self.run_subagent(key, task)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Subagente falhou: %s", exc)
+            self.result = {"error": f"o subagente falhou: {exc}"}
+        yield {"type": "subagent", "status": "done", "agent": (self.result.get("agent") if isinstance(self.result, dict) else None) or spec.get("name", key)}
+
+    async def _sift_dispatch(self, name: str, args: dict) -> Any:
+        # NÃO trocar por sift.adispatch: na SIFT 0.7 ele roda tools SÍNCRONAS inline
+        # ("offload them yourself if they block") — e TODAS as nossas builtins são
+        # sync (requests/Google/Tuya, segundos cada) → bloquearia o event loop do
+        # servidor inteiro. O threadpool é o offload correto enquanto as tools não
+        # forem `async def`.
+        result = await run_in_threadpool(self.sift.dispatch, name, args)
+        # Path errado/fora do escopo (modelo chutou, ex.: 'web.read' em vez de
+        # 'web.page.read'): enriquece o erro com o caminho de recuperação, senão
+        # modelos fracos DESISTEM e dizem que a ferramenta não existe.
+        if isinstance(result, str) and (
+            "not allowed in this scope" in result or "unknown tool" in result.lower()
+        ):
+            try:
+                _r = json.loads(result)
+                if isinstance(_r, dict) and _r.get("error"):
+                    _r["hint"] = _SCOPE_ERROR_HINT
+                    result = json.dumps(_r, ensure_ascii=False)
+            except (json.JSONDecodeError, ValueError):
+                pass
+        return result
+
+
+def _shape_tool_result(result: Any) -> tuple[str, Any]:
+    """A partir do resultado CRU de uma tool, devolve (content_p/_modelo, event_p/_UI).
+
+    - str (JSON ou texto do search_tools): não re-serializa (evita duplo-encode);
+    - dict: serializa p/ o modelo, e o próprio dict vai à UI;
+    - artefatos que o FRONT renderiza mas o modelo NÃO deve reproduzir (imagem,
+      rascunho de e-mail) recebem só uma nota enxuta;
+    - conhecimento: o modelo recebe os TRECHOS (`_model`), a UI só as fontes."""
+    if isinstance(result, str):
+        content = result
+        try:
+            event_result: Any = json.loads(result)
+        except (json.JSONDecodeError, ValueError):
+            event_result = result
+    else:
+        content = json.dumps(result, ensure_ascii=False, default=str)
+        event_result = result
+    if isinstance(event_result, dict) and event_result.get("kind") == "image":
+        content = json.dumps({"ok": True, "note": "Image generated and shown to the user."})
+    elif isinstance(event_result, dict) and event_result.get("kind") == "email_draft":
+        content = json.dumps({
+            "ok": True,
+            "note": "An editable email draft was shown to the user to review and send. "
+                    "Do NOT claim the email was sent; the user will send it from the composer.",
+        })
+    elif isinstance(event_result, dict) and event_result.get("kind") == "knowledge":
+        content = event_result.get("_model") or ""
+        event_result = {k: v for k, v in event_result.items() if k != "_model"}
+    return content, event_result
+
+
+async def run_turn(
+    *,
+    api_key: str,
+    model: str,
+    history: list[dict[str, Any]],
+    user_text: str,
+    chat_system_prompt: str | None,
+    params: dict[str, Any],
+    session: TurnSession,
+    base_url: str | None = None,
+    sift: Any | None = None,
+    use_tools: bool = True,
+    code_mode: bool = False,
+    skills: list[dict[str, Any]] | None = None,
+    use_context: bool = True,
+    knowledge: dict[str, Any] | None = None,
+    # docs referenciados com "#" no compositor: [{id, filename, base_id, text}].
+    # Injetados neste turno (híbrido: texto inteiro se pequeno, senão trechos).
+    ref_docs: list[dict[str, Any]] | None = None,
+    extra_system: str | None = None,
+    # detalhamento (em chars) das origens do extra_system, p/ o painel de uso:
+    # {"artifacts": n, "channel": n, "guards": n} — só rotula, não muda o prompt
+    extra_breakdown: dict[str, int] | None = None,
+    memory: MemoryOpts | None = None,
+    media: MediaOpts | None = None,
+    subagent: SubagentOpts | None = None,
+) -> AsyncGenerator[dict[str, Any], None]:
+    settings = get_settings()
+
+    # aliases dos grupos usados direto no corpo (o resto vive nas fases)
+    user_id = session.user_id
+    user_tz = session.user_tz
+    user_tz_offset = session.user_tz_offset
+    chat_id = session.chat_id
+    agent_id = session.agent_id
+    _mem = memory or MemoryOpts()
+    mem_write, mem_review, mem_project = _mem.write, _mem.review, _mem.project
+    _md = media or MediaOpts()
+    genimage, image_output = _md.genimage, _md.image_output
+    _sa = subagent or SubagentOpts()
+    subagents, run_subagent = _sa.agents, _sa.run
+    subagent_mode, subagent_max_calls = _sa.mode, _sa.max_calls
+    subagent_pass_context, subagent_worker_memory = _sa.pass_context, _sa.worker_memory
+
+    # Raciocínio: "Desligado" na UI apaga a chave => sem isto, modelos híbridos
+    # (DeepSeek V4 etc.) raciocinam POR PADRÃO e o usuário vê "Pensando…" com o
+    # seletor em off. Ausência de config = desligado de verdade. Quem escolhe um
+    # esforço na UI manda {"effort": ...} e passa intacto.
+    params = dict(params or {})
+    auto_reasoning_off = "reasoning" not in params
+    if auto_reasoning_off:
+        params["reasoning"] = {"enabled": False}
+
+    # torna o chat atual visível às ferramentas (ex.: lembrete "no chat atual").
+    # contextvar é isolado por task async e herdado pelo threadpool do dispatch.
+    toolctx.current_chat_id.set(chat_id)
+    # fuso do usuário visível às ferramentas (lembrete/agenda interpretam horários locais)
+    toolctx.user_tz.set(user_tz or "")
+    # execução autônoma (automação): tools pulam fases interativas (ex.: revisão de e-mail)
+    toolctx.background.set(bool(session.background))
+    # perfil do usuário visível à tool user.profile.get (nome, sobre, nascimento…)
+    toolctx.user_profile.set(session.user_profile or {})
+
+    # 1. contexto do turno: memória (mem0) + Base de Conhecimento (auto) + "#"refs
+    g = _GatheredContext()
+    async for ev in _gather_context(
+        g, api_key=api_key, user_text=user_text, session=session,
+        memory=_mem, knowledge=knowledge, ref_docs=ref_docs,
+    ):
+        yield ev
+    mem_items, memories = g.mem_items, g.memories
+    knowledge_block, ref_block = g.knowledge_block, g.ref_block
+    auto_knowledge_event, ref_knowledge_event = g.auto_knowledge_event, g.ref_knowledge_event
+    kb_bases, kb_k = g.kb_bases, g.kb_k
+
+    # 2. montagem das tools anunciadas + seção de ferramentas do system prompt
+    skills = skills or []
     subagents = subagents or []
-    subagents_by_key = {str(a.get("key")): a for a in subagents}
-    subagents_on = bool(subagents and run_subagent is not None)
-    if subagents_on:
-        tools = list(tools) + [_delegate_tool(subagents)]
-    delegations_used = 0
+    asm = _assemble_tools_and_prompt(
+        sift=sift, use_tools=use_tools, code_mode=code_mode, skills=skills,
+        genimage=genimage, kb_on=g.kb_on, kb_mode=g.kb_mode,
+        subagents=subagents, run_subagent=run_subagent,
+    )
+    tools: Any = asm.tools
+    sift_prompt = asm.sift_prompt
+    has_tools = asm.has_tools
+    skills_by_slug = asm.skills_by_slug
+    genimage_on = asm.genimage_on
+    kb_tool_on = asm.kb_tool_on
+    subagents_on = asm.subagents_on
+    subagents_by_key = asm.subagents_by_key
+    # despachante das tool_calls (contexto do turno agrupado; contador de
+    # delegações compartilhado entre a delegação paralela e a sequencial)
+    disp = _ToolDispatcher(
+        sift=sift, code_mode=code_mode, api_key=api_key, user_id=user_id, chat_id=chat_id,
+        skills=skills, skills_by_slug=skills_by_slug,
+        genimage_on=genimage_on, genimage=genimage,
+        kb_tool_on=kb_tool_on, kb_bases=kb_bases, kb_k=kb_k, user_text=user_text,
+        subagents_on=subagents_on, subagents_by_key=subagents_by_key,
+        subagent_max_calls=subagent_max_calls,
+        subagent_pass_context=subagent_pass_context,
+        subagent_worker_memory=subagent_worker_memory, run_subagent=run_subagent,
+    )
 
     static_system = _build_static_system(chat_system_prompt, sift_prompt)
     skills_block = _skills_block(skills)
@@ -785,100 +1295,13 @@ async def run_turn(
     if use_context:
         messages.extend(history)
 
-    # Anexos: imagens (visão nativa OU Vision Router), áudios (Audio Router) e
-    # arquivos de texto.
-    attachments = attachments or []
-    images = [a for a in attachments if a.get("type") == "image" and a.get("url")]
-    audios = [a for a in attachments if a.get("type") == "audio" and a.get("url")]
-    files = [a for a in attachments if a.get("type") == "file" and a.get("text")]
-    file_blocks = "\n\n".join(
-        f"[Arquivo anexado: {a.get('name') or 'arquivo'}]\n{a['text']}" for a in files
-    )
-    base_text = user_text
-    if file_blocks:
-        base_text = (base_text + "\n\n" + file_blocks).strip() if base_text else file_blocks
-
-    # Audio Router: transcreve os áudios ANTES do tratamento de imagens, para a
-    # transcrição entrar no texto-base em qualquer um dos ramos abaixo.
-    audio_note = ""
-    if audios and audio_router:
-        yield {"type": "audio_router", "status": "start", "engine": audio_router.get("engine"), "count": len(audios)}
-        try:
-            tx = await _transcribe_audios(audio_router, audios, api_key)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Audio Router falhou (%s); seguindo sem transcrição", exc)
-            tx = ""
-        yield {"type": "audio_router", "status": "done", "count": len(audios)}
-        audio_note = (
-            f"[O usuário enviou {len(audios)} áudio(s). Transcrição:\n{tx}]"
-            if tx else "[O usuário enviou áudio(s), mas não foi possível transcrevê-los.]"
-        )
-    elif audios:
-        audio_note = "[O usuário enviou áudio(s), mas este modelo não tem Audio Router configurado.]"
-    if audio_note:
-        attach_note_len = len(audio_note)
-        base_text = (base_text + "\n\n" + audio_note).strip() if base_text else audio_note
-    else:
-        attach_note_len = 0
-
-    # precedência do tratamento de imagens (modelo sem visão nativa):
-    #  - motor "tesseract" (ou "vision" sem router configurado) → OCR local
-    #  - motor "vision" com Vision Router → o modelo de visão descreve/transcreve
-    use_tesseract = bool(images and ocr and (ocr_engine == "tesseract" or not vision_router_model))
-    attach_chars = len(file_blocks) + attach_note_len
-    if images and vision:
-        # visão nativa: manda as imagens como partes image_url (multipart OpenAI)
-        parts: list[dict[str, Any]] = []
-        if base_text:
-            parts.append({"type": "text", "text": base_text})
-        for a in images:
-            parts.append({"type": "image_url", "image_url": {"url": a["url"]}})
-        messages.append({"role": "user", "content": parts})
-    elif images and vision_router_model and not use_tesseract:
-        # Vision Router: um modelo com visão descreve/transcreve as imagens em texto
-        yield {"type": "vision_router", "model": vision_router_model, "count": len(images)}
-        try:
-            desc = await _describe_images(api_key, vision_router_model, images)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Vision Router falhou (%s); seguindo sem descrição", exc)
-            desc = ""
-        note = (
-            f"[O usuário enviou {len(images)} imagem(ns). Um modelo de visão as descreveu:\n{desc}]"
-            if desc
-            else f"[O usuário enviou {len(images)} imagem(ns), mas não foi possível descrevê-las.]"
-        )
-        attach_chars += len(note)
-        combined = (base_text + "\n\n" + note).strip() if base_text else note
-        messages.append({"role": "user", "content": combined})
-    elif use_tesseract:
-        # OCR local (tesseract): lê o texto das imagens quando não há visão/router
-        yield {"type": "ocr", "count": len(images)}
-        texts: list[str] = []
-        for a in images:
-            raw = _decode_data_url(a.get("url"))
-            if not raw:
-                continue
-            try:
-                t = await run_in_threadpool(extraction.ocr_image_bytes, raw, ocr_lang)
-            except extraction.ExtractionError:
-                t = ""
-            if t.strip():
-                texts.append(t.strip())
-        note = (
-            "[Texto extraído por OCR das imagens enviadas:\n" + "\n---\n".join(texts) + "]"
-            if texts
-            else "[O usuário enviou imagens, mas o OCR não encontrou texto legível.]"
-        )
-        attach_chars += len(note)
-        combined = (base_text + "\n\n" + note).strip() if base_text else note
-        messages.append({"role": "user", "content": combined})
-    elif images:
-        note = "[O usuário enviou imagens, mas este modelo não tem Visão, Vision Router nem OCR configurado.]"
-        attach_chars += len(note)
-        combined = (base_text + "\n\n" + note).strip() if base_text else note
-        messages.append({"role": "user", "content": combined})
-    else:
-        messages.append({"role": "user", "content": base_text})
+    # 3. mensagem do usuário + anexos (arquivos, áudio, imagens) — Fase 3
+    _att: dict[str, int] = {"attach_chars": 0}
+    async for ev in _append_user_message(
+        _att, messages, user_text=user_text, media=_md, api_key=api_key,
+    ):
+        yield ev
+    attach_chars = _att["attach_chars"]
 
     # Pesos (em caracteres) de cada origem do prompt, p/ atribuir os tokens de
     # ENTRADA por categoria. O total de prompt_tokens vem real do provedor; a
@@ -1025,6 +1448,14 @@ async def run_turn(
             _merge_usage(total_usage, usage)
             yield {"type": "usage", "usage": usage}
 
+        # fecha o span de raciocínio ao FIM de cada iteração: quando o modelo pensa
+        # e emite só tool_calls (sem texto), reasoning_started ficava aberto e o
+        # próximo `+=` incluía a execução da(s) tool(s) e o pensamento seguinte —
+        # inflando o "pensou por Xs". Cada iteração fecha o seu.
+        if reasoning_started is not None:
+            reasoning_seconds += time.monotonic() - reasoning_started
+            reasoning_started = None
+
         if finish_reason != "tool_calls" or not tool_buffer:
             if tool_events and not nudged and _MARKER_ONLY_RE.match(assistant_text or ""):
                 nudged = True
@@ -1048,14 +1479,15 @@ async def run_turn(
         )
 
         # modo PARALELO: quando o modelo delega a vários operários numa tacada só,
-        # roda-os concorrentemente (respeitando o teto de chamadas do turno).
-        delegate_pre: dict[str, dict] = {}
+        # roda-os concorrentemente (respeitando o teto de chamadas do turno). O
+        # contador de delegações é do dispatcher (compartilhado com o modo sequencial).
+        disp.delegate_pre = {}
         if subagents_on and subagent_mode == "parallel":
             dcalls = [tc for tc in tool_calls if tc["function"]["name"] == "delegate"]
             if len(dcalls) > 1:
                 picked: list[tuple[str, str, str]] = []
                 for tc in dcalls:
-                    if delegations_used >= subagent_max_calls:
+                    if disp.delegations_used >= subagent_max_calls:
                         break
                     try:
                         a = json.loads(tc["function"]["arguments"] or "{}")
@@ -1067,14 +1499,14 @@ async def run_turn(
                         continue
                     task = str(a.get("task") or "")
                     yield {"type": "subagent", "status": "start", "agent": spec.get("name", key), "task": task[:200], "parallel": True, "ctx": subagent_pass_context, "mem": subagent_worker_memory}
-                    delegations_used += 1
+                    disp.delegations_used += 1
                     picked.append((tc["id"], key, task))
                 if picked:
                     results = await asyncio.gather(
                         *[run_subagent(k, t) for (_i, k, t) in picked], return_exceptions=True
                     )
                     for (tcid, _k, _t), res in zip(picked, results):
-                        delegate_pre[tcid] = {"error": str(res)} if isinstance(res, Exception) else res
+                        disp.delegate_pre[tcid] = {"error": str(res)} if isinstance(res, Exception) else res
 
         for tc in tool_calls:
             name = tc["function"]["name"]
@@ -1085,144 +1517,10 @@ async def run_turn(
             yield {"type": "tool_call", "name": name, "arguments": args}
             tool_events.append({"kind": "call", "name": name, "data": args})
 
-            if name == "view_skill":
-                slug = str(args.get("slug") or args.get("name") or "").strip().lower()
-                sk = skills_by_slug.get(slug)
-                if sk is None:
-                    known = ", ".join(sorted({s["slug"] for s in skills})) or "(nenhuma)"
-                    result: Any = {"error": f"skill '{slug}' não encontrada. Disponíveis: {known}"}
-                else:
-                    result = {
-                        "slug": sk["slug"],
-                        "name": sk["name"],
-                        "content": sk.get("content") or "",
-                    }
-            elif name == "generate_image":
-                # GenImage Router: gera a imagem, guarda os bytes e devolve uma URL
-                # assinada (pequena) — o base64 NUNCA vai ao contexto do modelo.
-                prompt = str(args.get("prompt") or "").strip()
-                if not genimage_on:
-                    result = {"error": "GenImage Router não está ativo neste modelo"}
-                elif not prompt:
-                    result = {"error": "`prompt` é obrigatório"}
-                else:
-                    yield {"type": "image_gen", "status": "start", "prompt": prompt[:120]}
-                    try:
-                        keys = {"openrouter": api_key, "imagegen": (genimage or {}).get("imagegen_key")}
-                        img_bytes, mime = await image_gen.generate(
-                            genimage, keys, prompt, str(args.get("size") or "1024x1024")
-                        )
-                        image_id = await _save_generated_image(
-                            user_id, chat_id, mime, img_bytes, prompt, (genimage or {}).get("model", "")
-                        )
-                        result = {"kind": "image", "url": image_gen.sign_image_url(image_id), "prompt": prompt}
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning("Falha ao gerar imagem: %s", exc)
-                        yield {"type": "image_gen", "status": "error"}
-                        result = {"error": f"não foi possível gerar a imagem: {exc}"}
-            elif name == "search_knowledge":
-                # Base de Conhecimento (modo ferramenta): busca os documentos e devolve
-                # os trechos numerados; a UI mostra as fontes (via kind:"knowledge").
-                query = str(args.get("query") or "").strip() or user_text
-                if not kb_tool_on:
-                    result = {"error": "base de conhecimento não está ativa neste modelo"}
-                else:
-                    yield {"type": "knowledge", "status": "start", "query": query[:120]}
-                    try:
-                        kres = await kb_retrieval.search(user_id, kb_bases, query, kb_k)
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning("search_knowledge falhou: %s", exc)
-                        kres = []
-                    _blk, ksrc = _knowledge_block_and_sources(kres)
-                    model_txt = (
-                        "Trechos da base de conhecimento (cite a fonte usada com [n]):\n\n" + _blk
-                        if kres else "Nenhum trecho relevante encontrado na base de conhecimento."
-                    )
-                    result = {
-                        "kind": "knowledge", "query": query[:200],
-                        "sources": ksrc, "count": len(kres), "_model": model_txt,
-                    }
-            elif name == "delegate":
-                if not subagents_on:
-                    result = {"error": "subagentes não habilitados neste modelo"}
-                elif tc["id"] in delegate_pre:  # já rodou em paralelo
-                    result = delegate_pre[tc["id"]]
-                    yield {"type": "subagent", "status": "done", "agent": (result.get("agent") if isinstance(result, dict) else None) or str(args.get("agent") or "")}
-                elif delegations_used >= subagent_max_calls:
-                    result = {"error": f"limite de {subagent_max_calls} delegações por turno atingido"}
-                else:
-                    key = str(args.get("agent") or "")
-                    task = str(args.get("task") or "")
-                    spec = subagents_by_key.get(key)
-                    if spec is None:
-                        result = {"error": f"subagente '{key}' não autorizado"}
-                    else:
-                        yield {"type": "subagent", "status": "start", "agent": spec.get("name", key), "task": task[:200], "ctx": subagent_pass_context, "mem": subagent_worker_memory}
-                        delegations_used += 1
-                        try:
-                            result = await run_subagent(key, task)
-                        except Exception as exc:  # noqa: BLE001
-                            logger.warning("Subagente falhou: %s", exc)
-                            result = {"error": f"o subagente falhou: {exc}"}
-                        yield {"type": "subagent", "status": "done", "agent": (result.get("agent") if isinstance(result, dict) else None) or spec.get("name", key)}
-            elif sift is None:
-                result = {"error": "ferramentas indisponíveis"}
-            elif name == "run_code" and not code_mode:
-                # run_code não foi anunciado a este modelo; não executa código
-                result = {"error": "run_code não está habilitado para este modelo"}
-            else:
-                # NÃO trocar por sift.adispatch: na SIFT 0.7 ele roda tools SÍNCRONAS
-                # inline ("offload them yourself if they block") — e TODAS as nossas
-                # builtins são sync (requests/Google/Tuya, segundos cada) → bloquearia
-                # o event loop do servidor inteiro. O threadpool é o offload correto
-                # enquanto as tools não forem `async def`.
-                result = await run_in_threadpool(sift.dispatch, name, args)
-                # Path errado/fora do escopo (modelo chutou, ex.: 'web.read' em vez
-                # de 'web.page.read'): enriquece o erro com o caminho de recuperação,
-                # senão modelos fracos DESISTEM e dizem que a ferramenta não existe.
-                if isinstance(result, str) and (
-                    "not allowed in this scope" in result or "unknown tool" in result.lower()
-                ):
-                    try:
-                        _r = json.loads(result)
-                        if isinstance(_r, dict) and _r.get("error"):
-                            _r["hint"] = (
-                                "This tool path does not exist here. Call search_tools "
-                                "with a short query to discover the CORRECT path, then "
-                                "retry execute_tool — do not tell the user the tool is unavailable."
-                            )
-                            result = json.dumps(_r, ensure_ascii=False)
-                    except (json.JSONDecodeError, ValueError):
-                        pass
-            # SIFT v0.4 retorna strings (JSON ou texto p/ search_tools); não
-            # re-serializar para não duplo-codificar o conteúdo enviado ao modelo.
-            if isinstance(result, str):
-                content = result
-                try:
-                    event_result: Any = json.loads(result)
-                except (json.JSONDecodeError, ValueError):
-                    event_result = result
-            else:
-                content = json.dumps(result, ensure_ascii=False, default=str)
-                event_result = result
-            # artefatos que o FRONT renderiza mas que o modelo não deve reproduzir:
-            # o modelo recebe só uma nota enxuta (event_result cobre str-JSON e dict).
-            # imagem: não repetir a URL interna nem o base64.
-            if isinstance(event_result, dict) and event_result.get("kind") == "image":
-                content = json.dumps({"ok": True, "note": "Image generated and shown to the user."})
-            # rascunho de e-mail: um composer editável foi mostrado ao usuário — o
-            # modelo NÃO deve afirmar que já enviou (o usuário revisa e envia).
-            if isinstance(event_result, dict) and event_result.get("kind") == "email_draft":
-                content = json.dumps({
-                    "ok": True,
-                    "note": "An editable email draft was shown to the user to review and send. "
-                            "Do NOT claim the email was sent; the user will send it from the composer.",
-                })
-            # base de conhecimento: o modelo recebe os TRECHOS (`_model`); a UI/persistência
-            # recebem só as fontes (o texto dos trechos não incha o tool_events salvo).
-            if isinstance(event_result, dict) and event_result.get("kind") == "knowledge":
-                content = event_result.get("_model") or ""
-                event_result = {k: v for k, v in event_result.items() if k != "_model"}
+            # despacha a tool (emite os eventos de progresso na ordem certa)
+            async for ev in disp.run(name, args, tc):
+                yield ev
+            content, event_result = _shape_tool_result(disp.result)
             yield {"type": "tool_result", "name": name, "result": event_result}
             tool_events.append({"kind": "result", "name": name, "data": event_result})
 
@@ -1243,45 +1541,11 @@ async def run_turn(
     if assistant_text and chat_id and mem_write and mem_write != "off":
         _spawn_memory_write(api_key, user_text, assistant_text, user_id, chat_id, agent_id, mem_write, mem_review, project_id=mem_project)
 
-    # fecha a duração caso o stream tenha terminado ainda "pensando"
-    if reasoning_started is not None:
-        reasoning_seconds += time.monotonic() - reasoning_started
-
-    # ENTRADA por categoria: distribui o total real de prompt_tokens
-    # proporcionalmente ao tamanho (chars) de cada bloco.
-    prompt_total = int(total_usage.get("prompt_tokens", 0) or 0)
-    weight_total = sum(input_chars.values())
-    if prompt_total and weight_total:
-        input_breakdown = {
-            k: round(prompt_total * v / weight_total) for k, v in input_chars.items()
-        }
-    else:
-        input_breakdown = {k: 0 for k in input_chars}
-
-    # SAÍDA por categoria: saída "visível" vs raciocínio (thinking)
-    completion_total = int(total_usage.get("completion_tokens", 0) or 0)
-    reasoning_tokens = int(total_usage.get("reasoning_tokens", 0) or 0)
-    # fallback: se o provedor não separou, estima o thinking pelo texto capturado
-    if not reasoning_tokens and reasoning_text and completion_total:
-        est = round(len(reasoning_text) / 4)
-        reasoning_tokens = min(est, completion_total)
-    output_breakdown = {
-        "output": max(0, completion_total - reasoning_tokens),
-        "thinking": reasoning_tokens,
-    }
-    total_usage["input_breakdown"] = input_breakdown
-    total_usage["output_breakdown"] = output_breakdown
-    # por ferramenta (mesma distribuição proporcional; soma ≈ tool_results)
-    if prompt_total and weight_total and tool_result_chars:
-        total_usage["tools_breakdown"] = {
-            k: round(prompt_total * v / weight_total) for k, v in tool_result_chars.items()
-        }
-    # detalhe do "extra" por origem (artefatos/canal/guardas) — soma ≈ extra
-    if prompt_total and weight_total and extra_breakdown:
-        total_usage["extra_breakdown"] = {
-            k: round(prompt_total * v / weight_total)
-            for k, v in extra_breakdown.items() if v
-        }
+    # 5. detalhamentos de uso (entrada/saída/por-tool/extra) — Fase 5
+    _finalize_usage(
+        total_usage, input_chars=input_chars, tool_result_chars=tool_result_chars,
+        extra_breakdown=extra_breakdown, reasoning_text=reasoning_text,
+    )
 
     has_usage = total_usage["total_tokens"] > 0 or total_usage["cost"] > 0
     yield {

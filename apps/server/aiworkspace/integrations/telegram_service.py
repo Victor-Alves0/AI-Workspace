@@ -147,20 +147,18 @@ async def _resolve_thread(
     return thread, chat
 
 
-def _memory_kwargs(conn: TelegramConnection, chat: Chat, mc: ModelConfig | None, model: str) -> dict:
-    from ..chat.routes import _mem_agent_id
+def _memory_setup(conn: TelegramConnection, chat: Chat, mc: ModelConfig | None, model: str):
+    """Política de memória da conexão → (chat_id, agent_id, MemoryOpts) — ver WhatsApp."""
+    from ..chat.orchestrator import MemoryOpts
+    from ..chat.turn_setup import _mem_agent_id
 
     agent_id = _mem_agent_id(mc, model)
     banks = [str(b) for b in ((mc.capabilities or {}).get("memory") or {}).get("banks", [])] if mc else []
     if conn.memory == "global":
-        return {
-            "chat_id": str(chat.id), "agent_id": agent_id, "mem_banks": banks,
-            "mem_read": {"global": True, "model": True, "chat": True}, "mem_write": "model",
-        }
-    return {
-        "chat_id": str(chat.id), "agent_id": agent_id, "mem_banks": banks,
-        "mem_read": {"global": False, "model": False, "chat": True}, "mem_write": "chat",
-    }
+        mem = MemoryOpts(read={"global": True, "model": True, "chat": True}, write="model", banks=banks)
+    else:
+        mem = MemoryOpts(read={"global": False, "model": False, "chat": True}, write="chat", banks=banks)
+    return str(chat.id), agent_id, mem
 
 
 # --------------------------------------------------------------------------- #
@@ -214,8 +212,8 @@ async def _deliver(conn: TelegramConnection, token: str, tg_chat_id: str, text: 
 # Turno de modelo por mensagem recebida
 # --------------------------------------------------------------------------- #
 async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
-    from ..chat.orchestrator import run_turn_guarded
-    from ..chat.routes import (
+    from ..chat.orchestrator import MediaOpts, TurnSession, run_turn_guarded
+    from ..chat.turn_setup import (
         _audio_router_config, _code_mode, _load_skills, _resolve_guards,
         _resolve_provider, _usage_record, _user_profile_dict,
     )
@@ -307,17 +305,22 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
         usage = reasoning = tool_events = None
         error = None
         try:
+            mem_chat_id, mem_agent_id, mem_opts = _memory_setup(conn, chat, mc, model)
             async for ev in run_turn_guarded(
                 guards=guards, api_key=api_key, model=model, history=history, user_text=text,
                 chat_system_prompt=mc.system_prompt if mc else None,
                 params=(mc.params if mc else {}) or {},
-                user_id=str(user.id), base_url=base_url, background=True,
+                base_url=base_url,
+                session=TurnSession(
+                    user_id=str(user.id), background=True,
+                    chat_id=mem_chat_id, agent_id=mem_agent_id,
+                    user_profile=_user_profile_dict(user),
+                ),
                 sift=sift, code_mode=_code_mode(mc),
                 skills=skills, use_context=True, extra_system=extra_system,
                 extra_breakdown={"channel": len(extra_system)},
-                attachments=attachments or None, audio_router=audio_router,
-                user_profile=_user_profile_dict(user),
-                **_memory_kwargs(conn, chat, mc, model),
+                memory=mem_opts,
+                media=MediaOpts(attachments=attachments or None, audio_router=audio_router),
             ):
                 if ev["type"] == "done":
                     content = ev.get("content", "")
