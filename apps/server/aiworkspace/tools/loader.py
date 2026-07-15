@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
-from ..models import GoogleAccount, Tool, User
+from ..models import GithubAccount, GoogleAccount, Tool, User
 from ..secrets_service import (
     ALPHAVANTAGE_KEY,
     BRAVE_KEY,
@@ -168,6 +168,20 @@ async def _assemble_configs(db: AsyncSession, user_id: uuid.UUID, model_config: 
     google_cfg = sift_service.google_config_from_secrets(
         str(user_id), g_accounts, g_prefs, confirm_actions=confirm_actions
     )
+    # GitHub: contas conectadas do usuário (PAT/OAuth) filtradas pelas liberadas neste
+    # modelo (tools_cfg.github.accounts; vazio = todas). O token NÃO entra na config
+    # (é buscado ao vivo na tool) — só id+login das contas + ops.
+    gh_prefs = tools_cfg.get("github") or {}
+    gh_allowed_ids = {str(x) for x in (gh_prefs.get("accounts") or [])}
+    gh_rows = list(await db.scalars(select(GithubAccount).where(GithubAccount.user_id == user_id)))
+    gh_accounts = [
+        {"id": str(a.id), "login": a.login}
+        for a in gh_rows
+        if not gh_allowed_ids or str(a.id) in gh_allowed_ids
+    ]
+    github_cfg = sift_service.github_config_from_secrets(
+        str(user_id), gh_accounts, gh_prefs, confirm_actions=confirm_actions
+    )
     # Tuya/Smart Life: conexão GLOBAL (app_settings) + gating por-modelo. Só busca a
     # conexão se este modelo de fato equipou a tool (evita ler config à toa).
     tuya_cfg = None
@@ -177,7 +191,23 @@ async def _assemble_configs(db: AsyncSession, user_id: uuid.UUID, model_config: 
         tuya_cfg = sift_service.tuya_config_from_secrets(
             conn, tools_cfg.get("tuya"), confirm_actions=confirm_actions
         )
-    return cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg
+    # Mensagens (WhatsApp/Telegram/Discord): conexões de chat ATIVAS do usuário
+    # filtradas pelas liberadas neste modelo (tools_cfg.messaging.accounts; vazio =
+    # todas). Nenhum token entra na config — resolvido ao vivo por conexão na tool.
+    # Só busca as conexões se o modelo de fato equipou a tool (evita I/O à toa).
+    messaging_cfg = None
+    if any(tid == f"{_BUILTIN_PREFIX}messaging.chat.manage" for tid in tool_ids):
+        from ..integrations import messaging_service
+        m_prefs = tools_cfg.get("messaging") or {}
+        m_allowed_ids = {str(x) for x in (m_prefs.get("accounts") or [])}
+        m_accounts = [
+            a for a in await messaging_service.gather_accounts(db, user_id)
+            if not m_allowed_ids or a["id"] in m_allowed_ids
+        ]
+        messaging_cfg = sift_service.messaging_config_from_secrets(
+            str(user_id), m_accounts, m_prefs, confirm_actions=confirm_actions
+        )
+    return cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg
 
 
 async def build_full_sift_for_user(db: AsyncSession, user_id: uuid.UUID):
@@ -185,9 +215,9 @@ async def build_full_sift_for_user(db: AsyncSession, user_id: uuid.UUID):
     Debug de Tools chamar qualquer ferramenta direto (`sift.execute_tool(path, params)`).
     Usa as configs globais do usuário (sem gating por-modelo). None se a SIFT falhar."""
     rows = list(await db.scalars(select(Tool).where(Tool.user_id == user_id)))
-    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg = await _assemble_configs(db, user_id, None, [])
+    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg = await _assemble_configs(db, user_id, None, [])
     return await run_in_threadpool(
-        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg
+        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg
     )
 
 
@@ -208,11 +238,11 @@ async def get_sift_for_user(
     if not allow:
         return None
 
-    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg = await _assemble_configs(
+    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg = await _assemble_configs(
         db, user_id, model_config, tool_ids
     )
     full = await run_in_threadpool(
-        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg
+        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg
     )
     if full is None:
         return None

@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -71,6 +71,9 @@ class WhatsAppConnection(Base):
         ForeignKey("folders.id", ondelete="SET NULL"), nullable=True
     )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # janela de silencio (s) p/ colar mensagens fragmentadas do contato num unico
+    # turno; 0 = desligado (um turno por mensagem)
+    debounce_seconds: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     # estado vivo: {status, profile_name, last_error, last_event_at}
     state: Mapped[dict] = mapped_column(JSONB, default=dict)
 

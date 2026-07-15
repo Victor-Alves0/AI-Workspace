@@ -280,6 +280,34 @@ GMAIL_METADATA_MAX = 50       # teto de GETs N+1 quando o modelo pede N explíci
 GMAIL_COUNT_SAMPLE = 25       # amostra com metadados quando max_results=0 (contar)
 
 
+# Lixo que infla o contexto sem informar: e-mails de marketing enchem snippets e
+# corpos de caracteres INVISÍVEIS (o LinkedIn manda centenas de U+034F seguidos p/
+# empurrar o preview) e de réguas/espaçamento. Cada char desses é pago como token na
+# entrada do modelo — e relido a cada volta do turno.
+# Codepoints INVISIVEIS (largura zero / joiners / marcas de direcao). Mantidos como
+# lista explicita: no fonte eles seriam indistinguiveis de espaco e corromperiam o
+# arquivo em qualquer editor descuidado.
+_INVISIBLE_CODEPOINTS = (
+    0x00AD, 0x034F, 0x061C, 0x180E, 0x200B, 0x200C, 0x200D, 0x200E, 0x200F,
+    0x2028, 0x2029, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2060, 0x2061,
+    0x2062, 0x2063, 0x2064, 0x2066, 0x2067, 0x2068, 0x2069, 0x206A, 0x206B,
+    0x206C, 0x206D, 0x206E, 0x206F, 0x2800, 0xFEFF,
+)
+_INVISIBLE_RE = re.compile("[" + "".join(chr(c) for c in _INVISIBLE_CODEPOINTS) + "]")
+_RULE_LINE_RE = re.compile(r"(?m)^[\s\-=_*~·•—–]{4,}$")
+_MULTI_SPACE_RE = re.compile(r"[ \t]{2,}")
+_MULTI_NL_RE = re.compile(r"\n{3,}")
+
+
+def _clean_text(s: str) -> str:
+    """Tira invisíveis, réguas e espaçamento repetido — sem tocar no conteúdo real."""
+    s = _INVISIBLE_RE.sub("", s or "")
+    s = _RULE_LINE_RE.sub("", s)
+    s = _MULTI_SPACE_RE.sub(" ", s)
+    s = _MULTI_NL_RE.sub("\n\n", s)
+    return s.strip()
+
+
 def gmail_search(token: str, query: str, max_results: int) -> dict[str, Any]:
     """Lista mensagens do Gmail (metadados + snippet).
 
@@ -315,7 +343,7 @@ def gmail_search(token: str, query: str, max_results: int) -> dict[str, Any]:
             "from": _hval(hs, "From"),
             "subject": _hval(hs, "Subject"),
             "date": _hval(hs, "Date"),
-            "snippet": full.get("snippet", ""),
+            "snippet": _clean_text(full.get("snippet", "")),
         })
     result: dict[str, Any] = {"messages": out, "count": len(ids)}
     if len(ids) > len(out):
@@ -344,7 +372,10 @@ def _decode_body(payload: dict) -> str:
     return html
 
 
-def gmail_get(token: str, msg_id: str, max_chars: int = 8000) -> dict[str, Any]:
+GMAIL_BODY_MAX = 4000  # teto por e-mail; ler 5 de uma vez já são 20k chars de contexto
+
+
+def gmail_get(token: str, msg_id: str, max_chars: int = GMAIL_BODY_MAX) -> dict[str, Any]:
     svc = _service(token, "gmail", "v1")
     full = svc.users().messages().get(userId="me", id=msg_id, format="full").execute()
     payload = full.get("payload", {})
@@ -354,13 +385,20 @@ def gmail_get(token: str, msg_id: str, max_chars: int = 8000) -> dict[str, Any]:
     if "<" in body and ">" in body:
         from .. import deep_search
         body = deep_search._html_to_text(body)
-    return {
+    body = _clean_text(body)
+    out = {
         "id": full["id"],
         "from": _hval(hs, "From"),
         "subject": _hval(hs, "Subject"),
         "date": _hval(hs, "Date"),
         "body": body[:max_chars],
     }
+    # o modelo precisa SABER que cortamos — senão ele afirma coisas sobre um e-mail
+    # que leu pela metade sem nunca dizer que faltou pedaço.
+    if len(body) > max_chars:
+        out["truncated"] = True
+        out["note"] = f"body cut at {max_chars} chars (original: {len(body)})"
+    return out
 
 
 def gmail_send(token: str, to: str, subject: str, body: str, cc: str = "", html: str = "") -> dict[str, Any]:

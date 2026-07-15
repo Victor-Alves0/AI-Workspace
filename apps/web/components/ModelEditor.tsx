@@ -8,7 +8,7 @@ import type { KnowledgeBase, MemoryBank, Model, ModelConfig, Skill, SystemTool, 
 import TransferModal, { type TransferItem } from "./TransferModal";
 import ModelField from "./ModelField";
 import { Toggle } from "./ui";
-import { WebSearchPanel, FinancePanel, TextExtractionPanel, DeepSearchPanel, GooglePanel, TuyaToolPanel } from "./toolPanels";
+import { WebSearchPanel, FinancePanel, TextExtractionPanel, DeepSearchPanel, GooglePanel, TuyaToolPanel, GithubToolPanel, MessagingToolPanel } from "./toolPanels";
 
 // ferramentas internas com painel de config (engrenagem em "Ferramentas Ativas")
 const TOOL_CFG: Record<string, { key: string; Panel: (p: any) => JSX.Element; needsStatus: boolean }> = {
@@ -19,6 +19,8 @@ const TOOL_CFG: Record<string, { key: string; Panel: (p: any) => JSX.Element; ne
   "builtin:google.gmail.mailbox": { key: "google", Panel: GooglePanel, needsStatus: false },
   "builtin:google.calendar.events": { key: "google", Panel: GooglePanel, needsStatus: false },
   "builtin:smartlife.tuya.devices": { key: "tuya", Panel: TuyaToolPanel, needsStatus: false },
+  "builtin:github.repo.manage": { key: "github", Panel: GithubToolPanel, needsStatus: false },
+  "builtin:messaging.chat.manage": { key: "messaging", Panel: MessagingToolPanel, needsStatus: false },
 };
 
 /** Ícone de info com tooltip no hover — ao lado dos títulos de configuração.

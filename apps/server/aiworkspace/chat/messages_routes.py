@@ -52,6 +52,7 @@ from .turn_setup import (
     _sse_stream,
     _subagent_opts,
     _subscribe,
+    _remember_tz,
     _tz_from_header,
     _usage_record,
     _use_context,
@@ -163,6 +164,7 @@ async def send_message(
     if not (body.content or "").strip() and not body.attachments:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mensagem vazia")
     await budget_service.enforce_or_raise(db, user)  # orçamento pessoal (modo "pausar")
+    _remember_tz(user, user_tz)  # canais (sem navegador) usam o fuso salvo aqui
 
     api_key, base_url = await _resolve_provider(db, user, chat.model)
 

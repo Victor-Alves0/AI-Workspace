@@ -1,14 +1,12 @@
-"""Serviço da integração Telegram: recebe updates, roda o modelo e responde.
-
-Espelha o `whatsapp_service` (inbound → run_turn_guarded → reply), mas via Bot API
-com long-polling. O poller (`telegram_poller`) chama `handle_update` por update.
+"""Serviço da integração Discord: recebe mensagens do Gateway, roda o modelo e
+responde. Espelha o `telegram_service` (inbound → run_turn_guarded → reply), mas o
+recebimento vem de um evento MESSAGE_CREATE do Gateway. Cada canal/DM vira um Chat.
 Também expõe entrega para automações (`resolve_recipients`/`broadcast`).
 """
 
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 import random
 import re
@@ -19,12 +17,9 @@ from typing import Any
 from sqlalchemy import select
 
 from ..db import SessionLocal
-from . import channel_media, inbound_batch
-from ..models import (
-    Chat, Folder, Message, ModelConfig, TelegramConnection, TelegramThread, User,
-)
+from ..models import Chat, Folder, Message, ModelConfig, DiscordConnection, DiscordThread, User
 from ..usage_service import usage_event_from_record
-from . import telegram_api
+from . import channel_media, discord_api, inbound_batch
 
 logger = logging.getLogger(__name__)
 
@@ -36,38 +31,41 @@ def _err_text(exc: BaseException) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Extração/filtragem do update
+# Extração/filtragem do evento
 # --------------------------------------------------------------------------- #
-def parse_update(u: dict[str, Any]) -> dict[str, Any] | None:
-    """Extrai o essencial de um update: mensagem de TEXTO ou de VOZ/ÁUDIO
-    (o Audio Router do modelo transcreve). Ignora o resto."""
-    msg = u.get("message") or {}
-    text = msg.get("text")
-    voice = msg.get("voice") or msg.get("audio") or {}
-    chat = msg.get("chat") or {}
-    frm = msg.get("from") or {}
-    if (not text and not voice.get("file_id")) or not chat.get("id"):
+def parse_message(event: dict[str, Any]) -> dict[str, Any] | None:
+    """Extrai o essencial de um MESSAGE_CREATE. Ignora mensagens de bots (inclui a
+    si mesmo) e sem conteúdo de texto (v1 não transcreve anexos de voz)."""
+    author = event.get("author") or {}
+    if author.get("bot"):
         return None
-    ctype = chat.get("type") or "private"
-    name = " ".join(p for p in [frm.get("first_name"), frm.get("last_name")] if p) or frm.get("username") or "contato"
+    content = (event.get("content") or "").strip()
+    channel_id = event.get("channel_id")
+    if not content or not channel_id:
+        return None
+    guild_id = event.get("guild_id")
+    name = author.get("global_name") or author.get("username") or "contato"
+    mention_ids = {str((m or {}).get("id")) for m in (event.get("mentions") or [])}
     return {
-        "update_id": u.get("update_id"),
-        "tg_chat_id": str(chat["id"]),
-        "text": text or "",
-        "audio_file_id": voice.get("file_id") or "",
-        "audio_mime": voice.get("mime_type") or "audio/ogg",
+        "channel_id": str(channel_id),
+        "text": content,
         "sender_name": name,
-        "sender_id": str(frm.get("id") or ""),
-        "username": (frm.get("username") or "").lower(),
-        "is_group": ctype in ("group", "supergroup"),
-        "msg_id": str(msg.get("message_id") or ""),
+        "sender_id": str(author.get("id") or ""),
+        "username": (author.get("username") or "").lower(),
+        "is_dm": guild_id is None,
+        "mention_ids": mention_ids,
+        "msg_id": str(event.get("id") or ""),
     }
 
 
-def passes_filters(conn: TelegramConnection, m: dict[str, Any]) -> tuple[bool, str]:
+def passes_filters(conn: DiscordConnection, m: dict[str, Any]) -> tuple[bool, str]:
     f = conn.filters or {}
-    if m["is_group"] and not f.get("groups", False):
-        return False, "grupos desativados"
+    if not m["is_dm"] and not f.get("guilds", True):
+        return False, "servidores desativados"
+    # em servidor, opcionalmente só responde quando o bot é @mencionado
+    if not m["is_dm"] and f.get("mention_only", True):
+        if conn.app_id and conn.app_id not in m.get("mention_ids", set()):
+            return False, "sem menção ao bot"
     ids = {str(x).lower().lstrip("@") for x in (f.get("block") or [])}
     if ids and (m["sender_id"] in ids or (m["username"] and m["username"] in ids)):
         return False, "remetente bloqueado"
@@ -80,14 +78,20 @@ def passes_filters(conn: TelegramConnection, m: dict[str, Any]) -> tuple[bool, s
     return True, ""
 
 
+def _strip_mention(text: str, app_id: str) -> str:
+    """Remove a menção ao bot (<@id> / <@!id>) do início do texto."""
+    if not app_id:
+        return text
+    return re.sub(rf"^\s*<@!?{re.escape(app_id)}>\s*", "", text).strip() or text
+
+
 # --------------------------------------------------------------------------- #
 # Pasta + thread ↔ chat
 # --------------------------------------------------------------------------- #
 async def _find_or_create_folder(db, user_id, name: str, parent_id) -> Folder:
     folder = await db.scalar(
         select(Folder).where(
-            Folder.user_id == user_id, Folder.name == name,
-            Folder.parent_id == parent_id,
+            Folder.user_id == user_id, Folder.name == name, Folder.parent_id == parent_id,
         )
     )
     if folder is None:
@@ -97,12 +101,12 @@ async def _find_or_create_folder(db, user_id, name: str, parent_id) -> Folder:
     return folder
 
 
-async def _ensure_folder(db, conn: TelegramConnection, user: User):
+async def _ensure_folder(db, conn: DiscordConnection, user: User):
     if conn.folder_id:
         f = await db.get(Folder, conn.folder_id)
         if f is not None:
             return f.id
-    root = await _find_or_create_folder(db, user.id, "Telegram", None)
+    root = await _find_or_create_folder(db, user.id, "Discord", None)
     who = conn.bot_username or conn.label or "bot"
     sub = await _find_or_create_folder(db, user.id, f"@{who}", root.id)
     chats = await _find_or_create_folder(db, user.id, "Chats", sub.id)
@@ -111,11 +115,11 @@ async def _ensure_folder(db, conn: TelegramConnection, user: User):
 
 
 async def _resolve_thread(
-    db, conn: TelegramConnection, user: User, m: dict[str, Any], mc: ModelConfig | None
-) -> tuple[TelegramThread, Chat]:
+    db, conn: DiscordConnection, user: User, m: dict[str, Any], mc: ModelConfig | None
+) -> tuple[DiscordThread, Chat]:
     thread = await db.scalar(
-        select(TelegramThread).where(
-            TelegramThread.connection_id == conn.id, TelegramThread.tg_chat_id == m["tg_chat_id"]
+        select(DiscordThread).where(
+            DiscordThread.connection_id == conn.id, DiscordThread.channel_id == m["channel_id"]
         )
     )
     if thread is not None:
@@ -131,7 +135,7 @@ async def _resolve_thread(
 
     chat = Chat(
         user_id=user.id,
-        title=f"Telegram · {m.get('sender_name') or m['tg_chat_id']}"[:255],
+        title=f"Discord · {m.get('sender_name') or m['channel_id']}"[:255],
         model=(mc.base_model if mc else "") or conn.model,
         model_config_id=mc.id if mc else None,
         params=(mc.params if mc else {}) or {},
@@ -139,17 +143,16 @@ async def _resolve_thread(
     )
     db.add(chat)
     await db.flush()
-    thread = TelegramThread(
-        connection_id=conn.id, tg_chat_id=m["tg_chat_id"], chat_id=chat.id,
-        contact_name=m.get("sender_name") or "", is_group=m.get("is_group", False),
+    thread = DiscordThread(
+        connection_id=conn.id, channel_id=m["channel_id"], chat_id=chat.id,
+        contact_name=m.get("sender_name") or "", is_dm=m.get("is_dm", False),
     )
     db.add(thread)
     await db.flush()
     return thread, chat
 
 
-def _memory_setup(conn: TelegramConnection, chat: Chat, mc: ModelConfig | None, model: str):
-    """Política de memória da conexão → (chat_id, agent_id, MemoryOpts) — ver WhatsApp."""
+def _memory_setup(conn: DiscordConnection, chat: Chat, mc: ModelConfig | None, model: str):
     from ..chat.orchestrator import MemoryOpts
     from ..chat.turn_setup import _mem_agent_id
 
@@ -168,7 +171,7 @@ def _memory_setup(conn: TelegramConnection, chat: Chat, mc: ModelConfig | None, 
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?…])\s+(?=[A-ZÀ-Ý0-9\"'(])")
 
 
-def _humanize_cfg(conn: TelegramConnection) -> dict[str, Any]:
+def _humanize_cfg(conn: DiscordConnection) -> dict[str, Any]:
     h = conn.humanize or {}
     return {
         "enabled": bool(h.get("enabled")),
@@ -193,20 +196,20 @@ def _split_message(text: str, max_parts: int = 5) -> list[str]:
 def _delay_seconds(cfg: dict, chunk: str) -> float:
     lo, hi = cfg["min_seconds"], max(cfg["max_seconds"], cfg["min_seconds"])
     base = random.uniform(lo, hi) if hi > 0 else 0.0
-    return min(base + len(chunk) / 900.0, 12.0)  # ~ tempo de digitar
+    return min(base + len(chunk) / 900.0, 12.0)
 
 
-async def _deliver(conn: TelegramConnection, token: str, tg_chat_id: str, text: str) -> None:
+async def _deliver(conn: DiscordConnection, token: str, channel_id: str, text: str) -> None:
     cfg = _humanize_cfg(conn)
     chunks = _split_message(text) if cfg["enabled"] and cfg["split"] else [text]
-    for i, chunk in enumerate(chunks):
+    for chunk in chunks:
         if cfg["enabled"]:
             if cfg["typing"]:
-                await telegram_api.send_chat_action(token, tg_chat_id, "typing")
+                await discord_api.trigger_typing(token, channel_id)
             wait = _delay_seconds(cfg, chunk)
             if wait > 0:
                 await asyncio.sleep(wait)
-        await telegram_api.send_message(token, tg_chat_id, chunk)
+        await discord_api.send_message(token, channel_id, chunk)
 
 
 # --------------------------------------------------------------------------- #
@@ -216,15 +219,16 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
     """Um turno para o LOTE de mensagens (ver inbound_batch). Sem janela de agregação
     o lote tem uma mensagem só e o comportamento é o de antes."""
     m = msgs[-1]  # identidade da conversa = a última do lote
-    from ..chat.orchestrator import MediaOpts, TurnSession, run_turn_guarded
+    from ..chat.orchestrator import TurnSession, run_turn_guarded
+    from ..chat.orchestrator import MediaOpts
     from ..chat.turn_setup import (
-        _audio_router_config, _code_mode, _genimage_config, _load_skills, _profile_tz,
-        _resolve_guards, _resolve_provider, _usage_record, _user_profile_dict,
+        _code_mode, _genimage_config, _load_skills, _profile_tz, _resolve_guards,
+        _resolve_provider, _usage_record, _user_profile_dict,
     )
     from ..tools.loader import get_sift_for_user
 
     async with SessionLocal() as db:
-        conn = await db.get(TelegramConnection, connection_id)
+        conn = await db.get(DiscordConnection, connection_id)
         if conn is None or not conn.enabled:
             return
         user = await db.get(User, conn.user_id)
@@ -262,30 +266,13 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
         # o lote (janela de agregação) vira um texto só — o contato fragmentou a fala
         trigger = ((conn.filters or {}).get("trigger") or "").strip()
 
-        def _strip_trigger(t: str) -> str:
+        def _clean(t: str) -> str:
+            t = _strip_mention(t, conn.app_id)
             if trigger and t.lower().startswith(trigger.lower()):
                 return t[len(trigger):].strip() or t
             return t
 
-        text = "\n".join(_strip_trigger(x["text"]) for x in msgs if (x.get("text") or "").strip())
-
-        # Notas de voz → baixa via getFile e deixa o Audio Router transcrever
-        attachments: list[dict[str, Any]] = []
-        audio_router = None
-        audio_msgs = [x for x in msgs if x.get("audio_file_id")]
-        if audio_msgs:
-            audio_router = await _audio_router_config(db, user, mc)
-            for i, x in enumerate(audio_msgs, 1):
-                try:
-                    raw = await telegram_api.get_file_bytes(token, x["audio_file_id"])
-                    b64 = base64.b64encode(raw).decode()
-                    mime = x.get("audio_mime") or "audio/ogg"
-                    attachments.append({
-                        "type": "audio", "name": f"voz{i}.ogg", "mime": mime,
-                        "url": f"data:{mime};base64,{b64}",
-                    })
-                except Exception as exc:  # noqa: BLE001 - áudio indisponível não trava o turno
-                    logger.warning("telegram: falha ao baixar áudio (%s): %s", conn.id, exc)
+        text = "\n".join(c for c in (_clean(x["text"]) for x in msgs) if c.strip())
 
         rows = list(await db.scalars(
             select(Message)
@@ -293,28 +280,25 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
             .order_by(Message.created_at.desc()).limit(40)
         ))
         history = [{"role": r.role, "content": r.content} for r in reversed(rows) if r.content]
-        display = text or ("[Mensagem de voz]" if attachments else text)
-        shown = f"{m['sender_name']}: {display}" if m.get("is_group") and m.get("sender_name") else display
+        shown = f"{m['sender_name']}: {text}" if not m.get("is_dm") and m.get("sender_name") else text
         db.add(Message(chat_id=chat.id, role="user", content=shown))
 
-        # sem as tools que o canal não entrega (diagrama); gráfico e imagem VÃO como mídia
+        # sem as tools que o canal nao entrega (diagrama); grafico e imagem VAO como anexo
         sift = await get_sift_for_user(db, user.id, channel_media.sift_view(mc))
         skills = await _load_skills(db, user, mc)
         guards = await _resolve_guards(db, user, mc)
         genimage = await _genimage_config(db, user, mc)
+        where = "a DM" if m.get("is_dm") else "a Discord server channel"
         extra_parts = [
-            f"You are replying on Telegram (bot '@{conn.bot_username or conn.label}') to "
-            f"{m.get('sender_name')}. Answer as a Telegram message: concise, plain text; "
-            f"avoid markdown headings/tables. Charts and generated images ARE delivered to "
-            f"the contact as real media, so you may use them. Match the contact's language."
+            f"You are replying on Discord (bot '{conn.bot_username or conn.label}') in {where} to "
+            f"{m.get('sender_name')}. Answer as a Discord message: concise, plain text; you may use "
+            f"simple markdown (bold, lists, `code`) but avoid big headings/tables. Match the "
+            f"contact's language."
         ]
         if (conn.system_prompt or "").strip():
             extra_parts.append(conn.system_prompt.strip())
         extra_system = "\n\n".join(extra_parts)
 
-        # COMMIT antes do turno (depois das queries de preparação): devolve a conexão
-        # ao pool durante o run_turn e preserva a mensagem recebida se o processo
-        # cair no meio (ver whatsapp_service).
         await db.commit()
 
         content = ""
@@ -337,8 +321,7 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
                 skills=skills, use_context=True, extra_system=extra_system,
                 extra_breakdown={"channel": len(extra_system)},
                 memory=mem_opts,
-                media=MediaOpts(attachments=attachments or None, audio_router=audio_router,
-                                genimage=genimage),
+                media=MediaOpts(genimage=genimage),
             ):
                 if ev["type"] == "done":
                     content = ev.get("content", "")
@@ -348,14 +331,14 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
         except Exception as exc:  # noqa: BLE001
             error = _err_text(exc)
 
-        # grafico/imagem do turno -> midia de verdade (sendPhoto)
+        # grafico/imagem do turno -> anexo de verdade no canal
         media = await channel_media.collect(tool_events)
 
         # resposta so com imagem e legitima ("me faz um grafico"): nao e "vazia"
         if error or not (content or media):
             conn.state = {**(conn.state or {}), "last_error": error or "Resposta vazia"}
             await db.commit()
-            logger.warning("telegram: turno falhou (%s): %s", conn.id, error)
+            logger.warning("discord: turno falhou (%s): %s", conn.id, error)
             return
 
         rec = _usage_record(usage, model, mc)
@@ -372,58 +355,57 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
         thread.last_message_at = datetime.now(timezone.utc)
         try:
             if content:
-                await _deliver(conn, token, m["tg_chat_id"], content)
+                await _deliver(conn, token, m["channel_id"], content)
             for item in media:
-                await telegram_api.send_photo(
-                    token, m["tg_chat_id"], item["data"], item["filename"], item["caption"],
+                await discord_api.send_file(
+                    token, m["channel_id"], item["data"], item["filename"], item["caption"],
                 )
             conn.state = {**(conn.state or {}), "last_error": None,
                           "last_event_at": datetime.now(timezone.utc).isoformat()}
         except Exception as exc:  # noqa: BLE001
             conn.state = {**(conn.state or {}), "last_error": f"Falha ao enviar: {_err_text(exc)}"}
-            logger.warning("telegram: envio falhou (%s): %s", conn.id, exc)
+            logger.warning("discord: envio falhou (%s): %s", conn.id, exc)
         await db.commit()
 
 
-async def handle_update(connection_id: uuid.UUID, update: dict[str, Any]) -> None:
-    """Processa UM update: filtra e roda o turno (sessão própria em _run_one)."""
-    m = parse_update(update)
+async def handle_message(connection_id: uuid.UUID, event: dict[str, Any]) -> None:
+    """Processa UMA mensagem: filtra e roda o turno (sessão própria em _run_one)."""
+    m = parse_message(event)
     if m is None:
         return
     async with SessionLocal() as db:
-        conn = await db.get(TelegramConnection, connection_id)
+        conn = await db.get(DiscordConnection, connection_id)
         if conn is None or not conn.enabled:
             return
         ok, reason = passes_filters(conn, m)
         debounce = conn.debounce_seconds or 0  # lido DENTRO da sessão
     if not ok:
-        logger.info("telegram: update filtrado (%s): %s", connection_id, reason)
+        logger.info("discord: mensagem filtrada (%s): %s", connection_id, reason)
         return
-    try:
-        # janela de agregação por remetente; lock por conversa (ver inbound_batch)
-        await inbound_batch.submit(
-            convo=f"{connection_id}|{m['tg_chat_id']}",
-            sender=str(m.get("sender_name") or m["tg_chat_id"]),
-            msg=m,
-            seconds=debounce,
-            runner=lambda batch: _run_one(connection_id, batch),
-        )
-    except Exception:  # noqa: BLE001
-        logger.exception("telegram: falha ao processar update (%s)", connection_id)
+    # O gateway despacha cada MESSAGE_CREATE numa task (p/ não travar o heartbeat),
+    # então duas mensagens rápidas no mesmo canal chegariam aqui CONCORRENTES: os dois
+    # turnos montariam o histórico sem enxergar um ao outro e as respostas poderiam sair
+    # fora de ordem. O lock do inbound_batch é por CONVERSA e serializa isso.
+    await inbound_batch.submit(
+        convo=f"{connection_id}|{m['channel_id']}",
+        sender=str(m.get("sender_id") or m.get("sender_name") or ""),
+        msg=m,
+        seconds=debounce,
+        runner=lambda batch: _run_one(connection_id, batch),
+    )
 
 
 # --------------------------------------------------------------------------- #
 # Entrega para automações (broadcast)
 # --------------------------------------------------------------------------- #
-async def resolve_recipients(db, conn: TelegramConnection, tg: dict) -> list[str]:
-    """Destinatários (tg_chat_id) conforme a config da automação:
-      {mode: "chat"|"threads", chat_id?: "<id>"}. "threads" = todas as conversas
-    conhecidas deste bot."""
-    mode = (tg or {}).get("mode") or "threads"
-    if mode == "chat" and (tg or {}).get("chat_id"):
-        return [str(tg["chat_id"]).strip()]
+async def resolve_recipients(db, conn: DiscordConnection, cfg: dict) -> list[str]:
+    """Destinatários (channel_id) conforme a config da automação:
+      {mode: "channel"|"threads", channel_id?: "<id>"}."""
+    mode = (cfg or {}).get("mode") or "threads"
+    if mode == "channel" and (cfg or {}).get("channel_id"):
+        return [str(cfg["channel_id"]).strip()]
     rows = list(await db.scalars(
-        select(TelegramThread.tg_chat_id).where(TelegramThread.connection_id == conn.id)
+        select(DiscordThread.channel_id).where(DiscordThread.connection_id == conn.id)
     ))
     return [r for r in rows][:_MAX_RECIPIENTS]
 
@@ -432,25 +414,21 @@ async def broadcast(connection_id: uuid.UUID, recipients: list[str], text: str) 
     if not recipients or not (text or "").strip():
         return
     async with SessionLocal() as db:
-        conn = await db.get(TelegramConnection, connection_id)
+        conn = await db.get(DiscordConnection, connection_id)
         if conn is None or not conn.enabled:
             return
-        token, tg_chat_ids = conn.bot_token, list(recipients)
+        token, channels = conn.bot_token, list(recipients)
         cfg = _humanize_cfg(conn)
-    for cid in tg_chat_ids:
+    for cid in channels:
         try:
-            await _deliver_token(token, cid, text, cfg)
+            chunks = _split_message(text) if cfg["enabled"] and cfg["split"] else [text]
+            for chunk in chunks:
+                if cfg["enabled"] and cfg["typing"]:
+                    await discord_api.trigger_typing(token, cid)
+                if cfg["enabled"]:
+                    w = _delay_seconds(cfg, chunk)
+                    if w > 0:
+                        await asyncio.sleep(w)
+                await discord_api.send_message(token, cid, chunk)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("telegram broadcast falhou p/ %s: %s", cid, exc)
-
-
-async def _deliver_token(token: str, tg_chat_id: str, text: str, cfg: dict) -> None:
-    chunks = _split_message(text) if cfg["enabled"] and cfg["split"] else [text]
-    for chunk in chunks:
-        if cfg["enabled"] and cfg["typing"]:
-            await telegram_api.send_chat_action(token, tg_chat_id, "typing")
-        if cfg["enabled"]:
-            w = _delay_seconds(cfg, chunk)
-            if w > 0:
-                await asyncio.sleep(w)
-        await telegram_api.send_message(token, tg_chat_id, chunk)
+            logger.warning("discord broadcast falhou p/ %s: %s", cid, exc)

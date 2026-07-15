@@ -10,10 +10,12 @@ from .app_setting import AppSetting
 from .automation import Automation, Notification
 from .automation_run import AutomationRun
 from .google_account import GoogleAccount
+from .github_account import GithubAccount
 from .generated_image import GeneratedImage
 from .usage_event import UsageEvent
 from .whatsapp import WhatsAppConnection, WhatsAppThread
 from .telegram import TelegramConnection, TelegramThread
+from .discord import DiscordConnection, DiscordThread
 from .push import PushSubscription
 from .artifact import Artifact, ArtifactVersion
 from .memory_bank import MemoryBank
@@ -37,12 +39,15 @@ __all__ = [
     "Notification",
     "AutomationRun",
     "GoogleAccount",
+    "GithubAccount",
     "GeneratedImage",
     "UsageEvent",
     "WhatsAppConnection",
     "WhatsAppThread",
     "TelegramConnection",
     "TelegramThread",
+    "DiscordConnection",
+    "DiscordThread",
     "PushSubscription",
     "Artifact",
     "ArtifactVersion",

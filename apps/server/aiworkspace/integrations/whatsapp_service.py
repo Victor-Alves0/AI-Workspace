@@ -33,6 +33,7 @@ from ..models import (
     WhatsAppThread,
 )
 from ..usage_service import usage_event_from_record
+from . import channel_media, inbound_batch, wa_format
 from . import whatsapp_evolution as evolution
 from . import whatsapp_official as official
 
@@ -43,15 +44,10 @@ def _err_text(exc: BaseException) -> str:
     """str(exc) legível — timeouts do httpx têm str vazia."""
     return str(exc).strip() or type(exc).__name__
 
-# lock por conversa (conexão+jid). Vive na memória do processo; vazamento é
-# desprezível (um Lock por contato ativo).
-_locks: dict[str, asyncio.Lock] = {}
-
-
-def _lock(key: str) -> asyncio.Lock:
-    if key not in _locks:
-        _locks[key] = asyncio.Lock()
-    return _locks[key]
+# lock por conversa (conexão+jid) — o MESMO registro usado pela entrada agregada
+# (inbound_batch), para que um envio proativo (broadcast) não atropele um turno em
+# curso naquela conversa.
+_lock = inbound_batch.lock
 
 
 # Deduplicação de mensagens já processadas (por msg_id), limitada em memória.
@@ -183,7 +179,7 @@ async def _resolve_thread(
     chat = Chat(
         user_id=user.id,
         title=f"WhatsApp · {who}"[:255],
-        model=conn.model or (mc.base_model if mc else ""),
+        model=(mc.base_model if mc else "") or conn.model,
         model_config_id=mc.id if mc else None,
         params=(mc.params if mc else {}) or {},
         folder_id=await _ensure_folder(db, conn, user),
@@ -445,12 +441,18 @@ async def broadcast(connection_id: uuid.UUID, recipients: list[dict[str, str]], 
                     logger.exception("whatsapp: falha ao enviar proativo p/ %s (%s)", jid, conn.id)
 
 
-async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
-    """Um turno completo para UMA mensagem aprovada (sessão própria)."""
+async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None:
+    """Um turno completo para o LOTE de mensagens aprovadas (sessão própria).
+
+    O lote é o que a janela de agregação juntou (ver inbound_batch): sem janela vem
+    uma mensagem só e o comportamento é idêntico ao de antes. Todas as mensagens do
+    lote são do MESMO remetente na MESMA conversa — os textos viram um turno único e
+    cada áudio entra como anexo."""
+    m = msgs[-1]  # identidade da conversa (jid/grupo/remetente) = a última do lote
     from ..chat.orchestrator import MediaOpts, TurnSession, run_turn_guarded
     from ..chat.turn_setup import (
-        _audio_router_config, _code_mode, _load_skills, _resolve_guards,
-        _resolve_provider, _usage_record, _user_profile_dict,
+        _audio_router_config, _code_mode, _genimage_config, _load_skills, _profile_tz,
+        _resolve_guards, _resolve_provider, _usage_record, _user_profile_dict,
     )
     from ..tools.loader import get_sift_for_user
 
@@ -467,7 +469,10 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
             mc = await db.get(ModelConfig, conn.model_config_id)
             if mc is not None and mc.user_id != user.id:
                 mc = None
-        model = conn.model or (mc.base_model if mc else "")
+        # com ModelConfig acoplado, o modelo DELE manda: conn.model é um snapshot
+        # gravado pelo painel na hora da escolha e envelhece (trocar o modelo do
+        # agente não regravava a conexão — o WhatsApp ficava preso no modelo velho)
+        model = (mc.base_model if mc else "") or conn.model
         if not model:
             conn.state = {**(conn.state or {}), "last_error": "Conexão sem modelo definido"}
             await db.commit()
@@ -499,28 +504,35 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
                         hit, conn.id, m["jid"])
             return
 
-        # prefixo-gatilho configurado → o modelo recebe o texto sem o prefixo
-        text = m["text"]
+        # prefixo-gatilho configurado → o modelo recebe o texto sem o prefixo.
+        # Várias mensagens do lote viram um texto só (o contato fragmentou a fala).
         trigger = ((conn.filters or {}).get("trigger") or "").strip()
-        if trigger and text.lower().startswith(trigger.lower()):
-            text = text[len(trigger):].strip() or text
 
-        # Nota de voz/áudio → baixa a mídia e deixa o Audio Router do modelo
-        # transcrever (mesmo fluxo do chat). Sem router configurado, o orchestrator
-        # avisa o modelo que chegou um áudio não-transcrevível.
+        def _strip_trigger(t: str) -> str:
+            if trigger and t.lower().startswith(trigger.lower()):
+                return t[len(trigger):].strip() or t
+            return t
+
+        text = "\n".join(_strip_trigger(x["text"]) for x in msgs if (x.get("text") or "").strip())
+
+        # Notas de voz → baixa a mídia e deixa o Audio Router do modelo transcrever
+        # (mesmo fluxo do chat). Sem router configurado, o orchestrator avisa o modelo
+        # que chegou um áudio não-transcrevível. Cada áudio do lote vira um anexo.
         attachments: list[dict[str, Any]] = []
         audio_router = None
-        if m.get("has_audio") and conn.provider == "evolution":
+        audio_msgs = [x for x in msgs if x.get("has_audio")] if conn.provider == "evolution" else []
+        if audio_msgs:
             audio_router = await _audio_router_config(db, user, mc)
-            try:
-                b64, mime = await evolution.get_media_base64(conn.instance, m["msg_id"])
-                if b64:
-                    attachments.append({
-                        "type": "audio", "name": "voz.ogg", "mime": mime,
-                        "url": f"data:{mime};base64,{b64}",
-                    })
-            except Exception as exc:  # noqa: BLE001 - áudio indisponível não trava o turno
-                logger.warning("whatsapp: falha ao baixar áudio (%s): %s", conn.id, exc)
+            for i, x in enumerate(audio_msgs, 1):
+                try:
+                    b64, mime = await evolution.get_media_base64(conn.instance, x["msg_id"])
+                    if b64:
+                        attachments.append({
+                            "type": "audio", "name": f"voz{i}.ogg", "mime": mime,
+                            "url": f"data:{mime};base64,{b64}",
+                        })
+                except Exception as exc:  # noqa: BLE001 - áudio indisponível não trava o turno
+                    logger.warning("whatsapp: falha ao baixar áudio (%s): %s", conn.id, exc)
 
         # histórico = o próprio chat da conversa (limitado)
         rows = list(await db.scalars(
@@ -536,17 +548,21 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
         shown = f"{m['sender_name']}: {display}" if m.get("is_group") and m.get("sender_name") else display
         db.add(Message(chat_id=chat.id, role="user", content=shown))
 
-        sift = await get_sift_for_user(db, user.id, mc)
+        # o canal ENTREGA gráfico e imagem (como mídia), mas não diagrama — a visão
+        # tira do modelo o que não teria como chegar, p/ ele não prometer o impossível
+        sift = await get_sift_for_user(db, user.id, channel_media.sift_view(mc))
         skills = await _load_skills(db, user, mc)
-        # filtros do modelo que fazem sentido em texto: Guardas de saída (os de
-        # imagem — vision/genimage router — não se aplicam a mensagens do WhatsApp)
         guards = await _resolve_guards(db, user, mc)
+        # GenImage Router: agora que o canal manda mídia de verdade, gerar imagem no
+        # WhatsApp funciona (antes a tool nem era oferecida — a imagem sumiria)
+        genimage = await _genimage_config(db, user, mc)
         who = m.get("sender_name") or _digits(m["jid"])
         extra_parts = [
             f"You are replying on WhatsApp (connection '{conn.label or conn.phone}') to "
             f"{who}. Answer as a WhatsApp message: concise, plain text (WhatsApp only "
             f"renders *bold*, _italic_ and ```code```; never use headings, tables or links "
-            f"in markdown syntax). Match the contact's language."
+            f"in markdown syntax). Charts and generated images ARE delivered to the contact "
+            f"as real media, so you may use them. Match the contact's language."
         ]
         # prompt adicional configurado para ESTE número conectado
         if (conn.system_prompt or "").strip():
@@ -581,12 +597,16 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
                     user_id=str(user.id), background=True,
                     chat_id=mem_chat_id, agent_id=mem_agent_id,
                     user_profile=_user_profile_dict(user),
+                    # fuso salvo pelo turno web: sem ele o modelo via hora UTC como
+                    # local ("já passou das 20h" às 17h) e lembretes saíam 3h errados
+                    user_tz=_profile_tz(user),
                 ),
                 sift=sift, code_mode=_code_mode(mc),
                 skills=skills, use_context=True, extra_system=extra_system,
                 extra_breakdown={"channel": len(extra_system)},
                 memory=mem_opts,
-                media=MediaOpts(attachments=attachments or None, audio_router=audio_router),
+                media=MediaOpts(attachments=attachments or None, audio_router=audio_router,
+                                genimage=genimage),
             ):
                 if ev["type"] == "done":
                     content = ev.get("content", "")
@@ -598,7 +618,13 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
         except Exception as exc:  # noqa: BLE001
             error = _err_text(exc)
 
-        if error or not content:
+        # gráfico/imagem que o turno produziu → mídia de verdade (o front do chat
+        # desenharia; aqui os bytes são entregues no WhatsApp)
+        media = await channel_media.collect(tool_events)
+
+        # uma resposta SÓ com imagem é legítima ("me faz um gráfico disso"): não é
+        # "resposta vazia" — só não tem texto.
+        if error or not (content or media):
             conn.state = {**(conn.state or {}), "last_error": error or "Resposta vazia"}
             await db.commit()
             logger.warning("whatsapp: turno falhou (%s): %s", conn.id, error)
@@ -618,7 +644,21 @@ async def _run_one(connection_id: uuid.UUID, m: dict[str, Any]) -> None:
         thread.last_message_at = datetime.now(timezone.utc)
 
         try:
-            await _deliver(conn, m["jid"], content)
+            # o BANCO guarda a resposta crua (o chat do app renderiza markdown); o
+            # WhatsApp recebe a versão que ele sabe desenhar — tabelas/headings/links
+            # viram texto legível em vez de canos e cerquilhas cruas.
+            if content:
+                await _deliver(conn, m["jid"], wa_format.to_whatsapp(content))
+            # mídia só pela Evolution: a Cloud API oficial exige subir o arquivo antes
+            # (upload → media_id) e isso ainda não está implementado
+            if media and conn.provider != "evolution":
+                logger.info("whatsapp: %d mídia(s) não enviadas (provider oficial)", len(media))
+            elif media:
+                for item in media:
+                    await evolution.send_media(
+                        conn.instance, m["jid"], item["data"], item["mime"],
+                        item["filename"], item["caption"],
+                    )
             conn.state = {**(conn.state or {}), "last_error": None,
                           "last_event_at": datetime.now(timezone.utc).isoformat()}
         except Exception as exc:  # noqa: BLE001 - resposta gerada mas não entregue
@@ -649,9 +689,14 @@ async def handle_incoming(connection_id: uuid.UUID, messages: list[dict[str, Any
                 approved.append(m)
             else:
                 logger.info("whatsapp: mensagem filtrada (%s): %s", conn.id, reason)
+        debounce = conn.debounce_seconds or 0  # lido DENTRO da sessão
+    # Entrega à janela de agregação: o lock é da CONVERSA (um turno por vez) e a
+    # janela é do REMETENTE (num grupo, não cola a fala de duas pessoas num turno só).
     for m in approved:
-        async with _lock(f"{connection_id}|{m['jid']}"):
-            try:
-                await _run_one(connection_id, m)
-            except Exception:  # noqa: BLE001 - nunca derruba o loop de webhooks
-                logger.exception("whatsapp: falha ao processar mensagem (%s)", connection_id)
+        await inbound_batch.submit(
+            convo=f"{connection_id}|{m['jid']}",
+            sender=str(m.get("sender_name") or m["jid"]),
+            msg=m,
+            seconds=debounce,
+            runner=lambda batch: _run_one(connection_id, batch),
+        )

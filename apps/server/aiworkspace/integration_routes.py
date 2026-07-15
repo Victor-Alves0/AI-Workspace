@@ -22,8 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth.deps import require_admin, require_approved
 from .config import get_settings
 from .db import get_db
-from .integrations import google_service, ollama_service, tuya_service
-from .models import GoogleAccount, User
+from .integrations import github_service, google_service, ollama_service, tuya_service
+from .models import GithubAccount, GoogleAccount, User
 from .tools import sift_service
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
@@ -223,6 +223,172 @@ async def google_disconnect_account(
 
 
 # --------------------------------------------------------------------------- #
+# GitHub — tool. Conexão por PAT (colar token) OU OAuth App (client id/secret na
+# UI). Cada usuário conecta VÁRIAS contas (github_accounts); o token é lido ao vivo.
+# --------------------------------------------------------------------------- #
+async def _gh_accounts(db: AsyncSession, user_id: uuid.UUID) -> list[GithubAccount]:
+    return list(await db.scalars(
+        select(GithubAccount).where(GithubAccount.user_id == user_id).order_by(GithubAccount.created_at)
+    ))
+
+
+@router.get("/github")
+async def github_status(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    cfg = await github_service.get_oauth_config(db)
+    accounts = await _gh_accounts(db, user.id)
+    return {
+        "oauth_configured": cfg is not None,
+        "is_admin": user.role == "admin",
+        "client_id": cfg["client_id"] if cfg else "",
+        "redirect_uri": get_settings().github_redirect_uri,
+        "accounts": [
+            {"id": str(a.id), "login": a.login, "auth_type": a.auth_type,
+             "avatar_url": a.avatar_url, "connected_at": a.created_at.isoformat()}
+            for a in accounts
+        ],
+    }
+
+
+@router.put("/github/oauth")
+async def github_set_oauth(
+    body: OAuthConfigIn, user: User = Depends(require_admin), db: AsyncSession = Depends(get_db),
+):
+    if not body.client_id.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Client ID é obrigatório")
+    existing = await github_service.get_oauth_config(db)
+    if existing is None and not (body.client_secret or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Client Secret é obrigatório")
+    await github_service.set_oauth_config(db, body.client_id, body.client_secret)
+    return {"ok": True}
+
+
+class GithubPatIn(BaseModel):
+    token: str
+
+
+@router.post("/github/pat")
+async def github_connect_pat(
+    body: GithubPatIn, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    """Conecta uma conta colando um Personal Access Token (fine-grained ou classic)."""
+    token = (body.token or "").strip()
+    if not token:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Informe o token")
+    info = await github_service.validate_pat(token)
+    if info.get("error") or not info.get("login"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Token inválido: {info.get('error', 'sem acesso')}")
+    login = info["login"]
+    existing = await db.scalar(
+        select(GithubAccount).where(GithubAccount.user_id == user.id, GithubAccount.login == login)
+    )
+    if existing is not None:
+        existing.token = token
+        existing.auth_type = "pat"
+        existing.refresh_token = ""
+        existing.token_expires_at = None
+        existing.scopes = info.get("scopes", "")
+        existing.avatar_url = info.get("avatar_url", "")
+        github_service.forget(str(existing.id))
+    else:
+        db.add(GithubAccount(
+            user_id=user.id, login=login, token=token, auth_type="pat",
+            scopes=info.get("scopes", ""), avatar_url=info.get("avatar_url", ""),
+        ))
+    await db.commit()
+    sift_service.invalidate(str(user.id))
+    return {"ok": True, "login": login}
+
+
+@router.get("/github/connect")
+async def github_connect(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    cfg = await github_service.get_oauth_config(db)
+    if cfg is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "OAuth do GitHub não configurado. Um administrador precisa definir o Client ID/Secret — "
+            "ou conecte colando um Personal Access Token.",
+        )
+    return RedirectResponse(github_service.authorization_url(str(user.id), cfg))
+
+
+@router.get("/github/callback")
+async def github_callback(
+    state: str = "", code: str = "", error: str = "", db: AsyncSession = Depends(get_db),
+):
+    web = get_settings().web_origin.rstrip("/")
+
+    def _back(kv: str) -> RedirectResponse:
+        return RedirectResponse(f"{web}/chat?{kv}")
+
+    if error:
+        return _back(f"github=error&reason={error}")
+    user_id = github_service.verify_state(state)
+    if not user_id or not code:
+        return _back("github=error&reason=invalid_state")
+    cfg = await github_service.get_oauth_config(db)
+    if cfg is None:
+        return _back("github=error&reason=not_configured")
+    result = await github_service.exchange_code(code, cfg)
+    if result.get("error"):
+        return _back(f"github=error&reason={result['error'][:60]}")
+    uid = uuid.UUID(user_id)
+    if await db.get(User, uid) is None:
+        return _back("github=error&reason=user_not_found")
+    login = result.get("login", "")
+    from datetime import datetime, timedelta, timezone
+    expires = (datetime.now(timezone.utc) + timedelta(seconds=result["expires_in"])
+               if result.get("expires_in") else None)
+    existing = await db.scalar(
+        select(GithubAccount).where(GithubAccount.user_id == uid, GithubAccount.login == login)
+    ) if login else None
+    if existing is not None:
+        existing.token = result["access_token"]
+        existing.refresh_token = result.get("refresh_token", "")
+        existing.auth_type = "oauth"
+        existing.token_expires_at = expires
+        existing.scopes = result.get("scopes", "")
+        existing.avatar_url = result.get("avatar_url", "")
+        github_service.forget(str(existing.id))
+    else:
+        db.add(GithubAccount(
+            user_id=uid, login=login, token=result["access_token"],
+            refresh_token=result.get("refresh_token", ""), auth_type="oauth",
+            token_expires_at=expires, scopes=result.get("scopes", ""),
+            avatar_url=result.get("avatar_url", ""),
+        ))
+    await db.commit()
+    sift_service.invalidate(user_id)
+    return _back("github=connected")
+
+
+@router.post("/github/accounts/{account_id}/test")
+async def github_test_account(
+    account_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    acc = await db.get(GithubAccount, account_id)
+    if acc is None or acc.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conta não encontrada")
+    result = await github_service.test_account(str(acc.id))
+    if result.get("ok"):
+        return {"ok": True, "login": result.get("login") or acc.login}
+    return {"ok": False, "error": "Não foi possível acessar esta conta — reconecte (o token pode ter expirado ou sido revogado)."}
+
+
+@router.delete("/github/accounts/{account_id}")
+async def github_disconnect_account(
+    account_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    acc = await db.get(GithubAccount, account_id)
+    if acc is None or acc.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conta não encontrada")
+    github_service.forget(str(acc.id))
+    await db.delete(acc)
+    await db.commit()
+    sift_service.invalidate(str(user.id))
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
 # Ollama — modelos LOCAIS, config POR-USUÁRIO (só a base URL; sem chave).
 # --------------------------------------------------------------------------- #
 class OllamaIn(BaseModel):
@@ -349,3 +515,15 @@ async def tuya_test(
     if result.get("ok"):
         return {"ok": True}
     return {"ok": False, "error": result.get("error") or "Não foi possível conectar ao Tuya."}
+
+
+@router.get("/messaging/connections")
+async def messaging_connections(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Conexoes de chat ATIVAS do usuario (WhatsApp/Telegram/Discord) achatadas em
+    [{id, platform, label}] — usado pela engrenagem da tool de Mensagens p/ escolher
+    por quais conexoes a IA pode agir."""
+    from .integrations import messaging_service
+    accounts = await messaging_service.gather_accounts(db, user.id)
+    return {"accounts": accounts}

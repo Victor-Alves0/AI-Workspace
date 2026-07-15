@@ -442,3 +442,131 @@ export function TuyaToolPanel({ value, onChange }: PanelProps) {
     </div>
   );
 }
+
+/* ---------------------------------- GitHub -------------------------------- */
+export function GithubToolPanel({ value, onChange }: PanelProps) {
+  const g = value ?? {};
+  const gSet = (k: string, v: any) => onChange({ ...g, [k]: v });
+  const confirm = g.require_confirm !== false;
+  const ops: Record<string, boolean> = g.ops && typeof g.ops === "object" ? g.ops : {};
+  const opOn = (cap: string) => ops[cap] !== false;
+  const toggleOp = (cap: string) => gSet("ops", { ...ops, [cap]: !opOn(cap) });
+
+  const [accounts, setAccounts] = useState<{ id: string; login: string }[]>([]);
+  useEffect(() => {
+    api.get<{ accounts: { id: string; login: string }[] }>("/integrations/github")
+      .then((s) => setAccounts(s.accounts || []))
+      .catch(() => {});
+  }, []);
+  const allIds = accounts.map((a) => a.id);
+  const sel: string[] = Array.isArray(g.accounts) ? g.accounts : [];
+  const effective = sel.length === 0 ? allIds : sel;
+  const toggleAccount = (id: string) => {
+    const cur = sel.length === 0 ? allIds : sel;
+    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    gSet("accounts", next.length === allIds.length ? [] : next);
+  };
+
+  return (
+    <div>
+      <p className="text-xs leading-5 text-muted">Contas e ações deste modelo no GitHub. A conexão das contas fica em Configurações → Integrações.</p>
+      <Heading>Contas liberadas</Heading>
+      <div className="rounded-xl border border-border bg-surface px-3 py-1">
+        {accounts.length === 0 ? (
+          <p className="py-2 text-xs text-muted">Nenhuma conta conectada. Conecte em Configurações → Integrações → GitHub.</p>
+        ) : (
+          <>
+            {accounts.map((a, i) => (
+              <label key={a.id} className={`flex cursor-pointer items-center gap-2.5 py-2 text-sm ${i > 0 ? "border-t border-border" : ""}`}>
+                <input type="checkbox" checked={effective.includes(a.id)} onChange={() => toggleAccount(a.id)}
+                  className="h-4 w-4 shrink-0 accent-accent" />
+                <span className="min-w-0 flex-1 truncate text-ink">{a.login}</span>
+              </label>
+            ))}
+            <p className="border-t border-border py-2 text-xs text-muted">Todas marcadas = este modelo pode usar qualquer conta.</p>
+          </>
+        )}
+      </div>
+      <Heading>Leitura</Heading>
+      <div className="rounded-xl border border-border bg-surface px-3 py-1">
+        <Row label="Ler repos, arquivos, issues e PRs" sub="Listar repositórios, ler arquivos, buscar código, ver issues/PRs"><Toggle on={opOn("gh_read")} onClick={() => toggleOp("gh_read")} /></Row>
+      </div>
+      <Heading>Escrita</Heading>
+      <div className="rounded-xl border border-border bg-surface px-3 py-1">
+        <Row label="Criar issues"><Toggle on={opOn("gh_issue")} onClick={() => toggleOp("gh_issue")} /></Row>
+        <div className="border-t border-border"><Row label="Comentar em issues/PRs"><Toggle on={opOn("gh_comment")} onClick={() => toggleOp("gh_comment")} /></Row></div>
+        <div className="border-t border-border"><Row label="Abrir pull requests"><Toggle on={opOn("gh_pr")} onClick={() => toggleOp("gh_pr")} /></Row></div>
+        <div className="border-t border-border"><Row label="Commitar arquivos" sub="Criar/atualizar arquivos (commit direto)"><Toggle on={opOn("gh_commit")} onClick={() => toggleOp("gh_commit")} /></Row></div>
+      </div>
+      <Heading>Segurança</Heading>
+      <div className="rounded-xl border border-border bg-surface px-3 py-1">
+        <Row label="Pedir confirmação antes de escrever" sub="Mostra Confirmar/Cancelar antes de criar issue/PR/comentário/commit. Desligado = age direto.">
+          <Toggle on={confirm} onClick={() => gSet("require_confirm", !confirm)} />
+        </Row>
+      </div>
+    </div>
+  );
+}
+
+const MSG_PLAT_PT: Record<string, string> = { whatsapp: "WhatsApp", telegram: "Telegram", discord: "Discord" };
+
+export function MessagingToolPanel({ value, onChange }: PanelProps) {
+  const g = value ?? {};
+  const gSet = (k: string, v: any) => onChange({ ...g, [k]: v });
+  const confirm = g.require_confirm !== false;
+  const ops: Record<string, boolean> = g.ops && typeof g.ops === "object" ? g.ops : {};
+  const opOn = (cap: string) => ops[cap] !== false;
+  const toggleOp = (cap: string) => gSet("ops", { ...ops, [cap]: !opOn(cap) });
+
+  const [accounts, setAccounts] = useState<{ id: string; platform: string; label: string }[]>([]);
+  useEffect(() => {
+    api.get<{ accounts: { id: string; platform: string; label: string }[] }>("/integrations/messaging/connections")
+      .then((s) => setAccounts(s.accounts || []))
+      .catch(() => {});
+  }, []);
+  const allIds = accounts.map((a) => a.id);
+  const sel: string[] = Array.isArray(g.accounts) ? g.accounts : [];
+  const effective = sel.length === 0 ? allIds : sel;
+  const toggleAccount = (id: string) => {
+    const cur = sel.length === 0 ? allIds : sel;
+    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    gSet("accounts", next.length === allIds.length ? [] : next);
+  };
+
+  return (
+    <div>
+      <p className="text-xs leading-5 text-muted">A IA age nas suas conexões de chat a seu pedido (responder, avisar em grupo, ver o que disseram). Conecte-as em Configurações → Integrações.</p>
+      <p className="mt-1 text-xs leading-5 text-muted">Limites por rede: <span className="text-ink-soft">WhatsApp</span> age como você (ler/enviar completo). <span className="text-ink-soft">Telegram/Discord</span> agem como o bot — só as conversas onde o bot está; o Telegram-bot não lê histórico.</p>
+      <Heading>Conexões liberadas</Heading>
+      <div className="rounded-xl border border-border bg-surface px-3 py-1">
+        {accounts.length === 0 ? (
+          <p className="py-2 text-xs text-muted">Nenhuma conexão ativa. Conecte um WhatsApp, Telegram ou Discord em Configurações → Integrações.</p>
+        ) : (
+          <>
+            {accounts.map((a, i) => (
+              <label key={a.id} className={`flex cursor-pointer items-center gap-2.5 py-2 text-sm ${i > 0 ? "border-t border-border" : ""}`}>
+                <input type="checkbox" checked={effective.includes(a.id)} onChange={() => toggleAccount(a.id)}
+                  className="h-4 w-4 shrink-0 accent-accent" />
+                <span className="min-w-0 flex-1 truncate text-ink">{a.label}</span>
+                <span className="shrink-0 text-xs text-muted">{MSG_PLAT_PT[a.platform] || a.platform}</span>
+              </label>
+            ))}
+            <p className="border-t border-border py-2 text-xs text-muted">Todas marcadas = este modelo pode agir por qualquer conexão.</p>
+          </>
+        )}
+      </div>
+      <Heading>Ações</Heading>
+      <div className="rounded-xl border border-border bg-surface px-3 py-1">
+        <Row label="Listar conversas" sub="Encontrar contatos e grupos"><Toggle on={opOn("msg_list")} onClick={() => toggleOp("msg_list")} /></Row>
+        <div className="border-t border-border"><Row label="Ler mensagens" sub="Ver o histórico de uma conversa (WhatsApp/Discord)"><Toggle on={opOn("msg_read")} onClick={() => toggleOp("msg_read")} /></Row></div>
+        <div className="border-t border-border"><Row label="Enviar mensagens" sub="Mandar mensagem por você"><Toggle on={opOn("msg_send")} onClick={() => toggleOp("msg_send")} /></Row></div>
+      </div>
+      <Heading>Segurança</Heading>
+      <div className="rounded-xl border border-border bg-surface px-3 py-1">
+        <Row label="Pedir confirmação antes de enviar" sub="Mostra Enviar/Cancelar antes de mandar uma mensagem. Desligado = envia direto.">
+          <Toggle on={confirm} onClick={() => gSet("require_confirm", !confirm)} />
+        </Row>
+      </div>
+    </div>
+  );
+}

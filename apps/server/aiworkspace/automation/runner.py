@@ -189,8 +189,10 @@ async def _run_scheduled(db, automation: Automation, user: User) -> dict[str, An
         params = {k: v for k, v in params.items() if k != "reasoning"}
     # respeita o off-switch global (allow_code_mode) + tools_enabled, como no chat
     code_mode = _code_mode(eff)
-    # sem navegador aqui: usa o tz_offset gravado no schedule (getTimezoneOffset do
-    # navegador no momento em que a automação foi criada) p/ dar a hora local certa.
+    # sem navegador aqui: preferimos o fuso IANA salvo no profile (acompanha horário
+    # de verão); o tz_offset gravado no schedule na criação fica de fallback.
+    from ..chat.turn_setup import _profile_tz
+    user_tz = _profile_tz(user)
     try:
         tz_off = int((automation.schedule or {}).get("tz_offset"))
     except (TypeError, ValueError):
@@ -209,7 +211,8 @@ async def _run_scheduled(db, automation: Automation, user: User) -> dict[str, An
         params=params,
         # autônomo: tools pulam revisão interativa; chat_id=None => sem mem0 em
         # jobs de fundo (mais barato/previsível)
-        session=TurnSession(user_id=str(user.id), user_tz_offset=tz_off, background=True),
+        session=TurnSession(user_id=str(user.id), user_tz=user_tz, user_tz_offset=tz_off,
+                            background=True),
         sift=sift,
         code_mode=code_mode,
         skills=skills,

@@ -72,6 +72,8 @@ class ConnectionUpdate(BaseModel):
     contacts: list[dict[str, Any]] | None = None
     # Modo humanizador: {enabled, typing, min_seconds, max_seconds, split}
     humanize: dict[str, Any] | None = None
+    # janela de silêncio (s) p/ juntar mensagens fragmentadas num único turno (0 = off)
+    debounce_seconds: int | None = Field(default=None, ge=0, le=60)
 
 
 _LIMIT_KEYS = ("total", "per_hour", "per_day", "per_month")
@@ -133,6 +135,7 @@ def _serialize(conn: WhatsAppConnection, threads: int = 0) -> dict[str, Any]:
         "limits": conn.limits or {},
         "contacts": conn.contacts or [],
         "humanize": conn.humanize or {},
+        "debounce_seconds": conn.debounce_seconds or 0,
         "enabled": conn.enabled,
         "state": conn.state or {},
         "threads": threads,

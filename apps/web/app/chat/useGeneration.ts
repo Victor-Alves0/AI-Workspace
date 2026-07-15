@@ -142,10 +142,15 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         if (ids.length) deps.setArtifactOpen(ids[ids.length - 1]);
         setLiveArtifact(null);
       } else if (ev.type === "done") {
-        // fluxo dos guardas de saída vem só no done (não é streamado como tool_call);
-        // captura p/ o chat temporário mostrar o escudo (o persistente recarrega do banco)
-        const g = ((ev.tool_events ?? []) as ToolEvent[]).filter((t) => t.kind === "guard");
-        if (g.length) state.tools = [...g, ...state.tools.filter((t) => t.kind !== "guard")];
+        // o `done` traz os tool_events DEFINITIVOS: os guardas (que não são streamados
+        // como tool_call) e o custo em tokens de cada evento — só conhecido no fim do
+        // turno. Substitui os montados durante o stream p/ o badge aparecer na hora,
+        // sem esperar um F5.
+        const evs = (ev.tool_events ?? []) as ToolEvent[];
+        if (evs.length) {
+          state.tools = evs;
+          setToolEvents(evs);
+        }
       } else if (ev.type === "title") {
         // título gerado por IA na 1ª troca: atualiza o cabeçalho na hora
         deps.setActive((a) => (a && ev.title ? { ...a, title: ev.title } : a));

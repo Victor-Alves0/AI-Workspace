@@ -1,9 +1,9 @@
-"""Integração Telegram: bots conectados + conversas mapeadas a chats.
+"""Integração Discord: bots conectados + conversas mapeadas a chats.
 
-Espelha o WhatsApp ([[whatsapp.py]]), mas via Bot API oficial (long-polling, sem
-sidecar). Cada usuário conecta um bot (token do @BotFather) e associa a um modelo.
-Mensagens recebidas passam pelos filtros e viram turnos do modelo; a resposta volta
-pelo mesmo bot. Cada conversa (chat do Telegram) vira um Chat normal do app.
+Espelha o Telegram ([[telegram.py]]), mas via Gateway (WebSocket) em vez de
+long-polling. Cada usuário conecta um bot (token do Developer Portal) e associa a
+um modelo. Mensagens recebidas passam pelos filtros e viram turnos do modelo; a
+resposta volta pelo mesmo bot. Cada canal/DM do Discord vira um Chat normal do app.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,23 +19,26 @@ from ..crypto import EncryptedText
 from ..db import Base
 
 
-class TelegramConnection(Base):
-    __tablename__ = "telegram_connections"
+class DiscordConnection(Base):
+    __tablename__ = "discord_connections"
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     label: Mapped[str] = mapped_column(String(120), default="")
-    # token do bot (@BotFather), cifrado em repouso
+    # token do bot (Developer Portal), cifrado em repouso
     bot_token: Mapped[str] = mapped_column(EncryptedText, default="")
     bot_username: Mapped[str] = mapped_column(String(64), default="")
+    # id da aplicação/bot no Discord (p/ detectar @menção ao próprio bot)
+    app_id: Mapped[str] = mapped_column(String(32), default="")
     # modelo que atende este bot (custom ou base)
     model_config_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("model_configs.id", ondelete="SET NULL"), nullable=True
     )
     model: Mapped[str] = mapped_column(String(255), default="")
     # filtragem ANTES do modelo:
-    #   {allow: [ids/usernames], block: [...], groups: bool, trigger: "" (prefixo)}
+    #   {allow: [ids/usernames], block: [...], guilds: bool, mention_only: bool,
+    #    trigger: "" (prefixo)}
     filters: Mapped[dict] = mapped_column(JSONB, default=dict)
     # memória: "local" (isolada por conversa) | "global" (memória do modelo)
     memory: Mapped[str] = mapped_column(String(8), default="local")
@@ -43,7 +46,7 @@ class TelegramConnection(Base):
     system_prompt: Mapped[str] = mapped_column(Text, default="")
     # "Modo humanizador": {enabled, typing, min_seconds, max_seconds, split}
     humanize: Mapped[dict] = mapped_column(JSONB, default=dict)
-    # pasta "Chats" desta conexão (Telegram/<bot>/Chats) — criada sob demanda
+    # pasta "Chats" desta conexão (Discord/<bot>/Chats) — criada sob demanda
     folder_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("folders.id", ondelete="SET NULL"), nullable=True
     )
@@ -51,25 +54,24 @@ class TelegramConnection(Base):
     # janela de silencio (s) p/ colar mensagens fragmentadas do contato num unico
     # turno; 0 = desligado (um turno por mensagem)
     debounce_seconds: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
-    # offset do getUpdates (durabilidade do long-polling entre reinícios)
-    update_offset: Mapped[int] = mapped_column(BigInteger, default=0)
-    # estado vivo: {status, last_error, last_event_at}
+    # estado vivo do Gateway: {status, last_error, last_event_at,
+    #   session_id, resume_url, seq} — permite RESUME após reconexão
     state: Mapped[dict] = mapped_column(JSONB, default=dict)
 
 
-class TelegramThread(Base):
-    """Uma conversa do Telegram (privada ou grupo) ↔ um Chat do app."""
+class DiscordThread(Base):
+    """Um canal/DM do Discord ↔ um Chat do app."""
 
-    __tablename__ = "telegram_threads"
+    __tablename__ = "discord_threads"
 
     connection_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("telegram_connections.id", ondelete="CASCADE"), index=True
+        ForeignKey("discord_connections.id", ondelete="CASCADE"), index=True
     )
-    # id numérico do chat no Telegram (privado = id do usuário; grupo = negativo)
-    tg_chat_id: Mapped[str] = mapped_column(String(32), index=True)
+    # id do canal no Discord (DM ou canal de servidor)
+    channel_id: Mapped[str] = mapped_column(String(32), index=True)
     chat_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("chats.id", ondelete="CASCADE"))
     contact_name: Mapped[str] = mapped_column(String(255), default="")
-    is_group: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_dm: Mapped[bool] = mapped_column(Boolean, default=False)
     last_message_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

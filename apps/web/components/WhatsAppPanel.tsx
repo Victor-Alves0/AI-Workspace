@@ -366,6 +366,21 @@ function ConnectionCard({
           {/* contexto/roles por número */}
           <ContactRoles contacts={conn.contacts ?? []} onChange={(contacts) => patch({ contacts })} />
 
+          {/* Agrupar mensagens fragmentadas do contato num único turno */}
+          <label className="block text-xs text-muted">Agrupar mensagens seguidas
+            <select
+              value={conn.debounce_seconds ?? 0}
+              onChange={(e) => patch({ debounce_seconds: Number(e.target.value) })}
+              className="mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
+            >
+              <option value={0}>Desligado (responde cada mensagem)</option>
+              <option value={3}>Esperar 3s de silêncio</option>
+              <option value={5}>Esperar 5s de silêncio</option>
+              <option value={8}>Esperar 8s de silêncio</option>
+              <option value={15}>Esperar 15s de silêncio</option>
+            </select>
+          </label>
+
           {/* Modo humanizador */}
           <Humanizer humanize={conn.humanize ?? {}} onChange={(humanize) => patch({ humanize })} />
 

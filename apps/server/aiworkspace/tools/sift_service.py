@@ -21,6 +21,7 @@ import math
 import operator
 import os
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Iterable
 
@@ -127,6 +128,32 @@ class TuyaConfig:
     ops: dict = field(default_factory=dict)
 
 
+@dataclass
+class GithubConfig:
+    """Config por-modelo da tool GitHub. Como a do Google, o TOKEN não mora aqui (é
+    buscado ao vivo por conta em cada chamada); só as contas liberadas, as operações
+    ativas e a confirmação. `accounts` = [{"id","login"}] (vazio = sem conta →
+    responde 'não conectado'). `ops` = capacidade→ligado (ausente = ligado):
+    gh_read / gh_issue / gh_comment / gh_pr / gh_commit."""
+    user_id: str = ""
+    require_confirm: bool = True
+    accounts: list = field(default_factory=list)
+    ops: dict = field(default_factory=dict)
+
+
+@dataclass
+class MessagingConfig:
+    """Config por-modelo da tool de mensagens (agir nas conexões de chat do usuário:
+    WhatsApp/Telegram/Discord). Nada de token/instância aqui — resolvidos ao vivo por
+    conexão em cada chamada. `accounts` = [{"id","platform","label"}] das conexões
+    liberadas p/ este modelo (vazio = nenhuma → 'nenhuma conexão'). `ops` =
+    capacidade→ligado (ausente = ligado): msg_list / msg_read / msg_send."""
+    user_id: str = ""
+    require_confirm: bool = True
+    accounts: list = field(default_factory=list)
+    ops: dict = field(default_factory=dict)
+
+
 # --------------------------------------------------------------------------- #
 # Ferramentas embutidas (do sistema)
 # --------------------------------------------------------------------------- #
@@ -173,6 +200,17 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # engrenagem da ferramenta (por modelo).
     {"path": "smartlife.tuya.devices", "name": "Tuya Smart Home", "description": "Controlar dispositivos Smart Life/Tuya: luzes, tomadas, ar-condicionado e cenas.",
      "model_desc": "Control the user's smart home (Tuya/Smart Life): lights, plugs, AC and scenes."},
+    # GitHub (requer conta conectada em Integrações via PAT ou OAuth). Uma ferramenta
+    # com `action`: lê repos/arquivos/issues/PRs e (com confirmação) cria issues,
+    # comentários, PRs e commits. As operações liberadas são escolhidas na engrenagem.
+    {"path": "github.repo.manage", "name": "GitHub", "description": "Repositórios GitHub do usuário: listar repos, ler arquivos, buscar código, ver/criar issues, PRs e comentários.",
+     "model_desc": "The user's GitHub: list repos, read files, search code, view/create issues, PRs and comments."},
+    # Mensagens (requer uma conexão de chat em Integrações: WhatsApp/Telegram/Discord).
+    # Uma ferramenta com `action`: lista conversas, lê o histórico e (com confirmação)
+    # envia mensagens pelas conexões do usuário. As conexões e ações liberadas são
+    # escolhidas na engrenagem (por modelo).
+    {"path": "messaging.chat.manage", "name": "Mensagens (WhatsApp/Telegram/Discord)", "description": "Agir nas conexões de chat do usuário: listar conversas, ler mensagens e enviar mensagens por WhatsApp, Telegram ou Discord.",
+     "model_desc": "Act on the user's chat connections: list conversations, read messages, and send messages via WhatsApp, Telegram or Discord."},
 ]
 # NOTA: "perguntar opções" (kind:"ask") é uma PRIMITIVA de sistema (tools/interaction.py),
 # não uma tool equipável — qualquer ferramenta a usa via `ask_options(...)` (ex.: o Lembrete
@@ -242,6 +280,8 @@ def _register_builtins(
     user_id: str | None = None,
     google_cfg: "GoogleConfig | None" = None,
     tuya_cfg: "TuyaConfig | None" = None,
+    github_cfg: "GithubConfig | None" = None,
+    messaging_cfg: "MessagingConfig | None" = None,
 ) -> None:
     """Registra as ferramentas de sistema. `allowed=None` = todas; caso contrário
     apenas os paths presentes no conjunto."""
@@ -739,7 +779,7 @@ def _register_builtins(
                     "confirm": "boolean:o::set true only after the user confirmed a write (archive/trash/mark)",
                     "account": _ACCOUNT_PARAM,
                 },
-                returns=["messages", "count", "note", "from", "subject", "date", "snippet", "body", "id", "ok", "action", "error",
+                returns=["messages", "count", "note", "truncated", "from", "subject", "date", "snippet", "body", "id", "ok", "action", "error",
                          "kind", "draft_id", "to", "cc", "account", "account_email", *_ASK_KEYS],
                 risk=True,
                 examples=["read my last email", "any unread emails?", "send an email to bob", "archive this message"],
@@ -1017,6 +1057,336 @@ def _register_builtins(
             except Exception as exc:  # noqa: BLE001
                 return {"error": str(exc)}
 
+    # ------------------------------ GitHub ------------------------------------ #
+    if want("github.repo.manage"):
+        gh_confirm = True if github_cfg is None else bool(github_cfg.require_confirm)
+        gh_accounts = list(github_cfg.accounts) if github_cfg else []  # [{"id","login"}]
+        gh_ops = github_cfg.ops if github_cfg else {}
+
+        def _gh_on(cap: str) -> bool:
+            return gh_ops.get(cap, True) is not False
+
+        def _gh_truthy(v: Any) -> bool:
+            if v is True:
+                return True
+            return isinstance(v, str) and v.strip().lower() in ("true", "1", "yes", "sim", "on")
+
+        def _gh_pick(account: str = "") -> tuple[dict | None, dict | None]:
+            if not gh_accounts:
+                return None, {"error": "GitHub não conectado. Conecte uma conta em Configurações → Integrações."}
+            if (account or "").strip():
+                a = account.strip().lower()
+                chosen = next(
+                    (x for x in gh_accounts
+                     if a == str(x.get("id", "")).lower() or a == (x.get("login", "") or "").lower()),
+                    None,
+                )
+                if chosen is None:
+                    logins = ", ".join(x.get("login", "") for x in gh_accounts)
+                    return None, {"error": f"conta '{account}' não liberada para este modelo. Disponíveis: {logins}"}
+                return chosen, None
+            if len(gh_accounts) == 1:
+                return gh_accounts[0], None
+            from .interaction import ask_options
+            return None, ask_options(
+                "Qual conta GitHub devo usar?",
+                [{"label": x.get("login", ""), "value": f"Use a conta {x.get('login', '')}"} for x in gh_accounts],
+                allow_custom=False,
+            )
+
+        def _gh_ctx(account: str = "") -> tuple[str | None, dict | None]:
+            chosen, block = _gh_pick(account)
+            if block is not None:
+                return None, block
+            from ..integrations import github_service
+            tok = asyncio.run(github_service.get_token(str(chosen.get("id"))))
+            if not tok:
+                return None, {"error": f"não foi possível acessar a conta {chosen.get('login', '')} (reconecte em Integrações)."}
+            return tok, None
+
+        def _gh_guard(summary: str, confirm: Any) -> dict | None:
+            # em automações/canais (background) não há usuário p/ confirmar → executa direto
+            if gh_confirm and not _gh_truthy(confirm) and not toolctx.background.get():
+                from .interaction import ask_options
+                return ask_options(
+                    summary,
+                    [
+                        {"label": "Confirmar", "value": "Sim, confirmo — refaça a ação agora com confirm=true."},
+                        {"label": "Cancelar", "value": "Cancele, não execute a ação."},
+                    ],
+                    allow_custom=False,
+                )
+            return None
+
+        def _gh_n(limit: Any, default: int = 20) -> int:
+            s = str(limit if limit is not None else "").strip()
+            if not s:
+                return default
+            try:
+                return max(1, min(int(float(s)), 100))
+            except (TypeError, ValueError):
+                return default
+
+        @sift.tool(
+            "github.repo.manage",
+            description=(
+                "The user's GitHub. `repo` is 'owner/name'. `action`: 'list_repos' (their repos), "
+                "'read_file' (`repo`,`path`; optional `ref`; a directory lists its entries), "
+                "'search_code' (`query`, optional `repo`), 'list_issues'/'list_prs' (`repo`, optional "
+                "`state` open/closed/all), 'read_issue'/'read_pr' (`repo`,`number`), 'create_issue' "
+                "(`repo`,`title`,`body`), 'comment' (`repo`,`number`,`body`), 'create_pr' "
+                "(`repo`,`title`,`head`,`base`,`body`), 'put_file' (commit: `repo`,`path`,`body` as the "
+                "file content, `message`; `branch` and `sha` to update an existing file). Writes ask "
+                "the user for confirmation unless confirm=true."
+            ),
+            params={
+                "action": "string:n::list_repos | read_file | search_code | list_issues | read_issue | list_prs | read_pr | create_issue | comment | create_pr | put_file",
+                "repo": "string:o::'owner/name' (required for everything except list_repos)",
+                "path": "string:o::read_file/put_file: file path in the repo",
+                "ref": "string:o::read_file: branch/tag/sha (default the repo's default branch)",
+                "query": "string:o::search_code: what to look for",
+                "number": "number:o::read_issue/read_pr/comment: the issue or PR number",
+                "state": "string:o::list_issues/list_prs: open | closed | all (default open)",
+                "title": "string:o::create_issue/create_pr: title",
+                "body": "string:o::create_issue/comment/create_pr: text. For put_file: the FULL file content",
+                "head": "string:o::create_pr: the branch with your changes",
+                "base": "string:o::create_pr: the branch to merge into (e.g. main)",
+                "message": "string:o::put_file: commit message",
+                "branch": "string:o::put_file: target branch (default the repo's default)",
+                "sha": "string:o::put_file: blob sha of the file being replaced (required to update, omit to create)",
+                "limit": "number:o::list_*/search: max items (1-100)",
+                "confirm": "boolean:o::set true only after the user confirmed a write",
+                "account": "string:o::which connected GitHub account to use (login); omit if only one",
+            },
+            returns=["repos", "full_name", "content", "path", "sha", "entries", "type", "items",
+                     "number", "title", "state", "user", "url", "body", "comment_list", "head",
+                     "base", "ok", "commit", "action", "error",
+                     "kind", "question", "options", "allow_custom", "custom_label"],
+            risk=True,
+            examples=["list my repositories", "read src/app.py in me/repo", "search TODO in my repo",
+                      "any open issues on me/repo?", "create an issue in me/repo", "comment on issue 5",
+                      "open a PR from feature to main"],
+        )
+        def _github(action: str = "", repo: str = "", path: str = "", ref: str = "",
+                    query: str = "", number: Any = None, state: str = "", title: str = "",
+                    body: str = "", head: str = "", base: str = "", message: str = "",
+                    branch: str = "", sha: str = "", limit: Any = None, confirm: Any = None,
+                    account: str = "") -> dict[str, Any]:
+            act = (action or "").strip().lower()
+            reads = {"list_repos", "read_file", "search_code", "list_issues",
+                     "read_issue", "list_prs", "read_pr"}
+            writes = {"create_issue", "comment", "create_pr", "put_file"}
+            if act not in reads | writes:
+                return {"error": f"unknown action '{action}' (use list_repos/read_file/search_code/"
+                                 "list_issues/read_issue/list_prs/read_pr/create_issue/comment/create_pr/put_file)"}
+            cap = ("gh_read" if act in reads else "gh_issue" if act == "create_issue"
+                   else "gh_comment" if act == "comment" else "gh_pr" if act == "create_pr"
+                   else "gh_commit")
+            if not _gh_on(cap):
+                return {"error": f"a operação '{act}' está desativada nas configurações desta ferramenta."}
+            if act != "list_repos" and not (repo or "").strip():
+                return {"error": "`repo` ('owner/name') is required"}
+            # confirmação antes de escrever
+            if act in writes:
+                summ = {
+                    "create_issue": f"Criar a issue “{title}” em {repo}?",
+                    "comment": f"Comentar na #{number} de {repo}?",
+                    "create_pr": f"Abrir PR “{title}” em {repo} ({head} → {base})?",
+                    "put_file": f"Commitar em {repo}: {path}?",
+                }[act]
+                blocked = _gh_guard(summ, confirm)
+                if blocked is not None:
+                    return blocked
+            tok, block = _gh_ctx(account)
+            if block is not None:
+                return block
+            from ..integrations import github_service as ghs
+            try:
+                if act == "list_repos":
+                    return {"repos": ghs.list_repos(tok, limit=_gh_n(limit, 30))}
+                if act == "read_file":
+                    if not (path or "").strip():
+                        return {"error": "`path` is required for read_file"}
+                    return ghs.get_file(tok, repo, path, ref)
+                if act == "search_code":
+                    if not (query or "").strip():
+                        return {"error": "`query` is required for search_code"}
+                    return {"items": ghs.search_code(tok, query, repo, _gh_n(limit, 10))}
+                if act == "list_issues":
+                    return {"items": ghs.list_issues(tok, repo, state or "open", _gh_n(limit))}
+                if act == "read_issue":
+                    if number is None:
+                        return {"error": "`number` is required"}
+                    return ghs.get_issue(tok, repo, int(number))
+                if act == "list_prs":
+                    return {"items": ghs.list_prs(tok, repo, state or "open", _gh_n(limit))}
+                if act == "read_pr":
+                    if number is None:
+                        return {"error": "`number` is required"}
+                    return ghs.get_pr(tok, repo, int(number))
+                if act == "create_issue":
+                    if not (title or "").strip():
+                        return {"error": "`title` is required"}
+                    return ghs.create_issue(tok, repo, title, body)
+                if act == "comment":
+                    if number is None or not (body or "").strip():
+                        return {"error": "`number` and `body` are required"}
+                    return ghs.comment_issue(tok, repo, int(number), body)
+                if act == "create_pr":
+                    if not ((title or "").strip() and (head or "").strip() and (base or "").strip()):
+                        return {"error": "`title`, `head` and `base` are required"}
+                    return ghs.create_pr(tok, repo, title, head, base, body)
+                # put_file
+                if not ((path or "").strip() and (message or "").strip()):
+                    return {"error": "`path` and `message` are required for put_file"}
+                return ghs.put_file(tok, repo, path, body, message, branch, sha)
+            except ghs.GithubError as exc:
+                return {"error": str(exc)}
+            except Exception as exc:  # noqa: BLE001
+                return {"error": str(exc)}
+
+    if want("messaging.chat.manage"):
+        msg_confirm = True if messaging_cfg is None else bool(messaging_cfg.require_confirm)
+        msg_accounts = list(messaging_cfg.accounts) if messaging_cfg else []  # [{id,platform,label}]
+        msg_ops = messaging_cfg.ops if messaging_cfg else {}
+        _MSG_PLAT_PT = {"whatsapp": "WhatsApp", "telegram": "Telegram", "discord": "Discord"}
+
+        def _msg_on(cap: str) -> bool:
+            return msg_ops.get(cap, True) is not False
+
+        def _msg_truthy(v: Any) -> bool:
+            if v is True:
+                return True
+            return isinstance(v, str) and v.strip().lower() in ("true", "1", "yes", "sim", "on")
+
+        def _msg_label(a: dict) -> str:
+            plat = _MSG_PLAT_PT.get(a.get("platform", ""), a.get("platform", ""))
+            return f"{a.get('label') or plat} ({plat})"
+
+        def _msg_pick(account: str = "", platform: str = "") -> tuple[dict | None, dict | None]:
+            pool = msg_accounts
+            plat = (platform or "").strip().lower()
+            if plat:
+                pool = [a for a in pool if a.get("platform") == plat]
+            if not pool:
+                if not msg_accounts:
+                    return None, {"error": "Nenhuma conexão de chat liberada. Conecte um WhatsApp/Telegram/Discord em Configurações → Integrações e libere-o na engrenagem desta ferramenta."}
+                return None, {"error": f"nenhuma conexão de '{platform}' liberada para este modelo."}
+            if (account or "").strip():
+                a = account.strip().lower()
+                chosen = next(
+                    (x for x in pool
+                     if a == str(x.get("id", "")).lower() or a == (x.get("label", "") or "").lower()
+                     or a == (x.get("platform", "") or "").lower()),
+                    None,
+                )
+                if chosen is None:
+                    labels = ", ".join(_msg_label(x) for x in pool)
+                    return None, {"error": f"conexão '{account}' não encontrada. Disponíveis: {labels}"}
+                return chosen, None
+            if len(pool) == 1:
+                return pool[0], None
+            from .interaction import ask_options
+            return None, ask_options(
+                "Por qual conexão devo agir?",
+                [{"label": _msg_label(x), "value": f"Use a conexão {x.get('label') or x.get('platform')} ({x.get('platform')})"} for x in pool],
+                allow_custom=False,
+            )
+
+        def _msg_guard(summary: str, confirm: Any) -> dict | None:
+            # canais/automações (background): não há usuário p/ confirmar → envia direto
+            if msg_confirm and not _msg_truthy(confirm) and not toolctx.background.get():
+                from .interaction import ask_options
+                return ask_options(
+                    summary,
+                    [
+                        {"label": "Enviar", "value": "Sim, confirmo — reenvie agora com confirm=true."},
+                        {"label": "Cancelar", "value": "Cancele, não envie a mensagem."},
+                    ],
+                    allow_custom=False,
+                )
+            return None
+
+        def _msg_n(limit: Any, default: int = 20) -> int:
+            s = str(limit if limit is not None else "").strip()
+            if not s:
+                return default
+            try:
+                return max(1, min(int(float(s)), 100))
+            except (TypeError, ValueError):
+                return default
+
+        @sift.tool(
+            "messaging.chat.manage",
+            description=(
+                "Act on the user's OWN chat connections (WhatsApp/Telegram/Discord) — send, read "
+                "and list on their behalf ('reply to X for me', 'tell the group about the meeting', "
+                "'what did X say about Y?'). `action`: 'list_chats' (find conversations; optional "
+                "`query` to filter by name/number), 'read_messages' (`chat` = a conversation id from "
+                "list_chats, or a phone number for WhatsApp; recent history), 'send_message' (`chat` + "
+                "`text`). Pick the connection with `platform` (whatsapp|telegram|discord) and/or "
+                "`account` when the user has more than one. IMPORTANT per-platform limits: WhatsApp "
+                "acts AS the user (full read/send to anyone). Telegram/Discord act as a BOT — they only "
+                "reach conversations the bot is already in, and Telegram CANNOT read history. Prefer "
+                "calling list_chats first to get the exact `chat` id. Sending asks the user to confirm "
+                "unless confirm=true."
+            ),
+            params={
+                "action": "string:n::list_chats | read_messages | send_message",
+                "platform": "string:o::which network: whatsapp | telegram | discord (omit if the user has only one)",
+                "account": "string:o::which connection (its label) when several on the same network",
+                "chat": "string:o::the conversation: an id from list_chats, or a phone number (with country code) for WhatsApp",
+                "text": "string:o::send_message: the message to send",
+                "query": "string:o::list_chats: filter conversations by name or number",
+                "limit": "number:o::list_chats/read_messages: max items (1-100)",
+                "confirm": "boolean:o::set true only after the user confirmed sending",
+            },
+            returns=["chats", "messages", "id", "name", "is_group", "is_dm", "from", "text",
+                     "from_me", "ts", "ok", "to", "platform", "action", "error",
+                     "kind", "question", "options", "allow_custom", "custom_label"],
+            risk=True,
+            examples=["reply to Ana on WhatsApp for me", "what did the group say about the trip?",
+                      "tell the family group there's a meeting at 8pm", "list my WhatsApp chats",
+                      "read my last messages with João"],
+        )
+        def _messaging(action: str = "", platform: str = "", account: str = "", chat: str = "",
+                       text: str = "", query: str = "", limit: Any = None,
+                       confirm: Any = None) -> dict[str, Any]:
+            act = (action or "").strip().lower()
+            caps = {"list_chats": "msg_list", "read_messages": "msg_read", "send_message": "msg_send"}
+            if act not in caps:
+                return {"error": f"unknown action '{action}' (use list_chats/read_messages/send_message)"}
+            if not _msg_on(caps[act]):
+                return {"error": f"a operação '{act}' está desativada nas configurações desta ferramenta."}
+            chosen, block = _msg_pick(account, platform)
+            if block is not None:
+                return block
+            plat = chosen["platform"]
+            cid = str(chosen["id"])
+            plat_pt = _MSG_PLAT_PT.get(plat, plat)
+            if act == "send_message":
+                if not (text or "").strip():
+                    return {"error": "`text` (a mensagem) é obrigatório para send_message"}
+                if not (chat or "").strip():
+                    return {"error": "`chat` (o destinatário) é obrigatório — use list_chats p/ achar o id"}
+                who = chat.strip()
+                blocked = _msg_guard(f"Enviar no {plat_pt} para {who}: “{text.strip()[:140]}”?", confirm)
+                if blocked is not None:
+                    return blocked
+            from ..integrations import messaging_service as ms
+            try:
+                if act == "list_chats":
+                    rows = asyncio.run(ms.list_chats(plat, cid, query, _msg_n(limit, 30)))
+                    return {"chats": rows, "platform": plat}
+                if act == "read_messages":
+                    rows = asyncio.run(ms.read_messages(plat, cid, chat, _msg_n(limit, 20)))
+                    return {"messages": rows, "platform": plat}
+                return asyncio.run(ms.send_message(plat, cid, chat, text))
+            except ms.MessagingError as exc:
+                return {"error": str(exc)}
+            except Exception as exc:  # noqa: BLE001
+                return {"error": str(exc)}
+
 
 # --------------------------------------------------------------------------- #
 # Ferramentas do usuário (código dinâmico)
@@ -1053,6 +1423,8 @@ def _signature(
     deep_cfg: "deep_search.DeepSearchConfig | None" = None,
     google_cfg: "GoogleConfig | None" = None,
     tuya_cfg: "TuyaConfig | None" = None,
+    github_cfg: "GithubConfig | None" = None,
+    messaging_cfg: "MessagingConfig | None" = None,
 ) -> tuple:
     rows = tuple(
         sorted(
@@ -1092,6 +1464,18 @@ def _signature(
          tuple(sorted(str(d) for d in tuya_cfg.allowed_devices)))
         if tuya_cfg else ()
     )
+    # config GitHub: contas liberadas (id) + ops + confirmação (token NÃO entra).
+    ghc = (
+        (github_cfg.require_confirm, tuple(sorted(github_cfg.ops.items())),
+         tuple(sorted(str(a.get("id")) for a in github_cfg.accounts)))
+        if github_cfg else ()
+    )
+    # config Mensagens: conexões liberadas (id+platform) + ops + confirmação.
+    msgc = (
+        (messaging_cfg.require_confirm, tuple(sorted(messaging_cfg.ops.items())),
+         tuple(sorted((str(a.get("id")), a.get("platform", "")) for a in messaging_cfg.accounts)))
+        if messaging_cfg else ()
+    )
     return (
         rows,
         search_cfg.provider,
@@ -1104,7 +1488,31 @@ def _signature(
         dp,
         gg,
         ty,
+        ghc,
+        msgc,
     )
+
+
+# Ferramentas REALMENTE executadas no turno — inclusive as chamadas por `call()` de
+# DENTRO do run_code. Sem isto, o Modo Código é uma caixa-preta na conta de tokens: o
+# detalhamento mostra só "run_code: 15.382" e o Gmail (que trouxe os 17 KB) fica
+# invisível. O `on_result` da SIFT é um pós-filtro global que roda p/ TODA tool — o
+# sandbox do run_code proxia as chamadas de volta a ESTE processo, então elas passam
+# por aqui. O contextvar isola por turno (cada request tem seu próprio contexto), o que
+# importa porque a instância Sift é CACHEADA e compartilhada entre turnos do usuário.
+tool_calls_log: ContextVar[list | None] = ContextVar("sift_tool_calls_log", default=None)
+
+
+def _record_call(path: str, result: Any) -> Any:
+    """Hook `on_result` da SIFT: anota (path, tamanho) e devolve o resultado intacto."""
+    log = tool_calls_log.get()
+    if log is not None:
+        try:
+            blob = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, default=str)
+            log.append({"path": path, "chars": len(blob)})
+        except (TypeError, ValueError):  # resultado exótico: registra sem tamanho
+            log.append({"path": path, "chars": 0})
+    return result
 
 
 def _index_cache_path(user_id: str | None) -> str | None:
@@ -1126,6 +1534,8 @@ def build_user_sift(
     deep_cfg: "deep_search.DeepSearchConfig | None" = None,
     google_cfg: "GoogleConfig | None" = None,
     tuya_cfg: "TuyaConfig | None" = None,
+    github_cfg: "GithubConfig | None" = None,
+    messaging_cfg: "MessagingConfig | None" = None,
 ) -> Sift | None:
     """Constrói a instância SIFT completa do usuário (builtins + tools dele).
 
@@ -1147,9 +1557,10 @@ def build_user_sift(
                 cpu_seconds=s.tool_cpu_seconds,
                 memory_mb=s.sift_code_mem_mb,
             ),
+            on_result=_record_call,
             index_cache=_index_cache_path(user_id),
         )
-        _register_builtins(sift, search_cfg, None, finance_cfg, deep_cfg, user_id, google_cfg, tuya_cfg)
+        _register_builtins(sift, search_cfg, None, finance_cfg, deep_cfg, user_id, google_cfg, tuya_cfg, github_cfg, messaging_cfg)
         for t in tool_rows:
             if not t.enabled:
                 continue
@@ -1182,12 +1593,14 @@ def get_user_sift(
     deep_cfg: "deep_search.DeepSearchConfig | None" = None,
     google_cfg: "GoogleConfig | None" = None,
     tuya_cfg: "TuyaConfig | None" = None,
+    github_cfg: "GithubConfig | None" = None,
+    messaging_cfg: "MessagingConfig | None" = None,
 ) -> Sift | None:
-    sig = _signature(tool_rows, search_cfg, finance_cfg, deep_cfg, google_cfg, tuya_cfg)
+    sig = _signature(tool_rows, search_cfg, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg)
     cached = _cache.get(user_id)
     if cached is not None and cached[0] == sig:
         return cached[1]
-    sift = build_user_sift(tool_rows, search_cfg, user_id, finance_cfg, deep_cfg, google_cfg, tuya_cfg)
+    sift = build_user_sift(tool_rows, search_cfg, user_id, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg)
     _cache[user_id] = (sig, sift)
     return sift
 
@@ -1325,6 +1738,40 @@ def tuya_config_from_secrets(
         conn=conn or {},
         allowed_devices=[str(d) for d in (p.get("devices") or [])],
         require_confirm=bool(confirm_actions),
+        ops=p.get("ops") if isinstance(p.get("ops"), dict) else {},
+    )
+
+
+def github_config_from_secrets(
+    user_id: str, accounts: list[dict] | None = None, github_prefs: dict | None = None,
+    *, confirm_actions: bool = False,
+) -> "GithubConfig":
+    """Config da tool GitHub. `accounts` = contas liberadas p/ este modelo
+    ([{"id","login"}]); vazio → a tool existe mas responde 'não conectado'.
+    Confirmação de escritas (criar issue/PR/comentário/commit) é OPT-IN pelo perfil
+    global (`confirm_actions`, Configurações → Segurança)."""
+    p = github_prefs or {}
+    return GithubConfig(
+        user_id=user_id,
+        require_confirm=bool(confirm_actions),
+        accounts=list(accounts or []),
+        ops=p.get("ops") if isinstance(p.get("ops"), dict) else {},
+    )
+
+
+def messaging_config_from_secrets(
+    user_id: str, accounts: list[dict] | None = None, messaging_prefs: dict | None = None,
+    *, confirm_actions: bool = False,
+) -> "MessagingConfig":
+    """Config da tool de Mensagens. `accounts` = conexões liberadas p/ este modelo
+    ([{"id","platform","label"}]); vazio → a tool existe mas responde 'nenhuma conexão'.
+    Confirmação de ENVIO é OPT-IN pelo perfil global (`confirm_actions`, Configurações →
+    Segurança); leitura/listagem nunca pedem confirmação."""
+    p = messaging_prefs or {}
+    return MessagingConfig(
+        user_id=user_id,
+        require_confirm=bool(confirm_actions),
+        accounts=list(accounts or []),
         ops=p.get("ops") if isinstance(p.get("ops"), dict) else {},
     )
 

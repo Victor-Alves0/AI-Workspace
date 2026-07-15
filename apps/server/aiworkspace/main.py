@@ -18,6 +18,7 @@ from .brain_routes import router as brain_router
 from .knowledge_routes import router as knowledge_router
 from .share_routes import router as share_router
 from .telegram_routes import router as telegram_router
+from .discord_routes import router as discord_router
 from .push_routes import router as push_router
 from .playground_routes import router as playground_router
 from .auth.routes import router as auth_router
@@ -73,6 +74,12 @@ async def lifespan(app: FastAPI):
         await telegram_poller.start()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível iniciar os pollers do Telegram (%s)", exc)
+    # gateways (WebSocket) dos bots do Discord conectados (uma task por conexão)
+    try:
+        from .integrations import discord_gateway
+        await discord_gateway.start()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Não foi possível iniciar os gateways do Discord (%s)", exc)
     try:
         yield
     finally:
@@ -80,6 +87,11 @@ async def lifespan(app: FastAPI):
         try:
             from .integrations import telegram_poller
             await telegram_poller.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from .integrations import discord_gateway
+            await discord_gateway.stop()
         except Exception:  # noqa: BLE001
             pass
 
@@ -167,6 +179,7 @@ def create_app() -> FastAPI:
     app.include_router(brain_router)
     app.include_router(share_router)
     app.include_router(telegram_router)
+    app.include_router(discord_router)
     app.include_router(push_router)
     app.include_router(playground_router)
     return app

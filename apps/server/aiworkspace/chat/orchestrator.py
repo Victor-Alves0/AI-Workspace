@@ -21,7 +21,7 @@ import re
 import time
 import uuid
 from collections.abc import AsyncGenerator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -38,7 +38,7 @@ from ..knowledge.links import sign_doc_url
 from ..memory import mem0_service
 from ..models import GeneratedImage
 from ..providers import image_gen, openrouter
-from ..tools import toolctx
+from ..tools import sift_service, toolctx
 
 logger = logging.getLogger(__name__)
 
@@ -876,6 +876,8 @@ def _assemble_tools_and_prompt(
     # catálogo legível, modo de exposição, prompt "quando usar", tools promovidas
     sift_meta: dict[str, Any] = (getattr(sift, "meta", None) or {}) if a.has_tools else {}
     if a.has_tools and code_mode:
+        # SIFT >= 0.8: o code_system_prompt já traz as SANDBOX_RULES (geradas da própria
+        # policy do sandbox, então não envelhecem) e a semântica de REPL do `output`.
         a.sift_prompt = sift.code_system_prompt
         a.tools = list(sift.code_tools())
         # tools LONGAS promovidas a 1ª classe (rodam fora do sandbox do run_code —
@@ -1068,6 +1070,10 @@ def _finalize_usage(
     tool_result_chars: dict[str, int],
     extra_breakdown: dict[str, int] | None,
     reasoning_text: str,
+    tool_events: list[dict[str, Any]] | None = None,
+    system_chars: dict[str, int] | None = None,
+    tools_prompt_chars: dict[str, int] | None = None,
+    calls_log: list[dict[str, Any]] | None = None,
 ) -> None:
     """Fase 5 — detalhamentos de uso (entrada/saída/por-tool/extra) em `total_usage`.
 
@@ -1075,6 +1081,15 @@ def _finalize_usage(
     ao tamanho (chars) de cada bloco. SAÍDA: visível vs raciocínio (thinking)."""
     prompt_total = int(total_usage.get("prompt_tokens", 0) or 0)
     weight_total = sum(input_chars.values())
+    rate = (prompt_total / weight_total) if (prompt_total and weight_total) else 0.0
+    # custo POR EVENTO de ferramenta (badge na UI): a mesma taxa tokens/char do turno
+    # aplicada ao tamanho de cada chamada/resultado. Somados, os resultados de uma tool
+    # batem com `tools_breakdown[tool]` — é a mesma distribuição, só granular.
+    if prompt_total and weight_total and tool_events:
+        for ev in tool_events:
+            chars = ev.get("chars")
+            if chars:
+                ev["tokens"] = round(prompt_total * chars / weight_total)
     if prompt_total and weight_total:
         input_breakdown = {
             k: round(prompt_total * v / weight_total) for k, v in input_chars.items()
@@ -1104,6 +1119,22 @@ def _finalize_usage(
             k: round(prompt_total * v / weight_total)
             for k, v in extra_breakdown.items() if v
         }
+    # PROVENIÊNCIA do prompt do sistema (do modelo/agente vs. injetado por nós) e do
+    # bloco de ferramentas (instruções vs. schemas vs. cérebro) — somam a `system`/`tools`
+    if rate and system_chars:
+        total_usage["system_breakdown"] = {k: round(rate * v) for k, v in system_chars.items()}
+    if rate and tools_prompt_chars:
+        total_usage["tools_prompt_breakdown"] = {k: round(rate * v) for k, v in tools_prompt_chars.items()}
+    # ferramentas REAIS executadas (agrega o log do on_result). No Modo Código é a ÚNICA
+    # forma de ver o que rodou dentro do run_code — ali `tools_breakdown` só diz "run_code".
+    if rate and calls_log:
+        agg: dict[str, int] = {}
+        for c in calls_log:
+            path = str(c.get("path") or "")
+            if path:
+                agg[path] = agg.get(path, 0) + int(c.get("chars") or 0)
+        if agg:
+            total_usage["called_tools_breakdown"] = {k: round(rate * v) for k, v in agg.items()}
 
 
 _SCOPE_ERROR_HINT = (
@@ -1111,6 +1142,11 @@ _SCOPE_ERROR_HINT = (
     "discover the CORRECT path, then retry execute_tool — do not tell the user the "
     "tool is unavailable."
 )
+
+# Teto de tools rodando ao mesmo tempo numa volta. Existe para não transformar um
+# fan-out do modelo (ex.: "leia estes 20 e-mails") numa rajada contra a API de
+# terceiros — que responderia com rate limit.
+_MAX_PARALLEL_TOOLS = 6
 
 
 @dataclass
@@ -1376,7 +1412,7 @@ class _ToolDispatcher:
         yield {"type": "subagent", "status": "done", "agent": (self.result.get("agent") if isinstance(self.result, dict) else None) or spec.get("name", key)}
 
     async def _sift_dispatch(self, name: str, args: dict) -> Any:
-        # NÃO trocar por sift.adispatch: na SIFT 0.7 ele roda tools SÍNCRONAS inline
+        # NÃO trocar por sift.adispatch: na SIFT 0.8 ele roda tools SÍNCRONAS inline
         # ("offload them yourself if they block") — e TODAS as nossas builtins são
         # sync (requests/Google/Tuya, segundos cada) → bloquearia o event loop do
         # servidor inteiro. O threadpool é o offload correto enquanto as tools não
@@ -1624,8 +1660,25 @@ async def run_turn(
         "tool_results": 0,  # preenchido conforme as tools respondem no loop (inclui view_skill)
         "file": attach_chars,
     }
+    # PROVENIÊNCIA dos dois blocos compostos, p/ o detalhamento "Extenso" responder
+    # "de onde veio esse prompt?": `system` mistura o prompt do modelo/agente com a
+    # nota temporal que INJETAMOS a cada turno; `tools` mistura as instruções da SIFT
+    # com os schemas das ferramentas (que o modelo nem lê como texto) e o cérebro.
+    system_chars = {
+        "model_prompt": len(chat_system_prompt or ""),
+        "datetime": len(time_note),
+    }
+    tools_prompt_chars = {
+        "instructions": len(sift_prompt),
+        "schemas": len(json.dumps(tools)) if tools else 0,
+        "brain": len(brain_block),
+    }
     # por FERRAMENTA: quanto cada tool devolveu (p/ o detalhamento "Extenso")
     tool_result_chars: dict[str, int] = {}
+    # ferramentas REAIS do turno (inclui as chamadas dentro do run_code — ver
+    # sift_service.tool_calls_log). Sem isto o Modo Código é caixa-preta na conta.
+    calls_log: list[dict[str, Any]] = []
+    calls_token = sift_service.tool_calls_log.set(calls_log)
 
     assistant_text = ""
     # raciocínio ("thinking") de modelos que o expõem via OpenRouter
@@ -1802,31 +1855,76 @@ async def run_turn(
                     for (tcid, _k, _t), res in zip(picked, results):
                         disp.delegate_pre[tcid] = {"error": str(res)} if isinstance(res, Exception) else res
 
-        for tc in tool_calls:
-            name = tc["function"]["name"]
+        def _args_of(tc: dict) -> dict:
             try:
-                args = json.loads(tc["function"]["arguments"] or "{}")
+                return json.loads(tc["function"]["arguments"] or "{}")
             except json.JSONDecodeError:
-                args = {}
-            yield {"type": "tool_call", "name": name, "arguments": args}
-            tool_events.append({"kind": "call", "name": name, "data": args})
+                return {}
 
-            # despacha a tool (emite os eventos de progresso na ordem certa)
-            async for ev in disp.run(name, args, tc):
-                yield ev
-            content, event_result = _shape_tool_result(disp.result)
-            yield {"type": "tool_result", "name": name, "result": event_result}
-            tool_events.append({"kind": "result", "name": name, "data": event_result})
+        def _announce(name: str, args: dict) -> dict[str, Any]:
+            # `chars` = peso do bloco no contexto; vira o badge de tokens no
+            # _finalize_usage (a chamada também é reenviada nas voltas seguintes).
+            tool_events.append({
+                "kind": "call", "name": name, "data": args,
+                "chars": len(json.dumps(args, ensure_ascii=False, default=str)),
+            })
+            return {"type": "tool_call", "name": name, "arguments": args}
 
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": tc["id"],
-                    "content": content,
-                }
-            )
+        def _absorb(name: str, tc: dict, result: Any) -> dict[str, Any]:
+            """Registra o resultado de UMA tool: evento p/ a UI, mensagem p/ o modelo e
+            a contabilidade de tokens. Devolve o evento a emitir."""
+            content, event_result = _shape_tool_result(result)
+            tool_events.append({
+                "kind": "result", "name": name, "data": event_result,
+                "chars": len(content),  # o que de fato volta como ENTRADA do modelo
+            })
+            messages.append({"role": "tool", "tool_call_id": tc["id"], "content": content})
             input_chars["tool_results"] += len(content)  # custo invisível: saída da tool volta como entrada
             tool_result_chars[name] = tool_result_chars.get(name, 0) + len(content)
+            return {"type": "tool_result", "name": name, "result": event_result}
+
+        # PARALELO: o modelo pede várias tools numa mensagem só (parallel tool calling).
+        # Executá-las em série não custa tokens nem voltas — custa TEMPO DE PAREDE: ler 4
+        # e-mails vira 4x a latência de rede enfileirada. Aqui elas rodam concorrentes.
+        # `delegate` fica de fora: já tem o próprio paralelismo (delegate_pre) e um contador
+        # compartilhado no dispatcher. Cada chamada ganha uma CÓPIA do dispatcher — ele
+        # guarda o resultado em `self.result`, e instâncias concorrentes se atropelariam.
+        specs = [(tc, tc["function"]["name"], _args_of(tc)) for tc in tool_calls]
+        parallel = len(specs) > 1 and all(n != "delegate" for _t, n, _a in specs)
+
+        if parallel:
+            for _tc, name, args in specs:
+                yield _announce(name, args)
+
+            sem = asyncio.Semaphore(_MAX_PARALLEL_TOOLS)
+
+            async def _run_one(tc: dict, name: str, args: dict):
+                async with sem:
+                    d = replace(disp, result=None)
+                    evs = [ev async for ev in d.run(name, args, tc)]
+                    return evs, d.result
+
+            outs = await asyncio.gather(
+                *[_run_one(tc, n, a) for tc, n, a in specs], return_exceptions=True
+            )
+            # emite na ORDEM ORIGINAL (os eventos de progresso de cada tool saem juntos):
+            # a UI e o histórico ficam determinísticos, mesmo com a execução embaralhada.
+            for (tc, name, _args), out in zip(specs, outs):
+                if isinstance(out, BaseException):
+                    logger.warning("Tool '%s' falhou em paralelo: %s", name, out)
+                    yield _absorb(name, tc, {"error": str(out)})
+                    continue
+                evs, res = out
+                for ev in evs:
+                    yield ev
+                yield _absorb(name, tc, res)
+        else:
+            for tc, name, args in specs:
+                yield _announce(name, args)
+                # despacha a tool (emite os eventos de progresso na ordem certa)
+                async for ev in disp.run(name, args, tc):
+                    yield ev
+                yield _absorb(name, tc, disp.result)
 
         assistant_text = ""  # reinicia p/ a próxima volta (resposta final)
 
@@ -1839,7 +1937,10 @@ async def run_turn(
     _finalize_usage(
         total_usage, input_chars=input_chars, tool_result_chars=tool_result_chars,
         extra_breakdown=extra_breakdown, reasoning_text=reasoning_text,
+        tool_events=tool_events, system_chars=system_chars,
+        tools_prompt_chars=tools_prompt_chars, calls_log=calls_log,
     )
+    sift_service.tool_calls_log.reset(calls_token)
 
     has_usage = total_usage["total_tokens"] > 0 or total_usage["cost"] > 0
     yield {

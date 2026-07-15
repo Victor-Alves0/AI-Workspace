@@ -303,12 +303,21 @@ export interface MessageUsage {
   tools_breakdown?: Record<string, number>;
   /** detalhe do `extra` por origem: artifacts | channel | guards (soma ≈ extra) */
   extra_breakdown?: Record<string, number>;
+  /** de onde vem o prompt do sistema: do modelo/agente vs. injetado por nós (soma ≈ system) */
+  system_breakdown?: { model_prompt?: number; datetime?: number };
+  /** o que compõe o bloco de ferramentas no prompt (soma ≈ tools) */
+  tools_prompt_breakdown?: { instructions?: number; schemas?: number; brain?: number };
+  /** ferramentas REALMENTE executadas, inclusive as chamadas dentro do run_code
+   *  (no Modo Código o `tools_breakdown` só mostra "run_code" — isto abre a caixa-preta) */
+  called_tools_breakdown?: Record<string, number>;
 }
 
 export interface ToolEvent {
   kind: "call" | "result" | "guard";
   name: string;
   data: unknown;
+  chars?: number;   // tamanho do bloco no contexto
+  tokens?: number;  // custo em tokens deste evento (taxa do turno × chars)
 }
 
 // anexo de mensagem: imagem (data URL), arquivo de texto, ou doc p/ extração
@@ -509,6 +518,25 @@ export interface TelegramConnection {
   memory: "local" | "global";
   system_prompt: string;
   humanize: { enabled?: boolean; typing?: boolean; split?: boolean; min_seconds?: number; max_seconds?: number };
+  /** janela de silencio (s) p/ juntar mensagens fragmentadas num turno; 0 = off */
+  debounce_seconds?: number;
+  enabled: boolean;
+  state: { status?: string; last_error?: string | null };
+  threads: number;
+}
+
+export interface DiscordConnection {
+  id: string;
+  label: string;
+  bot_username: string;
+  model_config_id: string | null;
+  model: string;
+  filters: { allow?: string[]; block?: string[]; guilds?: boolean; mention_only?: boolean; trigger?: string };
+  memory: "local" | "global";
+  system_prompt: string;
+  humanize: { enabled?: boolean; typing?: boolean; split?: boolean; min_seconds?: number; max_seconds?: number };
+  /** janela de silencio (s) p/ juntar mensagens fragmentadas num turno; 0 = off */
+  debounce_seconds?: number;
   enabled: boolean;
   state: { status?: string; last_error?: string | null };
   threads: number;
@@ -531,6 +559,8 @@ export interface WhatsAppConnection {
   contacts: { number: string; name: string; role: string; context: string }[];
   /** Modo humanizador: digitação simulada + quebra de mensagens */
   humanize: { enabled?: boolean; typing?: boolean; split?: boolean; min_seconds?: number; max_seconds?: number };
+  /** janela de silencio (s) p/ juntar mensagens fragmentadas num turno; 0 = off */
+  debounce_seconds?: number;
   enabled: boolean;
   state: { status?: string; last_error?: string | null };
   threads: number;

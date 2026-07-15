@@ -83,6 +83,11 @@ class Settings(BaseSettings):
     # console do Google e ser alcançado via localhost (política do Google).
     google_redirect_uri: str = "http://localhost:8000/integrations/google/callback"
 
+    # Integração GitHub (OAuth App, opcional — o caminho principal é colar um PAT).
+    # Client ID/Secret ficam em app_settings (UI); só o redirect_uri fica aqui e
+    # precisa bater com o cadastrado no OAuth App do GitHub.
+    github_redirect_uri: str = "http://localhost:8000/integrations/github/callback"
+
     # Integração WhatsApp
     # Evolution API (caminho NÃO oficial, QR Code): serviço opt-in do compose
     # (`--profile whatsapp`). Vazio = caminho não oficial indisponível (o oficial

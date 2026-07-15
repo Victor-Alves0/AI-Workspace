@@ -63,6 +63,20 @@ async def send_message(token: str, chat_id: str, text: str) -> dict[str, Any]:
     return await _call(token, "sendMessage", chat_id=chat_id, text=text, timeout=30.0)
 
 
+async def send_photo(token: str, chat_id: str, data: bytes, filename: str,
+                     caption: str = "") -> dict[str, Any]:
+    """Envia uma imagem (gráfico/imagem gerada) como FOTO — multipart, não JSON."""
+    url = _BASE.format(token=token, method="sendPhoto")
+    form = {"chat_id": chat_id}
+    if caption:
+        form["caption"] = caption[:1024]  # teto de legenda do Telegram
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        r = await client.post(url, data=form, files={"photo": (filename, data, "image/png")})
+    if r.status_code != 200:
+        raise TelegramError(f"sendPhoto falhou (HTTP {r.status_code})")
+    return r.json()
+
+
 # teto p/ download de mídia (voz do Telegram raramente passa de poucos MB)
 _MAX_FILE_BYTES = 20 * 1024 * 1024
 

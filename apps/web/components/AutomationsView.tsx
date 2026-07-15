@@ -85,10 +85,11 @@ export default function AutomationsView({
     return () => clearInterval(t);
   }, [reload]);
 
-  // some com o aviso sozinho (menos o "Executando…", que fica até terminar)
+  // some com o aviso sozinho (menos o "Executando…", que fica até terminar). Uma
+  // instrução longa — com um endereço a digitar — não se lê em 3,5s: fica mais tempo.
   useEffect(() => {
     if (!toast || toast === "Executando…") return;
-    const t = setTimeout(() => setToast(null), 3500);
+    const t = setTimeout(() => setToast(null), toast.length > 80 ? 12000 : 3500);
     return () => clearTimeout(t);
   }, [toast]);
 
@@ -300,9 +301,12 @@ export default function AutomationsView({
       </div>
 
       {toast && (
-        <div className="pointer-events-none fixed bottom-5 left-1/2 -translate-x-1/2 rounded-full bg-surface2 px-4 py-2 text-sm text-ink shadow-menu">
+        <button
+          onClick={() => setToast(null)}
+          className="fixed bottom-5 left-1/2 max-w-[min(92vw,30rem)] -translate-x-1/2 rounded-2xl bg-surface2 px-4 py-2 text-center text-sm text-ink shadow-menu"
+        >
           {toast}
-        </div>
+        </button>
       )}
 
       {(creating || editing) && (

@@ -52,6 +52,21 @@ def _tz_from_header(x_timezone: str | None = Header(default=None)) -> str:
     return tz
 
 
+def _remember_tz(user: User, user_tz: str) -> None:
+    """Guarda o fuso do navegador no profile (persiste no commit que o turno já
+    faz). É daí que os CANAIS (WhatsApp/Telegram/Discord) tiram o fuso — lá não há
+    navegador, e sem isso o modelo recebia a hora em UTC como se fosse a local
+    (dizia "já passou das 20h" às 17h de Brasília)."""
+    if user_tz and (user.profile or {}).get("timezone") != user_tz:
+        # reatribuição (não mutação): JSONB só marca dirty com objeto novo
+        user.profile = {**(user.profile or {}), "timezone": user_tz}
+
+
+def _profile_tz(user: User) -> str:
+    """Fuso IANA salvo no profile (via `_remember_tz`) — o que os canais usam."""
+    return str((user.profile or {}).get("timezone") or "")
+
+
 async def _get_owned_chat(db: AsyncSession, chat_id: uuid.UUID, user: User) -> Chat:
     chat = await db.get(Chat, chat_id)
     if chat is None or chat.user_id != user.id:
@@ -91,13 +106,12 @@ def _usage_record(usage: dict | None, model: str, model_config: ModelConfig | No
         "cached_tokens": int(u.get("cached_tokens", 0) or 0),
         "cost": float(u.get("cost", 0.0) or 0.0),
     }
-    # detalhamento de entrada/saída por categoria (ver orchestrator)
-    if isinstance(u.get("input_breakdown"), dict):
-        rec["input_breakdown"] = u["input_breakdown"]
-    if isinstance(u.get("output_breakdown"), dict):
-        rec["output_breakdown"] = u["output_breakdown"]
-    if isinstance(u.get("tools_breakdown"), dict):
-        rec["tools_breakdown"] = u["tools_breakdown"]
+    # TODOS os detalhamentos do turno (ver orchestrator._finalize_usage). Copiados por
+    # sufixo em vez de um a um: a lista explícita já tinha esquecido o `extra_breakdown`,
+    # e o painel de uso mostrava as sub-linhas de "Instruções extras" sempre vazias.
+    for k, v in u.items():
+        if k.endswith("_breakdown") and isinstance(v, dict):
+            rec[k] = v
     return rec
 
 

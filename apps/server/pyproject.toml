@@ -33,7 +33,7 @@ dependencies = [
     # adispatch/aexecute_tool no scope, erros estruturados com hint, coerção de
     # tipos nos params e hooks observer/on_risky/on_result.
     # Integração em tools/sift_service.py + tools/loader.py.
-    "sift-tools>=0.7.0,<0.8",
+    "sift-tools>=0.8.2,<0.9",
     # fixado na linha 0.1.x: é a API (Memory.from_config + config de provider)
     # contra a qual o serviço de memória foi escrito.
     "mem0ai>=0.1.40,<0.2",
@@ -49,6 +49,9 @@ dependencies = [
     # Web Push (notificações do navegador): pywebpush + py-vapid (usam cryptography,
     # já presente). Chaves VAPID geradas uma vez e guardadas em app_settings.
     "pywebpush>=2.0",
+    # Gateway do Discord (canal): conexão WebSocket persistente por bot. httpx
+    # cobre o REST (enviar mensagem), mas não faz WS — daí a lib dedicada.
+    "websockets>=12",
 ]
 
 [project.optional-dependencies]

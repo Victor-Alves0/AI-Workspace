@@ -11,6 +11,7 @@ levar ao banimento do número — a UI avisa; use um número descartável/secund
 
 from __future__ import annotations
 
+import base64
 import logging
 from typing import Any
 
@@ -112,6 +113,25 @@ async def send_text(instance: str, jid: str, text: str, delay_ms: int = 0) -> di
         return r.json()
 
 
+async def send_media(instance: str, jid: str, data: bytes, mime: str,
+                     filename: str, caption: str = "") -> dict[str, Any]:
+    """Envia uma imagem (gráfico renderizado, imagem gerada) como MÍDIA de verdade.
+    A Evolution aceita o arquivo em base64 no campo `media`."""
+    payload = {
+        "number": jid,
+        "mediatype": "image",
+        "mimetype": mime,
+        "media": base64.b64encode(data).decode(),
+        "fileName": filename,
+    }
+    if caption:
+        payload["caption"] = caption
+    async with _client() as c:
+        r = await c.post(f"/message/sendMedia/{instance}", json=payload)
+        r.raise_for_status()
+        return r.json()
+
+
 async def send_presence(instance: str, jid: str, presence: str = "composing", delay_ms: int = 3000) -> None:
     """Mostra o status de presença ('composing' = digitando, 'recording', 'paused').
     Best-effort: falhar aqui não pode impedir o envio da mensagem."""
@@ -147,6 +167,89 @@ async def get_media_base64(instance: str, msg_id: str) -> tuple[str, str]:
         r.raise_for_status()
         data = r.json()
     return data.get("base64") or "", data.get("mimetype") or "audio/ogg"
+
+
+async def find_chats(instance: str, limit: int = 50) -> list[dict[str, str]]:
+    """Lista as conversas da instância (contatos e grupos com quem há histórico).
+    Devolve [{jid, name, is_group}] — usado pela tool de mensagens p/ a IA achar
+    com quem falar. Best-effort: variações de payload entre versões do Evolution."""
+    async with _client() as c:
+        r = await c.post(f"/chat/findChats/{instance}", json={})
+        r.raise_for_status()
+        data = r.json()
+    rows = data if isinstance(data, list) else (data.get("chats") or data.get("data") or [])
+    out: list[dict[str, str]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        jid = str(row.get("remoteJid") or row.get("id") or row.get("jid") or "")
+        if not jid or jid.endswith("@broadcast") or jid == "status@broadcast":
+            continue
+        name = str(row.get("pushName") or row.get("name") or row.get("subject") or "")
+        out.append({"jid": jid, "name": name, "is_group": jid.endswith("@g.us")})
+        if len(out) >= max(1, limit):
+            break
+    return out
+
+
+async def find_contacts(instance: str, query: str = "", limit: int = 30) -> list[dict[str, str]]:
+    """Busca contatos salvos por nome/número (resolve 'fulano' → jid). Best-effort."""
+    async with _client() as c:
+        r = await c.post(f"/chat/findContacts/{instance}", json={})
+        r.raise_for_status()
+        data = r.json()
+    rows = data if isinstance(data, list) else (data.get("contacts") or data.get("data") or [])
+    q = (query or "").strip().lower()
+    out: list[dict[str, str]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        jid = str(row.get("remoteJid") or row.get("id") or row.get("jid") or "")
+        name = str(row.get("pushName") or row.get("name") or "")
+        if not jid or jid.endswith("@g.us"):
+            continue
+        if q and q not in name.lower() and q not in jid.lower():
+            continue
+        out.append({"jid": jid, "name": name, "is_group": False})
+        if len(out) >= max(1, limit):
+            break
+    return out
+
+
+async def find_messages(instance: str, jid: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Lê as últimas mensagens de uma conversa (mais recentes primeiro no retorno da
+    Evolution). Devolve [{from_me, text, sender_name, ts, msg_id}] em ordem cronológica."""
+    body = {"where": {"key": {"remoteJid": jid}}, "limit": int(max(1, min(limit, 100)))}
+    async with _client() as c:
+        r = await c.post(f"/chat/findMessages/{instance}", json=body)
+        r.raise_for_status()
+        data = r.json()
+    rows = data if isinstance(data, list) else (
+        (data.get("messages") or {}).get("records") if isinstance(data.get("messages"), dict)
+        else data.get("messages") or data.get("records") or data.get("data") or []
+    )
+    out: list[dict[str, Any]] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        key = row.get("key") or {}
+        msg = row.get("message") or {}
+        text = (
+            msg.get("conversation")
+            or (msg.get("extendedTextMessage") or {}).get("text")
+            or (msg.get("imageMessage") or {}).get("caption")
+            or (msg.get("videoMessage") or {}).get("caption")
+            or ""
+        )
+        out.append({
+            "from_me": bool(key.get("fromMe")),
+            "text": str(text or ""),
+            "sender_name": str(row.get("pushName") or ""),
+            "ts": _to_unix(row.get("messageTimestamp")),
+            "msg_id": str(key.get("id") or ""),
+        })
+    out.sort(key=lambda m: m["ts"])
+    return out[-int(max(1, min(limit, 100))):]
 
 
 def parse_webhook(payload: dict[str, Any]) -> list[dict[str, Any]]:

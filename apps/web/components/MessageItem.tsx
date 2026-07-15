@@ -767,7 +767,15 @@ function ToolEventRow({ event }: { event: ToolEvent }) {
           <Check size={12} className="shrink-0 text-green-400" />
         )}
         <span className="font-mono">{isCall ? "chamada" : "resultado"} · {event.name}</span>
-        <ChevronRight size={12} className={`ml-auto shrink-0 transition-transform duration-150 ${open ? "rotate-90" : ""}`} />
+        {!!event.tokens && (
+          <span
+            title={`Este bloco ocupou ~${event.tokens.toLocaleString("pt-BR")} tokens do contexto (${(event.chars ?? 0).toLocaleString("pt-BR")} caracteres)`}
+            className="ml-auto shrink-0 font-mono text-[11px] text-muted"
+          >
+            {event.tokens.toLocaleString("pt-BR")} tokens
+          </span>
+        )}
+        <ChevronRight size={12} className={`shrink-0 transition-transform duration-150 ${event.tokens ? "" : "ml-auto"} ${open ? "rotate-90" : ""}`} />
       </button>
       {open && (
         <pre ref={preRef} className="max-h-56 overflow-auto border-t border-border/70 px-2.5 py-2 font-mono text-[11px] leading-5 text-ink-soft">
@@ -857,12 +865,14 @@ function BreakdownRow({
   parts,
   showZero = false,
   startOpen = false,
+  hint,
 }: {
   label: string;
   total: number;
   parts: { label: string; value: number; sub?: boolean }[];
   showZero?: boolean;
   startOpen?: boolean;
+  hint?: string;
 }) {
   const [open, setOpen] = useState(startOpen);
   const listRef = useRef<HTMLDivElement>(null);
@@ -876,6 +886,7 @@ function BreakdownRow({
     <div>
       <button
         onClick={() => setOpen((v) => !v)}
+        title={hint}
         className="flex w-full items-center gap-1.5 rounded-md py-0.5 text-left transition-colors hover:text-ink"
         disabled={!shown.length}
       >
@@ -925,14 +936,29 @@ function UsagePanel({ u }: { u: NonNullable<Message["usage"]> }) {
     guards: "Guardas de saída (reforços acionados)",
   };
   const perExtra = Object.entries(u.extra_breakdown ?? {}).sort((a, b) => b[1] - a[1]);
+  // Extenso: PROVENIÊNCIA do prompt do sistema e do bloco de ferramentas — responde
+  // "esse prompt veio do modelo, ou fomos nós que injetamos?"
+  const sysb = u.system_breakdown;
+  const tpb = u.tools_prompt_breakdown;
+  // ferramentas REALMENTE executadas (inclui as de dentro do run_code)
+  const perCalled = Object.entries(u.called_tools_breakdown ?? {}).sort((a, b) => b[1] - a[1]);
   const inputParts = [
     { label: "Usuário (mensagem atual)", value: inb?.user ?? 0 },
     { label: "Contexto (histórico do chat)", value: inb?.context ?? 0 },
     { label: "Prompt do sistema", value: inb?.system ?? 0 },
+    ...(full && sysb ? [
+      { label: "Prompt do modelo (editor do modelo)", value: sysb.model_prompt ?? 0, sub: true },
+      { label: "Data e hora (injetada a cada turno)", value: sysb.datetime ?? 0, sub: true },
+    ] : []),
     { label: "Instruções extras (artefatos/canal/guardas)", value: inb?.extra ?? 0 },
     ...(full ? perExtra.map(([k, v]) => ({ label: EXTRA_LABELS[k] ?? k, value: v, sub: true })) : []),
     { label: "Memória (mem0)", value: inb?.memory ?? 0 },
     { label: "Ferramentas (instruções + schemas)", value: inb?.tools ?? 0 },
+    ...(full && tpb ? [
+      { label: "Instruções da SIFT + catálogo", value: tpb.instructions ?? 0, sub: true },
+      { label: "Schemas das ferramentas", value: tpb.schemas ?? 0, sub: true },
+      { label: "Cérebro (notas)", value: tpb.brain ?? 0, sub: true },
+    ] : []),
     { label: "Skills", value: inb?.skills ?? 0 },
     { label: "Resultados de ferramentas", value: inb?.tool_results ?? 0 },
     // Extenso: o gasto de cada ferramenta, aninhado sob "Resultados"
@@ -976,6 +1002,19 @@ function UsagePanel({ u }: { u: NonNullable<Message["usage"]> }) {
               { label: "Entrada em cache (leitura)", value: cached },
               { label: "Não cacheado", value: Math.max(0, u.prompt_tokens - cached) },
             ]}
+          />
+        )}
+        {/* No Modo Código o modelo chama as tools DENTRO do run_code: acima elas
+            aparecem só como "run_code". Aqui saem por nome, com o que cada uma
+            produziu — é o mesmo gasto visto por outro ângulo, não um custo a mais. */}
+        {full && perCalled.length > 0 && (
+          <BreakdownRow
+            label="Ferramentas executadas"
+            hint="O que cada ferramenta produziu neste turno — inclusive as chamadas por dentro do run_code (Modo Código). Não é um custo adicional: é o detalhe do que voltou como entrada."
+            total={perCalled.reduce((s, [, v]) => s + v, 0)}
+            parts={perCalled.map(([p, v]) => ({ label: p, value: v }))}
+            showZero
+            startOpen
           />
         )}
       </div>

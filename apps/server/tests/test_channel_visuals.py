@@ -1,0 +1,157 @@
+"""Saída visual dos canais: markdown → WhatsApp, gráfico → PNG, artefatos → mídia.
+
+Antes disto: a IA chamava `chart.render.plot`, o artefato era descartado em silêncio e
+ela ainda dizia "segue o gráfico abaixo"; e as tabelas/headings chegavam como canos e
+cerquilhas cruas. Estes testes fixam as duas garantias."""
+from __future__ import annotations
+
+import struct
+
+from aiworkspace.chart_render import render_chart
+from aiworkspace.integrations import channel_media
+from aiworkspace.integrations.wa_format import to_whatsapp
+
+
+# ----------------------------- markdown → WhatsApp ---------------------------
+
+def test_headings_become_bold():
+    assert to_whatsapp("### Resumo dos e-mails") == "*Resumo dos e-mails*"
+
+
+def test_bold_and_italic_are_converted():
+    assert to_whatsapp("**forte** e __tambem__") == "*forte* e *tambem*"
+
+
+def test_links_keep_the_url_visible():
+    # o WhatsApp nao renderiza [texto](url) — o contato precisa VER a url
+    assert to_whatsapp("veja o [relatorio](https://x.com/a)") == "veja o relatorio: https://x.com/a"
+
+
+def test_table_becomes_readable_lines():
+    md = (
+        "| Cidade | Horario | Dia |\n"
+        "|--------|---------|-----|\n"
+        "| Sao Paulo | 14:43 | seg |\n"
+        "| Toquio | 02:43 | ter |"
+    )
+    out = to_whatsapp(md)
+    assert "|" not in out                       # nenhum cano sobrevive
+    assert "*Sao Paulo* — Horario: 14:43 · Dia: seg" in out
+    assert "*Toquio* — Horario: 02:43 · Dia: ter" in out
+
+
+def test_bullets_and_rules():
+    out = to_whatsapp("- um\n- dois\n\n---\n\ntexto")
+    assert "• um" in out and "• dois" in out
+    assert "---" not in out
+
+
+def test_code_blocks_survive_untouched():
+    src = "olhe:\n```\n| nao | e | tabela |\n### nem heading\n```\nfim"
+    out = to_whatsapp(src)
+    assert "| nao | e | tabela |" in out        # dentro do code block, nada muda
+    assert "### nem heading" in out
+
+
+def test_empty_is_safe():
+    assert to_whatsapp("") == ""
+
+
+# ------------------------------- gráfico → PNG -------------------------------
+
+def _png_size(b: bytes) -> tuple[int, int]:
+    assert b[:8] == b"\x89PNG\r\n\x1a\n", "nao e um PNG"
+    w, h = struct.unpack(">II", b[16:24])
+    return w, h
+
+
+def test_renders_every_chart_type():
+    for t in ("line", "bar", "area", "pie"):
+        png = render_chart({
+            "kind": "chart", "type": t, "title": f"teste {t}",
+            "labels": ["a", "b", "c"],
+            "series": [{"name": "s1", "data": [3, 1, 2]}],
+        })
+        assert png, t
+        assert _png_size(png) == (1000, 640)
+
+
+def test_multi_series_renders():
+    png = render_chart({
+        "kind": "chart", "type": "line", "title": "duas series",
+        "labels": ["jan", "fev"],
+        "series": [{"name": "a", "data": [1, 2]}, {"name": "b", "data": [2, 1]}],
+    })
+    assert png and _png_size(png) == (1000, 640)
+
+
+def test_more_series_than_colors_does_not_crash():
+    # a 9a serie NAO ganha cor inventada — reusa a ordem fixa
+    png = render_chart({
+        "kind": "chart", "type": "bar", "title": "muitas",
+        "labels": ["x"],
+        "series": [{"name": f"s{i}", "data": [i + 1]} for i in range(10)],
+    })
+    assert png
+
+
+def test_empty_series_returns_none():
+    assert render_chart({"kind": "chart", "type": "line", "series": []}) is None
+
+
+def test_bad_chart_does_not_raise():
+    # um grafico ruim nao pode derrubar a resposta do canal
+    assert render_chart({"kind": "chart", "type": "line", "series": [{"data": None}]}) is None
+
+
+# --------------------------- artefatos → mídia -------------------------------
+
+async def test_collect_turns_a_chart_event_into_png():
+    events = [
+        {"kind": "call", "name": "chart", "data": {}},
+        {"kind": "result", "name": "chart", "data": {
+            "kind": "chart", "type": "bar", "title": "Vendas",
+            "labels": ["a", "b"], "series": [{"name": "s", "data": [1, 2]}],
+        }},
+    ]
+    media = await channel_media.collect(events)
+    assert len(media) == 1
+    assert media[0]["mime"] == "image/png"
+    assert media[0]["caption"] == "Vendas"      # o titulo vira legenda da imagem
+    assert media[0]["data"][:8] == b"\x89PNG\r\n\x1a\n"
+
+
+async def test_collect_ignores_non_visual_results():
+    media = await channel_media.collect([
+        {"kind": "result", "name": "web", "data": {"results": [1, 2]}},
+        {"kind": "result", "name": "x", "data": "texto puro"},
+        {"kind": "call", "name": "chart", "data": {"kind": "chart"}},  # call, nao result
+    ])
+    assert media == []
+
+
+def test_diagram_tool_is_removed_in_channels():
+    """A IA nao pode PROMETER um diagrama que o canal nao sabe entregar."""
+    ids = ["builtin:web.search.query", "builtin:diagram.excalidraw.render", "builtin:chart.render.plot"]
+    out = channel_media.unsupported_tool_ids(ids)
+    assert "builtin:diagram.excalidraw.render" not in out
+    assert "builtin:chart.render.plot" in out      # gráfico FICA: agora ele é entregue
+    assert "builtin:web.search.query" in out
+
+
+def test_sift_view_does_not_touch_the_db_object():
+    """Filtrar as tools do canal nao pode PERSISTIR no modelo do usuario."""
+    class FakeMC:
+        tools_enabled = True
+        tool_ids = ["builtin:diagram.excalidraw.render", "builtin:chart.render.plot"]
+        sift_config = {"mode": "prompt"}
+        code_mode = True
+        filter_config = {"tools": {}}
+
+    mc = FakeMC()
+    view = channel_media.sift_view(mc)
+    assert view.tool_ids == ["builtin:chart.render.plot"]
+    assert mc.tool_ids == [                       # o objeto original segue INTACTO
+        "builtin:diagram.excalidraw.render", "builtin:chart.render.plot",
+    ]
+    assert view.code_mode is True and view.tools_enabled is True
