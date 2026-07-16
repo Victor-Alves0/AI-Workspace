@@ -1,6 +1,6 @@
 """Modelos ORM. Importa tudo para que o metadata do Alembic enxergue todas as tabelas."""
 
-from .user import User, UserSecret
+from .user import AuditEvent, User, UserSecret
 from .chat import Folder, Chat, Message, Preset, ChatCompaction
 from .tool import Tool
 from .model_config import ModelConfig
@@ -23,6 +23,7 @@ from .knowledge import KnowledgeBase, KnowledgeFolder, KnowledgeDoc, KnowledgeCh
 from .benchmark import Benchmark, BenchmarkRun
 
 __all__ = [
+    "AuditEvent",
     "User",
     "UserSecret",
     "Folder",

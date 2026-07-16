@@ -19,6 +19,7 @@ import { api, API_URL, ApiError } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import type { Model, ModelConfig, WhatsAppConnection, WhatsAppFilters } from "@/lib/types";
 import ModelField from "./ModelField";
+import ContextWindowSelect from "./ContextWindowSelect";
 
 const inputCls =
   "mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent placeholder:text-muted";
@@ -269,6 +270,10 @@ function ConnectionCard({
                 <option value="local">Local (isolada por conversa)</option>
                 <option value="global">Global (compartilhada do modelo)</option>
               </select>
+            </label>
+            <label className="block text-sm">
+              <span className="text-xs text-muted">Contexto (mensagens que a IA enxerga)</span>
+              <ContextWindowSelect value={conn.context_window} onChange={(v) => patch({ context_window: v })} className={inputCls} />
             </label>
           </div>
 

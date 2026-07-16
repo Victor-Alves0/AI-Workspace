@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import {
   Blocks,
   Cable,
+  Check,
+  ChevronDown,
   ChevronLeft,
   Activity,
   Database,
@@ -37,6 +39,7 @@ import {
   SiWhatsapp,
 } from "react-icons/si";
 import { api, ApiError } from "@/lib/api";
+import { fmtTime } from "@/components/MessageItem";
 import { fileToAvatarDataUrl } from "@/lib/image";
 import {
   SHORTCUT_GROUPS, SHORTCUTS, resolveBinding, prettyCombo, eventToCombo, comboHasModifier,
@@ -80,8 +83,23 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Idioma", cat: "general" },
   { label: "Barra Lateral", cat: "interface", view: "sidebar" },
   { label: "Gerar título de novos chats", cat: "interface", view: "sidebar" },
+  { label: "Mostrar Modelos", cat: "interface", view: "sidebar" },
+  { label: "Mostrar Automações", cat: "interface", view: "sidebar" },
+  { label: "Mostrar Espaço de Trabalho", cat: "interface", view: "sidebar" },
+  { label: "Mostrar Analítica", cat: "interface", view: "sidebar" },
+  { label: "Mostrar Playground", cat: "interface", view: "sidebar" },
+  { label: "Mostrar Chats Arquivados", cat: "interface", view: "sidebar" },
+  { label: "Chat (aparência)", cat: "interface", view: "chat" },
+  { label: "Mostrar ferramentas do modelo", cat: "interface", view: "chat" },
+  { label: "Mostrar compartilhar conversa", cat: "interface", view: "chat" },
+  { label: "Mostrar imagem do modelo no chat", cat: "interface", view: "chat" },
+  { label: "Artefatos", cat: "interface", view: "chat" },
   { label: "Notificações", cat: "general" },
+  { label: "Animações", cat: "general" },
+  { label: "Fuso horário", cat: "general" },
   { label: "Prompt do Sistema", cat: "personalization" },
+  { label: "Formato de hora", cat: "personalization" },
+  { label: "Formato de data", cat: "personalization" },
   { label: "Parâmetros Avançados", cat: "personalization" },
   { label: "Atalhos de teclado", cat: "shortcuts" },
   { label: "Atalhos", cat: "shortcuts" },
@@ -162,6 +180,22 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
 
 function Heading({ children }: { children: React.ReactNode }) {
   return <p className="mb-2 mt-6 border-b border-border pb-1.5 text-sm font-semibold text-ink first:mt-0">{children}</p>;
+}
+
+/* card com título + descrição opcional + toggle à direita (reutilizado nas abas
+   de Interface). Mantém o visual consistente sem repetir a marcação. */
+function ToggleCard({ label, sub, on, onToggle }: { label: string; sub?: string; on: boolean; onToggle: () => void }) {
+  return (
+    <div className="rounded-xl border border-border bg-surface px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <span className="text-sm text-ink">{label}</span>
+          {sub && <p className="text-xs text-muted">{sub}</p>}
+        </div>
+        <Toggle on={on} onClick={onToggle} />
+      </div>
+    </div>
+  );
 }
 
 /* grade de cards (2 colunas): quadradinho com ícone + nome abaixo */
@@ -626,29 +660,44 @@ function InterfaceTab({
 function ChatSettings({ profile, set, onBack }: { profile: Record<string, any>; set: (k: string, v: any) => void; onBack: () => void }) {
   const iface: Record<string, any> = profile.interface ?? {};
   const setIface = (k: string, v: any) => set("interface", { ...iface, [k]: v });
-  const artifacts = iface.artifacts !== false; // padrão: ligado
-  const modelAvatar = iface.model_avatar !== false; // padrão: ligado
+  const artifacts = iface.artifacts !== false;          // padrão: ligado
+  const modelAvatar = iface.model_avatar !== false;      // avatar no SELETOR (topo)
+  const chatTools = iface.chat_tools !== false;          // chave inglesa + lista de tools
+  const chatShare = iface.chat_share !== false;          // botão compartilhar (topo direito)
+  const chatModelImg = iface.chat_model_image !== false; // avatar ao lado do nome na mensagem
   return (
     <DetailView title="Chat" onBack={onBack}>
       <div className="space-y-2.5">
-        <div className="rounded-xl border border-border bg-surface px-4 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <span className="text-sm text-ink">Artefatos</span>
-              <p className="text-xs text-muted">Conteúdos extensos (código, documentos, HTML…) abrem numa janela dedicada ao lado do chat, com edição e versões</p>
-            </div>
-            <Toggle on={artifacts} onClick={() => setIface("artifacts", !artifacts)} />
-          </div>
-        </div>
-        <div className="rounded-xl border border-border bg-surface px-4 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <span className="text-sm text-ink">Foto do modelo no seletor</span>
-              <p className="text-xs text-muted">Mostra o avatar do modelo ao lado do nome, no topo do chat</p>
-            </div>
-            <Toggle on={modelAvatar} onClick={() => setIface("model_avatar", !modelAvatar)} />
-          </div>
-        </div>
+        <ToggleCard
+          label="Mostrar ferramentas do modelo"
+          sub="A chave inglesa com a lista de ferramentas equipadas, no topo do chat"
+          on={chatTools}
+          onToggle={() => setIface("chat_tools", !chatTools)}
+        />
+        <ToggleCard
+          label="Mostrar compartilhar conversa"
+          sub="O botão de compartilhar (gera um link público), no canto superior direito"
+          on={chatShare}
+          onToggle={() => setIface("chat_share", !chatShare)}
+        />
+        <ToggleCard
+          label="Mostrar imagem do modelo no chat"
+          sub="O avatar do modelo ao lado do nome dele, dentro de cada resposta"
+          on={chatModelImg}
+          onToggle={() => setIface("chat_model_image", !chatModelImg)}
+        />
+        <ToggleCard
+          label="Foto do modelo no seletor"
+          sub="Mostra o avatar do modelo ao lado do nome, no topo do chat"
+          on={modelAvatar}
+          onToggle={() => setIface("model_avatar", !modelAvatar)}
+        />
+        <ToggleCard
+          label="Artefatos"
+          sub="Conteúdos extensos (código, documentos, HTML…) abrem numa janela dedicada ao lado do chat, com edição e versões"
+          on={artifacts}
+          onToggle={() => setIface("artifacts", !artifacts)}
+        />
       </div>
     </DetailView>
   );
@@ -711,9 +760,30 @@ function SidebarSettings({ profile, set, onBack }: { profile: Record<string, any
           </div>
         )}
       </div>
+
+      <p className="mb-2 mt-5 text-xs font-semibold uppercase tracking-wider text-muted/70">Itens visíveis</p>
+      <div className="space-y-2.5">
+        {SIDEBAR_ITEMS.map((it) => {
+          const on = iface[it.key] !== false; // padrão: visível
+          return (
+            <ToggleCard key={it.key} label={it.label} on={on} onToggle={() => setIface(it.key, !on)} />
+          );
+        })}
+      </div>
     </DetailView>
   );
 }
+
+// itens da barra lateral que podem ser ocultados (a chave vive em profile.interface,
+// padrão visível). Os identificadores são lidos pela Sidebar/UserMenu.
+const SIDEBAR_ITEMS: { key: string; label: string }[] = [
+  { key: "sb_models", label: "Mostrar Modelos" },
+  { key: "sb_automations", label: "Mostrar Automações" },
+  { key: "sb_workspace", label: "Mostrar Espaço de Trabalho" },
+  { key: "sb_analytics", label: "Mostrar Analítica" },
+  { key: "sb_playground", label: "Mostrar Playground" },
+  { key: "sb_archived", label: "Mostrar Chats Arquivados" },
+];
 
 /* ---------------------------------- Sobre --------------------------------- */
 interface AboutInfo { version: string; latest_version: string | null; update_available: boolean; repo_url: string | null }
@@ -777,9 +847,106 @@ function GeneralTab({ profile, set }: { profile: Record<string, any>; set: (k: s
       <Row label="Notificações">
         <Toggle on={!!profile.notifications} onClick={() => set("notifications", !profile.notifications)} />
       </Row>
+      <Row label="Animações" sub="Transições e efeitos da interface">
+        <Toggle on={profile.animations !== false} onClick={() => set("animations", profile.animations === false)} />
+      </Row>
+      <Row label="Fuso horário">
+        <TimezoneSelect
+          value={profile.tz_manual ? (profile.timezone ?? "") : ""}
+          onChange={(tz) => {
+            if (tz) { set("timezone", tz); set("tz_manual", true); }
+            else { set("tz_manual", false); }
+          }}
+        />
+      </Row>
     </div>
   );
 }
+
+/* seletor de fuso: 'Automático' (segue o navegador) ou um IANA da lista do runtime,
+   com busca (mesmo padrão do seletor de modelos) */
+function TimezoneSelect({ value, onChange }: { value: string; onChange: (tz: string) => void }) {
+  const zones = useMemo(() => {
+    try {
+      // Intl.supportedValuesOf existe nos navegadores atuais; fallback numa lista curta
+      return (Intl as any).supportedValuesOf?.("timeZone") as string[] ?? COMMON_TZ;
+    } catch { return COMMON_TZ; }
+  }, []);
+  const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const f = q.trim().toLowerCase();
+  const filtered = useMemo(
+    () => (f ? zones.filter((z) => z.toLowerCase().includes(f)) : zones),
+    [zones, f],
+  );
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => { setOpen((v) => !v); setQ(""); }}
+        className="flex max-w-[220px] items-center gap-1.5 rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none hover:bg-hover"
+      >
+        <span className="truncate">{value || `Automático (${detected})`}</span>
+        <ChevronDown size={15} className="shrink-0 text-muted" />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-9 z-50 w-64 overflow-hidden rounded-xl border border-border bg-surface shadow-menu animate-pop">
+          <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+            <Search size={15} className="text-muted" />
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Pesquisar fuso"
+              className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
+            />
+          </div>
+          <div className="max-h-64 overflow-y-auto overscroll-contain p-1">
+            <button
+              type="button"
+              onClick={() => { onChange(""); setOpen(false); }}
+              className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-sm text-ink hover:bg-hover"
+            >
+              <span className="truncate">Automático ({detected})</span>
+              {!value && <Check size={15} className="shrink-0 text-accent" />}
+            </button>
+            {filtered.map((z) => (
+              <button
+                key={z}
+                type="button"
+                onClick={() => { onChange(z); setOpen(false); }}
+                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-sm text-ink hover:bg-hover"
+              >
+                <span className="truncate">{z}</span>
+                {value === z && <Check size={15} className="shrink-0 text-accent" />}
+              </button>
+            ))}
+            {filtered.length === 0 && (
+              <p className="px-3 py-6 text-center text-sm text-muted">Nenhum fuso.</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const COMMON_TZ = [
+  "America/Sao_Paulo", "America/New_York", "America/Los_Angeles", "America/Mexico_City",
+  "Europe/London", "Europe/Lisbon", "Europe/Paris", "UTC", "Asia/Tokyo", "Asia/Shanghai",
+];
 
 function SecurityTab({ profile, set }: { profile: Record<string, any>; set: (k: string, v: any) => void }) {
   const sec = (profile.security as Record<string, any>) ?? {};
@@ -797,7 +964,126 @@ function SecurityTab({ profile, set }: { profile: Record<string, any>; set: (k: 
         Vale para todos os seus modelos. Automações e canais (WhatsApp/Telegram) sempre executam
         direto, pois rodam sem você presente para confirmar.
       </p>
+
+      <TwoFactorSection />
+      <AuditLogSection />
     </div>
+  );
+}
+
+/* --------------------------- 2FA (TOTP) ----------------------------------- */
+function TwoFactorSection() {
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [setup, setSetup] = useState<{ secret: string; qr: string } | null>(null);
+  const [code, setCode] = useState("");
+  const [pw, setPw] = useState("");
+  const [disabling, setDisabling] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const reload = () => api.get<{ enabled: boolean }>("/security/2fa").then((r) => setEnabled(r.enabled)).catch(() => setEnabled(false));
+  useEffect(() => { reload(); }, []);
+
+  async function startSetup() {
+    setMsg(null); setBusy(true);
+    try { setSetup(await api.post<{ secret: string; qr: string }>("/security/2fa/setup")); }
+    catch (e) { setMsg(e instanceof ApiError ? e.message : "Falha ao iniciar"); }
+    finally { setBusy(false); }
+  }
+  async function confirm() {
+    setMsg(null); setBusy(true);
+    try {
+      await api.post("/security/2fa/enable", { code: code.trim() });
+      setSetup(null); setCode(""); setMsg("2FA ativado ✓"); reload();
+    } catch (e) { setMsg(e instanceof ApiError ? e.message : "Código inválido"); }
+    finally { setBusy(false); }
+  }
+  async function disable() {
+    setMsg(null); setBusy(true);
+    try {
+      await api.post("/security/2fa/disable", { password: pw });
+      setDisabling(false); setPw(""); setMsg("2FA desativado"); reload();
+    } catch (e) { setMsg(e instanceof ApiError ? e.message : "Senha incorreta"); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <>
+      <Heading>Verificação em duas etapas (2FA)</Heading>
+      <p className="mb-2 text-xs leading-5 text-muted">
+        Um código do app autenticador (Google Authenticator, Authy…) além da senha, no login.
+      </p>
+      {enabled === null ? (
+        <p className="text-sm text-muted">Carregando…</p>
+      ) : enabled ? (
+        <div className="rounded-xl border border-border bg-surface px-4 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="flex items-center gap-2 text-sm text-ink"><Check size={15} className="text-green-400" /> 2FA está ativo</span>
+            {!disabling && <button onClick={() => setDisabling(true)} className="text-sm text-red-400 hover:text-red-300">Desativar</button>}
+          </div>
+          {disabling && (
+            <div className="mt-3 space-y-2 border-t border-border pt-3">
+              <p className="text-xs text-muted">Confirme com a senha da conta para desligar.</p>
+              <div className="flex gap-2">
+                <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Senha"
+                  className="flex-1 rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent" />
+                <button onClick={disable} disabled={busy || !pw} className="rounded-lg bg-red-500/90 px-3 py-2 text-sm text-white disabled:opacity-50">Desativar</button>
+                <button onClick={() => { setDisabling(false); setPw(""); }} className="px-2 text-sm text-muted hover:text-ink">Cancelar</button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : setup ? (
+        <div className="space-y-3 rounded-xl border border-border bg-surface px-4 py-4">
+          <p className="text-sm text-ink">1. Escaneie o QR no seu app autenticador:</p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={setup.qr} alt="QR de pareamento" className="mx-auto h-44 w-44 rounded-lg bg-white p-1" />
+          <p className="text-center text-xs text-muted">ou digite manualmente: <code className="rounded bg-surface2 px-1.5 py-0.5 text-ink">{setup.secret}</code></p>
+          <p className="text-sm text-ink">2. Digite o código de 6 dígitos que aparece no app:</p>
+          <div className="flex gap-2">
+            <input value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              inputMode="numeric" placeholder="000000"
+              className="flex-1 rounded-lg border border-border bg-surface2 px-3 py-2 text-center font-mono text-lg tracking-widest text-ink outline-none focus:border-accent" />
+            <button onClick={confirm} disabled={busy || code.length < 6} className="rounded-lg bg-accent px-4 py-2 text-sm text-white disabled:opacity-50">Ativar</button>
+          </div>
+          <button onClick={() => { setSetup(null); setCode(""); }} className="text-xs text-muted hover:text-ink">Cancelar</button>
+        </div>
+      ) : (
+        <button onClick={startSetup} disabled={busy} className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-hover disabled:opacity-50">
+          Ativar 2FA
+        </button>
+      )}
+      {msg && <p className="mt-2 text-xs text-ink-soft">{msg}</p>}
+    </>
+  );
+}
+
+/* --------------------------- Logs (auditoria) ----------------------------- */
+type AuditRow = { id: string; label: string; ip: string; created_at: string; detail: Record<string, any> };
+function AuditLogSection() {
+  const [events, setEvents] = useState<AuditRow[] | null>(null);
+  useEffect(() => {
+    api.get<AuditRow[]>("/security/audit?limit=50").then(setEvents).catch(() => setEvents([]));
+  }, []);
+  return (
+    <>
+      <Heading>Logs de segurança</Heading>
+      <p className="mb-2 text-xs text-muted">Atividades recentes da sua conta (login, senha, 2FA, chaves).</p>
+      {events === null ? (
+        <p className="text-sm text-muted">Carregando…</p>
+      ) : events.length === 0 ? (
+        <p className="text-sm text-muted">Nenhum evento registrado ainda.</p>
+      ) : (
+        <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
+          {events.map((e) => (
+            <div key={e.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+              <span className="text-ink">{e.label}{e.detail?.name ? ` · ${e.detail.name}` : ""}</span>
+              <span className="shrink-0 text-xs text-muted">{e.ip || "—"} · {fmtTime(e.created_at)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -813,6 +1099,29 @@ function PersonalizationTab({ profile, set }: { profile: Record<string, any>; se
         placeholder="Insira o prompt do sistema aqui"
         className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
       />
+
+      <Heading>Formato de data e hora</Heading>
+      <Row label="Formato de hora">
+        <select
+          value={profile.time_format ?? "24h"}
+          onChange={(e) => set("time_format", e.target.value)}
+          className="rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none"
+        >
+          <option value="24h">24 horas (14:30)</option>
+          <option value="12h">12 horas (2:30 PM)</option>
+        </select>
+      </Row>
+      <Row label="Formato de data">
+        <select
+          value={profile.date_format ?? "dmy"}
+          onChange={(e) => set("date_format", e.target.value)}
+          className="rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none"
+        >
+          <option value="dmy">DD/MM/AAAA</option>
+          <option value="mdy">MM/DD/AAAA</option>
+          <option value="ymd">AAAA-MM-DD</option>
+        </select>
+      </Row>
 
       <Heading>Aviso de uso alto</Heading>
       <Row label="Avisar quando uma resposta passar de (tokens)" sub="0 = desligado. Marca a mensagem com um alerta; não bloqueia.">

@@ -57,6 +57,24 @@ def sift_view(mc: Any) -> Any:
     )
 
 
+# teto de seguranca da janela de contexto: "Tudo" nao pode virar tokens sem fim
+# (custo/latencia e estouro do contexto do modelo). Alto, mas limitado.
+CONTEXT_WINDOW_MAX = 500
+
+
+def history_limit(conn: Any) -> int:
+    """Quantas mensagens anteriores puxar para o histórico desta conexão de canal.
+
+    `context_window` da conexão: None/ausente = 40 (padrão); 0 = "Tudo" (teto de
+    segurança `CONTEXT_WINDOW_MAX`); N>0 = últimas N (também limitado pelo teto)."""
+    cw = getattr(conn, "context_window", None)
+    if cw is None:
+        return 40
+    if cw <= 0:
+        return CONTEXT_WINDOW_MAX
+    return min(cw, CONTEXT_WINDOW_MAX)
+
+
 async def collect(tool_events: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     """Varre os eventos do turno e devolve [{data, mime, filename, caption}].
 

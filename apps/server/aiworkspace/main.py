@@ -20,6 +20,7 @@ from .share_routes import router as share_router
 from .telegram_routes import router as telegram_router
 from .discord_routes import router as discord_router
 from .push_routes import router as push_router
+from .security_routes import router as security_router
 from .playground_routes import router as playground_router
 from .auth.routes import router as auth_router
 from .automation_routes import router as automation_router
@@ -188,6 +189,7 @@ def create_app() -> FastAPI:
     app.include_router(discord_router)
     app.include_router(push_router)
     app.include_router(playground_router)
+    app.include_router(security_router)
     return app
 
 

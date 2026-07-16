@@ -107,6 +107,8 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
   const [metaDoc, setMetaDoc] = useState<KnowledgeDoc | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null); // folder id
   const [renameVal, setRenameVal] = useState("");
+  const [renamingBase, setRenamingBase] = useState<string | null>(null); // base id
+  const [baseRenameVal, setBaseRenameVal] = useState("");
   const [moveFor, setMoveFor] = useState<{ kind: "doc" | "folder"; id: string } | null>(null);
   const moveAnchor = useRef<HTMLButtonElement>(null);
   // vista do cérebro: lista de notas (files) ou grafo de [[wikilinks]]
@@ -257,6 +259,13 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
   }
   async function deleteDoc(d: KnowledgeDoc) {
     try { await api.del(`/knowledge/docs/${d.id}`); if (sel) { loadDocs(sel); loadBases(); } } catch {}
+  }
+  async function submitRenameBase(b: KnowledgeBase) {
+    const name = baseRenameVal.trim();
+    setRenamingBase(null);
+    if (!name || name === b.name) return;
+    setBases((bs) => bs.map((x) => (x.id === b.id ? { ...x, name } : x)));
+    try { await api.patch(`/knowledge/bases/${b.id}`, { name }); } catch { loadBases(); }
   }
   async function saveBaseTags(tags: string[]) {
     if (!current) return;
@@ -501,25 +510,43 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
         <ul className="grid gap-2 sm:grid-cols-2">
           {bases.map((b) => (
             <li key={b.id} className="group flex items-center gap-3 rounded-xl border border-border bg-surface p-3.5 transition-colors hover:border-accent/40">
-              <button onClick={() => setSel(b.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface2 text-accent-hover">
-                  {isBrain ? <Brain size={18} /> : <BookOpen size={18} />}
-                </span>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-ink">{b.name}</p>
-                  <p className="text-xs text-muted">{isBrain ? `${b.doc_count} nota(s)` : `${b.doc_count} doc(s) · ${b.chunk_count} trechos`}</p>
-                  {(b.tags || []).length > 0 && (
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {(b.tags || []).slice(0, 4).map((t) => (
-                        <span key={t} className="rounded-full bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">{t}</span>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </button>
-              <button onClick={() => deleteBase(b)} title="Excluir base" className="rounded-lg p-1.5 text-muted opacity-0 transition-all hover:bg-hover hover:text-rose-500 group-hover:opacity-100">
-                <Trash2 size={15} />
-              </button>
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface2 text-accent-hover">
+                {isBrain ? <Brain size={18} /> : <BookOpen size={18} />}
+              </span>
+              {renamingBase === b.id ? (
+                <input
+                  autoFocus
+                  value={baseRenameVal}
+                  onChange={(e) => setBaseRenameVal(e.target.value)}
+                  onBlur={() => submitRenameBase(b)}
+                  onKeyDown={(e) => { if (e.key === "Enter") submitRenameBase(b); if (e.key === "Escape") setRenamingBase(null); }}
+                  className="min-w-0 flex-1 rounded-md border border-accent bg-surface px-2 py-1 text-sm text-ink outline-none"
+                />
+              ) : (
+                <button onClick={() => setSel(b.id)} className="flex min-w-0 flex-1 items-center text-left">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-ink">{b.name}</p>
+                    <p className="text-xs text-muted">{isBrain ? `${b.doc_count} nota(s)` : `${b.doc_count} doc(s) · ${b.chunk_count} trechos`}</p>
+                    {(b.tags || []).length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {(b.tags || []).slice(0, 4).map((t) => (
+                          <span key={t} className="rounded-full bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">{t}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              )}
+              {renamingBase !== b.id && (
+                <>
+                  <button onClick={() => { setRenamingBase(b.id); setBaseRenameVal(b.name); }} title="Renomear" className="rounded-lg p-1.5 text-muted opacity-0 transition-all hover:bg-hover hover:text-ink group-hover:opacity-100">
+                    <Pencil size={15} />
+                  </button>
+                  <button onClick={() => deleteBase(b)} title="Excluir base" className="rounded-lg p-1.5 text-muted opacity-0 transition-all hover:bg-hover hover:text-rose-500 group-hover:opacity-100">
+                    <Trash2 size={15} />
+                  </button>
+                </>
+              )}
             </li>
           ))}
         </ul>

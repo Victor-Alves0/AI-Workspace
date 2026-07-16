@@ -23,6 +23,16 @@
     Consolas, monospace;
 }
 
+/* "Animações" desligado (Configurações → Geral): corta transições/animações da
+ * interface. Mantém `scroll-behavior` de fora para o auto-scroll ainda funcionar. */
+html.no-animations *,
+html.no-animations *::before,
+html.no-animations *::after {
+  transition-duration: 0ms !important;
+  animation-duration: 0ms !important;
+  animation-iteration-count: 1 !important;
+}
+
 /* Moldura de "app": a página em si NUNCA rola — cada tela é 100dvh e rola por
  * dentro (mensagens, painéis). Sem isso, no iOS o 100vh passa da área visível
  * (barra de URL) e a barra do topo + promptbox saem rolando com a página. */

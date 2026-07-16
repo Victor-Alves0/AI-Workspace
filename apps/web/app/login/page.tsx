@@ -12,6 +12,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [need2fa, setNeed2fa] = useState(false);
+  const [totp, setTotp] = useState("");
   const [allowSignups, setAllowSignups] = useState(false);
 
   useEffect(() => {
@@ -28,10 +30,21 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const path = mode === "login" ? "/auth/login" : "/auth/register";
-      const u = await api.post<User>(path, { email, password });
+      const payload: Record<string, string> = { email, password };
+      if (mode === "login" && need2fa) payload.totp_code = totp;
+      const u = await api.post<User>(path, payload);
       router.replace(u.status === "active" ? "/chat" : "/pending");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Falha inesperada");
+      // 2FA: o servidor responde 401 com detail "2fa_required" (pedir código) ou
+      // "2fa_invalid" (código errado) — o front troca para a etapa do código.
+      const detail = err instanceof ApiError ? err.message : "";
+      if (detail === "2fa_required") {
+        setNeed2fa(true); setError(null);
+      } else if (detail === "2fa_invalid") {
+        setNeed2fa(true); setError("Código de verificação inválido.");
+      } else {
+        setError(detail || "Falha inesperada");
+      }
     } finally {
       setLoading(false);
     }
@@ -75,6 +88,21 @@ export default function LoginPage() {
           onChange={(e) => setPassword(e.target.value)}
           className="w-full rounded-xl border border-border bg-surface2/70 px-3.5 py-2.5 text-sm text-ink outline-none transition-colors placeholder:text-muted focus:border-accent/60"
         />
+
+        {mode === "login" && need2fa && (
+          <div className="space-y-1.5">
+            <p className="text-xs text-muted">Digite o código de 6 dígitos do seu app autenticador.</p>
+            <input
+              inputMode="numeric"
+              autoFocus
+              required
+              placeholder="000000"
+              value={totp}
+              onChange={(e) => setTotp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              className="w-full rounded-xl border border-border bg-surface2/70 px-3.5 py-2.5 text-center font-mono text-lg tracking-widest text-ink outline-none transition-colors placeholder:text-muted focus:border-accent/60"
+            />
+          </div>
+        )}
 
         {error && <p className="text-sm text-red-400">{error}</p>}
 

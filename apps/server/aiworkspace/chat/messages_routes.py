@@ -53,6 +53,7 @@ from .turn_setup import (
     _subagent_opts,
     _subscribe,
     _remember_tz,
+    _session_tz,
     _tz_from_header,
     _usage_record,
     _use_context,
@@ -117,7 +118,7 @@ async def ephemeral(
             chat_system_prompt=body.get("system_prompt"),
             params=body.get("params") or {},
             base_url=base_url,
-            session=TurnSession(user_id=user_id, user_tz=user_tz),
+            session=TurnSession(user_id=user_id, user_tz=_session_tz(user, user_tz)),
             sift=sift,
             code_mode=_code_mode(model_config),
             skills=skills,
@@ -295,7 +296,7 @@ async def send_message(
         base_url=base_url,
         **(await _artifacts_kwargs(db, chat_id, user, arts_on)),
         session=TurnSession(
-            user_id=user_id, user_tz=user_tz, chat_id=str(chat_id),
+            user_id=user_id, user_tz=_session_tz(user, user_tz), chat_id=str(chat_id),
             agent_id=_mem_agent_id(model_config, model),
             user_profile=_user_profile_dict(user),
         ),
@@ -500,7 +501,7 @@ async def regenerate_message(
         base_url=base_url,
         **(await _artifacts_kwargs(db, chat_id, user, arts_on)),
         session=TurnSession(
-            user_id=user_id, user_tz=user_tz, chat_id=str(chat_id),
+            user_id=user_id, user_tz=_session_tz(user, user_tz), chat_id=str(chat_id),
             agent_id=_mem_agent_id(model_config, model),
             user_profile=_user_profile_dict(user),
         ),
@@ -623,7 +624,7 @@ async def continue_message(
         base_url=base_url,
         **(await _artifacts_kwargs(db, chat_id, user, arts_on)),
         session=TurnSession(
-            user_id=user_id, user_tz=user_tz, chat_id=str(chat_id),
+            user_id=user_id, user_tz=_session_tz(user, user_tz), chat_id=str(chat_id),
             agent_id=_mem_agent_id(model_config, model),
             user_profile=_user_profile_dict(user),
         ),

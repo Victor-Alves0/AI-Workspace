@@ -168,3 +168,21 @@ def test_sift_view_does_not_touch_the_db_object():
         "builtin:diagram.excalidraw.render", "builtin:chart.render.plot",
     ]
     assert view.code_mode is True and view.tools_enabled is True
+
+
+# --------------------- janela de contexto por conexão ------------------------
+
+def test_history_limit_default_and_missing():
+    """Sem valor (None) ou ausente = padrão 40 — o comportamento antigo."""
+    from types import SimpleNamespace
+    assert channel_media.history_limit(SimpleNamespace(context_window=None)) == 40
+    assert channel_media.history_limit(SimpleNamespace()) == 40  # atributo ausente
+
+
+def test_history_limit_custom_and_all_and_cap():
+    from types import SimpleNamespace
+    assert channel_media.history_limit(SimpleNamespace(context_window=100)) == 100
+    # 0 = "Tudo" → teto de segurança
+    assert channel_media.history_limit(SimpleNamespace(context_window=0)) == channel_media.CONTEXT_WINDOW_MAX
+    # acima do teto é limitado
+    assert channel_media.history_limit(SimpleNamespace(context_window=99999)) == channel_media.CONTEXT_WINDOW_MAX

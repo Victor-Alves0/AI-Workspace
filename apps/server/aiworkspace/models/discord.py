@@ -54,6 +54,9 @@ class DiscordConnection(Base):
     # janela de silencio (s) p/ colar mensagens fragmentadas do contato num unico
     # turno; 0 = desligado (um turno por mensagem)
     debounce_seconds: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # quantas mensagens anteriores da conversa a IA enxerga a cada resposta.
+    # 0 = "Tudo" (teto de seguranca aplicado no service); padrao 40.
+    context_window: Mapped[int] = mapped_column(Integer, default=40, server_default="40")
     # estado vivo do Gateway: {status, last_error, last_event_at,
     #   session_id, resume_url, seq} — permite RESUME após reconexão
     state: Mapped[dict] = mapped_column(JSONB, default=dict)

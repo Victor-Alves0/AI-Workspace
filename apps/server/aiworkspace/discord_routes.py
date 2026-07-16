@@ -32,6 +32,7 @@ class ConnIn(BaseModel):
     system_prompt: str = Field(default="", max_length=8000)
     humanize: dict[str, Any] = Field(default_factory=dict)
     debounce_seconds: int = Field(default=0, ge=0, le=60)
+    context_window: int = Field(default=40, ge=0, le=500)
 
 
 class ConnUpdate(BaseModel):
@@ -44,6 +45,7 @@ class ConnUpdate(BaseModel):
     system_prompt: str | None = Field(default=None, max_length=8000)
     humanize: dict[str, Any] | None = None
     debounce_seconds: int | None = Field(default=None, ge=0, le=60)
+    context_window: int | None = Field(default=None, ge=0, le=500)
     enabled: bool | None = None
 
 
@@ -58,6 +60,7 @@ class ConnOut(BaseModel):
     system_prompt: str
     humanize: dict
     debounce_seconds: int
+    context_window: int
     enabled: bool
     state: dict
     threads: int = 0
@@ -73,6 +76,7 @@ def _out(c: DiscordConnection, threads: int = 0) -> ConnOut:
         model=c.model, filters=c.filters or {}, memory=c.memory,
         system_prompt=c.system_prompt or "", humanize=c.humanize or {},
         debounce_seconds=c.debounce_seconds or 0,
+        context_window=c.context_window if c.context_window is not None else 40,
         enabled=c.enabled, state=st, threads=threads,
     )
 
@@ -117,7 +121,8 @@ async def create_connection(body: ConnIn, user: User = Depends(require_approved)
         bot_token=body.bot_token.strip(), bot_username=username, app_id=app_id,
         model_config_id=body.model_config_id, model=body.model,
         filters=body.filters, memory=body.memory, system_prompt=body.system_prompt,
-        humanize=body.humanize, debounce_seconds=body.debounce_seconds, enabled=True, state={"status": "connecting"},
+        humanize=body.humanize, debounce_seconds=body.debounce_seconds,
+        context_window=body.context_window, enabled=True, state={"status": "connecting"},
     )
     db.add(c)
     await db.commit()

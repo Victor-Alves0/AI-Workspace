@@ -15,6 +15,7 @@ import ArtifactPanel from "@/components/ArtifactPanel";
 import Roundtable, { nextColor, RT_COLORS } from "@/components/Roundtable";
 import Markdown from "@/components/Markdown";
 import { ReasoningBlock, ToolEventsPanel, fmtTime } from "@/components/MessageItem";
+import { setFormatPrefs } from "@/lib/format";
 import AskOptions from "@/components/AskOptions";
 import { useConfirm } from "@/components/ConfirmDialog";
 import Sidebar from "@/components/Sidebar";
@@ -348,6 +349,17 @@ export default function ChatPage() {
     if ((user?.profile as Record<string, unknown> | undefined)?.notifications) requestNotifPermission();
   }, [user]);
 
+  // "Animações" (Configurações → Geral): classe global que corta transições
+  useEffect(() => {
+    const off = (user?.profile as Record<string, unknown> | undefined)?.animations === false;
+    document.documentElement.classList.toggle("no-animations", off);
+  }, [user]);
+
+  // formato de hora/data (Configurações → Personalização) para os utilitários
+  useEffect(() => {
+    setFormatPrefs(user?.profile as { time_format?: string; date_format?: string } | undefined);
+  }, [user]);
+
   // estado volátil legível dentro de efeitos/timers sem virar dependência
   // (também usado pelo poll de 15s lá embaixo)
   const pollRef = useRef({ active, sending, streaming, atBottom });
@@ -678,8 +690,9 @@ export default function ChatPage() {
   }, [refreshChats, reloadMessages]);
 
   // toggle "Artefatos" (Configurações → Interface → Chat). Padrão: ligado.
-  const artifactsEnabled =
-    ((user?.profile as Record<string, any> | undefined)?.interface as Record<string, unknown> | undefined)?.artifacts !== false;
+  const iface = ((user?.profile as Record<string, any> | undefined)?.interface as Record<string, any> | undefined) ?? {};
+  const artifactsEnabled = iface.artifacts !== false;
+  const showShareBtn = iface.chat_share !== false;   // botão compartilhar (topo direito)
 
   async function selectChat(id: string) {
     setTemporary(false);
@@ -1355,7 +1368,7 @@ export default function ChatPage() {
             )}
           </div>
           <div className="flex items-center gap-1">
-            {active && !temporary && (
+            {active && !temporary && showShareBtn && (
               <button
                 onClick={() => setShowShare(true)}
                 title="Compartilhar conversa (link público)"
@@ -1432,7 +1445,7 @@ export default function ChatPage() {
                   </div>
                 </div>
                 <div className="w-full max-w-3xl">
-                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} />
+                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} temporary={temporary} />
                 </div>
                 {/* menu do "+" abre para baixo aqui (há espaço); na conversa abre para cima */}
                 {temporary && <p className="mt-2 text-xs text-muted">Chat temporário — esta conversa não será salva.</p>}
@@ -1498,6 +1511,8 @@ export default function ChatPage() {
                           message={m}
                           busy={sending}
                           modelName={m.speaker?.name ?? modelLabel}
+                          toolsEnabled={iface.chat_tools !== false}
+                          modelAvatar={iface.chat_model_image !== false ? (curCustom?.avatar_url ?? null) : null}
                           chatArtifacts={chatArtifacts}
                           onOpenArtifact={(ident) => setArtifactOpen(ident)}
                           onSpeak={(c) => speak(c, curCustom?.tts_voice ?? undefined)}
@@ -1581,7 +1596,7 @@ export default function ChatPage() {
                       {showAsk && askSpec && (
                         <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                       )}
-                      <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
+                      <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
                     </div>
                   </div>
                 </div>

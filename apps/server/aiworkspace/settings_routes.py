@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import budget_service
+from . import audit_service, budget_service
 from .app_config import ALLOW_SIGNUPS, get_setting
 from .auth.deps import require_approved
 from .config import get_settings
@@ -64,6 +64,7 @@ async def list_secret_status(
 async def set_secret_route(
     name: str,
     body: SecretIn,
+    request: Request,
     user: User = Depends(require_approved),
     db: AsyncSession = Depends(get_db),
 ):
@@ -76,6 +77,8 @@ async def set_secret_route(
     # chaves de busca/finanças afetam a instância SIFT do usuário
     if name in _SIFT_AFFECTING:
         sift_service.invalidate(str(user.id))
+    # auditoria: registra QUE segredo mudou (nunca o valor)
+    await audit_service.record("secret_set", user_id=user.id, request=request, detail={"name": name})
     return {"ok": True}
 
 

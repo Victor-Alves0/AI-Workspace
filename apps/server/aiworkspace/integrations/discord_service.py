@@ -282,7 +282,7 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
         rows = list(await db.scalars(
             select(Message)
             .where(Message.chat_id == chat.id, Message.role.in_(("user", "assistant")))
-            .order_by(Message.created_at.desc()).limit(40)
+            .order_by(Message.created_at.desc()).limit(channel_media.history_limit(conn))
         ))
         history = [{"role": r.role, "content": r.content} for r in reversed(rows) if r.content]
         shown = f"{m['sender_name']}: {text}" if not m.get("is_dm") and m.get("sender_name") else text

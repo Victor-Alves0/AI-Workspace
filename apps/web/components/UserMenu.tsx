@@ -37,6 +37,9 @@ export default function UserMenu({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const isAdmin = user.role === "admin";
+  // itens ocultáveis (Configurações → Interface → Barra Lateral); padrão: visível
+  const iface = (user.profile?.interface as Record<string, any>) ?? {};
+  const show = (k: string) => iface[k] !== false;
   const avatar = user.profile?.avatar as string | undefined;
   const displayName = (user.profile?.name as string | undefined) || user.email.split("@")[0];
   const initial = (displayName[0] ?? user.email[0] ?? "U").toUpperCase();
@@ -70,22 +73,32 @@ export default function UserMenu({
                 Painel do Admin
               </MenuItem>
             )}
-            <MenuItem icon={<Archive size={16} />} onClick={() => { onArchived(); setOpen(false); }}>
-              Chats Arquivados
-            </MenuItem>
+            {show("sb_archived") && (
+              <MenuItem icon={<Archive size={16} />} onClick={() => { onArchived(); setOpen(false); }}>
+                Chats Arquivados
+              </MenuItem>
+            )}
             <MenuDivider />
-            <MenuItem icon={<LayoutGrid size={16} />} onClick={() => { onOpenWorkspace ? onOpenWorkspace() : router.push("/workspace"); setOpen(false); }}>
-              Espaço de Trabalho
-            </MenuItem>
-            <MenuItem icon={<BarChart3 size={16} />} onClick={() => { onOpenAnalytics ? onOpenAnalytics() : router.push("/chat?v=analytics"); setOpen(false); }}>
-              Analítica
-            </MenuItem>
-            <MenuItem icon={<CalendarClock size={16} />} onClick={() => { router.push("/automations"); setOpen(false); }}>
-              Automações
-            </MenuItem>
-            <MenuItem icon={<FlaskConical size={16} />} onClick={() => { onOpenPlayground ? onOpenPlayground() : router.push("/playground"); setOpen(false); }}>
-              Playground
-            </MenuItem>
+            {show("sb_workspace") && (
+              <MenuItem icon={<LayoutGrid size={16} />} onClick={() => { onOpenWorkspace ? onOpenWorkspace() : router.push("/workspace"); setOpen(false); }}>
+                Espaço de Trabalho
+              </MenuItem>
+            )}
+            {show("sb_analytics") && (
+              <MenuItem icon={<BarChart3 size={16} />} onClick={() => { onOpenAnalytics ? onOpenAnalytics() : router.push("/chat?v=analytics"); setOpen(false); }}>
+                Analítica
+              </MenuItem>
+            )}
+            {show("sb_automations") && (
+              <MenuItem icon={<CalendarClock size={16} />} onClick={() => { router.push("/automations"); setOpen(false); }}>
+                Automações
+              </MenuItem>
+            )}
+            {show("sb_playground") && (
+              <MenuItem icon={<FlaskConical size={16} />} onClick={() => { onOpenPlayground ? onOpenPlayground() : router.push("/playground"); setOpen(false); }}>
+                Playground
+              </MenuItem>
+            )}
             <MenuDivider />
             <MenuItem danger icon={<LogOut size={16} />} onClick={() => { onLogout(); setOpen(false); }}>
               Sair

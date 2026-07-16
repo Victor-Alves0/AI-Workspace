@@ -23,31 +23,42 @@ const MEM_DEFAULT: Required<MemoryConfig> = {
   read: { global: true, model: true, chat: true, project: true }, banks: [], review: false,
 };
 
-// Lista de parâmetros do painel (espelha o OpenWebUI). Os numéricos comuns
-// (temperature, top_p, etc.) são enviados ao OpenRouter; os demais são ignorados
-// por provedores que não os suportam.
-const PARAMS: { key: string; label: string }[] = [
-  { key: "stream", label: "Stream Resposta do Chat" },
-  { key: "stream_delta_size", label: "Tamanho do bloco delta do stream" },
-  { key: "function_calling", label: "Chamada de função" },
-  { key: "reasoning_tags", label: "Tags de raciocínio" },
-  { key: "seed", label: "Seed" },
-  { key: "stop", label: "Sequência de Parada" },
-  { key: "temperature", label: "Temperatura" },
-  { key: "reasoning_effort", label: "Esforço de raciocínio" },
-  { key: "logit_bias", label: "logit_bias" },
-  { key: "max_tokens", label: "max_tokens" },
-  { key: "top_k", label: "top_k" },
-  { key: "top_p", label: "top_p" },
-  { key: "min_p", label: "min_p" },
-  { key: "frequency_penalty", label: "frequency_penalty" },
-  { key: "presence_penalty", label: "presence_penalty" },
-  { key: "mirostat", label: "mirostat" },
-  { key: "mirostat_eta", label: "mirostat_eta" },
-  { key: "mirostat_tau", label: "mirostat_tau" },
-  { key: "repeat_last_n", label: "repeat_last_n" },
-  { key: "tfs_z", label: "tfs_z" },
-  { key: "repeat_penalty", label: "repeat_penalty" },
+// Lista de parâmetros do painel (espelha o OpenWebUI). Cada um vira o controle certo:
+// faixa numérica → slider (com valor custom), escolha fixa → seletor, ligado/desligado →
+// bool. Os de geração comuns (temperature, top_p, seed, penalties, reasoning_effort…) são
+// enviados ao OpenRouter; os legados do Ollama (mirostat/tfs_z/…) são ignorados por quem
+// não os suporta. Em toda opção, "Padrão" = não enviamos o parâmetro (o modelo usa o dele).
+type ParamSpec =
+  | { key: string; label: string; kind: "slider"; min: number; max: number; step: number; def: number }
+  | { key: string; label: string; kind: "select"; options: { value: string; label: string }[] }
+  | { key: string; label: string; kind: "bool" }
+  | { key: string; label: string; kind: "text" };
+
+const PARAMS: ParamSpec[] = [
+  { key: "temperature", label: "Temperatura", kind: "slider", min: 0, max: 2, step: 0.05, def: 1 },
+  { key: "top_p", label: "top_p", kind: "slider", min: 0, max: 1, step: 0.05, def: 1 },
+  { key: "top_k", label: "top_k", kind: "slider", min: 0, max: 100, step: 1, def: 40 },
+  { key: "min_p", label: "min_p", kind: "slider", min: 0, max: 1, step: 0.01, def: 0 },
+  { key: "frequency_penalty", label: "Penalidade de frequência", kind: "slider", min: -2, max: 2, step: 0.1, def: 0 },
+  { key: "presence_penalty", label: "Penalidade de presença", kind: "slider", min: -2, max: 2, step: 0.1, def: 0 },
+  { key: "reasoning_effort", label: "Esforço de raciocínio", kind: "select", options: [
+    { value: "minimal", label: "Mínimo" }, { value: "low", label: "Baixo" },
+    { value: "medium", label: "Médio" }, { value: "high", label: "Alto" },
+  ] },
+  { key: "max_tokens", label: "max_tokens", kind: "text" },
+  { key: "seed", label: "Seed", kind: "text" },
+  { key: "stop", label: "Sequência de parada", kind: "text" },
+  { key: "logit_bias", label: "logit_bias", kind: "text" },
+  { key: "stream", label: "Stream da resposta", kind: "bool" },
+  { key: "function_calling", label: "Chamada de função", kind: "bool" },
+  { key: "reasoning_tags", label: "Tags de raciocínio", kind: "bool" },
+  { key: "stream_delta_size", label: "Tamanho do bloco delta", kind: "text" },
+  { key: "repeat_penalty", label: "repeat_penalty", kind: "slider", min: 0, max: 2, step: 0.05, def: 1 },
+  { key: "repeat_last_n", label: "repeat_last_n", kind: "text" },
+  { key: "mirostat", label: "mirostat", kind: "text" },
+  { key: "mirostat_eta", label: "mirostat_eta", kind: "text" },
+  { key: "mirostat_tau", label: "mirostat_tau", kind: "text" },
+  { key: "tfs_z", label: "tfs_z", kind: "text" },
 ];
 
 function MemToggle({ on, onClick }: { on: boolean; onClick: () => void }) {
@@ -80,14 +91,101 @@ function Section({
   );
 }
 
-function ParamRow({
+// "Padrão" (não enviado ao modelo) = valor ausente. Cada tipo de linha materializa
+// um valor tipado ao ser mexido; o "×"/opção Padrão volta a não enviar.
+const PADRAO_HINT = "\"Padrão\" usa o valor do próprio modelo — o parâmetro não é enviado.";
+
+function ParamControl({
+  spec,
+  value,
+  onChange,
+}: {
+  spec: ParamSpec;
+  value: unknown;
+  /** valor tipado; undefined = voltar ao Padrão (remove do envio) */
+  onChange: (v: number | string | boolean | undefined) => void;
+}) {
+  const has = value !== undefined && value !== "";
+
+  if (spec.kind === "slider") {
+    const num = has ? Number(value) : spec.def;
+    return (
+      <div className="py-2 text-sm">
+        <div className="flex items-center justify-between">
+          <span className="text-ink">{spec.label}</span>
+          {has ? (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="number"
+                value={Number.isFinite(num) ? num : ""}
+                step={spec.step}
+                onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
+                className="w-16 rounded-md border border-border bg-surface px-1.5 py-0.5 text-right text-xs text-ink outline-none focus:border-accent"
+              />
+              <button onClick={() => onChange(undefined)} title="Voltar ao Padrão" className="text-muted hover:text-ink">
+                <X size={13} />
+              </button>
+            </div>
+          ) : (
+            <button onClick={() => onChange(spec.def)} title={PADRAO_HINT} className="text-xs text-muted hover:text-ink">
+              Padrão
+            </button>
+          )}
+        </div>
+        {has && (
+          <input
+            type="range"
+            min={spec.min}
+            max={spec.max}
+            step={spec.step}
+            value={Number.isFinite(num) ? Math.min(Math.max(num, spec.min), spec.max) : spec.def}
+            onChange={(e) => onChange(Number(e.target.value))}
+            className="mt-1.5 w-full accent-accent"
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (spec.kind === "select" || spec.kind === "bool") {
+    const options =
+      spec.kind === "bool"
+        ? [{ value: "true", label: "Ligado" }, { value: "false", label: "Desligado" }]
+        : spec.options;
+    const cur = has ? String(value) : "";
+    return (
+      <div className="flex items-center justify-between py-1.5 text-sm">
+        <span className="text-ink">{spec.label}</span>
+        <select
+          value={cur}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === "") onChange(undefined);
+            else if (spec.kind === "bool") onChange(v === "true");
+            else onChange(v);
+          }}
+          title={PADRAO_HINT}
+          className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-ink outline-none focus:border-accent"
+        >
+          <option value="">Padrão (do modelo)</option>
+          {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      </div>
+    );
+  }
+
+  // text (freeform): número quando numérico, senão string
+  return <ParamTextRow label={spec.label} value={value} onChange={onChange} />;
+}
+
+function ParamTextRow({
   label,
   value,
   onChange,
 }: {
   label: string;
   value: unknown;
-  onChange: (v: string) => void;
+  onChange: (v: number | string | undefined) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const has = value !== undefined && value !== "";
@@ -99,17 +197,17 @@ function ParamRow({
           autoFocus
           defaultValue={has ? String(value) : ""}
           onBlur={(e) => {
-            onChange(e.target.value);
+            const raw = e.target.value;
+            onChange(raw === "" ? undefined : (isNaN(Number(raw)) ? raw : Number(raw)));
             setEditing(false);
           }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-          }}
+          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
           className="w-24 rounded-md border border-accent bg-surface px-2 py-0.5 text-right text-xs text-ink outline-none"
         />
       ) : (
         <button
           onClick={() => setEditing(true)}
+          title={has ? undefined : PADRAO_HINT}
           className={has ? "text-sm text-ink" : "text-sm text-muted hover:text-ink"}
         >
           {has ? String(value) : "Padrão"}
@@ -186,11 +284,11 @@ export default function Controls({
   const patchMem = (p: Partial<MemoryConfig>) =>
     onMemoryChange?.({ ...mem, enabled: true, ...p, read: { ...mem.read, ...(p.read ?? {}) } });
 
-  function setParam(key: string, raw: string) {
+  function setParam(key: string, v: number | string | boolean | undefined) {
     setParams((p) => {
       const next = { ...p };
-      if (raw === "") delete next[key];
-      else next[key] = isNaN(Number(raw)) ? raw : Number(raw);
+      if (v === undefined || v === "") delete next[key];
+      else next[key] = v;
       return next;
     });
   }
@@ -354,7 +452,7 @@ export default function Controls({
         <Section title="Parâmetros Avançados" open={open.advanced} onToggle={() => setOpen({ ...open, advanced: !open.advanced })}>
           <div className="divide-y divide-border/40">
             {PARAMS.map((p) => (
-              <ParamRow key={p.key} label={p.label} value={params[p.key]} onChange={(v) => setParam(p.key, v)} />
+              <ParamControl key={p.key} spec={p} value={params[p.key]} onChange={(v) => setParam(p.key, v)} />
             ))}
           </div>
         </Section>

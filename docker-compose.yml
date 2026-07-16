@@ -12,11 +12,11 @@ services:
       # volumes já existentes não roda — crie na mão: `docker compose exec db
       # createdb -U aiworkspace evolution`
       - ./infra/db-init:/docker-entrypoint-initdb.d:ro
-    ports:
-      # apenas o host (127.0.0.1) — o server acessa o banco pela rede do compose
-      # (db:5432). Não exponha o Postgres à rede: as credenciais default são fracas
-      # e o sandbox de tools tem acesso de rede. Para psql use `docker compose exec db`.
-      - "127.0.0.1:5432:5432"
+    # Por padrão o Postgres NÃO é publicado no host — a aplicação o acessa pela rede
+    # interna do compose (db:5432), então não há como colidir com um Postgres que
+    # você já rode no PC. Para acessar com um cliente externo (psql/DBeaver), copie
+    # docker-compose.override.yml.example para docker-compose.override.yml (a porta
+    # sai de DB_PORT no .env). Sem cliente externo, use `docker compose exec db psql`.
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aiworkspace} -d ${POSTGRES_DB:-aiworkspace}"]
       interval: 5s

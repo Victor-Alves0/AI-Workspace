@@ -6,6 +6,7 @@ import { SiTelegram } from "react-icons/si";
 import { api, ApiError } from "@/lib/api";
 import type { Model, ModelConfig, TelegramConnection } from "@/lib/types";
 import ModelField from "./ModelField";
+import ContextWindowSelect from "./ContextWindowSelect";
 import { useConfirm } from "@/components/ConfirmDialog";
 
 const inputCls = "mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent placeholder:text-muted";
@@ -156,6 +157,9 @@ export default function TelegramPanel({ onBack }: { onBack: () => void }) {
                       <option value="local">Local (isolada por conversa)</option>
                       <option value="global">Global (memória do modelo)</option>
                     </select>
+                  </div>
+                  <div className="text-xs text-muted">Contexto (mensagens que a IA enxerga)
+                    <ContextWindowSelect value={c.context_window} onChange={(v) => patch(c.id, { context_window: v })} className={inputCls} />
                   </div>
                   <label className="block text-xs text-muted">Prompt adicional deste bot
                     <textarea defaultValue={c.system_prompt} onBlur={(e) => e.target.value !== c.system_prompt && patch(c.id, { system_prompt: e.target.value })} rows={2} placeholder="Ex.: responda curto e informal" className={inputCls} />

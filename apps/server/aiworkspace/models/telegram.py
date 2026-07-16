@@ -51,6 +51,9 @@ class TelegramConnection(Base):
     # janela de silencio (s) p/ colar mensagens fragmentadas do contato num unico
     # turno; 0 = desligado (um turno por mensagem)
     debounce_seconds: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    # quantas mensagens anteriores da conversa a IA enxerga a cada resposta.
+    # 0 = "Tudo" (teto de seguranca aplicado no service); padrao 40.
+    context_window: Mapped[int] = mapped_column(Integer, default=40, server_default="40")
     # offset do getUpdates (durabilidade do long-polling entre reinícios)
     update_offset: Mapped[int] = mapped_column(BigInteger, default=0)
     # estado vivo: {status, last_error, last_event_at}

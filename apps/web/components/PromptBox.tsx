@@ -251,6 +251,7 @@ export default function PromptBox({
   onCompact,
   onHistory,
   compacting = false,
+  temporary = false,
   placeholder = "Como posso ajudar você hoje?",
 }: {
   value: string;
@@ -293,6 +294,8 @@ export default function PromptBox({
   onCompact?: () => void;
   onHistory?: () => void;
   compacting?: boolean;
+  /** chat temporário: moldura tracejada (estilo "modo temporário") p/ identificar */
+  temporary?: boolean;
 }) {
   const [plusOpen, setPlusOpen] = useState(false);
   const plusRef = useClickOutside<HTMLDivElement>(() => setPlusOpen(false));
@@ -507,7 +510,7 @@ export default function PromptBox({
         onDragOver={(e) => { if (canAttach) { e.preventDefault(); setDragOver(true); } }}
         onDragLeave={() => setDragOver(false)}
         onDrop={canAttach ? onDrop : undefined}
-        className={`relative mx-auto max-w-3xl rounded-3xl border bg-surface px-3 py-2.5 shadow-prompt transition-colors duration-200 focus-within:border-accent/50 hover:border-accent/30 ${dragOver ? "border-accent border-dashed" : "border-border"}`}
+        className={`relative mx-auto max-w-3xl rounded-3xl border bg-surface px-3 py-2.5 shadow-prompt transition-colors duration-200 focus-within:border-accent/50 hover:border-accent/30 ${dragOver ? "border-accent border-dashed" : temporary ? "border-dashed border-ink-soft/60" : "border-border"}`}
       >
         {dragOver && (
           <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-3xl bg-accent/5 text-sm font-medium text-accent-hover">

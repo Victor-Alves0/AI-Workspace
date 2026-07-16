@@ -520,6 +520,8 @@ export interface TelegramConnection {
   humanize: { enabled?: boolean; typing?: boolean; split?: boolean; min_seconds?: number; max_seconds?: number };
   /** janela de silencio (s) p/ juntar mensagens fragmentadas num turno; 0 = off */
   debounce_seconds?: number;
+  /** quantas mensagens anteriores a IA enxerga; 0 = Tudo, ausente = padrao (40) */
+  context_window?: number;
   enabled: boolean;
   state: { status?: string; last_error?: string | null };
   threads: number;
@@ -537,6 +539,8 @@ export interface DiscordConnection {
   humanize: { enabled?: boolean; typing?: boolean; split?: boolean; min_seconds?: number; max_seconds?: number };
   /** janela de silencio (s) p/ juntar mensagens fragmentadas num turno; 0 = off */
   debounce_seconds?: number;
+  /** quantas mensagens anteriores a IA enxerga; 0 = Tudo, ausente = padrao (40) */
+  context_window?: number;
   enabled: boolean;
   state: { status?: string; last_error?: string | null };
   threads: number;
@@ -561,6 +565,8 @@ export interface WhatsAppConnection {
   humanize: { enabled?: boolean; typing?: boolean; split?: boolean; min_seconds?: number; max_seconds?: number };
   /** janela de silencio (s) p/ juntar mensagens fragmentadas num turno; 0 = off */
   debounce_seconds?: number;
+  /** quantas mensagens anteriores a IA enxerga; 0 = Tudo, ausente = padrao (40) */
+  context_window?: number;
   enabled: boolean;
   state: { status?: string; last_error?: string | null };
   threads: number;

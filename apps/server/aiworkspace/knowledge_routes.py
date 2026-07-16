@@ -47,6 +47,13 @@ class BaseIn(BaseModel):
     kind: str = "kb"
 
 
+class BaseUpdate(BaseModel):
+    # tudo opcional: um PATCH só-nome não pode zerar a descrição/etiquetas
+    name: str | None = None
+    description: str | None = None
+    tags: list[str] | None = None
+
+
 class BaseOut(BaseModel):
     id: str
     name: str
@@ -216,12 +223,14 @@ async def create_base(body: BaseIn, user: User = Depends(require_approved), db: 
 
 @router.patch("/bases/{base_id}", response_model=BaseOut)
 async def update_base(
-    base_id: uuid.UUID, body: BaseIn,
+    base_id: uuid.UUID, body: BaseUpdate,
     user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
 ):
     b = await _owned_base(db, user, base_id)
-    b.name = (body.name or "Base").strip()[:120]
-    b.description = (body.description or "").strip()
+    if body.name is not None:
+        b.name = (body.name or "Base").strip()[:120]
+    if body.description is not None:
+        b.description = body.description.strip()
     if body.tags is not None:
         b.tags = _clean_tags(body.tags)
     # `kind` é imutável: ignorado no PATCH

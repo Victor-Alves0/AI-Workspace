@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Mail, Pencil, Play, RotateCcw, Send, ShieldAlert, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench } from "lucide-react";
 import type { BrainNoteEvent, ChartSpec, ChatArtifact, DeepResearch, Message, SkillProposal, StockQuote, ToolEvent } from "@/lib/types";
 import { api, ApiError, API_URL } from "@/lib/api";
+import { fmtHM, fmtDayShort } from "@/lib/format";
 import { copyText } from "@/lib/clipboard";
 import Markdown from "./Markdown";
 import ExcalidrawCanvas from "./ExcalidrawCanvas";
@@ -635,10 +636,9 @@ export function fmtTime(iso: string): string {
   if (Number.isNaN(d.getTime())) return "";
   const now = new Date();
   const sameDay = d.toDateString() === now.toDateString();
-  const hm = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const hm = fmtHM(d);  // formato de hora do usuário (24h/12h)
   if (sameDay) return hm;
-  const dm = d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
-  return `${dm} ${hm}`;
+  return `${fmtDayShort(d)} ${hm}`;  // formato de data do usuário
 }
 
 /** Painel embutido dos usos de ferramenta do segmento (aberto pelo botão de chave).
@@ -1038,6 +1038,8 @@ export default function MessageItem({
   onRemember,
   busy = false,
   modelName,
+  toolsEnabled = true,
+  modelAvatar = null,
   chatArtifacts,
   onOpenArtifact,
 }: {
@@ -1052,6 +1054,10 @@ export default function MessageItem({
   busy?: boolean;
   /** nome exibido acima da mensagem do assistente (fallback qdo não há usage) */
   modelName?: string;
+  /** mostra a chave inglesa + painel de ferramentas (Interface → Chat) */
+  toolsEnabled?: boolean;
+  /** avatar do modelo ao lado do nome na resposta (null = oculto) */
+  modelAvatar?: string | null;
   /** artefatos de chat (janela dedicada) — p/ os cartões [[artifact:slug]] */
   chatArtifacts?: ChatArtifact[];
   onOpenArtifact?: (identifier: string) => void;
@@ -1204,8 +1210,12 @@ export default function MessageItem({
       <div className="group relative">
         {name && (
           <p className="mb-1.5 flex items-center gap-1.5 text-lg font-semibold tracking-tight text-ink">
+            {modelAvatar && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={modelAvatar} alt="" className="h-6 w-6 shrink-0 rounded-md object-cover" />
+            )}
             {name}
-            {usedTools && (
+            {usedTools && toolsEnabled && (
               <span title="Ferramentas usadas neste segmento" className="text-muted">
                 <Wrench size={15} />
               </span>
@@ -1260,7 +1270,7 @@ export default function MessageItem({
               <IconButton title="Tentar novamente" onClick={() => onRegenerate(message.id)} disabled={busy}>
                 <RotateCcw size={15} />
               </IconButton>
-              {usedTools && (
+              {usedTools && toolsEnabled && (
                 <IconButton title="Ferramentas usadas" onClick={() => setShowTools((v) => !v)}>
                   <Wrench size={15} className={showTools ? "text-accent-hover" : ""} />
                 </IconButton>
@@ -1307,7 +1317,7 @@ export default function MessageItem({
               </IconButton>
             </div>
 
-            {showTools && usedTools && <ToolEventsPanel events={toolEvents} />}
+            {showTools && usedTools && toolsEnabled && <ToolEventsPanel events={toolEvents} />}
 
             {showMem && usedMemories.length > 0 && <MemoriesUsedPanel items={usedMemories} />}
 

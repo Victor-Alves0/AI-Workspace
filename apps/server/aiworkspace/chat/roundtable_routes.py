@@ -68,7 +68,7 @@ def _rt_context(convo: list[dict], names: dict[str, str], target_pid: str) -> tu
     falas próprias = assistant; dos outros = user "Nome: ..."; humano = user."""
     mapped: list[dict] = []
     for c in convo:
-        if c["role"] == "user":
+        if c["role"] == "user" or c.get("is_summary"):
             mapped.append({"role": "user", "content": c["content"]})
         elif c.get("speaker") == target_pid:
             mapped.append({"role": "assistant", "content": c["content"]})
@@ -213,6 +213,9 @@ async def roundtable_run(
                 "role": m.role,
                 "content": m.content,
                 "speaker": (m.speaker or {}).get("id") if m.role == "assistant" else None,
+                # o resumo da compactação entra como nota de contexto neutra, não como
+                # fala de um "Participante" fantasma
+                "is_summary": bool(m.is_summary),
             })
     last_pid = next((c["speaker"] for c in reversed(convo) if c["role"] == "assistant"), None)
 

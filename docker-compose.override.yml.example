@@ -1,0 +1,18 @@
+# Publica o Postgres no HOST (opt-in). Por padrão o banco NÃO é exposto — a
+# aplicação o acessa pela rede interna do compose (db:5432). Use este arquivo só
+# se quiser conectar um cliente externo (psql, DBeaver, pgAdmin).
+#
+# Como usar:
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#   # (opcional) no .env: DB_PORT=5433  se a 5432 já estiver ocupada no seu PC
+#   docker compose up -d
+#
+# O Compose mescla docker-compose.override.yml automaticamente. Este arquivo é
+# git-ignored — sua escolha fica local, não vai para o repositório.
+
+services:
+  db:
+    ports:
+      # Só em 127.0.0.1 (nunca 0.0.0.0): as credenciais default são fracas e o
+      # sandbox de ferramentas tem acesso de rede. DB_PORT muda só a porta do host.
+      - "${DB_BIND:-127.0.0.1}:${DB_PORT:-5432}:5432"

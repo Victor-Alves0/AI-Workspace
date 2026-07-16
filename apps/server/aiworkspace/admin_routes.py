@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import __version__, network_config
+from . import __version__, audit_service, network_config
 from .app_config import ALLOW_SIGNUPS, get_setting, set_setting
 from .auth.deps import require_admin
 from .config import get_settings
@@ -340,6 +340,22 @@ async def import_backup(
                 "manualmente antes de usar o sistema."
             )
 
+        # a sessão do WhatsApp (Evolution) vive FORA deste backup — no banco
+        # "evolution" (separado) e no volume evolution_instances (arquivos do
+        # Baileys). Ao restaurar em outra máquina, a conexão volta alegando "open"
+        # mas o pareamento não existe: a UI mostraria "conectado" mentindo. Zera o
+        # status p/ ela aparecer como desconectada e pedir novo QR. (Cloud API
+        # oficial não depende de sessão local, então só mexemos no Evolution.)
+        try:
+            await db.execute(text(
+                "UPDATE whatsapp_connections "
+                "SET state = jsonb_set(coalesce(state, '{}'::jsonb), '{status}', '\"close\"') "
+                "WHERE provider = 'evolution'"
+            ))
+            await db.commit()
+        except Exception:  # noqa: BLE001 - não pode bloquear o restore
+            logger.exception("pós-restore: falha ao zerar status do WhatsApp")
+
         # caches em memória ficam órfãos do banco antigo → limpa (best-effort)
         try:
             from .db import engine
@@ -350,6 +366,7 @@ async def import_backup(
             logger.exception("limpeza pós-restore falhou (siga com o restart)")
 
         logger.warning("Backup restaurado pelo admin %s", admin.email)
+        await audit_service.record("backup_restored", user_id=admin.id, detail={"migrate_note": bool(migrate_note)})
         return {
             "ok": True,
             "note": "Backup restaurado e migrações aplicadas. Se os usuários mudaram, faça "

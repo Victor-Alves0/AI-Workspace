@@ -31,3 +31,6 @@ Thumbs.db
 pgdata/
 *.sqlite
 *.db
+
+# override local do compose (ex.: expor a porta do Postgres) — escolha por-máquina
+docker-compose.override.yml

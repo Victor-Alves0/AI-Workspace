@@ -7,6 +7,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .. import audit_service, twofa_service
 from ..app_config import signups_allowed
 from ..config import get_settings
 from ..db import get_db
@@ -103,13 +104,26 @@ async def login(
     # real antes de recusar — não dá para enumerar e-mails pelo tempo de resposta.
     if user is None:
         dummy_verify()
+        await audit_service.record("login_failed", request=request, detail={"email": body.email, "reason": "no_user"})
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Credenciais inválidas")
     if not verify_password(body.password, user.hashed_password):
+        await audit_service.record("login_failed", user_id=user.id, request=request, detail={"reason": "bad_password"})
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Credenciais inválidas")
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Usuário desativado")
 
+    # 2º fator: se ligado, exige o código do app autenticador. Sem código, sinaliza
+    # ao front (detail "2fa_required") p/ ele pedir; código errado = "2fa_invalid".
+    if user.totp_enabled:
+        if not (body.totp_code or "").strip():
+            await audit_service.record("login_2fa_required", user_id=user.id, request=request)
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "2fa_required")
+        if not twofa_service.verify(user.totp_secret, body.totp_code):
+            await audit_service.record("login_failed", user_id=user.id, request=request, detail={"reason": "bad_2fa"})
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "2fa_invalid")
+
     _set_auth_cookies(response, user)
+    await audit_service.record("login", user_id=user.id, request=request)
     return user
 
 
@@ -142,6 +156,7 @@ async def refresh(
 
 @router.post("/logout")
 async def logout(
+    request: Request,
     response: Response,
     aw_refresh: str | None = Cookie(default=None),
     db: AsyncSession = Depends(get_db),
@@ -157,6 +172,7 @@ async def logout(
             if user is not None:
                 user.token_version += 1
                 await db.commit()
+                await audit_service.record("logout", user_id=user.id, request=request)
         except (jwt.PyJWTError, ValueError):
             pass
     response.delete_cookie(ACCESS_COOKIE, path="/")
@@ -172,6 +188,7 @@ async def me(user: User = Depends(current_user)):
 @router.post("/change-password")
 async def change_password(
     body: ChangePasswordIn,
+    request: Request,
     response: Response,
     user: User = Depends(current_user),
     db: AsyncSession = Depends(get_db),
@@ -183,6 +200,7 @@ async def change_password(
     user.token_version += 1
     await db.commit()
     await db.refresh(user)
+    await audit_service.record("password_changed", user_id=user.id, request=request)
     # reemite cookies para a sessão atual não cair imediatamente após a troca
     _set_auth_cookies(response, user)
     return {"ok": True}

@@ -34,6 +34,8 @@ class LoginIn(BaseModel):
         return v.strip().lower()
 
     password: str
+    # 2º fator (TOTP): só exigido se o usuário tiver 2FA ativo. Opcional na 1ª etapa.
+    totp_code: str | None = Field(default=None, max_length=12)
 
 
 class UserOut(BaseModel):
@@ -44,6 +46,7 @@ class UserOut(BaseModel):
     status: str = "active"
     default_model: str | None = None
     profile: dict = Field(default_factory=dict)
+    totp_enabled: bool = False
 
     class Config:
         from_attributes = True

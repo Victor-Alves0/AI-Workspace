@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String, UniqueConstraint
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from ..crypto import EncryptedText
 from ..db import Base
 
 
@@ -30,9 +33,30 @@ class User(Base):
     # token precisa bater com este valor). Usado p/ revogar sessões ao trocar a
     # senha ou em "sair de todos os dispositivos".
     token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # 2FA (TOTP): segredo base32 cifrado em repouso; `totp_enabled` só vira True
+    # após o usuário confirmar um código válido (prova que pareou o app).
+    totp_secret: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
+    totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     secrets: Mapped[list["UserSecret"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class AuditEvent(Base):
+    """Trilha de auditoria de ações sensíveis (Configurações → Segurança → Logs)."""
+
+    __tablename__ = "audit_events"
+
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    action: Mapped[str] = mapped_column(String(64))
+    detail: Mapped[dict] = mapped_column(JSONB, default=dict)
+    ip: Mapped[str] = mapped_column(String(64), default="")
+    user_agent: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
     )
 
 

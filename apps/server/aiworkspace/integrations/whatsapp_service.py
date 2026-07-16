@@ -543,7 +543,7 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
             select(Message)
             .where(Message.chat_id == chat.id, Message.role.in_(("user", "assistant")))
             .order_by(Message.created_at.desc())
-            .limit(40)
+            .limit(channel_media.history_limit(conn))
         ))
         history = [{"role": r.role, "content": r.content} for r in reversed(rows) if r.content]
 

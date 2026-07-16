@@ -174,6 +174,11 @@ export default function Sidebar({
 }) {
   const [sections, setSections] = useState({ models: true, folders: true, chats: true });
 
+  // itens ocultáveis da barra (Configurações → Interface → Barra Lateral). Padrão:
+  // visível (só some quando a flag é explicitamente false).
+  const iface = (user.profile?.interface as Record<string, any>) ?? {};
+  const show = (k: string) => iface[k] !== false;
+
   // atalho do "Novo Chat" (custom do perfil > default) p/ mostrar no botão
   const newChatCombo = useMemo(() => {
     const a = SHORTCUTS.find((x) => x.id === "new_chat");
@@ -243,13 +248,17 @@ export default function Sidebar({
         <button onClick={onSearch} title="Pesquisar" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
           <Search size={18} />
         </button>
-        <button onClick={onOpenAutomations} title="Automações" className="relative rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
-          <CalendarClock size={18} />
-          {unread > 0 && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-accent" />}
-        </button>
-        <button onClick={onOpenWorkspace} title="Espaço de Trabalho" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
-          <LayoutGrid size={18} />
-        </button>
+        {show("sb_automations") && (
+          <button onClick={onOpenAutomations} title="Automações" className="relative rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
+            <CalendarClock size={18} />
+            {unread > 0 && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-accent" />}
+          </button>
+        )}
+        {show("sb_workspace") && (
+          <button onClick={onOpenWorkspace} title="Espaço de Trabalho" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
+            <LayoutGrid size={18} />
+          </button>
+        )}
         <div className="mt-auto">
           <UserMenu user={user} collapsed onSettings={onOpenSettings} onArchived={onShowArchived} onOpenWorkspace={onOpenWorkspace} onOpenAnalytics={onOpenAnalytics} onOpenPlayground={onOpenPlayground} onLogout={onLogout} />
         </div>
@@ -286,20 +295,26 @@ export default function Sidebar({
           trailing={newChatCombo ? <Kbd combo={newChatCombo} /> : undefined}
         />
         <NavButton icon={<MessagesSquare size={17} />} label="Conversas" collapsed={false} onClick={onOpenConversations} />
-        <button
-          onClick={onOpenAutomations}
-          className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-medium text-ink transition-colors hover:bg-hover"
-        >
-          <span className="shrink-0 text-ink-soft"><CalendarClock size={17} /></span>
-          <span className="truncate">Automações</span>
-          {unread > 0 && <span className="ml-auto rounded-full bg-accent px-1.5 text-[11px] font-medium text-white">{unread}</span>}
-        </button>
-        <NavButton icon={<LayoutGrid size={17} />} label="Espaço de Trabalho" collapsed={false} onClick={onOpenWorkspace} />
+        {show("sb_automations") && (
+          <button
+            onClick={onOpenAutomations}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-medium text-ink transition-colors hover:bg-hover"
+          >
+            <span className="shrink-0 text-ink-soft"><CalendarClock size={17} /></span>
+            <span className="truncate">Automações</span>
+            {unread > 0 && <span className="ml-auto rounded-full bg-accent px-1.5 text-[11px] font-medium text-white">{unread}</span>}
+          </button>
+        )}
+        {show("sb_workspace") && (
+          <NavButton icon={<LayoutGrid size={17} />} label="Espaço de Trabalho" collapsed={false} onClick={onOpenWorkspace} />
+        )}
       </div>
 
       <div className="mt-2 flex-1 overflow-y-auto px-2 pb-2">
         <p className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wider text-muted/70">Biblioteca</p>
         {/* Modelos */}
+        {show("sb_models") && (
+        <>
         <SectionHeader
           label="Modelos"
           icon={<LayoutGrid size={16} />}
@@ -328,6 +343,8 @@ export default function Sidebar({
               </button>
             ))}
           </div>
+        )}
+        </>
         )}
 
         {/* Pastas */}

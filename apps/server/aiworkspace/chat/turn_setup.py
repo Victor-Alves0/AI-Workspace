@@ -60,15 +60,31 @@ def _remember_tz(user: User, user_tz: str) -> None:
     """Guarda o fuso do navegador no profile (persiste no commit que o turno já
     faz). É daí que os CANAIS (WhatsApp/Telegram/Discord) tiram o fuso — lá não há
     navegador, e sem isso o modelo recebia a hora em UTC como se fosse a local
-    (dizia "já passou das 20h" às 17h de Brasília)."""
-    if user_tz and (user.profile or {}).get("timezone") != user_tz:
+    (dizia "já passou das 20h" às 17h de Brasília).
+
+    Se o usuário fixou o fuso à mão (Configurações → Geral → `tz_manual`), NÃO
+    sobrescreve: a escolha manual vence o autodetectado do navegador."""
+    prof = user.profile or {}
+    if prof.get("tz_manual"):
+        return
+    if user_tz and prof.get("timezone") != user_tz:
         # reatribuição (não mutação): JSONB só marca dirty com objeto novo
-        user.profile = {**(user.profile or {}), "timezone": user_tz}
+        user.profile = {**prof, "timezone": user_tz}
 
 
 def _profile_tz(user: User) -> str:
-    """Fuso IANA salvo no profile (via `_remember_tz`) — o que os canais usam."""
+    """Fuso IANA salvo no profile (via `_remember_tz` ou escolha manual) — o que os
+    canais usam (lá não há navegador que informe o fuso)."""
     return str((user.profile or {}).get("timezone") or "")
+
+
+def _session_tz(user: User, header_tz: str) -> str:
+    """Fuso efetivo do turno web: a escolha manual do usuário vence o header do
+    navegador; senão usa o que o navegador informou."""
+    prof = user.profile or {}
+    if prof.get("tz_manual") and prof.get("timezone"):
+        return str(prof["timezone"])
+    return header_tz
 
 
 async def _get_owned_chat(db: AsyncSession, chat_id: uuid.UUID, user: User) -> Chat:

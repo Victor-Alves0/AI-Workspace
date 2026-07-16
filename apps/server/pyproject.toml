@@ -52,6 +52,11 @@ dependencies = [
     # Gateway do Discord (canal): conexão WebSocket persistente por bot. httpx
     # cobre o REST (enviar mensagem), mas não faz WS — daí a lib dedicada.
     "websockets>=12",
+    # 2FA (autenticação em dois fatores): TOTP (compatível com Google/Microsoft
+    # Authenticator, Authy). qrcode renderiza o QR de pareamento (usa a Pillow já
+    # presente). O segredo TOTP fica cifrado no banco (EncryptedText).
+    "pyotp>=2.9",
+    "qrcode>=8.0",
 ]
 
 [project.optional-dependencies]
