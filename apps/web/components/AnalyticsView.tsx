@@ -463,7 +463,7 @@ function ModelDetail({ detail, loading }: { detail: ModelDetail | null; loading:
         <Stat icon={<DollarSign size={15} />} label="Custo médio" value={fmtUSD(t.avg_cost)} sub="por resposta" />
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {/* entrada × saída */}
         <div className="rounded-2xl border border-border bg-surface p-4">
           <div className="mb-3 flex items-center gap-2">
@@ -501,7 +501,7 @@ function ModelDetail({ detail, loading }: { detail: ModelDetail | null; loading:
         </div>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         {/* por ferramenta */}
         <div className="rounded-2xl border border-border bg-surface p-4">
           <div className="mb-3 flex items-center gap-2">
@@ -688,7 +688,7 @@ export default function AnalyticsView() {
 
   if (empty) {
     return (
-      <div className="mx-auto grid max-w-5xl gap-3 lg:grid-cols-5">
+      <div className="mx-auto grid max-w-5xl grid-cols-1 gap-3 lg:grid-cols-5">
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-surface py-20 text-center lg:col-span-3">
           <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-surface2 text-accent-hover"><BarChart3 size={26} /></span>
           <h2 className="text-lg font-semibold text-ink">Sem dados ainda</h2>
@@ -739,7 +739,7 @@ export default function AnalyticsView() {
 
       {tab === "overview" ? (
         <>
-          <div className="grid items-start gap-3 lg:grid-cols-3">
+          <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-3">
             <div className="space-y-3 lg:col-span-2">
               <Summary data={data} metric={metric} busy={busy} onMetric={setMetric} />
               <ActivityCard act={data.activity} />

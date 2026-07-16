@@ -41,6 +41,27 @@ def spawn_index(doc_id: uuid.UUID) -> None:
     t.add_done_callback(_TASKS.discard)
 
 
+async def resume_pending() -> int:
+    """Retoma no boot os docs que ficaram no meio do caminho ("pending"/"indexing").
+
+    A indexação é uma task em memória: se o servidor reinicia com ela em voo, o doc
+    ficava PRESO em "Indexando" para sempre (visto ao vivo com um lote de imagens).
+    Chamado no lifespan. Retorna quantos foram reagendados."""
+    from sqlalchemy import select
+
+    from ..db import SessionLocal
+
+    async with SessionLocal() as db:
+        rows = list(await db.scalars(
+            select(KnowledgeDoc.id).where(KnowledgeDoc.status.in_(("pending", "indexing")))
+        ))
+    for did in rows:
+        spawn_index(did)
+    if rows:
+        logger.info("knowledge: %d doc(s) de indexação retomados no boot", len(rows))
+    return len(rows)
+
+
 # --------------------------------------------------------------------------- #
 # Extração de texto
 # --------------------------------------------------------------------------- #
@@ -58,10 +79,29 @@ def _extract_docx(data: bytes) -> str:
     return "\n".join(p.text for p in doc.paragraphs)
 
 
+_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif", ".svg")
+
+
+def is_image(filename: str, mime: str) -> bool:
+    return (mime or "").lower().startswith("image/") or (filename or "").lower().endswith(_IMAGE_EXTS)
+
+
+def _image_text(filename: str) -> str:
+    """Texto indexável de uma imagem: o nome do arquivo vira descrição ("akeno-
+    himejima-dxd-27.webp" → "akeno himejima dxd"). Título/tags entram pelo
+    `_meta_prefix`, como nos demais docs. Os BYTES nunca são decodificados —
+    era isso que gerava megabytes de lixo binário e travava a indexação."""
+    stem = re.sub(r"\.[a-z0-9]+$", "", (filename or "").strip(), flags=re.I)
+    words = re.sub(r"[-_.+%#0-9]+", " ", stem).split()
+    return "Imagem: " + (" ".join(words) if words else (filename or "imagem"))
+
+
 def extract_text(filename: str, mime: str, data: bytes) -> str:
     """Texto cru de um arquivo. Decide pelo mime e/ou extensão. Levanta em erro."""
     name = (filename or "").lower()
     mime = (mime or "").lower()
+    if is_image(filename, mime):
+        return _image_text(filename)
     if "pdf" in mime or name.endswith(".pdf"):
         return _extract_pdf(data)
     if "wordprocessingml" in mime or name.endswith(".docx"):

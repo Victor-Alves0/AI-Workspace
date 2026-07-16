@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import shutil
 import tempfile
 import uuid
+from pathlib import Path
 from datetime import datetime
 
 import httpx
@@ -202,6 +204,37 @@ def _require_pg_tools() -> None:
         )
 
 
+def _app_root() -> Path:
+    """Raiz do app no container (/app) — onde vivem alembic.ini e alembic/."""
+    return Path(__file__).resolve().parents[1]
+
+
+def _known_revisions() -> set[str]:
+    """Todas as revisões de migração que ESTA instalação conhece."""
+    try:
+        from alembic.script import ScriptDirectory
+        script = ScriptDirectory(str(_app_root() / "alembic"))
+        return {s.revision for s in script.walk_revisions()}
+    except Exception:  # noqa: BLE001 - checagem é proteção, não pode bloquear sozinha
+        logger.exception("não consegui listar as revisões do alembic")
+        return set()
+
+
+async def _dump_alembic_rev(path: str) -> str | None:
+    """Revisão do alembic gravada DENTRO do dump (sem restaurar nada): extrai só a
+    tabela alembic_version como SQL e lê o valor do COPY."""
+    proc = await asyncio.create_subprocess_exec(
+        # "-f -" = SQL no stdout (obrigatório no PG16+, que exige -d ou -f explícito)
+        "pg_restore", "--data-only", "--table=alembic_version", "-f", "-", path,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    out, _ = await proc.communicate()
+    if proc.returncode != 0:
+        return None
+    m = re.search(r"FROM stdin;\s*\n([^\s\\]+)", out.decode(errors="replace"))
+    return m.group(1).strip() if m else None
+
+
 @router.get("/backup")
 async def export_backup(admin: User = Depends(require_admin)):
     """Baixa um backup completo do sistema (formato custom do pg_dump)."""
@@ -258,6 +291,19 @@ async def import_backup(
                     "Arquivo inválido — envie um backup exportado por este painel (.backup).",
                 )
 
+        # backup de uma versão MAIS NOVA? A revisão do alembic no dump precisa ser
+        # conhecida desta instalação — senão o restore "funciona" e o próximo boot
+        # quebra no `alembic upgrade head` (Can't locate revision). Barra ANTES.
+        dump_rev = await _dump_alembic_rev(tmp.name)
+        known = _known_revisions()
+        if dump_rev and known and dump_rev not in known:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"Este backup vem de uma versão mais nova do sistema (migração "
+                f"'{dump_rev}' é desconhecida desta instalação). Atualize este servidor "
+                "(git pull + docker compose build) antes de restaurar.",
+            )
+
         # encerra as demais conexões (pools do app) p/ liberar locks do restore
         await db.execute(text(
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
@@ -279,6 +325,21 @@ async def import_backup(
                 f"pg_restore falhou (código {proc.returncode}): {err[-500:]}",
             )
 
+        # backup de versão ANTIGA → traz o esquema ao presente já aqui (antes o app
+        # rodava com esquema velho até alguém lembrar do upgrade e tudo quebrava)
+        migrate_note = ""
+        up = await asyncio.create_subprocess_exec(
+            "alembic", "upgrade", "head", cwd=str(_app_root()),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        )
+        up_out, _ = await up.communicate()
+        if up.returncode != 0:
+            logger.error("alembic upgrade pós-restore falhou: %s", up_out.decode(errors="replace")[-2000:])
+            migrate_note = (
+                " ATENÇÃO: as migrações pós-restore falharam — rode `alembic upgrade head` "
+                "manualmente antes de usar o sistema."
+            )
+
         # caches em memória ficam órfãos do banco antigo → limpa (best-effort)
         try:
             from .db import engine
@@ -291,8 +352,9 @@ async def import_backup(
         logger.warning("Backup restaurado pelo admin %s", admin.email)
         return {
             "ok": True,
-            "note": "Backup restaurado. Se os usuários mudaram, faça login novamente. "
-                    "Recomendado: reiniciar o server (docker compose restart server).",
+            "note": "Backup restaurado e migrações aplicadas. Se os usuários mudaram, faça "
+                    "login novamente. Recomendado: reiniciar o server (docker compose "
+                    "restart server)." + migrate_note,
         }
     finally:
         try:

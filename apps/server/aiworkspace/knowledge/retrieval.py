@@ -20,7 +20,7 @@ from . import embeddings
 logger = logging.getLogger(__name__)
 
 _SEARCH = sql_text(
-    "SELECT c.id AS chunk_id, c.doc_id, c.ordinal, c.text, d.filename, "
+    "SELECT c.id AS chunk_id, c.doc_id, c.ordinal, c.text, d.filename, d.mime, "
     "       c.embedding <=> CAST(:emb AS vector) AS dist "
     "FROM knowledge_chunks c "
     "JOIN knowledge_docs d ON d.id = c.doc_id "
@@ -31,7 +31,7 @@ _SEARCH = sql_text(
 
 # variante com filtro por documento (usada pela referência "#" a arquivos grandes)
 _SEARCH_DOCS = sql_text(
-    "SELECT c.id AS chunk_id, c.doc_id, c.ordinal, c.text, d.filename, "
+    "SELECT c.id AS chunk_id, c.doc_id, c.ordinal, c.text, d.filename, d.mime, "
     "       c.embedding <=> CAST(:emb AS vector) AS dist "
     "FROM knowledge_chunks c "
     "JOIN knowledge_docs d ON d.id = c.doc_id "
@@ -100,6 +100,7 @@ async def search(
                 "chunk_id": str(r["chunk_id"]),
                 "doc_id": str(r["doc_id"]),
                 "filename": r["filename"] or "documento",
+                "mime": r["mime"] or "",
                 "ordinal": int(r["ordinal"]),
                 "text": r["text"] or "",
                 "score": round(max(0.0, 1.0 - dist), 4),

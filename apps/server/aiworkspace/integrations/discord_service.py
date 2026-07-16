@@ -19,7 +19,7 @@ from sqlalchemy import select
 from ..db import SessionLocal
 from ..models import Chat, Folder, Message, ModelConfig, DiscordConnection, DiscordThread, User
 from ..usage_service import usage_event_from_record
-from . import channel_media, discord_api, inbound_batch
+from . import channel_folders, channel_media, discord_api, inbound_batch
 
 logger = logging.getLogger(__name__)
 
@@ -102,16 +102,21 @@ async def _find_or_create_folder(db, user_id, name: str, parent_id) -> Folder:
 
 
 async def _ensure_folder(db, conn: DiscordConnection, user: User):
+    # os chats ficam DIRETO na pasta do bot (a subpasta "Chats" era um nivel a
+    # mais sem funcao; o layout antigo e colapsado ao ser encontrado)
     if conn.folder_id:
         f = await db.get(Folder, conn.folder_id)
         if f is not None:
+            migrated = await channel_folders.collapse_chats_folder(db, f)
+            if migrated is not None:
+                conn.folder_id = migrated
+                return migrated
             return f.id
     root = await _find_or_create_folder(db, user.id, "Discord", None)
     who = conn.bot_username or conn.label or "bot"
     sub = await _find_or_create_folder(db, user.id, f"@{who}", root.id)
-    chats = await _find_or_create_folder(db, user.id, "Chats", sub.id)
-    conn.folder_id = chats.id
-    return chats.id
+    conn.folder_id = sub.id
+    return sub.id
 
 
 async def _resolve_thread(
@@ -333,6 +338,10 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
 
         # grafico/imagem do turno -> anexo de verdade no canal
         media = await channel_media.collect(tool_events)
+        # imagem da Base de Conhecimento colada como markdown na resposta -> midia
+        # (no canal o link local seria inutil); o texto segue sem o markdown
+        out_text, kb_media = await channel_media.extract_content_images(content)
+        media.extend(kb_media)
 
         # resposta so com imagem e legitima ("me faz um grafico"): nao e "vazia"
         if error or not (content or media):
@@ -354,8 +363,8 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
             db.add(ev_row)
         thread.last_message_at = datetime.now(timezone.utc)
         try:
-            if content:
-                await _deliver(conn, token, m["channel_id"], content)
+            if out_text:
+                await _deliver(conn, token, m["channel_id"], out_text)
             for item in media:
                 await discord_api.send_file(
                     token, m["channel_id"], item["data"], item["filename"], item["caption"],

@@ -5,6 +5,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { Check, Copy } from "lucide-react";
+import { API_URL } from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
 
 interface ElProps {
   className?: string;
@@ -31,7 +33,7 @@ function CodeBlock({ children }: { children?: React.ReactNode }) {
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(textOf(codeEl).replace(/\n$/, ""));
+      await copyText(textOf(codeEl).replace(/\n$/, ""));
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch {
@@ -110,6 +112,21 @@ function Markdown({
               {children}
             </a>
           ),
+          // imagens inline (ex.: da Base de Conhecimento, URL assinada relativa —
+          // "/knowledge/docs/…"): a URL vem do SERVIDOR, então resolve no host da
+          // API, não no do front (em dev são portas diferentes)
+          img: ({ src, alt }) => {
+            const url = typeof src === "string" && src.startsWith("/") ? `${API_URL}${src}` : src;
+            return (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={url}
+                alt={alt ?? ""}
+                loading="lazy"
+                className="my-2 max-h-96 max-w-full rounded-xl border border-border object-contain"
+              />
+            );
+          },
         }}
       >
         {shown}

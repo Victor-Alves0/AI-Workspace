@@ -44,6 +44,17 @@ def _norm_base(url: str) -> str:
     return u
 
 
+def _container_host(u: str) -> str:
+    """Dentro do container, o "localhost" digitado pelo usuário é a MÁQUINA dele,
+    não o container — reescreve p/ host.docker.internal (Docker Desktop). Aplicado
+    só na hora de USAR (o config guarda o que o usuário digitou)."""
+    import os
+    import re
+    if os.path.exists("/.dockerenv"):
+        return re.sub(r"//(localhost|127\.0\.0\.1)(?=[:/]|$)", "//host.docker.internal", u, count=1)
+    return u
+
+
 async def get_config(db: AsyncSession, user_id) -> dict[str, Any]:
     raw = await get_setting(db, _key(str(user_id)))
     return dict(raw) if isinstance(raw, dict) else {}
@@ -59,7 +70,7 @@ async def get_provider(db: AsyncSession, user_id) -> dict[str, Any] | None:
     if not base:
         return None
     return {
-        "base_url": base,
+        "base_url": _container_host(base),
         "api_key": raw.get("api_key") or "local",  # muitos servidores locais ignoram a chave
         "tts_model": (raw.get("tts_model") or DEFAULT_TTS_MODEL).strip(),
     }

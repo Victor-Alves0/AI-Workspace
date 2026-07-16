@@ -9,6 +9,7 @@ import {
   Trash2, Upload, Waypoints, Wrench,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
 import type { ModelConfig, Prompt, Skill, Tool, User } from "@/lib/types";
 import { AnchoredMenu, MenuItem } from "@/components/ui";
 import ToolEditor from "./ToolEditor";
@@ -563,7 +564,7 @@ export default function WorkspaceView({
                   <p className="truncate text-xs text-muted">Por {author} • {p.content}</p>
                 </button>
                 <button
-                  onClick={() => navigator.clipboard?.writeText(p.content)}
+                  onClick={() => void copyText(p.content)}
                   title="Copiar conteúdo"
                   className="rounded p-1 text-muted opacity-0 hover:text-ink group-hover:opacity-100"
                 >

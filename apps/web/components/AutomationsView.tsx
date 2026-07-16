@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { AlertTriangle, Bell, BellOff, BellRing, CalendarClock, Check, Clock, Eye, History, Loader2, Minus, Pause, Play, Plus, Search, Trash2, X, Zap } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Bell, BellOff, BellRing, CalendarClock, Check, Clock, Eye, History, Loader2, Minus, Pause, Play, Plus, Search, Trash2, X, Zap } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { AppNotification, Automation, AutomationRun } from "@/lib/types";
 import { disablePush, enablePush, pushEnabled, pushSupported } from "@/lib/push";
@@ -46,9 +46,12 @@ function scheduleLabel(a: Automation): string {
 /** Tela de Automações embutida no chat (mantém a barra lateral). */
 export default function AutomationsView({
   onOpenChat,
+  onBack,
 }: {
   /** abrir o chat de uma notificação (fecha a tela e seleciona o chat) */
   onOpenChat: (chatId: string) => void;
+  /** voltar ao chat — sem isso o mobile (sidebar escondida) fica preso aqui */
+  onBack?: () => void;
 }) {
   const confirm = useConfirm();
   const [items, setItems] = useState<Automation[]>([]);
@@ -166,7 +169,16 @@ export default function AutomationsView({
 
   return (
     <div className="flex h-full flex-1 flex-col bg-bg">
-      <div className="flex items-center gap-3 border-b border-border px-6 py-3">
+      <div className="flex items-center gap-3 border-b border-border px-3 py-3 sm:px-6">
+        {onBack && (
+          <button
+            onClick={onBack}
+            title="Voltar"
+            className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink"
+          >
+            <ArrowLeft size={18} />
+          </button>
+        )}
         <CalendarClock size={20} className="text-accent-hover" />
         <span className="font-semibold text-ink">Automações</span>
         <button
@@ -178,7 +190,7 @@ export default function AutomationsView({
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto grid max-w-5xl grid-cols-1 gap-6 px-6 py-6 lg:grid-cols-3">
+        <div className="mx-auto grid max-w-5xl grid-cols-1 gap-6 px-3 py-6 sm:px-6 lg:grid-cols-3">
           {/* lista de automações */}
           <div className="space-y-3 lg:col-span-2">
             {items.length > 1 && (

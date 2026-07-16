@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Mail, Pencil, Play, RotateCcw, Send, ShieldAlert, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench } from "lucide-react";
 import type { BrainNoteEvent, ChartSpec, ChatArtifact, DeepResearch, Message, SkillProposal, StockQuote, ToolEvent } from "@/lib/types";
 import { api, ApiError, API_URL } from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
 import Markdown from "./Markdown";
 import ExcalidrawCanvas from "./ExcalidrawCanvas";
 import StockCard from "./StockCard";
@@ -1075,7 +1076,7 @@ export default function MessageItem({
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(message.content);
+      await copyText(message.content);
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch {
@@ -1159,6 +1160,13 @@ export default function MessageItem({
               )}
               <div className="mt-1 flex items-center justify-end gap-1.5 pr-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
                 <span className="text-[11px] text-muted">{fmtTime(message.created_at)}</span>
+                <button
+                  title="Copiar"
+                  onClick={copy}
+                  className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-ink"
+                >
+                  {copied ? <Check size={13} className="text-green-400" /> : <Copy size={13} />}
+                </button>
                 <button
                   title="Tentar novamente — a IA responde de novo a partir desta mensagem"
                   onClick={() => onRegenerate(message.id)}
@@ -1244,7 +1252,7 @@ export default function MessageItem({
                 <Volume2 size={15} />
               </IconButton>
               <IconButton title="Custo / tokens" onClick={() => setShowCost((v) => !v)}>
-                <Info size={15} />
+                <Info size={15} className={showCost ? "text-accent-hover" : ""} />
               </IconButton>
               <IconButton title="Continuar" onClick={() => onContinue(message.id)} disabled={busy}>
                 <Play size={15} />

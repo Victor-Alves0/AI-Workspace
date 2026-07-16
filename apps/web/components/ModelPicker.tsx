@@ -15,6 +15,7 @@ import {
   Star,
 } from "lucide-react";
 import type { Model, ModelConfig } from "@/lib/types";
+import { copyText } from "@/lib/clipboard";
 import { AnchoredMenu, MenuItem, dismissKeyboard, finePointer, useClickOutside } from "./ui";
 
 interface Row {
@@ -220,7 +221,7 @@ export default function ModelPicker({
                         <MenuItem
                           icon={<Copy size={15} />}
                           onClick={() => {
-                            navigator.clipboard?.writeText(`${location.origin}/chat?model=${r.custom!.id}`);
+                            void copyText(`${location.origin}/chat?model=${r.custom!.id}`);
                             setItemMenu(null);
                           }}
                         >

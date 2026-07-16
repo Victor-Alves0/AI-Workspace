@@ -19,7 +19,7 @@ from typing import Any
 from sqlalchemy import select
 
 from ..db import SessionLocal
-from . import channel_media, inbound_batch
+from . import channel_folders, channel_media, inbound_batch
 from ..models import (
     Chat, Folder, Message, ModelConfig, TelegramConnection, TelegramThread, User,
 )
@@ -98,16 +98,21 @@ async def _find_or_create_folder(db, user_id, name: str, parent_id) -> Folder:
 
 
 async def _ensure_folder(db, conn: TelegramConnection, user: User):
+    # os chats ficam DIRETO na pasta do bot (a subpasta "Chats" era um nivel a
+    # mais sem funcao; o layout antigo e colapsado ao ser encontrado)
     if conn.folder_id:
         f = await db.get(Folder, conn.folder_id)
         if f is not None:
+            migrated = await channel_folders.collapse_chats_folder(db, f)
+            if migrated is not None:
+                conn.folder_id = migrated
+                return migrated
             return f.id
     root = await _find_or_create_folder(db, user.id, "Telegram", None)
     who = conn.bot_username or conn.label or "bot"
     sub = await _find_or_create_folder(db, user.id, f"@{who}", root.id)
-    chats = await _find_or_create_folder(db, user.id, "Chats", sub.id)
-    conn.folder_id = chats.id
-    return chats.id
+    conn.folder_id = sub.id
+    return sub.id
 
 
 async def _resolve_thread(
@@ -350,6 +355,10 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
 
         # grafico/imagem do turno -> midia de verdade (sendPhoto)
         media = await channel_media.collect(tool_events)
+        # imagem da Base de Conhecimento colada como markdown na resposta -> midia
+        # (no canal o link local seria inutil); o texto segue sem o markdown
+        out_text, kb_media = await channel_media.extract_content_images(content)
+        media.extend(kb_media)
 
         # resposta so com imagem e legitima ("me faz um grafico"): nao e "vazia"
         if error or not (content or media):
@@ -371,8 +380,8 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
             db.add(ev_row)
         thread.last_message_at = datetime.now(timezone.utc)
         try:
-            if content:
-                await _deliver(conn, token, m["tg_chat_id"], content)
+            if out_text:
+                await _deliver(conn, token, m["tg_chat_id"], out_text)
             for item in media:
                 await telegram_api.send_photo(
                     token, m["tg_chat_id"], item["data"], item["filename"], item["caption"],

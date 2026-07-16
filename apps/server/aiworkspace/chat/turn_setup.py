@@ -38,6 +38,10 @@ from .orchestrator import MediaOpts, MemoryOpts, SubagentOpts, TurnSession, run_
 
 logger = logging.getLogger(__name__)
 
+# último recurso do Audio Router: modelo multimodal de áudio via OpenRouter (a
+# chave do turno já existe) — mesmo exemplo que a UI do ModelEditor sugere
+_AUDIO_FALLBACK_MODEL = "google/gemini-2.5-flash"
+
 
 def _tz_from_header(x_timezone: str | None = Header(default=None)) -> str:
     """Fuso IANA do navegador (header `X-Timezone`, ex.: America/Sao_Paulo),
@@ -561,11 +565,23 @@ async def _audio_router_config(
     if engine == "model":
         model = (cfg.get("model") or "").strip()
         return {"engine": "model", "model": model} if model else None
-    key = await get_secret(db, user.id, VOICE_KEY)
-    if not key:
-        return None  # sem chave de voz → segue sem transcrição (nota avisa o modelo)
+    # motor "stt": monta a CADEIA — voz local do usuário → provedor global → modelo
+    # multimodal via OpenRouter (a chave do turno já existe). O runtime tenta na
+    # ordem; antes, sem chave de voz o canal ficava SURDO em silêncio.
+    from ..integrations import voice_service
     s = get_settings()
-    return {"engine": "stt", "base_url": s.voice_base_url, "api_key": key, "model": s.stt_model}
+    stt_chain: list[dict] = []
+    prov = await voice_service.get_provider(db, user.id)
+    if prov:
+        stt_chain.append({"engine": "stt", "base_url": prov["base_url"],
+                          "api_key": prov["api_key"], "model": s.stt_model})
+    key = await get_secret(db, user.id, VOICE_KEY)
+    if key:
+        stt_chain.append({"engine": "stt", "base_url": s.voice_base_url,
+                          "api_key": key, "model": s.stt_model})
+    stt_chain.append({"engine": "model", "model": _AUDIO_FALLBACK_MODEL})
+    head, *rest = stt_chain
+    return {**head, "fallbacks": rest}
 
 
 async def _genimage_config(

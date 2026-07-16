@@ -16,6 +16,7 @@ headless. Em vez de fingir, o canal simplesmente não oferece a ferramenta (ver
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from types import SimpleNamespace
 from typing import Any
@@ -23,7 +24,7 @@ from typing import Any
 from sqlalchemy import select
 
 from ..db import SessionLocal
-from ..models import GeneratedImage
+from ..models import GeneratedImage, KnowledgeDoc
 
 logger = logging.getLogger(__name__)
 
@@ -121,3 +122,39 @@ def _id_from_url(url: str) -> uuid.UUID | None:
         except (ValueError, AttributeError):
             continue
     return None
+
+
+# Imagem da Base de Conhecimento embutida na resposta como markdown
+# (`![nome](/knowledge/docs/<id>/raw?t=<token>)`). No chat o front renderiza; no
+# canal o contato receberia um LINK local inútil — aqui ela vira mídia de verdade.
+_KB_IMG_RE = re.compile(
+    r"!\[[^\]\n]*\]\((?:https?://[^/\s)]+)?/knowledge/docs/([0-9a-fA-F-]{36})/raw\?t=([^\s)]+)\)"
+)
+
+
+async def extract_content_images(text: str) -> tuple[str, list[dict[str, Any]]]:
+    """Extrai as imagens da KB do texto da resposta → (texto sem os markdowns,
+    [{data, mime, filename, caption}]). Valida o token assinado de cada URL (a
+    resposta do modelo não é confiável) e lê os bytes direto do banco."""
+    from ..knowledge.links import verify_doc_token
+
+    media: list[dict[str, Any]] = []
+    out = text or ""
+    for m in _KB_IMG_RE.finditer(text or ""):
+        doc_id, token = m.group(1), m.group(2)
+        if not verify_doc_token(doc_id, token):
+            continue
+        try:
+            async with SessionLocal() as db:
+                d = await db.get(KnowledgeDoc, uuid.UUID(doc_id))
+                if d is None or not d.data or not (d.mime or "").startswith("image/"):
+                    continue
+                media.append({
+                    "data": bytes(d.data), "mime": d.mime,
+                    "filename": d.filename or "imagem", "caption": "",
+                })
+        except Exception as exc:  # noqa: BLE001 - o texto segue mesmo sem a imagem
+            logger.warning("canal: falha ao carregar imagem da KB (%s): %s", doc_id, exc)
+            continue
+        out = out.replace(m.group(0), "")
+    return (re.sub(r"\n{3,}", "\n\n", out).strip(), media) if media else (text or "", media)

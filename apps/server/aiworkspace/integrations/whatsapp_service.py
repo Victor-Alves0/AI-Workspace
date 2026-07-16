@@ -33,7 +33,7 @@ from ..models import (
     WhatsAppThread,
 )
 from ..usage_service import usage_event_from_record
-from . import channel_media, inbound_batch, wa_format
+from . import channel_folders, channel_media, inbound_batch, wa_format
 from . import whatsapp_evolution as evolution
 from . import whatsapp_official as official
 
@@ -135,24 +135,28 @@ async def _find_or_create_folder(db, user_id, name: str, parent_id) -> Folder:
 
 
 async def _ensure_folder(db, conn: WhatsAppConnection, user: User):
-    """Pasta das conversas desta conexão: WhatsApp/<número>/Chats. Criada sob
-    demanda e memorizada em conn.folder_id (renomear/mover pastas é respeitado —
-    só recriamos se a pasta for excluída)."""
+    """Pasta das conversas desta conexão: WhatsApp/<número> (os chats ficam DIRETO
+    na pasta do número — a subpasta "Chats" era um nível a mais sem função). Criada
+    sob demanda e memorizada em conn.folder_id (renomear/mover é respeitado — só
+    recriamos se a pasta for excluída)."""
     if conn.folder_id is not None:
         folder = await db.get(Folder, conn.folder_id)
         if folder is not None:
+            migrated = await channel_folders.collapse_chats_folder(db, folder)
+            if migrated is not None:
+                conn.folder_id = migrated
+                return migrated
             return folder.id
         conn.folder_id = None  # pasta excluída pelo usuário → recria a estrutura
     try:
         root = await _find_or_create_folder(db, user.id, "WhatsApp", None)
         label = (f"+{conn.phone}" if conn.phone else "") or conn.label or "Número"
         number = await _find_or_create_folder(db, user.id, label[:255], root.id)
-        chats = await _find_or_create_folder(db, user.id, "Chats", number.id)
     except Exception:  # noqa: BLE001 - organização nunca derruba o turno
         logger.exception("whatsapp: falha ao criar pastas (%s)", conn.id)
         return None
-    conn.folder_id = chats.id
-    return chats.id
+    conn.folder_id = number.id
+    return number.id
 
 
 async def _resolve_thread(
@@ -621,6 +625,10 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
         # gráfico/imagem que o turno produziu → mídia de verdade (o front do chat
         # desenharia; aqui os bytes são entregues no WhatsApp)
         media = await channel_media.collect(tool_events)
+        # imagem da Base de Conhecimento colada como markdown na resposta -> midia
+        # (no canal o link local seria inutil); o texto segue sem o markdown
+        out_text, kb_media = await channel_media.extract_content_images(content)
+        media.extend(kb_media)
 
         # uma resposta SÓ com imagem é legítima ("me faz um gráfico disso"): não é
         # "resposta vazia" — só não tem texto.
@@ -647,8 +655,8 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
             # o BANCO guarda a resposta crua (o chat do app renderiza markdown); o
             # WhatsApp recebe a versão que ele sabe desenhar — tabelas/headings/links
             # viram texto legível em vez de canos e cerquilhas cruas.
-            if content:
-                await _deliver(conn, m["jid"], wa_format.to_whatsapp(content))
+            if out_text:
+                await _deliver(conn, m["jid"], wa_format.to_whatsapp(out_text))
             # mídia só pela Evolution: a Cloud API oficial exige subir o arquivo antes
             # (upload → media_id) e isso ainda não está implementado
             if media and conn.provider != "evolution":

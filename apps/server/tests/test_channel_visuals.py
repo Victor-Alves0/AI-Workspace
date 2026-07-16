@@ -139,6 +139,19 @@ def test_diagram_tool_is_removed_in_channels():
     assert "builtin:web.search.query" in out
 
 
+def test_kb_image_markdown_is_recognized():
+    """O regex da extração pega URL relativa E absoluta da KB — e nada além."""
+    doc = "9e0066b8-e9b5-45de-a600-445435a6c76b"
+    rel = f"![foto](/knowledge/docs/{doc}/raw?t=abc.def)"
+    absu = f"![x](http://192.168.1.199:8000/knowledge/docs/{doc}/raw?t=abc)"
+    outra = "![y](https://exemplo.com/foto.png)"
+    assert channel_media._KB_IMG_RE.search(rel)
+    assert channel_media._KB_IMG_RE.search(absu)
+    assert channel_media._KB_IMG_RE.search(outra) is None
+    m = channel_media._KB_IMG_RE.search(rel)
+    assert m.group(1) == doc and m.group(2) == "abc.def"
+
+
 def test_sift_view_does_not_touch_the_db_object():
     """Filtrar as tools do canal nao pode PERSISTIR no modelo do usuario."""
     class FakeMC:

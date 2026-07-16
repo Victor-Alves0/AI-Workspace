@@ -4,8 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, Copy, FlaskConical, GitBranch, Image as ImageIcon, Link2, Menu, MessageSquareDashed, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
 import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamRoundtable } from "@/lib/sse";
-import { speak, startRecording, transcribe } from "@/lib/voice";
+import { speak, startBrowserDictation, startRecording, transcribe } from "@/lib/voice";
 import { browserNotify, playChime, requestNotifPermission } from "@/lib/notify";
 import { downloadJSON, downloadPDF, downloadTXT } from "@/lib/download";
 import { pickSuggestions, type Suggestion } from "@/lib/suggestions";
@@ -181,6 +182,7 @@ export default function ChatPage() {
   // notificações (toast + som), controladas pela config "Notificações" da Conta
   const [toasts, setToasts] = useState<{ id: number; title: string; body?: string }[]>([]);
   const recorderRef = useRef<{ stop: () => Promise<Blob> } | null>(null);
+  const browserDictRef = useRef<{ stop: () => Promise<string> } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   // botão "ir até o fim": visível só quando o usuário rolou p/ cima
   const [atBottom, setAtBottom] = useState(true);
@@ -357,6 +359,10 @@ export default function ChatPage() {
   // puxava o usuário de volta pro fundo a cada evento.
   useEffect(() => {
     if (!pollRef.current.atBottom) return;
+    // usuário selecionando texto: rolar agora arrasta o conteúdo sob o cursor e
+    // desfaz a seleção (impossível copiar enquanto a IA responde) — pausa o grude
+    const sel = typeof window !== "undefined" ? window.getSelection() : null;
+    if (sel && !sel.isCollapsed) return;
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, streaming, streamingReasoning, toolEvents]);
 
@@ -1027,20 +1033,36 @@ export default function ChatPage() {
   async function toggleMic() {
     if (recording) {
       const rec = recorderRef.current;
+      const browser = browserDictRef.current;
       recorderRef.current = null;
+      browserDictRef.current = null;
       setRecording(false);
       if (rec) {
         try {
           const blob = await rec.stop();
-          const t = await transcribe(blob);
-          setInput((v) => (v ? v + " " : "") + t);
+          try {
+            const t = await transcribe(blob);
+            void browser?.stop();
+            setInput((v) => (v ? v + " " : "") + t);
+          } catch (e) {
+            // servidor de STT indisponível (sem chave/local não faz STT): usa o
+            // que o reconhecimento do NAVEGADOR captou em paralelo
+            const local = (await browser?.stop()) ?? "";
+            if (local) {
+              setInput((v) => (v ? v + " " : "") + local);
+            } else {
+              alert("Falha na transcrição: " + (e as Error).message);
+            }
+          }
         } catch (e) {
-          alert("Falha na transcrição: " + (e as Error).message);
+          alert("Falha na gravação: " + (e as Error).message);
         }
       }
     } else {
       try {
         recorderRef.current = await startRecording();
+        // melhor esforço, junto com a gravação — vira o fallback se o servidor falhar
+        browserDictRef.current = startBrowserDictation();
         setRecording(true);
       } catch {
         alert("Não foi possível acessar o microfone.");
@@ -1298,7 +1320,10 @@ export default function ChatPage() {
             onClose={() => { setWorkspaceOpen(false); setEditModelTarget(null); setWorkspaceSection(null); refreshModels(); }}
           />
         ) : automationsOpen ? (
-          <AutomationsView onOpenChat={(cid) => { setAutomationsOpen(false); selectChat(cid).catch(() => {}); }} />
+          <AutomationsView
+            onOpenChat={(cid) => { setAutomationsOpen(false); selectChat(cid).catch(() => {}); }}
+            onBack={() => setAutomationsOpen(false)}
+          />
         ) : playgroundOpen ? (
           <PlaygroundView key={playgroundKey} onClose={() => setPlaygroundOpen(false)} />
         ) : (
@@ -1920,7 +1945,7 @@ function ShareModal({
   }, []);
 
   async function copy() {
-    try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
+    try { await copyText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
   }
   async function revoke() {
     setBusy(true);

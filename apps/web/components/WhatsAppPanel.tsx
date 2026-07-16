@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { SiWhatsapp } from "react-icons/si";
 import { api, API_URL, ApiError } from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
 import type { Model, ModelConfig, WhatsAppConnection, WhatsAppFilters } from "@/lib/types";
 import ModelField from "./ModelField";
 
@@ -540,7 +541,7 @@ function CopyField({ label, value }: { label: string; value: string }) {
       <div className="mt-1 flex items-center gap-1.5">
         <code className="min-w-0 flex-1 truncate rounded-lg border border-border bg-surface2 px-2.5 py-1.5 font-mono text-[11px] text-ink">{value}</code>
         <button
-          onClick={async () => { try { await navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch { /* ignore */ } }}
+          onClick={async () => { try { await copyText(value); setCopied(true); setTimeout(() => setCopied(false), 1200); } catch { /* ignore */ } }}
           className="rounded-lg border border-border p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink"
         >
           {copied ? <Check size={13} className="text-green-400" /> : <Copy size={13} />}

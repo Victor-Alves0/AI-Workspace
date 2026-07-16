@@ -235,37 +235,48 @@ async def _transcribe_audios(
                  base_url/api_key/model resolvidos pela rota (aqui não há db).
       - "model": um modelo multimodal de áudio via OpenRouter (partes input_audio).
     Falha em um áudio não derruba os demais; devolve as transcrições unidas."""
+    async def _try_one(c: dict[str, Any], mime: str, b64: str, name: str) -> str:
+        if c.get("engine") == "model":
+            fmt = _AUDIO_FMT.get(mime, "mp3")
+            return await openrouter.complete(api_key, c["model"], [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Transcribe this audio verbatim. Output ONLY the transcription, in the audio's language."},
+                    {"type": "input_audio", "input_audio": {"data": b64, "format": fmt}},
+                ],
+            }])
+        # stt (Whisper OpenAI-compat)
+        raw = base64.b64decode(b64, validate=False)
+        ext = _AUDIO_FMT.get(mime, "mp3")
+        async with httpx.AsyncClient(timeout=90) as client:
+            resp = await client.post(
+                f"{c['base_url']}/audio/transcriptions",
+                headers={"Authorization": f"Bearer {c['api_key']}"},
+                files={"file": (name or f"audio.{ext}", raw, mime)},
+                data={"model": c.get("model") or "whisper-1"},
+            )
+        resp.raise_for_status()
+        return (resp.json().get("text") or "").strip()
+
+    # cadeia de motores: o principal + os fallbacks resolvidos pela rota (ex.: a
+    # conexão de voz local não faz STT → 404 → cai no modelo multimodal). Antes um
+    # único motor falho deixava o canal SURDO em silêncio.
+    chain: list[dict[str, Any]] = [cfg, *cfg.get("fallbacks", [])]
     texts: list[str] = []
     for a in audios:
         parts = _audio_url_parts(a.get("url"))
         if parts is None:
             continue
         mime, b64 = parts
-        try:
-            if cfg.get("engine") == "model":
-                fmt = _AUDIO_FMT.get(mime, "mp3")
-                text = await openrouter.complete(api_key, cfg["model"], [{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Transcribe this audio verbatim. Output ONLY the transcription, in the audio's language."},
-                        {"type": "input_audio", "input_audio": {"data": b64, "format": fmt}},
-                    ],
-                }])
-            else:  # stt (Whisper OpenAI-compat)
-                raw = base64.b64decode(b64, validate=False)
-                ext = _AUDIO_FMT.get(mime, "mp3")
-                async with httpx.AsyncClient(timeout=90) as client:
-                    resp = await client.post(
-                        f"{cfg['base_url']}/audio/transcriptions",
-                        headers={"Authorization": f"Bearer {cfg['api_key']}"},
-                        files={"file": (a.get("name") or f"audio.{ext}", raw, mime)},
-                        data={"model": cfg.get("model") or "whisper-1"},
-                    )
-                resp.raise_for_status()
-                text = (resp.json().get("text") or "").strip()
-        except Exception as exc:  # noqa: BLE001 - um áudio ruim não derruba o turno
-            logger.warning("Audio Router: transcrição falhou (%s)", exc)
-            text = ""
+        text = ""
+        for c in chain:
+            try:
+                text = await _try_one(c, mime, b64, a.get("name") or "")
+            except Exception as exc:  # noqa: BLE001 - tenta o próximo motor
+                logger.warning("Audio Router: motor %s falhou (%s)", c.get("engine"), exc)
+                text = ""
+            if text:
+                break
         if text:
             texts.append(text)
     return "\n---\n".join(texts)
@@ -357,9 +368,11 @@ def _search_knowledge_tool() -> dict[str, Any]:
         "function": {
             "name": "search_knowledge",
             "description": (
-                "Search the user's knowledge base (their uploaded documents) for passages "
-                "relevant to a question. Use whenever the answer may depend on the user's own "
-                "documents/files. Returns numbered passages — cite the source you used with [n]."
+                "Search the user's knowledge base (their uploaded documents AND images/photos) "
+                "for items relevant to a question. Use whenever the answer may depend on the "
+                "user's own files — including when they ask you to show/send a photo or image "
+                "stored there. Returns numbered passages (cite the source used with [n]); image "
+                "results include ready-to-paste markdown that DISPLAYS the image in the chat."
             ),
             "parameters": {
                 "type": "object",
@@ -464,7 +477,11 @@ def _knowledge_block_and_sources(results: list[dict]) -> tuple[str, list[dict[st
     """Dos trechos recuperados, monta (a) o bloco numerado por FONTE (documento) p/ o
     modelo e (b) a lista de fontes [{title, url}] (uma por documento, ordem de 1ª
     aparição) — a numeração [n] bate entre os dois, e a UI (`SourcesBar`/
-    `linkifyCitations`) transforma [n] em link p/ o documento original assinado."""
+    `linkifyCitations`) transforma [n] em link p/ o documento original assinado.
+
+    IMAGENS da base: o "trecho" é só o nome indexado — o que interessa é EXIBIR.
+    A linha entrega ao modelo o markdown pronto (`![nome](url assinada)`) p/ colar
+    na resposta; o chat renderiza (o front resolve a URL no host da API)."""
     sources: list[dict[str, str]] = []
     idx: dict[str, int] = {}
     lines: list[str] = []
@@ -473,7 +490,14 @@ def _knowledge_block_and_sources(results: list[dict]) -> tuple[str, list[dict[st
         if did not in idx:
             idx[did] = len(sources) + 1
             sources.append({"title": r.get("filename") or "documento", "url": sign_doc_url(did)})
-        lines.append(f"[{idx[did]}] {r.get('text') or ''}")
+        if (r.get("mime") or "").startswith("image/"):
+            name = r.get("filename") or "imagem"
+            lines.append(
+                f"[{idx[did]}] IMAGE — {r.get('text') or name}. "
+                f"To SHOW this image in your reply, paste exactly: ![{name}]({sources[idx[did]-1]['url']})"
+            )
+        else:
+            lines.append(f"[{idx[did]}] {r.get('text') or ''}")
     return "\n\n".join(lines), sources
 
 

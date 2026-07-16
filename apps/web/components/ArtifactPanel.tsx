@@ -20,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { api, API_URL, ApiError } from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
 import type { ChatArtifact, ChatArtifactVersion } from "@/lib/types";
 import Markdown from "./Markdown";
 import CodeEditor from "./CodeEditor";
@@ -260,7 +261,7 @@ export default function ArtifactPanel({
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(viewingVersion?.content ?? draft ?? content);
+      await copyText(viewingVersion?.content ?? draft ?? content);
       setCopied(true);
       setTimeout(() => setCopied(false), 1200);
     } catch { /* ignore */ }
@@ -280,7 +281,7 @@ export default function ArtifactPanel({
     if (!current) return;
     try {
       const r = await api.post<{ path: string }>(`/artifacts/${current.id}/share`);
-      await navigator.clipboard.writeText(`${API_URL}${r.path}`);
+      await copyText(`${API_URL}${r.path}`);
       setShared(true);
       setTimeout(() => setShared(false), 1600);
     } catch (e) {

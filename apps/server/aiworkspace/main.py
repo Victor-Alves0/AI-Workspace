@@ -80,6 +80,12 @@ async def lifespan(app: FastAPI):
         await discord_gateway.start()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível iniciar os gateways do Discord (%s)", exc)
+    # indexações da Base de Conhecimento interrompidas por restart (task em memória)
+    try:
+        from .knowledge import ingest as knowledge_ingest
+        await knowledge_ingest.resume_pending()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Não foi possível retomar indexações pendentes (%s)", exc)
     try:
         yield
     finally:

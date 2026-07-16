@@ -66,20 +66,48 @@ async def tts(
 ):
     base_url, key, model = await _resolve_tts(db, user)
     voice = body.voice or get_settings().tts_voice
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(
-            f"{base_url}/audio/speech",
-            headers={"Authorization": f"Bearer {key}"},
-            json={
-                "model": model,
-                "voice": voice,
-                "input": body.text,
-                "response_format": "mp3",
-            },
-        )
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{base_url}/audio/speech",
+                headers={"Authorization": f"Bearer {key}"},
+                json={
+                    "model": model,
+                    "voice": voice,
+                    "input": body.text,
+                    "response_format": "mp3",
+                },
+            )
+    except httpx.HTTPError:
+        # servidor de voz inacessível (ex.: conexão local configurada mas desligada):
+        # erro claro em vez de 500 — o front cai na voz do navegador
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Servidor de voz inacessível ({base_url}). Ele está rodando?",
+        ) from None
     if resp.status_code != 200:
         raise HTTPException(resp.status_code, f"Falha no TTS: {resp.text[:200]}")
     return Response(content=resp.content, media_type="audio/mpeg")
+
+
+async def _try_transcribe(base_url: str, key: str, model: str, filename: str, audio: bytes, mime: str):
+    """Uma tentativa de transcrição OpenAI-compat. Retorna o JSON ou None quando o
+    servidor não faz STT (404/405/501 — ex.: Kokoro só faz TTS) ou está fora do ar."""
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{base_url}/audio/transcriptions",
+                headers={"Authorization": f"Bearer {key}"},
+                files={"file": (filename, audio, mime)},
+                data={"model": model},
+            )
+    except httpx.HTTPError:
+        return None
+    if resp.status_code in (404, 405, 501):
+        return None
+    if resp.status_code != 200:
+        raise HTTPException(resp.status_code, f"Falha no STT: {resp.text[:200]}")
+    return resp.json()
 
 
 @router.post("/stt")
@@ -89,7 +117,6 @@ async def stt(
     db: AsyncSession = Depends(get_db),
 ):
     s = get_settings()
-    key = await _global_key(db, user)  # STT sempre no provedor global (whisper)
     # lê no máximo o limite + 1 byte para detectar estouro sem carregar tudo
     audio = await file.read(_MAX_AUDIO_BYTES + 1)
     if len(audio) > _MAX_AUDIO_BYTES:
@@ -97,16 +124,27 @@ async def stt(
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             f"Áudio excede o limite de {_MAX_AUDIO_BYTES // (1024 * 1024)}MB",
         )
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(
-            f"{s.voice_base_url}/audio/transcriptions",
-            headers={"Authorization": f"Bearer {key}"},
-            files={"file": (file.filename or "audio.webm", audio, file.content_type)},
-            data={"model": s.stt_model},
+    fname = file.filename or "audio.webm"
+    mime = file.content_type or "audio/webm"
+    # 1º a conexão de voz LOCAL do usuário (stacks como speaches/faster-whisper
+    # expõem /audio/transcriptions; Kokoro devolve 404 e caímos adiante)…
+    prov = await voice_service.get_provider(db, user.id)
+    if prov:
+        out = await _try_transcribe(prov["base_url"], prov["api_key"], s.stt_model, fname, audio, mime)
+        if out is not None:
+            return out
+    # …depois o provedor global (exige a chave)
+    key = await get_secret(db, user.id, VOICE_KEY)
+    if not key:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Nenhum servidor de transcrição disponível: a conexão de Voz Local não faz "
+            "STT e não há chave do provedor de voz configurada.",
         )
-    if resp.status_code != 200:
-        raise HTTPException(resp.status_code, f"Falha no STT: {resp.text[:200]}")
-    return resp.json()
+    out = await _try_transcribe(s.voice_base_url, key, s.stt_model, fname, audio, mime)
+    if out is None:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Provedor de voz global inacessível")
+    return out
 
 
 # --------------------------------------------------------------------------- #
