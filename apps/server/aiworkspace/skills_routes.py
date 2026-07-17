@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth.deps import require_approved
 from .db import get_db
-from .models import Skill, User
+from .models import Skill, SkillProposal, User
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 
@@ -135,5 +135,86 @@ async def delete_skill(
 ):
     s = await _owned(db, skill_id, user)
     await db.delete(s)
+    await db.commit()
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+# Propostas de skill do Aprendizado Proativo (Curator): fila para aprovação.
+# --------------------------------------------------------------------------- #
+class ProposalOut(BaseModel):
+    id: uuid.UUID
+    chat_id: uuid.UUID | None
+    name: str
+    slug: str
+    description: str
+    content: str
+    tags: list[str]
+    source: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+async def _owned_proposal(db: AsyncSession, pid: uuid.UUID, user: User) -> SkillProposal:
+    p = await db.get(SkillProposal, pid)
+    if p is None or p.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Proposta não encontrada")
+    return p
+
+
+@router.get("/proposals", response_model=list[ProposalOut])
+async def list_proposals(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    rows = await db.scalars(
+        select(SkillProposal)
+        .where(SkillProposal.user_id == user.id, SkillProposal.status == "pending")
+        .order_by(SkillProposal.created_at.desc())
+    )
+    return list(rows)
+
+
+async def _unique_slug(db: AsyncSession, user: User, base: str) -> str:
+    base = _slugify(base)
+    existing = set(
+        await db.scalars(select(Skill.slug).where(Skill.user_id == user.id))
+    )
+    if base not in existing:
+        return base
+    for n in range(2, 100):
+        cand = f"{base}_{n}"[:64]
+        if cand not in existing:
+            return cand
+    return f"{base}_{uuid.uuid4().hex[:6]}"[:64]
+
+
+@router.post("/proposals/{proposal_id}/approve", response_model=SkillOut)
+async def approve_proposal(
+    proposal_id: uuid.UUID,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    """Aprova uma proposta → cria a Skill (slug único) e marca a proposta como aprovada."""
+    p = await _owned_proposal(db, proposal_id, user)
+    slug = await _unique_slug(db, user, p.slug or p.name)
+    skill = Skill(
+        user_id=user.id, slug=slug, name=p.name, description=p.description,
+        content=p.content, tags=_clean_tags(list(p.tags or [])), enabled=True,
+    )
+    db.add(skill)
+    p.status = "approved"
+    await db.commit()
+    await db.refresh(skill)
+    return skill
+
+
+@router.post("/proposals/{proposal_id}/dismiss")
+async def dismiss_proposal(
+    proposal_id: uuid.UUID,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    p = await _owned_proposal(db, proposal_id, user)
+    p.status = "dismissed"
     await db.commit()
     return {"ok": True}

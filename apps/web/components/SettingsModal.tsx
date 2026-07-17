@@ -142,6 +142,7 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Excluir Todos os Chats", cat: "data" },
   { label: "Gerenciar arquivos", cat: "data" },
   { label: "Memória da IA", cat: "data" },
+  { label: "Aprendizado proativo", cat: "data" },
   { label: "Sobre", cat: "about" },
 ];
 
@@ -1579,6 +1580,15 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
     setMem(next);
     await api.put("/memory/settings", next).catch(() => {});
   }
+  // Aprendizado proativo (Curator): toggle global por-usuário
+  const [learn, setLearn] = useState<{ enabled?: boolean; interval?: number; model?: string } | null>(null);
+  useEffect(() => { api.get<{ enabled?: boolean }>("/learning/settings").then(setLearn).catch(() => {}); }, []);
+  const learnOn = learn?.enabled === true;
+  async function toggleLearn() {
+    const next = { ...(learn ?? {}), enabled: !learnOn };
+    setLearn(next);
+    await api.put("/learning/settings", next).catch(() => {});
+  }
 
   async function exportChats() {
     const raw = await prompt({
@@ -1673,6 +1683,9 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
       <Heading>Memória da IA</Heading>
       <Row label="Memória" sub="Permita a IA lembrar de fatos entre as conversas">
         <Toggle on={memOn} onClick={toggleMem} />
+      </Row>
+      <Row label="Aprendizado proativo" sub="A IA revisa as conversas de vez em quando e sugere skills e memórias — sempre com a sua aprovação">
+        <Toggle on={learnOn} onClick={toggleLearn} />
       </Row>
 
       <Heading>Arquivos</Heading>

@@ -418,6 +418,21 @@ export interface Skill {
   updated_at: string;
 }
 
+/** proposta de skill PERSISTIDA pelo Aprendizado Proativo (Curator), aguardando
+ *  aprovação na aba Skills. (Diferente de `SkillProposal`, que é o card efêmero
+ *  do /learn no chat.) */
+export interface SkillSuggestion {
+  id: string;
+  chat_id: string | null;
+  name: string;
+  slug: string;
+  description: string;
+  content: string;
+  tags: string[];
+  source: string;
+  created_at: string;
+}
+
 export interface ModelConfig {
   id: string;
   base_model: string;

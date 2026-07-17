@@ -461,9 +461,11 @@ def add_manual(
     scope: str,
     chat_id: str | None = None,
     agent_id: str | None = None,
+    pending: bool = False,
 ) -> bool:
     """Adiciona uma memória CRUA (sem extração via LLM, `infer=False`) num escopo:
-    global / model / chat / bank (agent_id = "bank:<id>")."""
+    global / model / chat / bank (agent_id = "bank:<id>"). Com `pending`, entra
+    PENDENTE (aguardando aprovação) — usado pela curadoria do Aprendizado Proativo."""
     mem = _memory_for_key(api_key)
     if mem is None or not text.strip():
         return False
@@ -474,8 +476,12 @@ def add_manual(
     if scope == "project" and agent_id:
         aid = agent_id if agent_id.startswith(_PROJECT_PREFIX) else _PROJECT_PREFIX + agent_id
     try:
-        mem.add([{"role": "user", "content": text.strip()}], user_id=user_id,
-                infer=False, **_scope(run_id, aid))
+        res = mem.add([{"role": "user", "content": text.strip()}], user_id=user_id,
+                      infer=False, **_scope(run_id, aid))
+        if pending:
+            new = _new_ids(res)
+            if new:
+                set_pending(user_id, new)
         return True
     except Exception as exc:  # noqa: BLE001
         logger.warning("mem0.add_manual falhou: %s", exc)

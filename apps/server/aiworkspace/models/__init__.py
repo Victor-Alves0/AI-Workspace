@@ -6,6 +6,7 @@ from .tool import Tool
 from .model_config import ModelConfig
 from .prompt import Prompt
 from .skill import Skill
+from .skill_proposal import SkillProposal
 from .app_setting import AppSetting
 from .automation import Automation, Notification
 from .automation_run import AutomationRun
@@ -35,6 +36,7 @@ __all__ = [
     "ModelConfig",
     "Prompt",
     "Skill",
+    "SkillProposal",
     "AppSetting",
     "Automation",
     "Notification",

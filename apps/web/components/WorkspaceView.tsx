@@ -4,13 +4,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft, BarChart3, BookOpen, Box, Brain, Code2, Copy, Download, FileText,
+  ArrowLeft, BarChart3, BookOpen, Box, Brain, Check, Code2, Copy, Download, FileText,
   LayoutGrid, MoreHorizontal, Pencil, Plug, Plus, Search, Settings, Sparkles,
-  Trash2, Upload, Waypoints, Wrench,
+  Trash2, Upload, Waypoints, Wrench, X,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
-import type { ModelConfig, Prompt, Skill, Tool, User } from "@/lib/types";
+import type { ModelConfig, Prompt, Skill, SkillSuggestion, Tool, User } from "@/lib/types";
 import { AnchoredMenu, MenuItem } from "@/components/ui";
 import ToolEditor from "./ToolEditor";
 import ModelEditor from "./ModelEditor";
@@ -158,6 +158,8 @@ export default function WorkspaceView({
   const [tools, setTools] = useState<Tool[]>([]);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
+  // propostas de skill do Aprendizado Proativo (Curator) — aguardando aprovação
+  const [proposals, setProposals] = useState<SkillSuggestion[]>([]);
   const [q, setQ] = useState("");
   // filtro por tag na aba Ferramentas: null = todas; "__none__" = sem tags
   const [tagFilter, setTagFilter] = useState<string | null>(null);
@@ -178,6 +180,7 @@ export default function WorkspaceView({
   const loadTools = () => api.get<Tool[]>("/tools").then(setTools).catch(() => {});
   const loadPrompts = () => api.get<Prompt[]>("/prompts").then(setPrompts).catch(() => {});
   const loadSkills = () => api.get<Skill[]>("/skills").then(setSkills).catch(() => {});
+  const loadProposals = () => api.get<SkillSuggestion[]>("/skills/proposals").then(setProposals).catch(() => {});
 
   useEffect(() => {
     api.get<User>("/auth/me").then(setUser).catch((e) => {
@@ -187,7 +190,18 @@ export default function WorkspaceView({
     loadTools();
     loadPrompts();
     loadSkills();
+    loadProposals();
   }, []);
+
+  async function approveProposal(id: string) {
+    await api.post(`/skills/proposals/${id}/approve`).catch(() => {});
+    loadProposals();
+    loadSkills();
+  }
+  async function dismissProposal(id: string) {
+    await api.post(`/skills/proposals/${id}/dismiss`).catch(() => {});
+    loadProposals();
+  }
 
   // se o pai pediu p/ abrir o editor de um modelo, já entra na seção Modelos
   useEffect(() => {
@@ -601,6 +615,39 @@ export default function WorkspaceView({
             </>
           }
         >
+          {proposals.length > 0 && (
+            <div className="mb-4 rounded-2xl border border-accent/30 bg-accent/5 p-3">
+              <p className="mb-2 flex items-center gap-1.5 px-1 text-sm font-medium text-ink">
+                <Sparkles size={15} className="text-accent-hover" />
+                Sugeridas pela IA
+                <span className="rounded-full bg-accent/20 px-2 py-0.5 text-[11px] text-accent-hover">{proposals.length}</span>
+              </p>
+              <p className="mb-2.5 px-1 text-xs text-muted">O Aprendizado Proativo notou estes padrões nas suas conversas. Aprove para virar uma skill.</p>
+              <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
+                {proposals.map((p) => (
+                  <div key={p.id} className="flex flex-col gap-2 rounded-xl border border-border bg-surface p-3">
+                    <div className="min-w-0">
+                      <p className="flex items-center gap-2 text-sm font-medium text-ink">
+                        <span className="truncate">{p.name}</span>
+                        {(p.tags ?? []).slice(0, 3).map((tag) => (
+                          <span key={tag} className="shrink-0 rounded-full bg-surface2 px-2 py-0.5 text-[10px] font-normal text-muted">{tag}</span>
+                        ))}
+                      </p>
+                      <p className="mt-0.5 line-clamp-2 text-xs text-muted">{p.description || "Sem descrição"}</p>
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                      <button onClick={() => dismissProposal(p.id)} className="flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs text-muted transition-colors hover:text-ink">
+                        <X size={13} /> Descartar
+                      </button>
+                      <button onClick={() => approveProposal(p.id)} className="flex items-center gap-1 rounded-full bg-accent px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-accent-hover">
+                        <Check size={13} /> Aprovar
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <SearchBar value={q} onChange={setQ} placeholder="Pesquisar skills" />
           <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
             {filteredSkills.map((s) => (

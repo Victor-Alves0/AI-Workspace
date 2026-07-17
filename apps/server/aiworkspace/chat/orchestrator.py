@@ -39,6 +39,7 @@ from ..memory import mem0_service
 from ..models import GeneratedImage
 from ..providers import image_gen, openrouter
 from ..tools import sift_service, toolctx
+from . import curator
 
 logger = logging.getLogger(__name__)
 
@@ -1981,6 +1982,14 @@ async def run_turn(
     # Dispara em BACKGROUND: não deve atrasar o `done`/conclusão visível na UI.
     if assistant_text and chat_id and mem_write and mem_write != "off":
         _spawn_memory_write(api_key, user_text, assistant_text, user_id, chat_id, agent_id, mem_write, mem_review, project_id=mem_project)
+
+    # 5b. Aprendizado Proativo (Curator): revisão em background a cada N turnos —
+    # propõe skills e cura memória (opt-in; a checagem do toggle é feita na task).
+    if assistant_text and chat_id:
+        curator.maybe_review(
+            api_key, user_id, chat_id, agent_id, model, base_url,
+            curator.turn_signals(user_text, tool_events),
+        )
 
     # 5. detalhamentos de uso (entrada/saída/por-tool/extra) — Fase 5
     _finalize_usage(

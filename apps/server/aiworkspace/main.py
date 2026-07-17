@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse
 from .admin_routes import router as admin_router
 from .analytics_routes import router as analytics_router
 from .artifacts_routes import router as artifacts_router
+from .learning_routes import router as learning_router
 from .memory_routes import router as memory_router
 from .brain_routes import router as brain_router
 from .knowledge_routes import router as knowledge_router
@@ -182,6 +183,7 @@ def create_app() -> FastAPI:
     app.include_router(analytics_router)
     app.include_router(artifacts_router)
     app.include_router(memory_router)
+    app.include_router(learning_router)
     app.include_router(knowledge_router)
     app.include_router(brain_router)
     app.include_router(share_router)
