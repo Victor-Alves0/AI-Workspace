@@ -176,6 +176,11 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
      "model_desc": "Search the web for current or factual info."},
     {"path": "web.page.read", "name": "Ler Página", "description": "Abre uma URL e devolve o texto legível da página (lê o conteúdo do site, não só o trecho da busca).",
      "model_desc": "Fetch a URL and return the page's readable text."},
+    # Navegador headless (Chromium) — requer o serviço opt-in `browser` (browserless).
+    # A IA controla uma aba VIVA por conversa: navega com JS, lê, clica, digita, rola e
+    # tira screenshot. Para sites com JS/SPA, login e formulários que o "Ler Página" não dá.
+    {"path": "web.browser.use", "name": "Navegador (Browser)", "description": "Controla um Chromium headless: navega (com JS), lê, clica, digita, rola e tira screenshot — mantém a página aberta entre as ações.",
+     "model_desc": "Drive a headless Chromium (renders JS; live tab across calls): goto, read, click, type, scroll, back, screenshot."},
     {"path": "diagram.excalidraw.render", "name": "Excalidraw (Diagrama)", "description": "Desenha um diagrama/fluxograma editável (canvas) a partir de Mermaid.",
      "model_desc": "Draw an editable diagram from a Mermaid flowchart."},
     {"path": "chart.render.plot", "name": "Gráfico", "description": "Desenha um gráfico (linha, barra, área ou pizza) a partir de dados.",
@@ -269,6 +274,68 @@ async def _fetch_page(url: str, max_chars: int, find: str = "") -> dict[str, Any
             text = text[max(0, idx - max_chars // 4):]
     text = text[:max_chars]
     return {"ok": True, "url": str(r.url), "title": title, "text": text, "chars": len(text)}
+
+
+def _public_web_url(url: str) -> bool:
+    """Guarda anti-SSRF do Navegador (mais restrita que a do deep_search): além de
+    barrar localhost/.local/IP privado LITERAL, exige host com ponto (bloqueia nomes
+    de serviço do compose — db, server, browser…) e RESOLVE o host, barrando se cair
+    em IP privado (anti DNS-rebinding). Falha de resolução não bloqueia (o dot-check
+    já cobre os nomes internos)."""
+    import ipaddress
+    import socket
+    from urllib.parse import urlparse
+
+    if not deep_search._is_public_url(url):
+        return False
+    host = (urlparse(url).hostname or "").lower()
+    if "." not in host or host.endswith("."):
+        return False
+    try:
+        ipaddress.ip_address(host)  # IP literal já passou pelo _is_public_url
+        return True
+    except ValueError:
+        pass
+    try:
+        for res in socket.getaddrinfo(host, None):
+            ip = ipaddress.ip_address(res[4][0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                return False
+    except OSError:
+        pass  # não resolveu — deixa o browser tentar (o dot-check já barrou os internos)
+    return True
+
+
+async def _store_browser_shot(user_id: str | None, chat_id: str | None, data: bytes) -> str | None:
+    """Guarda um screenshot como GeneratedImage e devolve o id (p/ servir por URL).
+
+    Usa um engine EFÊMERO com NullPool: a tool chama isto via `asyncio.run` (loop
+    próprio, em threadpool), e o pool compartilhado do engine global prende conexões
+    a OUTRO loop (erro 'attached to a different loop'). Uma conexão nova, criada e
+    descartada neste mesmo loop, evita o problema (screenshots são raros)."""
+    if not user_id or not data:
+        return None
+    import uuid as _uuid
+
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from ..config import get_settings
+    from ..models import GeneratedImage
+    eng = create_async_engine(get_settings().database_url, poolclass=NullPool)
+    try:
+        async with AsyncSession(eng, expire_on_commit=False) as db:
+            row = GeneratedImage(
+                user_id=_uuid.UUID(user_id),
+                chat_id=_uuid.UUID(chat_id) if chat_id else None,
+                mime="image/png", data=data, prompt="browser screenshot", model="browser",
+            )
+            db.add(row)
+            await db.commit()
+            await db.refresh(row)
+            return str(row.id)
+    finally:
+        await eng.dispose()
 
 
 def _register_builtins(
@@ -419,6 +486,77 @@ def _register_builtins(
                 return asyncio.run(_fetch_page(u, cap, (find or "").strip()))
             except Exception as exc:  # noqa: BLE001
                 return {"error": str(exc)}
+
+    if want("web.browser.use"):
+        @sift.tool(
+            "web.browser.use",
+            description=(
+                "Drive a REAL headless Chromium browser. It renders JavaScript and keeps a "
+                "LIVE tab across calls in this conversation — use it for JS-heavy sites, "
+                "SPAs, logins, and multi-step forms that web.page.read can't handle. "
+                "Actions: 'goto' (open a URL), 'read' (current page's text + a numbered list "
+                "of clickable 'elements'), 'click' (target = the element's visible text OR a "
+                "CSS selector), 'type' (target = a field's label/placeholder/CSS, `text` to "
+                "enter, set submit=true to press Enter), 'scroll' (up/down/top/bottom), "
+                "'back', 'screenshot' (shows the page image to the user), 'close'. After "
+                "goto/click, look at the returned 'elements' to pick your next target."
+            ),
+            params={
+                "action": "string:r::goto | read | click | type | scroll | back | screenshot | close",
+                "url": "string:o::URL for 'goto' (http/https)",
+                "target": "string:o::for click/type: the element's visible text OR a CSS selector",
+                "text": "string:o::for 'type': the text to enter in the field",
+                "submit": "boolean:o:false:for 'type': press Enter after filling",
+                "direction": "string:o:down:for 'scroll': up | down | top | bottom",
+            },
+            returns=["ok", "url", "title", "text", "elements", "kind", "note", "error"],
+        )
+        def _browser_use(
+            action: str = "", url: str = "", target: str = "",
+            text: str = "", submit: Any = False, direction: str = "down",
+        ) -> dict[str, Any]:
+            from .browser_driver import driver
+            from ..providers import image_gen
+            if not (get_settings().browser_ws_url or "").strip():
+                return {"error": "O navegador não está ativo. Suba o serviço: "
+                        "docker compose --profile browser up -d browser"}
+            act = (action or "").strip().lower()
+            chat_id = toolctx.current_chat_id.get()
+            key = chat_id or (user_id or "anon")
+            try:
+                if act == "goto":
+                    u = (url or "").strip()
+                    if not u:
+                        return {"error": "provide a URL for 'goto'"}
+                    if not u.lower().startswith(("http://", "https://")):
+                        u = "https://" + u
+                    if not _public_web_url(u):
+                        return {"error": "URL not allowed (only public http/https sites)"}
+                    return driver.goto(key, u)
+                if act == "read":
+                    return driver.read(key)
+                if act == "click":
+                    if not (target or "").strip():
+                        return {"error": "provide 'target' (visible text or CSS selector)"}
+                    return driver.click(key, target.strip())
+                if act == "type":
+                    return driver.type(key, (target or "").strip(), text or "", bool(submit))
+                if act == "scroll":
+                    return driver.scroll(key, (direction or "down").strip().lower())
+                if act == "back":
+                    return driver.back(key)
+                if act == "screenshot":
+                    png = driver.screenshot(key)
+                    iid = asyncio.run(_store_browser_shot(user_id, chat_id, png))
+                    if not iid:
+                        return {"error": "screenshot capturado, mas falhou ao salvar"}
+                    return {"ok": True, "kind": "image", "url": image_gen.sign_image_url(iid),
+                            "note": "screenshot da página atual"}
+                if act == "close":
+                    return driver.close(key)
+                return {"error": f"unknown action '{act}' (use goto/read/click/type/scroll/back/screenshot/close)"}
+            except Exception as exc:  # noqa: BLE001 - erros do browser não quebram o turno
+                return {"error": str(exc)[:300]}
 
     if want("diagram.excalidraw.render"):
         @sift.tool(

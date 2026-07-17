@@ -99,6 +99,12 @@ class Settings(BaseSettings):
     # defina aqui o endereço externo do server (túnel/proxy reverso).
     whatsapp_webhook_base: str = "http://server:8000"
 
+    # Navegador headless (tool "web.browser.use"): Chromium num serviço opt-in do
+    # compose (`--profile browser`, browserless). O server dirige por Playwright via
+    # CDP; vazio = a tool avisa que o serviço não está ativo. Token = BROWSER_TOKEN.
+    browser_ws_url: str = ""
+    browser_token: str = ""
+
     # Limite de iterações de tool-calling por turno
     max_tool_iterations: int = 8
 

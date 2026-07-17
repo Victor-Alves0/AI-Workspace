@@ -52,6 +52,10 @@ services:
       EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
       # base das URLs de webhook (Cloud API oficial exige uma URL pública https)
       WHATSAPP_WEBHOOK_BASE: ${WHATSAPP_WEBHOOK_BASE:-http://server:8000}
+      # Navegador headless (tool "web.browser.use"): serviço opt-in `browser`
+      # (browserless). Vazio = tool desativada. O token protege o endpoint CDP.
+      BROWSER_WS_URL: ${BROWSER_WS_URL:-ws://browser:3000}
+      BROWSER_TOKEN: ${BROWSER_TOKEN:-}
     volumes:
       # persiste modelos de embedding (fastembed/HF) e índices SIFT (.npz)
       # entre recriações do container — cold start rápido
@@ -116,6 +120,24 @@ services:
       - evolution_instances:/evolution/instances
     ports:
       - "${EVOLUTION_BIND:-127.0.0.1}:${EVOLUTION_PORT:-8081}:8080"
+
+  # Navegador headless (Chromium) — browserless v2, para a tool "web.browser.use".
+  # OPT-IN: só sobe com `docker compose --profile browser up -d browser`. O server
+  # o dirige por Playwright via CDP (ws://browser:3000). Defina BROWSER_TOKEN no .env
+  # (o mesmo valor vai para o server em BROWSER_TOKEN) para proteger o endpoint.
+  # Concurrency/timeout limitam abuso; o binário do Chromium fica SÓ aqui.
+  browser:
+    image: ghcr.io/browserless/chromium:latest
+    profiles: ["browser"]
+    restart: unless-stopped
+    environment:
+      TOKEN: ${BROWSER_TOKEN:-}
+      CONCURRENT: ${BROWSER_CONCURRENT:-5}
+      TIMEOUT: ${BROWSER_TIMEOUT_MS:-60000}
+    ports:
+      # só no host (127.0.0.1), p/ debug: o server acessa pela rede do compose
+      # (browser:3000). Porta 3009 no host p/ NÃO colidir com o web (3000).
+      - "${BROWSER_BIND:-127.0.0.1}:${BROWSER_PORT:-3009}:3000"
 
   web:
     build:
