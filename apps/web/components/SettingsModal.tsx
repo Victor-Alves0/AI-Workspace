@@ -47,6 +47,7 @@ import {
 } from "@/lib/shortcuts";
 import type { Model, User } from "@/lib/types";
 import ArchivedModal from "./ArchivedModal";
+import SharedChatsModal from "./SharedChatsModal";
 import ModelField from "./ModelField";
 import GoogleWorkspacePanel from "./GoogleWorkspacePanel";
 import TuyaPanel from "./TuyaPanel";
@@ -57,7 +58,7 @@ import GitHubPanel from "./GitHubPanel";
 import OllamaPanel from "./OllamaPanel";
 import VoicePanel from "./VoicePanel";
 import { WebSearchPanel } from "./toolPanels";
-import { useConfirm } from "./ConfirmDialog";
+import { useConfirm, usePrompt } from "./ConfirmDialog";
 
 type Cat = "general" | "status" | "interface" | "connections" | "integrations" | "personalization" | "shortcuts" | "security" | "data" | "account" | "about";
 
@@ -93,6 +94,7 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Mostrar ferramentas do modelo", cat: "interface", view: "chat" },
   { label: "Mostrar compartilhar conversa", cat: "interface", view: "chat" },
   { label: "Mostrar imagem do modelo no chat", cat: "interface", view: "chat" },
+  { label: "Foto do modelo no seletor", cat: "interface", view: "chat" },
   { label: "Artefatos", cat: "interface", view: "chat" },
   { label: "Notificações", cat: "general" },
   { label: "Animações", cat: "general" },
@@ -100,12 +102,17 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Prompt do Sistema", cat: "personalization" },
   { label: "Formato de hora", cat: "personalization" },
   { label: "Formato de data", cat: "personalization" },
+  { label: "Aviso de uso alto", cat: "personalization" },
+  { label: "Avisar quando uma resposta passar de (tokens)", cat: "personalization" },
   { label: "Parâmetros Avançados", cat: "personalization" },
   { label: "Atalhos de teclado", cat: "shortcuts" },
   { label: "Atalhos", cat: "shortcuts" },
   { label: "Segurança", cat: "security" },
-  { label: "Confirmar ações sensíveis", cat: "security" },
-  { label: "Pedir permissão antes de agir", cat: "security" },
+  { label: "Pedir confirmação antes de ações sensíveis", cat: "security" },
+  { label: "Verificação em duas etapas (2FA)", cat: "security" },
+  { label: "Autenticação de dois fatores", cat: "security" },
+  { label: "Logs de segurança", cat: "security" },
+  { label: "Auditoria", cat: "security" },
   { label: "Status do sistema", cat: "status" },
   { label: "Orçamento mensal", cat: "account" },
   { label: "Nome", cat: "account" },
@@ -305,6 +312,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
   // mobile: abre direto no conteúdo quando veio de um deep-link (paleta de comandos)
   const [mobilePane, setMobilePane] = useState<"nav" | "content">(initialCat ? "content" : "nav");
   const [showArchived, setShowArchived] = useState(false);
+  const [showShared, setShowShared] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -452,6 +460,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
               <DataTab
                 fileRef={fileRef}
                 onArchived={() => setShowArchived(true)}
+                onManageShared={() => setShowShared(true)}
               />
             )}
             {cat === "connections" && (
@@ -597,6 +606,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
       </div>
 
       {showArchived && <ArchivedModal onChanged={() => {}} onClose={() => setShowArchived(false)} />}
+      {showShared && <SharedChatsModal onClose={() => setShowShared(false)} />}
     </div>
   );
 }
@@ -1555,9 +1565,10 @@ function ShortcutsTab({ profile, set }: { profile: Record<string, any>; set: (k:
   );
 }
 
-function DataTab({ fileRef, onArchived }: { fileRef: React.RefObject<HTMLInputElement>; onArchived: () => void }) {
+function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefObject<HTMLInputElement>; onArchived: () => void; onManageShared: () => void }) {
   const [busy, setBusy] = useState(false);
   const confirm = useConfirm();
+  const prompt = usePrompt();
   // Memória da IA: liga/desliga geral (o controle de dados da memória mora aqui;
   // os detalhes por escopo ficam em Espaço → Memória).
   const [mem, setMem] = useState<{ enabled?: boolean } | null>(null);
@@ -1570,7 +1581,16 @@ function DataTab({ fileRef, onArchived }: { fileRef: React.RefObject<HTMLInputEl
   }
 
   async function exportChats() {
-    const pw = (window.prompt("Senha para CIFRAR o export (deixe vazio para exportar sem criptografia):") ?? "").trim();
+    const raw = await prompt({
+      title: "Exportar chats",
+      body: "Defina uma senha para CIFRAR o export, ou deixe em branco para exportar sem criptografia.",
+      placeholder: "Senha (opcional)",
+      password: true,
+      allowEmpty: true,
+      confirmLabel: "Exportar",
+    });
+    if (raw === null) return; // cancelou
+    const pw = raw.trim();
     const res = await api.post<{ encrypted: boolean; blob?: string; items?: unknown[] }>(
       "/chats/bulk/export",
       pw ? { password: pw } : {},
@@ -1591,7 +1611,14 @@ function DataTab({ fileRef, onArchived }: { fileRef: React.RefObject<HTMLInputEl
       try {
         const parsed = JSON.parse(text);
         if (parsed && parsed.aw_enc === 1) {
-          const pw = (window.prompt("Este arquivo está cifrado. Digite a senha:") ?? "").trim();
+          const raw = await prompt({
+            title: "Arquivo cifrado",
+            body: "Este arquivo está protegido. Digite a senha para importar.",
+            placeholder: "Senha",
+            password: true,
+            confirmLabel: "Importar",
+          });
+          const pw = (raw ?? "").trim();
           if (!pw) { setBusy(false); return; }
           body = { blob: text, password: pw };
         } else {
@@ -1637,14 +1664,14 @@ function DataTab({ fileRef, onArchived }: { fileRef: React.RefObject<HTMLInputEl
       <Row label="Importar Chats"><LinkBtn onClick={() => fileRef.current?.click()}>{busy ? "…" : "Importar"}</LinkBtn></Row>
       <Row label="Exportar Chats"><LinkBtn onClick={exportChats}>Exportar</LinkBtn></Row>
       <Row label="Chats Arquivados"><LinkBtn onClick={onArchived}>Gerenciar</LinkBtn></Row>
-      <Row label="Chats compartilhados"><LinkBtn onClick={() => alert("Em breve")}>Gerenciar</LinkBtn></Row>
+      <Row label="Chats compartilhados"><LinkBtn onClick={onManageShared}>Gerenciar</LinkBtn></Row>
       <Row label="Arquivar Todos os Chats"><LinkBtn onClick={archiveAll}>Arquivar tudo</LinkBtn></Row>
       <Row label="Excluir Todos os Chats">
         <button onClick={deleteAll} className="shrink-0 text-sm text-red-400 hover:text-red-300">Excluir tudo</button>
       </Row>
 
       <Heading>Memória da IA</Heading>
-      <Row label="Memória" sub="Deixe a IA lembrar de fatos entre conversas. Gerencie o conteúdo em Espaço → Memória.">
+      <Row label="Memória" sub="Permita a IA lembrar de fatos entre as conversas">
         <Toggle on={memOn} onClick={toggleMem} />
       </Row>
 

@@ -69,6 +69,12 @@ class Chat(Base):
     public_id: Mapped[str | None] = mapped_column(
         String(32), nullable=True, unique=True, index=True
     )
+    # senha OPCIONAL do link público (hash argon2; None = sem senha) e validade
+    # OPCIONAL do link (None = sem prazo). NÃO apaga o chat — só invalida o link.
+    public_password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    public_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     # "Duração do Chat" (chats criados por automações): apagado pelo scheduler
     # quando expires_at vence; view_once = apagado quando o usuário abre e sai.
     expires_at: Mapped[datetime | None] = mapped_column(

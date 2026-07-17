@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import calendar
 import logging
+import random
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, select
@@ -46,6 +47,23 @@ def _schedule_seconds(schedule: dict) -> int:
     unit = (schedule or {}).get("unit") or "hours"
     secs = max(1, every) * _UNIT_SECONDS.get(unit, 3600)
     return max(secs, _MIN_SCHEDULED)
+
+
+def _between_seconds(schedule: dict) -> int:
+    """Modo "between": SORTEIA um intervalo (s) aleatório na faixa [min, max] (na
+    `unit`), recalculado a cada disparo. Piso anti-custo aplicado nas duas pontas."""
+    sched = schedule or {}
+    unit_s = _UNIT_SECONDS.get(sched.get("unit") or "hours", 3600)
+    try:
+        lo = max(1, int(sched.get("min") or 1))
+        hi = max(1, int(sched.get("max") or 6))
+    except (TypeError, ValueError):
+        lo, hi = 1, 6
+    if hi < lo:
+        lo, hi = hi, lo
+    lo_s = max(lo * unit_s, _MIN_SCHEDULED)
+    hi_s = max(hi * unit_s, _MIN_SCHEDULED)
+    return random.randint(lo_s, hi_s)
 
 
 def _parse_hhmm(value: str) -> tuple[int, int]:
@@ -115,16 +133,19 @@ def compute_next_run(automation: Automation, now: datetime) -> datetime:
     mode = (automation.schedule or {}).get("mode")
     if mode in ("daily", "weekly", "monthly"):
         return _next_at(automation.schedule or {}, now)
+    if mode == "between":
+        return now + timedelta(seconds=_between_seconds(automation.schedule or {}))
     return now + timedelta(seconds=_schedule_seconds(automation.schedule))
 
 
 def _backoff_next(automation: Automation, now: datetime) -> datetime:
     """Recuo exponencial após falhas consecutivas (limitado ao teto)."""
-    base = (
-        max(int(automation.interval_seconds or 300), _MIN_MONITOR)
-        if automation.kind == "monitor"
-        else _schedule_seconds(automation.schedule)
-    )
+    if automation.kind == "monitor":
+        base = max(int(automation.interval_seconds or 300), _MIN_MONITOR)
+    elif (automation.schedule or {}).get("mode") == "between":
+        base = _between_seconds(automation.schedule or {})
+    else:
+        base = _schedule_seconds(automation.schedule)
     factor = 2 ** max(0, automation.fail_count - 1)
     return now + timedelta(seconds=min(base * factor, _BACKOFF_CAP))
 

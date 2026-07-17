@@ -20,6 +20,7 @@ const UNITS: { key: "minutes" | "hours" | "days"; label: string }[] = [
 
 const FREQ_MODES: { key: string; label: string }[] = [
   { key: "interval", label: "A cada intervalo" },
+  { key: "between", label: "Entre (intervalo aleatório)" },
   { key: "daily", label: "Diariamente" },
   { key: "weekly", label: "Dias da semana" },
   { key: "monthly", label: "Mensal (dia do mês)" },
@@ -317,6 +318,13 @@ export default function AutomationEditor({
     // fuso do navegador acompanha o horário escolhido (o servidor converte p/ UTC)
     const schedule = mode === "interval"
       ? { mode, every: d.schedule.every ?? 1, unit: d.schedule.unit ?? "hours" }
+      : mode === "between"
+      ? {
+          mode,
+          min: Math.min(d.schedule.min ?? 1, d.schedule.max ?? 6),
+          max: Math.max(d.schedule.min ?? 1, d.schedule.max ?? 6),
+          unit: d.schedule.unit ?? "hours",
+        }
       : { ...d.schedule, mode, time: d.schedule.time || "09:00", tz_offset: new Date().getTimezoneOffset() };
     const body = {
       title: d.title || (isMonitor ? "Novo monitor" : "Nova automação"),
@@ -460,6 +468,21 @@ export default function AutomationEditor({
                       {UNITS.map((u) => <option key={u.key} value={u.key}>{u.label}</option>)}
                     </select>
                   </div>
+                )}
+
+                {freqMode === "between" && (
+                  <>
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <span className="text-sm text-ink-soft">Entre</span>
+                      <input type="number" min={1} value={d.schedule.min ?? 1} onChange={(e) => sched({ min: Math.max(1, Number(e.target.value) || 1) })} className="w-20 rounded-lg border border-border bg-surface2 px-3 py-1.5 text-right text-sm text-ink outline-none focus:border-accent" />
+                      <span className="text-sm text-ink-soft">e</span>
+                      <input type="number" min={1} value={d.schedule.max ?? 6} onChange={(e) => sched({ max: Math.max(1, Number(e.target.value) || 1) })} className="w-20 rounded-lg border border-border bg-surface2 px-3 py-1.5 text-right text-sm text-ink outline-none focus:border-accent" />
+                      <select value={d.schedule.unit ?? "hours"} onChange={(e) => sched({ unit: e.target.value })} className="rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent">
+                        {UNITS.map((u) => <option key={u.key} value={u.key}>{u.label}</option>)}
+                      </select>
+                    </div>
+                    <p className="text-xs text-muted">A cada disparo sorteia um novo intervalo aleatório nessa faixa.</p>
+                  </>
                 )}
 
                 {freqMode === "weekly" && (

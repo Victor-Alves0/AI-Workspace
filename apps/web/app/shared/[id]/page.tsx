@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import { MessageSquare } from "lucide-react";
+import { Lock, MessageSquare } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import Markdown from "@/components/Markdown";
 
@@ -15,13 +15,38 @@ export default function SharedChatPage() {
   const id = params?.id;
   const [chat, setChat] = useState<SharedChat | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [needPw, setNeedPw] = useState(false); // link protegido por senha
+  const [pw, setPw] = useState("");
+  const [pwErr, setPwErr] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const load = useCallback(async (password?: string) => {
     if (!id) return;
-    api.get<SharedChat>(`/shared/${id}`)
-      .then(setChat)
-      .catch((e) => setErr(e instanceof ApiError && e.status === 404 ? "Esta conversa não existe ou não está mais compartilhada." : "Não foi possível carregar a conversa."));
+    setLoading(true);
+    setPwErr(false);
+    try {
+      const q = password ? `?pw=${encodeURIComponent(password)}` : "";
+      const data = await api.get<SharedChat>(`/shared/${id}${q}`);
+      setChat(data);
+      setNeedPw(false);
+      setErr(null);
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        setNeedPw(true);
+        if (password) setPwErr(true); // tinha senha e errou
+      } else if (e instanceof ApiError && e.status === 410) {
+        setErr("Este link de compartilhamento expirou.");
+      } else if (e instanceof ApiError && e.status === 404) {
+        setErr("Esta conversa não existe ou não está mais compartilhada.");
+      } else {
+        setErr("Não foi possível carregar a conversa.");
+      }
+    } finally {
+      setLoading(false);
+    }
   }, [id]);
+
+  useEffect(() => { load(); }, [load]);
 
   return (
     <div className="min-h-full bg-bg text-ink">
@@ -37,7 +62,30 @@ export default function SharedChatPage() {
       </header>
 
       <main className="mx-auto max-w-3xl px-4 py-6">
-        {err ? (
+        {needPw ? (
+          <div className="mx-auto mt-16 flex max-w-sm flex-col items-center gap-3 rounded-2xl border border-border bg-surface p-6 text-center">
+            <Lock size={26} className="text-accent-hover" />
+            <p className="text-sm font-medium text-ink">Conversa protegida</p>
+            <p className="text-xs text-muted">Digite a senha para visualizar.</p>
+            <input
+              type="password"
+              autoFocus
+              value={pw}
+              onChange={(e) => setPw(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && pw.trim()) load(pw.trim()); }}
+              placeholder="Senha"
+              className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
+            />
+            {pwErr && <p className="text-xs text-red-400">Senha incorreta.</p>}
+            <button
+              onClick={() => pw.trim() && load(pw.trim())}
+              disabled={!pw.trim() || loading}
+              className="w-full rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
+            >
+              {loading ? "…" : "Ver conversa"}
+            </button>
+          </div>
+        ) : err ? (
           <div className="flex flex-col items-center gap-2 py-20 text-center">
             <MessageSquare size={28} className="text-muted" />
             <p className="text-sm text-muted">{err}</p>

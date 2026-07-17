@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.concurrency import run_in_threadpool
@@ -22,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import crypto
 from ..auth.deps import require_approved
+from ..auth.security import hash_password
 from ..db import get_db
 from ..models import Artifact, Chat, Message, User
 from ..schemas.chat import (
@@ -91,6 +94,47 @@ async def create_chat(
     return chat
 
 
+class SharedChatOut(BaseModel):
+    id: str
+    title: str
+    public_id: str
+    url: str
+    has_password: bool
+    expires_at: datetime | None
+    expired: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+def _shared_out(c: Chat, now: datetime) -> SharedChatOut:
+    return SharedChatOut(
+        id=str(c.id),
+        title=c.title,
+        public_id=c.public_id or "",
+        url=f"/shared/{c.public_id}",
+        has_password=bool(c.public_password_hash),
+        expires_at=c.public_expires_at,
+        expired=bool(c.public_expires_at and c.public_expires_at <= now),
+        created_at=c.created_at,
+        updated_at=c.updated_at,
+    )
+
+
+# NB: declarado ANTES de `/{chat_id}` senão "shared" cai na rota paramétrica (422).
+@router.get("/shared", response_model=list[SharedChatOut])
+async def list_shared_chats(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Lista os chats do usuário que têm link público ativo (para gerenciar)."""
+    now = datetime.now(timezone.utc)
+    rows = await db.scalars(
+        select(Chat)
+        .where(Chat.user_id == user.id, Chat.public_id.is_not(None))
+        .order_by(Chat.updated_at.desc())
+    )
+    return [_shared_out(c, now) for c in rows]
+
+
 @router.get("/{chat_id}", response_model=ChatDetail)
 async def get_chat(
     chat_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
@@ -121,21 +165,65 @@ async def share_chat(
 ):
     """Cria (ou retorna) o link público read-only do chat. Idempotente: reusa o
     public_id existente. Devolve o token — o front monta a URL /shared/<token>."""
-    import secrets as _secrets
     chat = await _get_owned_chat(db, chat_id, user)
     if not chat.public_id:
-        chat.public_id = _secrets.token_urlsafe(12)[:24]
+        chat.public_id = secrets.token_urlsafe(12)[:24]
         await db.commit()
     return {"public_id": chat.public_id}
+
+
+class ShareUpdate(BaseModel):
+    # `exclude_unset`: só mexe no que veio no corpo (senha e validade são
+    # independentes). password: string define, ""/null limpa. expires_at: ISO
+    # define, null limpa.
+    password: str | None = None
+    expires_at: datetime | None = None
+
+
+@router.patch("/{chat_id}/share")
+async def update_share(
+    chat_id: uuid.UUID,
+    body: ShareUpdate,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    """Atualiza a senha e/ou a validade do link público (sem trocar o link)."""
+    chat = await _get_owned_chat(db, chat_id, user)
+    if not chat.public_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Este chat não está compartilhado")
+    data = body.model_dump(exclude_unset=True)
+    if "password" in data:
+        pw = (data["password"] or "").strip()
+        chat.public_password_hash = hash_password(pw) if pw else None
+    if "expires_at" in data:
+        chat.public_expires_at = data["expires_at"]
+    await db.commit()
+    await db.refresh(chat)
+    return _shared_out(chat, datetime.now(timezone.utc))
+
+
+@router.post("/{chat_id}/share/rotate")
+async def rotate_share(
+    chat_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Gera um NOVO link (invalida o anterior); mantém senha e validade."""
+    chat = await _get_owned_chat(db, chat_id, user)
+    if not chat.public_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Este chat não está compartilhado")
+    chat.public_id = secrets.token_urlsafe(12)[:24]
+    await db.commit()
+    return {"public_id": chat.public_id, "url": f"/shared/{chat.public_id}"}
 
 
 @router.delete("/{chat_id}/share")
 async def unshare_chat(
     chat_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
 ):
-    """Revoga o link público (o chat volta a ser privado)."""
+    """Revoga o link público (o chat volta a ser privado). Limpa senha e validade."""
     chat = await _get_owned_chat(db, chat_id, user)
     chat.public_id = None
+    chat.public_password_hash = None
+    chat.public_expires_at = None
     await db.commit()
     return {"ok": True}
 

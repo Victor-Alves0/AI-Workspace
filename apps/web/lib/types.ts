@@ -484,13 +484,16 @@ export interface AutomationTarget {
 
 // agendamento de uma automação por tempo. Modos:
 //   interval (default/legado): {every, unit}
+//   between: {min, max, unit} — sorteia um intervalo aleatório na faixa a cada disparo
 //   daily:   {time "HH:MM", tz_offset}
 //   weekly:  {days [0-6 dom..sáb], time, tz_offset}
 //   monthly: {day 1-31, time, tz_offset}
 export interface AutomationSchedule {
-  mode?: "interval" | "daily" | "weekly" | "monthly";
+  mode?: "interval" | "between" | "daily" | "weekly" | "monthly";
   every?: number;
   unit?: "minutes" | "hours" | "days";
+  min?: number;
+  max?: number;
   time?: string;
   days?: number[];
   day?: number;
