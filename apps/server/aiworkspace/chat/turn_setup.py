@@ -305,21 +305,33 @@ def _artifacts_enabled(user: User) -> bool:
     return bool(iface.get("artifacts", True))
 
 
-async def _artifacts_extra(db: AsyncSession, chat_id: uuid.UUID, user: User) -> str | None:
+async def _artifacts_extra(
+    db: AsyncSession, chat_id: uuid.UUID, user: User, model_config: ModelConfig | None,
+) -> str | None:
     """Bloco de system prompt dos Artefatos: instruções de uso + conteúdo ATUAL
-    dos artefatos do chat (o modelo vê edições manuais do usuário)."""
+    dos artefatos do chat (o modelo vê edições manuais do usuário).
+
+    Injeta SÓ quando faz sentido (economia de ~400 tokens/turno): o modelo tem a
+    capacidade `artifacts` OU o chat já tem artefatos (precisa do estado atual p/
+    editar). Sem nenhum dos dois, não injeta nada."""
     if not _artifacts_enabled(user):
         return None
     rows = list(await db.scalars(select(Artifact).where(Artifact.chat_id == chat_id)))
+    cap_on = _has_capability(model_config, "artifacts", default=False)
+    if not cap_on and not rows:
+        return None
     return artifacts_service.system_block(rows)
 
 
-async def _artifacts_kwargs(db: AsyncSession, chat_id: uuid.UUID, user: User, arts_on: bool) -> dict:
+async def _artifacts_kwargs(
+    db: AsyncSession, chat_id: uuid.UUID, user: User, arts_on: bool,
+    model_config: ModelConfig | None,
+) -> dict:
     """kwargs de artefatos p/ o run_turn: o bloco de instruções (extra_system) + o
     rótulo "artifacts" no detalhamento de uso (painel Extenso)."""
     if not arts_on:
         return {}
-    txt = await _artifacts_extra(db, chat_id, user)
+    txt = await _artifacts_extra(db, chat_id, user, model_config)
     if not txt:
         return {}
     return {"extra_system": txt, "extra_breakdown": {"artifacts": len(txt)}}
@@ -422,13 +434,22 @@ def _resolve_knowledge(chat: Chat | None, model_config: ModelConfig | None, user
     chat_cfg = (chat.knowledge_config or {}) if chat is not None else {}
     merged = {**prof, **mc, **chat_cfg}
     if merged.get("enabled") is False:
-        return {"bases": [], "mode": "auto", "k": 6}
+        return {"bases": [], "mode": "auto", "modes": {}, "k": 6}
     bases: list[str] = []
     for src in (prof, mc, chat_cfg):
         for b in src.get("bases") or []:
             if b and str(b) not in bases:
                 bases.append(str(b))
-    return {"bases": bases, "mode": (merged.get("mode") or "auto"), "k": int(merged.get("k") or 6)}
+    # override de MODO por base (auto|tool); a camada mais específica vence
+    modes: dict[str, str] = {}
+    for src in (prof, mc, chat_cfg):
+        for k, v in (src.get("modes") or {}).items():
+            if str(v).lower() in ("auto", "tool"):
+                modes[str(k)] = str(v).lower()
+    return {
+        "bases": bases, "mode": (merged.get("mode") or "auto"),
+        "modes": modes, "k": int(merged.get("k") or 6),
+    }
 
 
 def _resolve_brain(chat: Chat | None, model_config: ModelConfig | None, user: User) -> dict:
@@ -489,6 +510,21 @@ async def _brain_setup(
         "write": bool(cfg.get("write")),
         "k": int(cfg.get("k") or 6),
     }
+
+
+def _has_capability(model_config: ModelConfig | None, key: str, *, default: bool) -> bool:
+    """Lê uma capacidade booleana do modelo; `default` quando ausente/inválida."""
+    if model_config is None:
+        return default
+    v = (model_config.capabilities or {}).get(key)
+    return bool(v) if isinstance(v, bool) else default
+
+
+def _realtime_datetime(model_config: ModelConfig | None) -> bool:
+    """Capacidade "Data e Hora em Tempo Real": injeta a data/hora atual (fuso do
+    usuário) no system a cada turno. Padrão LIGADO (ausente = ligada) — desligue no
+    modelo p/ economizar tokens quando ele não precisa saber "agora" (ex.: roleplay)."""
+    return _has_capability(model_config, "realtime_datetime", default=True)
 
 
 def _skill_learning(model_config: ModelConfig | None) -> bool | None:

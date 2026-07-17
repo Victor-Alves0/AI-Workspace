@@ -20,6 +20,8 @@ export interface TransferItem {
   group?: string;
   /** item embutido do sistema (mostra ícone de chave + tooltip "AI Workspace") */
   system?: boolean;
+  /** título do ícone de chave (default "AI Workspace"; ex.: "Nativa do modelo") */
+  iconTitle?: string;
 }
 
 /**
@@ -77,7 +79,7 @@ function TransferPane({
               >
                 <span className="flex items-center gap-1.5">
                   {it.system && (
-                    <span title="AI Workspace" className="shrink-0 text-muted">
+                    <span title={it.iconTitle ?? "AI Workspace"} className="shrink-0 text-muted">
                       <Wrench size={12} />
                     </span>
                   )}

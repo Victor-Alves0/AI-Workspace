@@ -757,6 +757,9 @@ class _GatheredContext:
     kb_mode: str = "auto"
     kb_k: int = 6
     kb_on: bool = False
+    # bases separadas por MODO (override por base; cai no kb_mode como padrão)
+    kb_bases_auto: list[str] = field(default_factory=list)
+    kb_bases_tool: list[str] = field(default_factory=list)
 
 
 async def _gather_context(
@@ -798,10 +801,14 @@ async def _gather_context(
     g.kb_mode = (kb.get("mode") or "auto").lower()
     g.kb_k = int(kb.get("k") or 6)
     g.kb_on = bool(g.kb_bases)
-    if g.kb_on and g.kb_mode == "auto":
+    # MODO por base (override); sem override, cai no g.kb_mode (padrão do modelo)
+    kb_modes = {str(k): str(v).lower() for k, v in (kb.get("modes") or {}).items()}
+    g.kb_bases_auto = [b for b in g.kb_bases if (kb_modes.get(b) or g.kb_mode) == "auto"]
+    g.kb_bases_tool = [b for b in g.kb_bases if (kb_modes.get(b) or g.kb_mode) == "tool"]
+    if g.kb_bases_auto:
         yield {"type": "knowledge", "status": "start", "query": user_text[:120]}
         try:
-            auto_kres = await kb_retrieval.search(user_id, g.kb_bases, user_text, g.kb_k)
+            auto_kres = await kb_retrieval.search(user_id, g.kb_bases_auto, user_text, g.kb_k)
         except Exception as exc:  # noqa: BLE001
             logger.warning("busca na base de conhecimento falhou: %s", exc)
             auto_kres = []
@@ -883,8 +890,7 @@ def _assemble_tools_and_prompt(
     code_mode: bool,
     skills: list[dict[str, Any]],
     genimage: dict[str, Any] | None,
-    kb_on: bool,
-    kb_mode: str,
+    kb_tool_on: bool,
     brain: dict[str, Any] | None,
     skill_learning: bool | None,
     subagents: list[dict[str, Any]],
@@ -953,7 +959,7 @@ def _assemble_tools_and_prompt(
 
     # Base de Conhecimento no modo "ferramenta": o modelo ganha `search_knowledge`
     # (independe da SIFT), buscando os documentos sob demanda.
-    a.kb_tool_on = kb_on and kb_mode == "tool"
+    a.kb_tool_on = kb_tool_on
     if a.kb_tool_on:
         a.tools = list(a.tools) + [_search_knowledge_tool()]
 
@@ -1525,6 +1531,9 @@ async def run_turn(
     # /learn tri-state: True força a tool propose_skill, False desliga,
     # None (default) = auto — injeta só se o turno já anuncia outras tools.
     skill_learning: bool | None = None,
+    # capacidade "Data e Hora em Tempo Real": injeta a linha de data/hora a cada
+    # turno. Default True (comportamento antigo); False economiza os ~30-40 tokens.
+    realtime_datetime: bool = True,
     # docs referenciados com "#" no compositor: [{id, filename, base_id, text}].
     # Injetados neste turno (híbrido: texto inteiro se pequeno, senão trechos).
     ref_docs: list[dict[str, Any]] | None = None,
@@ -1582,14 +1591,15 @@ async def run_turn(
     mem_items, memories = g.mem_items, g.memories
     knowledge_block, ref_block = g.knowledge_block, g.ref_block
     auto_knowledge_event, ref_knowledge_event = g.auto_knowledge_event, g.ref_knowledge_event
-    kb_bases, kb_k = g.kb_bases, g.kb_k
+    # o search_knowledge (modo "tool") busca SÓ nas bases marcadas como ferramenta
+    kb_bases, kb_k = g.kb_bases_tool, g.kb_k
 
     # 2. montagem das tools anunciadas + seção de ferramentas do system prompt
     skills = skills or []
     subagents = subagents or []
     asm = _assemble_tools_and_prompt(
         sift=sift, use_tools=use_tools, code_mode=code_mode, skills=skills,
-        genimage=genimage, kb_on=g.kb_on, kb_mode=g.kb_mode,
+        genimage=genimage, kb_tool_on=bool(g.kb_bases_tool),
         brain=brain, skill_learning=skill_learning,
         subagents=subagents, run_subagent=run_subagent,
     )
@@ -1634,7 +1644,7 @@ async def run_turn(
     # bloco de contexto por-turno (fora do prefixo cacheado): memória + conhecimento
     # recuperado (modo auto). Ambos variam a cada turno conforme a pergunta.
     context_block = "\n\n".join(b for b in (mem_block, knowledge_block, ref_block) if b)
-    time_note = _temporal_note(user_tz, user_tz_offset)
+    time_note = _temporal_note(user_tz, user_tz_offset) if realtime_datetime else ""
     # `extra_system` = instruções de ALTA PRIORIDADE: reforço de um Guarda de saída
     # (retry) OU instruções do canal (ex.: WhatsApp). Vão para o FIM do system, DEPOIS
     # de memória/hora e com um marcador de prioridade — é a última coisa que o modelo

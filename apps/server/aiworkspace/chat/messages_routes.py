@@ -43,6 +43,7 @@ from .turn_setup import (
     _prepare_turn,
     _brain_setup,
     _resolve_guards,
+    _realtime_datetime,
     _resolve_knowledge,
     _resolve_provider,
     _skill_learning,
@@ -126,6 +127,7 @@ async def ephemeral(
             knowledge=_resolve_knowledge(None, model_config, user),
             brain=brain,
             skill_learning=_skill_learning(model_config),
+            realtime_datetime=_realtime_datetime(model_config),
             media=media,
         ):
             if isinstance(event, dict) and event.get("type") == "done":
@@ -294,7 +296,7 @@ async def send_message(
         chat_system_prompt=system_prompt,
         params=params,
         base_url=base_url,
-        **(await _artifacts_kwargs(db, chat_id, user, arts_on)),
+        **(await _artifacts_kwargs(db, chat_id, user, arts_on, model_config)),
         session=TurnSession(
             user_id=user_id, user_tz=_session_tz(user, user_tz), chat_id=str(chat_id),
             agent_id=_mem_agent_id(model_config, model),
@@ -307,6 +309,7 @@ async def send_message(
         knowledge=_resolve_knowledge(chat, model_config, user),
         brain=await _brain_setup(db, user, chat, model_config),
         skill_learning=_skill_learning(model_config),
+        realtime_datetime=_realtime_datetime(model_config),
         ref_docs=await _ref_docs(db, user, chat, model_config, body.ref_doc_ids),
         memory=_memory_opts(chat, model_config, user),
         media=await _media_opts(db, user, model_config, attachments=attachments),
@@ -499,7 +502,7 @@ async def regenerate_message(
         chat_system_prompt=system_prompt,
         params=params,
         base_url=base_url,
-        **(await _artifacts_kwargs(db, chat_id, user, arts_on)),
+        **(await _artifacts_kwargs(db, chat_id, user, arts_on, model_config)),
         session=TurnSession(
             user_id=user_id, user_tz=_session_tz(user, user_tz), chat_id=str(chat_id),
             agent_id=_mem_agent_id(model_config, model),
@@ -512,6 +515,7 @@ async def regenerate_message(
         knowledge=_resolve_knowledge(chat, model_config, user),
         brain=await _brain_setup(db, user, chat, model_config),
         skill_learning=_skill_learning(model_config),
+        realtime_datetime=_realtime_datetime(model_config),
         memory=_memory_opts(chat, model_config, user),
         media=await _media_opts(db, user, model_config, attachments=user_attachments),
         subagent=_subagent_opts(sub_specs, sub_conf, sub_runner),
@@ -622,7 +626,7 @@ async def continue_message(
         chat_system_prompt=system_prompt,
         params=params,
         base_url=base_url,
-        **(await _artifacts_kwargs(db, chat_id, user, arts_on)),
+        **(await _artifacts_kwargs(db, chat_id, user, arts_on, model_config)),
         session=TurnSession(
             user_id=user_id, user_tz=_session_tz(user, user_tz), chat_id=str(chat_id),
             agent_id=_mem_agent_id(model_config, model),
@@ -635,6 +639,7 @@ async def continue_message(
         knowledge=_resolve_knowledge(chat, model_config, user),
         brain=await _brain_setup(db, user, chat, model_config),
         skill_learning=_skill_learning(model_config),
+        realtime_datetime=_realtime_datetime(model_config),
         memory=_memory_opts(chat, model_config, user),
         media=await _media_opts(db, user, model_config),
     )

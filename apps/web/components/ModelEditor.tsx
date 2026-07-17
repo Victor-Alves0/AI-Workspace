@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, BookOpen, Box, Brain, Camera, ChevronDown, ChevronRight, FileText, Gauge, Info, Pin, Plus, Search, Settings, ShieldAlert, Sliders, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Box, Brain, Camera, Check, ChevronDown, ChevronRight, FileText, Gauge, Info, Pin, Plus, Search, Settings, ShieldAlert, Sliders, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { fileToAvatarDataUrl } from "@/lib/image";
 import type { KnowledgeBase, MemoryBank, Model, ModelConfig, Skill, SystemTool, Tool } from "@/lib/types";
@@ -283,17 +283,24 @@ const FILTERS: { key: string; label: string }[] = [
   { key: "output_guard", label: "Guarda de saída" },
 ];
 
-const CAPS: { key: string; label: string }[] = [
-  { key: "vision", label: "Visão" },
-  { key: "file_upload", label: "Upload de Arquivos" },
-  { key: "image_generation", label: "Geração de Imagens" },
-  { key: "chat_context", label: "Contexto do Chat" },
-  { key: "skill_learning", label: "Aprender skills (/learn)" },
+// `native: true` = habilidade do PRÓPRIO modelo (o que ele sabe fazer). As demais
+// são recursos que o app injeta quando ativados (custam tokens/round-trips).
+const CAPS: { key: string; label: string; native?: boolean }[] = [
+  { key: "vision", label: "Visão", native: true },
+  { key: "file_upload", label: "Upload de Arquivos", native: true },
+  { key: "image_generation", label: "Geração de Imagens", native: true },
+  { key: "chat_context", label: "Contexto do Chat", native: true },
+  { key: "skill_learning", label: "Aprender Skills" },
+  { key: "realtime_datetime", label: "Data e Hora em Tempo Real" },
+  { key: "artifacts", label: "Artefatos" },
 ];
+const CAPS_NATIVE = new Set(CAPS.filter((c) => c.native).map((c) => c.key));
 
 // capacidades que vêm LIGADAS por padrão (ausência = ligada). Para desligá-las é
 // preciso gravar explicitamente `false` (o orchestrator respeita chat_context).
-const CAPS_DEFAULT_ON = new Set<string>(["chat_context", "skill_learning"]);
+// `artifacts` NÃO é default-on: só injeta as instruções quando marcada (ou quando o
+// chat já tem artefatos) — poupa ~400 tokens/turno.
+const CAPS_DEFAULT_ON = new Set<string>(["chat_context", "skill_learning", "realtime_datetime"]);
 
 // memória por-modelo (guardada em capabilities.memory; null = herda do perfil).
 // Ao personalizar, materializa com enabled:true (liga a memória p/ os chats deste
@@ -315,7 +322,8 @@ const MEM_CFG_DEFAULT: Required<MemoryCfg> = {
 };
 
 // Base de Conhecimento por-modelo (capabilities.knowledge). bases vazio = desligado.
-type KnowledgeCfg = { bases?: string[]; mode?: "auto" | "tool"; k?: number };
+// `mode` = padrão; `modes` = override POR base (auto|tool). k = trechos (global).
+type KnowledgeCfg = { bases?: string[]; mode?: "auto" | "tool"; modes?: Record<string, "auto" | "tool">; k?: number };
 
 // Cérebro por-modelo (capabilities.brain). brains vazio = desligado.
 type BrainCfg = { brains?: string[]; write?: boolean; k?: number };
@@ -324,27 +332,32 @@ function slugify(s: string) {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
-/** Campo de seleção padrão: chips do selecionado + botão "Gerenciar" que abre
- *  um popup de transferência. Usado p/ Ferramentas, Capacidades e Filtros. */
-function SelectorField({
-  label,
-  icon,
-  selected,
-  labelOf,
-  onRemove,
-  onManage,
-  empty,
-  hint,
+/** Janela (modal) centralizada para configurar uma ferramenta. Fecha no X, no
+ *  Esc ou ao clicar no fundo. O conteúdo (Panel) rola internamente. */
+/** Lista de itens ATIVOS no estilo "Ferramentas Ativas": cabeçalho + Gerenciar,
+ *  busca (quando >4) e lista rolável de linhas (badge/engrenagem/remover opcionais). */
+function ActiveListField({
+  label, icon, hint, items, labelOf, badgeOf, leadingOf, hasConfig, onConfig, onRemove,
+  onManage, manageIcon, searchPlaceholder, empty,
 }: {
   label: string;
-  icon: React.ReactNode;
-  selected: string[];
+  icon?: React.ReactNode;
+  hint?: string;
+  items: string[];
   labelOf: (k: string) => string;
+  badgeOf?: (k: string) => string | null;
+  leadingOf?: (k: string) => React.ReactNode;
+  hasConfig?: (k: string) => boolean;
+  onConfig?: (k: string) => void;
   onRemove: (k: string) => void;
   onManage: () => void;
+  manageIcon?: React.ReactNode;
+  searchPlaceholder: string;
   empty: string;
-  hint?: string;
 }) {
+  const [q, setQ] = useState("");
+  const f = q.trim().toLowerCase();
+  const shown = f ? items.filter((k) => labelOf(k).toLowerCase().includes(f)) : items;
   return (
     <div className="space-y-2">
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -357,29 +370,50 @@ function SelectorField({
           onClick={onManage}
           className="flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink"
         >
-          {icon} Gerenciar
+          {manageIcon} Gerenciar
         </button>
       </div>
-      {selected.length === 0 ? (
+      {items.length === 0 ? (
         <p className="text-xs text-muted">{empty}</p>
       ) : (
-        <div className="flex flex-wrap gap-1.5">
-          {selected.map((k) => (
-            <span key={k} className="flex items-center gap-1 rounded-full bg-surface2 px-2.5 py-0.5 text-xs text-ink">
-              {labelOf(k)}
-              <button onClick={() => onRemove(k)} className="text-muted transition-colors hover:text-ink">
-                <X size={11} />
-              </button>
-            </span>
-          ))}
+        <div className="space-y-1.5">
+          {items.length > 4 && (
+            <div className="relative">
+              <Search size={13} className="pointer-events-none absolute left-2.5 top-2 text-muted" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder={searchPlaceholder}
+                className="w-full rounded-lg border border-border bg-surface py-1.5 pl-8 pr-3 text-xs text-ink outline-none focus:border-accent placeholder:text-muted"
+              />
+            </div>
+          )}
+          <div className="max-h-[158px] space-y-1.5 overflow-y-auto pr-1">
+            {shown.map((k) => (
+              <div key={k} className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5">
+                {leadingOf?.(k)}
+                <span className="flex-1 truncate text-sm text-ink">{labelOf(k)}</span>
+                {badgeOf?.(k) && (
+                  <span className="shrink-0 rounded-full bg-accent/15 px-1.5 text-[10px] font-medium text-accent-hover">{badgeOf(k)}</span>
+                )}
+                {hasConfig?.(k) && onConfig && (
+                  <button onClick={() => onConfig(k)} title="Configurar" className="rounded-md p-1 text-muted transition-colors hover:text-ink">
+                    <Settings size={14} />
+                  </button>
+                )}
+                <button onClick={() => onRemove(k)} title="Remover" className="rounded-md p-1 text-muted transition-colors hover:text-ink">
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+            {shown.length === 0 && <p className="px-1 py-2 text-xs text-muted">Nada corresponde à busca.</p>}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
-/** Janela (modal) centralizada para configurar uma ferramenta. Fecha no X, no
- *  Esc ou ao clicar no fundo. O conteúdo (Panel) rola internamente. */
 function CfgModal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -467,6 +501,8 @@ export default function ModelEditor({
   const [toolsModal, setToolsModal] = useState(false);
   const [capsModal, setCapsModal] = useState(false);
   const [filtersModal, setFiltersModal] = useState(false);
+  const [kbModal, setKbModal] = useState(false);          // seletor de bases (transferência)
+  const [kbCfgBase, setKbCfgBase] = useState<string | null>(null); // base com "modo" aberto
   // filtros vivem dentro de `capabilities` como chaves "filter:<key>" (dict[str,bool])
   const [filters, setFilters] = useState<string[]>(
     Object.keys(model?.capabilities ?? {})
@@ -607,7 +643,11 @@ export default function ModelEditor({
   }, [skills]);
 
   // capacidades (real caps, sem as chaves "filter:") como itens de transferência
-  const capItems: TransferItem[] = CAPS.map((c) => ({ key: c.key, label: c.label }));
+  const capItems: TransferItem[] = CAPS.map((c) => ({
+    key: c.key, label: c.label,
+    // capacidade NATIVA do modelo → chave inglesa no seletor (como as tools de sistema)
+    system: c.native, iconTitle: c.native ? "Nativa do modelo" : undefined,
+  }));
   const capSelected = useMemo(() => {
     const sel = Object.keys(caps).filter((k) => caps[k] === true && !k.startsWith("filter:"));
     // default-on (ex.: chat_context): marcado quando ausente ou true; só some com false explícito
@@ -626,6 +666,15 @@ export default function ModelEditor({
     setCaps(next);
   }
   const filterItems: TransferItem[] = FILTERS.map((f) => ({ key: f.key, label: f.label }));
+
+  // Bases de Conhecimento (para o seletor de transferência + a lista de ativas)
+  const kbItems: TransferItem[] = kbBases.map((b) => ({ key: b.id, label: b.name }));
+  const kbNameOf = (id: string) => kbBases.find((b) => b.id === id)?.name ?? id;
+  const kbAttached = kb.bases ?? [];
+  const kbModeOf = (id: string): "auto" | "tool" => (kb.modes?.[id] ?? kb.mode ?? "auto");
+  const setKbBasesSel = (ids: string[]) => setKb({ ...kb, bases: ids });
+  const setKbModeOf = (id: string, mode: "auto" | "tool") =>
+    setKb({ ...kb, modes: { ...(kb.modes ?? {}), [id]: mode } });
 
   async function save() {
     setErr(null);
@@ -654,7 +703,13 @@ export default function ModelEditor({
     if (mem) capabilities.memory = mem;
     // base de conhecimento por-modelo: só grava quando há base(s) acoplada(s)
     if (kb.bases && kb.bases.length > 0) {
-      capabilities.knowledge = { bases: kb.bases, mode: kb.mode || "auto", k: Number(kb.k) || 6 };
+      // `modes` só guarda overrides das bases ainda acopladas (não vaza base removida)
+      const modes: Record<string, "auto" | "tool"> = {};
+      for (const id of kb.bases) if (kb.modes?.[id]) modes[id] = kb.modes[id];
+      capabilities.knowledge = {
+        bases: kb.bases, mode: kb.mode || "auto", k: Number(kb.k) || 6,
+        ...(Object.keys(modes).length ? { modes } : {}),
+      };
     }
     // cérebro por-modelo: só grava quando há cérebro(s) acoplado(s)
     if (brainCfg.brains && brainCfg.brains.length > 0) {
@@ -1062,15 +1117,18 @@ export default function ModelEditor({
 
           {/* Capacidades — o que o modelo PODE fazer (config base) */}
           <div className="mt-8 border-t border-border pt-7">
-            <SelectorField
+            <ActiveListField
               label="Capacidades"
               icon={<Sparkles size={13} />}
-              selected={capSelected}
+              manageIcon={<Sparkles size={13} />}
+              items={capSelected}
               labelOf={(k) => CAPS.find((c) => c.key === k)?.label ?? k}
+              badgeOf={(k) => (CAPS_NATIVE.has(k) ? "Nativo" : null)}
               onRemove={(k) => setCapSelected(capSelected.filter((x) => x !== k))}
               onManage={() => setCapsModal(true)}
+              searchPlaceholder="Buscar capacidades…"
               empty="Nenhuma capacidade marcada."
-              hint="O que o modelo pode fazer: Visão (enxerga imagens — se ligada, usa a visão do próprio modelo; o filtro Vision Router se sobrepõe), Upload de Arquivos, Geração de Imagens e Contexto do Chat (envia o histórico da conversa; desligada = turno sem memória)."
+              hint="'Nativo' = habilidade do próprio modelo (Visão, Upload de Arquivos, Geração de Imagens, Contexto do Chat). As demais são recursos que o app injeta quando ativados: Aprender Skills (/learn), Data e Hora em Tempo Real (injeta o 'agora' a cada turno — desligue p/ poupar tokens) e Artefatos (instruções de documento/código versionável; só injeta quando ativada ou quando o chat já tem artefatos)."
             />
           </div>
 
@@ -1155,65 +1213,49 @@ export default function ModelEditor({
             )}
           </div>
 
-          {/* Base de Conhecimento — documentos que este modelo consulta (RAG) */}
+          {/* Base de Conhecimento — documentos que este modelo consulta (RAG). Lista
+              no estilo "Ferramentas Ativas": engrenagem por base = o MODO daquela base. */}
           <div className="mt-8 border-t border-border pt-7">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
-              <span className="text-muted"><BookOpen size={15} /></span>
-              Conhecimento
-              <InfoHint text="Acople Bases de Conhecimento (documentos) a este modelo. Ele passa a consultá-las nas conversas. Crie/suba documentos em Espaço → Conhecimento." />
-            </h2>
-            <div className="mt-3 space-y-4">
-              {kbBases.length === 0 ? (
-                <p className="text-xs text-muted">Nenhuma base criada. Crie em <span className="text-ink-soft">Espaço → Conhecimento</span>.</p>
-              ) : (
-                <>
-                  <div>
-                    <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Bases acopladas</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {kbBases.map((b) => {
-                        const on = (kb.bases ?? []).includes(b.id);
-                        return (
-                          <button
-                            key={b.id}
-                            onClick={() => {
-                              const cur = kb.bases ?? [];
-                              setKb({ ...kb, bases: on ? cur.filter((x) => x !== b.id) : [...cur, b.id] });
-                            }}
-                            className={`rounded-full border px-3 py-1 text-xs transition-colors ${on ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border text-muted hover:text-ink"}`}
-                          >
-                            {b.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  {(kb.bases ?? []).length > 0 && (
-                    <div className="flex flex-wrap items-center gap-4">
-                      <label className="flex items-center gap-2 text-xs text-muted">
-                        Modo
-                        <select
-                          value={kb.mode || "auto"}
-                          onChange={(e) => setKb({ ...kb, mode: e.target.value as "auto" | "tool" })}
-                          className="rounded-lg border border-border bg-surface px-2.5 py-1.5 text-sm text-ink outline-none focus:border-accent"
-                        >
-                          <option value="auto">Automático (injeta + cita)</option>
-                          <option value="tool">Ferramenta (a IA busca)</option>
-                        </select>
-                        <InfoHint text="Automático: a cada mensagem busco os trechos relevantes e injeto no contexto, com citações. Ferramenta: a IA decide quando buscar (chama search_knowledge)." />
-                      </label>
-                      <label className="flex items-center gap-2 text-xs text-muted">
-                        Trechos
-                        <input
-                          type="number" min={1} max={20} value={kb.k ?? 6}
-                          onChange={(e) => setKb({ ...kb, k: Math.max(1, Math.min(20, Number(e.target.value) || 6)) })}
-                          className="w-16 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-right text-sm text-ink outline-none focus:border-accent"
-                        />
-                      </label>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
+            {kbBases.length === 0 ? (
+              <>
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
+                  <span className="text-muted"><BookOpen size={15} /></span>
+                  Conhecimento
+                  <InfoHint text="Acople Bases de Conhecimento (documentos) a este modelo. Ele passa a consultá-las nas conversas. Crie/suba documentos em Espaço → Conhecimento." />
+                </h2>
+                <p className="mt-3 text-xs text-muted">Nenhuma base criada. Crie em <span className="text-ink-soft">Espaço → Conhecimento</span>.</p>
+              </>
+            ) : (
+              <div className="space-y-4">
+                <ActiveListField
+                  label="Conhecimento"
+                  icon={<BookOpen size={15} />}
+                  manageIcon={<BookOpen size={13} />}
+                  items={kbAttached}
+                  labelOf={kbNameOf}
+                  badgeOf={(id) => (kbModeOf(id) === "tool" ? "Ferramenta" : "Auto")}
+                  leadingOf={() => <BookOpen size={13} className="shrink-0 text-accent-hover" />}
+                  hasConfig={() => true}
+                  onConfig={(id) => setKbCfgBase(id)}
+                  onRemove={(id) => setKbBasesSel(kbAttached.filter((x) => x !== id))}
+                  onManage={() => setKbModal(true)}
+                  searchPlaceholder="Buscar bases acopladas…"
+                  empty="Nenhuma base acoplada. Clique em Gerenciar para acoplar."
+                  hint="Bases acopladas a este modelo (consultadas nas conversas). A engrenagem de cada base define o MODO dela — Automático (injeta + cita) ou Ferramenta (a IA busca com search_knowledge). Crie bases em Espaço → Conhecimento."
+                />
+                {kbAttached.length > 0 && (
+                  <label className="flex items-center gap-2 text-xs text-muted">
+                    Trechos por busca
+                    <input
+                      type="number" min={1} max={20} value={kb.k ?? 6}
+                      onChange={(e) => setKb({ ...kb, k: Math.max(1, Math.min(20, Number(e.target.value) || 6)) })}
+                      className="w-16 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-right text-sm text-ink outline-none focus:border-accent"
+                    />
+                    <InfoHint text="Quantos trechos relevantes cada busca traz (vale para todas as bases)." />
+                  </label>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Cérebro — notas [[interligadas]] que este modelo lê/escreve */}
@@ -1595,6 +1637,44 @@ export default function ModelEditor({
           availableLabel="Disponíveis"
           selectedLabel="Ativados"
         />
+      )}
+      {kbModal && (
+        <TransferModal
+          title="Bases de Conhecimento do modelo"
+          items={kbItems}
+          selected={kbAttached}
+          onChange={setKbBasesSel}
+          onClose={() => setKbModal(false)}
+          availableLabel="Disponíveis"
+          selectedLabel="Acopladas"
+          searchPlaceholder="Buscar bases…"
+        />
+      )}
+      {kbCfgBase && (
+        <CfgModal title={`Modo — ${kbNameOf(kbCfgBase)}`} onClose={() => setKbCfgBase(null)}>
+          <p className="mb-3 text-xs text-muted">Como esta base é consultada nas conversas deste modelo.</p>
+          <div className="space-y-2">
+            {([
+              ["auto", "Automático", "A cada mensagem eu busco os trechos relevantes e injeto no contexto, com citações."],
+              ["tool", "Ferramenta", "A IA decide quando buscar (chama search_knowledge). Bom p/ bases grandes ou de uso pontual."],
+            ] as const).map(([val, title, desc]) => {
+              const on = kbModeOf(kbCfgBase) === val;
+              return (
+                <button
+                  key={val}
+                  onClick={() => { setKbModeOf(kbCfgBase, val); setKbCfgBase(null); }}
+                  className={`flex w-full items-start gap-2 rounded-xl border px-3 py-2.5 text-left transition-colors ${on ? "border-accent/50 bg-accent/10" : "border-border hover:bg-hover"}`}
+                >
+                  <span className={`mt-0.5 shrink-0 ${on ? "text-accent-hover" : "text-transparent"}`}><Check size={15} /></span>
+                  <span>
+                    <span className="block text-sm font-medium text-ink">{title}</span>
+                    <span className="block text-xs text-muted">{desc}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </CfgModal>
       )}
       {teamModal && (
         <TransferModal

@@ -1212,7 +1212,7 @@ export default function MessageItem({
           <p className="mb-1.5 flex items-center gap-1.5 text-lg font-semibold tracking-tight text-ink">
             {modelAvatar && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={modelAvatar} alt="" className="h-6 w-6 shrink-0 rounded-md object-cover" />
+              <img src={modelAvatar} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
             )}
             {name}
             {usedTools && toolsEnabled && (

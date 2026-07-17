@@ -378,15 +378,31 @@ export default function ChatPage() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [messages, streaming, streamingReasoning, toolEvents]);
 
-  // mede a altura do composer flutuante (muda com opções/anexos/linhas)
+  // mede a altura do composer flutuante (muda com opções/anexos/linhas). O padding
+  // inferior da área de rolagem = essa altura; se ela for medida CEDO demais (antes de
+  // fontes/chips assentarem) e nada mais redimensionar, o padding fica curto e a última
+  // mensagem trava atrás do composer — dava o bug de "não consigo rolar até o fim, só
+  // um F5 corrige". Por isso re-medimos após o layout assentar (rAF + timeout) e no
+  // resize da janela, além do ResizeObserver.
   const hasConversation = messages.length > 0 || !!streaming || rtRunning || !!rtStreaming;
   useEffect(() => {
     const el = composerRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => setComposerH(el.offsetHeight));
-    ro.observe(el);
-    setComposerH(el.offsetHeight);
-    return () => ro.disconnect();
+    if (!el) return;
+    const measure = () => setComposerH(el.offsetHeight);
+    measure();
+    const r1 = requestAnimationFrame(measure);
+    const r2 = requestAnimationFrame(() => requestAnimationFrame(measure));
+    const t = setTimeout(measure, 300);
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(measure);
+      ro.observe(el);
+    }
+    window.addEventListener("resize", measure);
+    return () => {
+      cancelAnimationFrame(r1); cancelAnimationFrame(r2); clearTimeout(t);
+      ro?.disconnect(); window.removeEventListener("resize", measure);
+    };
   }, [hasConversation]);
 
 
@@ -473,6 +489,15 @@ export default function ChatPage() {
     const ext = extModels.find((m) => m.id === curModel);
     return ext?.name ?? curModel;
   }, [curCustom, extModels, curModel]);
+
+  // "Ler em voz alta": usa a voz do modelo que PRODUZIU a mensagem (casa o nome do
+  // modelo da resposta com um modelo custom), caindo no modelo atual do chat. Sem
+  // isto o botão usava só o modelo selecionado, ignorando a voz configurada.
+  const voiceFor = useCallback((m: Message): string | undefined => {
+    const name = m.usage?.model_name;
+    const byMsg = name ? customModels.find((c) => c.name === name) : undefined;
+    return (byMsg ?? curCustom)?.tts_voice ?? undefined;
+  }, [customModels, curCustom]);
 
   // ---------------------------------------------------------------------------
   // Mesa-redonda (multi-modelo): modelos conversam entre si; o usuário guia.
@@ -1503,7 +1528,7 @@ export default function ChatPage() {
                           name={m.role === "assistant" ? modelLabel : undefined}
                           reasoning={m.reasoning}
                           toolEvents={m.tool_events ?? undefined}
-                          onSpeak={m.role === "assistant" ? () => speak(m.content) : undefined}
+                          onSpeak={m.role === "assistant" ? () => speak(m.content, voiceFor(m)) : undefined}
                           onDelete={() => deleteMessage(m.id)}
                         />
                       ) : (
@@ -1515,7 +1540,7 @@ export default function ChatPage() {
                           modelAvatar={iface.chat_model_image !== false ? (curCustom?.avatar_url ?? null) : null}
                           chatArtifacts={chatArtifacts}
                           onOpenArtifact={(ident) => setArtifactOpen(ident)}
-                          onSpeak={(c) => speak(c, curCustom?.tts_voice ?? undefined)}
+                          onSpeak={(c) => speak(c, voiceFor(m))}
                           onEdit={editMessage}
                           onRegenerate={regenerateMessage}
                           onContinue={continueMessage}

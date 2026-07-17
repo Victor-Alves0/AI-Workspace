@@ -223,8 +223,9 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
     m = msgs[-1]  # identidade da conversa = a última do lote
     from ..chat.orchestrator import MediaOpts, TurnSession, run_turn_guarded
     from ..chat.turn_setup import (
-        _audio_router_config, _code_mode, _genimage_config, _load_skills, _profile_tz,
-        _resolve_guards, _resolve_provider, _usage_record, _user_profile_dict,
+        _audio_router_config, _brain_setup, _code_mode, _genimage_config, _load_skills,
+        _profile_tz, _realtime_datetime, _resolve_guards, _resolve_knowledge,
+        _resolve_provider, _usage_record, _user_profile_dict,
     )
     from ..tools.loader import get_sift_for_user
 
@@ -327,11 +328,17 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
         error = None
         try:
             mem_chat_id, mem_agent_id, mem_opts = _memory_setup(conn, chat, mc, model)
+            # conhecimento/cérebro do modelo desta conexão (sem isto o canal não
+            # enxerga a Base de Conhecimento acoplada, ao contrário do chat web)
+            knowledge = _resolve_knowledge(chat, mc, user)
+            brain = await _brain_setup(db, user, chat, mc)
             async for ev in run_turn_guarded(
                 guards=guards, api_key=api_key, model=model, history=history, user_text=text,
                 chat_system_prompt=mc.system_prompt if mc else None,
                 params=(mc.params if mc else {}) or {},
                 base_url=base_url,
+                knowledge=knowledge, brain=brain,
+                realtime_datetime=_realtime_datetime(mc),
                 session=TurnSession(
                     user_id=str(user.id), background=True,
                     chat_id=mem_chat_id, agent_id=mem_agent_id,
