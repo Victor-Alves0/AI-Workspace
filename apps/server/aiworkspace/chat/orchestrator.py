@@ -501,6 +501,21 @@ def _knowledge_block_and_sources(results: list[dict]) -> tuple[str, list[dict[st
     return "\n\n".join(lines), sources
 
 
+# Imagens da Base de Conhecimento que o modelo "cola" na resposta vêm com um token
+# assinado longo (~150 chars). Modelos às vezes ADULTERAM/TRUNCAM esse token ao
+# reproduzi-lo → o /raw responde 403 e a imagem renderiza QUEBRADA no chat (a borda
+# + o alt/nome do arquivo). Reassinamos server-side toda URL /knowledge/docs/<uuid>/raw
+# na resposta final: o doc_id (mais curto/robusto) é o que importa; o token é gerado
+# fresco aqui, então a imagem sempre carrega — mesmo que o modelo tenha estragado o dele.
+_KB_IMG_RE = re.compile(r"/knowledge/docs/([0-9a-fA-F-]{36})/raw(?:\?t=[^)\s\"'<>]*)?")
+
+
+def _resign_kb_images(text: str) -> str:
+    if not text or "/knowledge/docs/" not in text:
+        return text
+    return _KB_IMG_RE.sub(lambda m: sign_doc_url(m.group(1)), text)
+
+
 async def _save_generated_image(
     user_id: str, chat_id: str | None, mime: str, data: bytes, prompt: str, model: str
 ) -> str:
@@ -1977,6 +1992,9 @@ async def run_turn(
     sift_service.tool_calls_log.reset(calls_token)
 
     has_usage = total_usage["total_tokens"] > 0 or total_usage["cost"] > 0
+    # reassina URLs de imagem da KB antes de emitir/persistir (token pode ter sido
+    # adulterado pelo modelo) — garante que a imagem carregue no chat
+    assistant_text = _resign_kb_images(assistant_text)
     yield {
         "type": "done",
         "content": assistant_text,

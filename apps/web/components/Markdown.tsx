@@ -4,7 +4,7 @@ import { isValidElement, memo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, ImageOff } from "lucide-react";
 import { API_URL } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 
@@ -57,6 +57,37 @@ function CodeBlock({ children }: { children?: React.ReactNode }) {
       </div>
       <pre>{children}</pre>
     </div>
+  );
+}
+
+/** Imagem inline com fallback: se a URL falhar (ex.: token expirado/adulterado),
+ *  em vez do quadro quebrado feio mostra um chip clicável com o nome do arquivo,
+ *  que abre a imagem em nova aba. */
+function MdImage({ src, alt }: { src: string; alt: string }) {
+  const [broken, setBroken] = useState(false);
+  if (broken || !src) {
+    return (
+      <a
+        href={src || undefined}
+        target="_blank"
+        rel="noreferrer noopener"
+        className="my-2 inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs text-muted no-underline transition-colors hover:text-ink"
+        title={alt || "imagem"}
+      >
+        <ImageOff size={14} className="shrink-0" />
+        <span className="max-w-[240px] truncate">{alt || "imagem"}</span>
+      </a>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={alt}
+      loading="lazy"
+      onError={() => setBroken(true)}
+      className="my-2 max-h-96 max-w-full rounded-xl border border-border object-contain"
+    />
   );
 }
 
@@ -117,15 +148,7 @@ function Markdown({
           // API, não no do front (em dev são portas diferentes)
           img: ({ src, alt }) => {
             const url = typeof src === "string" && src.startsWith("/") ? `${API_URL}${src}` : src;
-            return (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={url}
-                alt={alt ?? ""}
-                loading="lazy"
-                className="my-2 max-h-96 max-w-full rounded-xl border border-border object-contain"
-              />
-            );
+            return <MdImage src={typeof url === "string" ? url : ""} alt={alt ?? ""} />;
           },
         }}
       >

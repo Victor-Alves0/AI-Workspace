@@ -7,8 +7,10 @@ WORKDIR /app
 ARG NEXT_PUBLIC_API_URL=
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
-COPY package.json ./
-RUN npm install
+# npm ci: instala EXATAMENTE a árvore fixada no lockfile (integrity hashes),
+# falha se package.json e lock divergirem — determinístico e à prova de drift.
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
 RUN npm run build

@@ -551,6 +551,18 @@ async def delete_doc(doc_id: uuid.UUID, user: User = Depends(require_approved), 
     return {"ok": True}
 
 
+@router.get("/docs/{doc_id}/link")
+async def get_doc_link(
+    doc_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """URL-capacidade assinada p/ VISUALIZAR o arquivo original no explorador
+    (imagem/PDF num `<img>`/`<iframe>`, que não mandam cookie cross-origin).
+    Autoriza por sessão + posse; a URL em si dispensa cookie (mesmo mecanismo das
+    imagens que a IA exibe no chat)."""
+    d = await _owned_doc(db, user, doc_id)
+    return {"url": sign_doc_url(str(d.id)), "mime": d.mime, "filename": d.filename}
+
+
 @router.get("/docs/{doc_id}/raw")
 async def get_doc_raw(doc_id: uuid.UUID, t: str = "", db: AsyncSession = Depends(get_db)):
     """Baixa o arquivo original de uma fonte citada. Autoriza pelo token assinado

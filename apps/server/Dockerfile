@@ -28,9 +28,15 @@ RUN install -d /usr/share/postgresql-common/pgdg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
-# instala o projeto + dependências
+# instala só as DEPENDÊNCIAS numa camada própria, chaveada apenas pelo pyproject.
+# Um stub do pacote (só __init__.py) faz o setuptools resolver; assim as deps
+# ficam em cache e NÃO são reinstaladas/rebaixadas quando só o código muda.
+RUN mkdir -p aiworkspace && touch aiworkspace/__init__.py \
+    && pip install --upgrade pip && pip install .
+
+# agora o código real; reinstala só o pacote (sem tocar nas deps, sem rede)
 COPY aiworkspace ./aiworkspace
-RUN pip install --upgrade pip && pip install .
+RUN pip install --no-deps --force-reinstall .
 
 COPY alembic.ini ./
 COPY alembic ./alembic

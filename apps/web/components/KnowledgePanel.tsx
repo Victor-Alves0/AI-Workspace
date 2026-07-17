@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle, ArrowLeft, BookOpen, Brain, Check, ChevronRight, FilePlus2, FileText,
-  Folder, FolderInput, FolderPlus, Home, Loader2, Pencil, Plus, RotateCcw, Tag,
+  AlertTriangle, ArrowLeft, BookOpen, Brain, Check, ChevronRight, Download, Eye, FilePlus2, FileText,
+  Folder, FolderInput, FolderPlus, Home, Image as ImageIcon, Loader2, Pencil, Plus, RotateCcw, Search, Tag,
   Trash2, Upload, Waypoints, X,
 } from "lucide-react";
 import { api, API_URL } from "@/lib/api";
@@ -20,9 +20,35 @@ function fmtSize(n: number): string {
 }
 
 const TEXT_RE = /\.(txt|md|markdown|csv|json|log|ya?ml)$/i;
+const IMAGE_RE = /\.(png|jpe?g|gif|webp|bmp|svg|avif)$/i;
 function isTextDoc(d: KnowledgeDoc): boolean {
   return (d.mime || "").startsWith("text/") || TEXT_RE.test(d.filename || "");
 }
+
+type DocKind = "image" | "pdf" | "text" | "other";
+function docKind(d: KnowledgeDoc): DocKind {
+  const mime = (d.mime || "").toLowerCase();
+  const fn = d.filename || "";
+  if (mime.startsWith("image/") || IMAGE_RE.test(fn)) return "image";
+  if (mime === "application/pdf" || /\.pdf$/i.test(fn)) return "pdf";
+  if (isTextDoc(d)) return "text";
+  return "other";
+}
+function DocIcon({ d, size = 18 }: { d: KnowledgeDoc; size?: number }) {
+  return docKind(d) === "image"
+    ? <ImageIcon size={size} className="shrink-0 text-accent-hover" />
+    : <FileText size={size} className="shrink-0 text-muted" />;
+}
+
+// filtro por tipo dentro de uma base
+const TYPE_FILTERS: { key: "all" | "folder" | DocKind; label: string }[] = [
+  { key: "all", label: "Tudo" },
+  { key: "folder", label: "Pastas" },
+  { key: "pdf", label: "PDF" },
+  { key: "text", label: "Texto" },
+  { key: "image", label: "Imagens" },
+  { key: "other", label: "Outros" },
+];
 
 const STATUS: Record<KnowledgeDoc["status"], { label: string; cls: string }> = {
   pending: { label: "Na fila", cls: "text-muted" },
@@ -105,6 +131,11 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
   const [editor, setEditor] = useState<{ docId?: string; filename: string; content: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [metaDoc, setMetaDoc] = useState<KnowledgeDoc | null>(null);
+  const [viewDoc, setViewDoc] = useState<KnowledgeDoc | null>(null); // visualizador de arquivo
+  // busca dentro da base (itens) + filtro por tipo; e busca no nível de bases
+  const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"all" | "folder" | DocKind>("all");
+  const [baseQuery, setBaseQuery] = useState("");
   const [renaming, setRenaming] = useState<string | null>(null); // folder id
   const [renameVal, setRenameVal] = useState("");
   const [renamingBase, setRenamingBase] = useState<string | null>(null); // base id
@@ -125,7 +156,7 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
   }, []);
 
   useEffect(() => { loadBases(); }, [loadBases]);
-  useEffect(() => { if (sel) { loadDocs(sel); loadFolders(sel); setCwd(null); setBrainView("files"); } }, [sel, loadDocs, loadFolders]);
+  useEffect(() => { if (sel) { loadDocs(sel); loadFolders(sel); setCwd(null); setBrainView("files"); setQuery(""); setTypeFilter("all"); } }, [sel, loadDocs, loadFolders]);
 
   // enquanto houver doc indexando, atualiza a cada 2s (status + contagens)
   useEffect(() => {
@@ -281,8 +312,24 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
     while (cur) { path.unshift(cur); cur = cur.parent_id ? folderById[cur.parent_id] : undefined; }
     return path;
   }, [cwd, folderById]);
-  const shownFolders = folders.filter((f) => (f.parent_id ?? null) === cwd);
-  const shownDocs = docs.filter((d) => (d.folder_id ?? null) === cwd);
+  // busca/filtro: quando há texto ou um filtro de tipo ativo, procura em TODA a base
+  // (ignora a pasta atual) p/ achar qualquer item; senão, mostra a pasta atual (cwd).
+  const q = query.trim().toLowerCase();
+  const searching = q !== "" || typeFilter !== "all";
+  const baseFolders = searching ? folders : folders.filter((f) => (f.parent_id ?? null) === cwd);
+  const baseDocs = searching ? docs : docs.filter((d) => (d.folder_id ?? null) === cwd);
+  const shownFolders = (typeFilter === "all" || typeFilter === "folder")
+    ? baseFolders.filter((f) => !q || f.name.toLowerCase().includes(q))
+    : [];
+  const shownDocs = typeFilter === "folder"
+    ? []
+    : baseDocs.filter((d) =>
+        (typeFilter === "all" || docKind(d) === typeFilter) &&
+        (!q || `${d.meta?.title || ""} ${d.filename || ""} ${(d.meta?.tags || []).join(" ")}`.toLowerCase().includes(q)),
+      );
+  const shownBases = baseQuery.trim()
+    ? bases.filter((b) => `${b.name} ${(b.tags || []).join(" ")}`.toLowerCase().includes(baseQuery.trim().toLowerCase()))
+    : bases;
 
   // ---- Explorador de uma base ------------------------------------------- //
   if (current) {
@@ -340,7 +387,7 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
             <Upload size={15} /> Enviar arquivos
           </button>
           {uploading && <span className="flex items-center gap-1.5 text-xs text-amber-500"><Loader2 size={12} className="animate-spin" /> enviando…</span>}
-          <input ref={fileRef} type="file" multiple hidden accept=".pdf,.docx,.txt,.md,.markdown,.csv,.json" onChange={(e) => e.target.files && uploadFiles(e.target.files)} />
+          <input ref={fileRef} type="file" multiple hidden accept=".pdf,.docx,.txt,.md,.markdown,.csv,.json,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.avif" onChange={(e) => e.target.files && uploadFiles(e.target.files)} />
         </div>
 
         {newFolder && (
@@ -356,6 +403,32 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
           </div>
         )}
 
+        {/* busca dentro da base + filtro por tipo */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex flex-1 items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2">
+            <Search size={15} className="shrink-0 text-muted" />
+            <input
+              value={query} onChange={(e) => setQuery(e.target.value)}
+              placeholder={isBrain ? "Buscar notas nesta base…" : "Buscar arquivos e pastas nesta base…"}
+              className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
+            />
+            {query && <button onClick={() => setQuery("")} className="shrink-0 text-muted hover:text-ink"><X size={14} /></button>}
+          </div>
+          {!isBrain && (
+            <div className="flex flex-wrap items-center gap-1">
+              {TYPE_FILTERS.map((tf) => (
+                <button
+                  key={tf.key}
+                  onClick={() => setTypeFilter(tf.key)}
+                  className={`rounded-full px-2.5 py-1 text-xs transition-colors ${typeFilter === tf.key ? "bg-accent text-white" : "border border-border text-muted hover:text-ink"}`}
+                >
+                  {tf.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* lista (pastas + docs da pasta atual) */}
         <div
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -365,7 +438,7 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
         >
           {shownFolders.length === 0 && shownDocs.length === 0 ? (
             <p className="py-14 text-center text-sm text-muted">
-              {isBrain ? "Nenhuma nota aqui. Crie uma nota — ou peça à IA para anotar algo no cérebro." : "Pasta vazia. Arraste arquivos aqui, crie uma subpasta ou um arquivo de texto."}
+              {searching ? "Nenhum resultado para esta busca." : isBrain ? "Nenhuma nota aqui. Crie uma nota — ou peça à IA para anotar algo no cérebro." : "Pasta vazia. Arraste arquivos aqui, crie uma subpasta ou um arquivo de texto."}
             </p>
           ) : (
             <ul className="flex flex-col gap-1 p-2">
@@ -380,7 +453,7 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
                     />
                   ) : (
                     <>
-                      <button onClick={() => setCwd(f.id)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+                      <button onClick={() => { setCwd(f.id); if (searching) { setQuery(""); setTypeFilter("all"); } }} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
                         <Folder size={18} className="shrink-0 text-accent-hover" />
                         <span className="truncate text-sm text-ink">{f.name}</span>
                       </button>
@@ -395,10 +468,10 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
               ))}
               {shownDocs.map((d) => (
                 <li key={d.id} className="group flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-hover">
-                  <FileText size={18} className="shrink-0 text-muted" />
+                  <DocIcon d={d} />
                   <div
-                    className={`min-w-0 flex-1 ${isBrain && isTextDoc(d) ? "cursor-pointer" : ""}`}
-                    onClick={() => { if (isBrain && isTextDoc(d)) openTextEditor(d); }}
+                    className="min-w-0 flex-1 cursor-pointer"
+                    onClick={() => { if (isBrain && isTextDoc(d)) openTextEditor(d); else setViewDoc(d); }}
                   >
                     <p className="truncate text-sm text-ink">{d.meta?.title || d.filename}</p>
                     <div className="flex flex-wrap items-center gap-2">
@@ -410,6 +483,9 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
                     </div>
                   </div>
                   <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    {!(isBrain && isTextDoc(d)) && (
+                      <button onClick={() => setViewDoc(d)} title="Visualizar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Eye size={15} /></button>
+                    )}
                     {isTextDoc(d) && (
                       <button onClick={() => openTextEditor(d)} title="Editar texto" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Pencil size={15} /></button>
                     )}
@@ -463,6 +539,7 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
         {metaDoc && (
           <MetaModal doc={metaDoc} saving={saving} onSave={saveMeta} onClose={() => setMetaDoc(null)} />
         )}
+        {viewDoc && <DocViewerModal doc={viewDoc} onClose={() => setViewDoc(null)} />}
       </div>
     );
   }
@@ -496,6 +573,18 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
         </div>
       )}
 
+      {bases.length > 0 && (
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2">
+          <Search size={15} className="shrink-0 text-muted" />
+          <input
+            value={baseQuery} onChange={(e) => setBaseQuery(e.target.value)}
+            placeholder={isBrain ? "Buscar cérebros…" : "Buscar bases de conhecimento…"}
+            className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
+          />
+          {baseQuery && <button onClick={() => setBaseQuery("")} className="shrink-0 text-muted hover:text-ink"><X size={14} /></button>}
+        </div>
+      )}
+
       {bases.length === 0 && !creating ? (
         <div className="flex flex-col items-center gap-2 py-12 text-center">
           {isBrain ? <Brain size={26} className="text-muted" /> : <BookOpen size={26} className="text-muted" />}
@@ -506,9 +595,11 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
               : "Crie uma base, suba seus documentos e a IA poderá consultá-los nas conversas (RAG)."}
           </p>
         </div>
+      ) : shownBases.length === 0 ? (
+        <p className="py-10 text-center text-sm text-muted">Nenhum resultado para “{baseQuery}”.</p>
       ) : (
         <ul className="grid gap-2 sm:grid-cols-2">
-          {bases.map((b) => (
+          {shownBases.map((b) => (
             <li key={b.id} className="group flex items-center gap-3 rounded-xl border border-border bg-surface p-3.5 transition-colors hover:border-accent/40">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-surface2 text-accent-hover">
                 {isBrain ? <Brain size={18} /> : <BookOpen size={18} />}
@@ -598,6 +689,85 @@ function TextEditorModal({
 }
 
 // --------------------------------------------------------------------------- //
+// Hook: URL-capacidade assinada p/ visualizar um doc (imagem/PDF em <img>/<iframe>)
+// --------------------------------------------------------------------------- //
+function useDocLink(doc: KnowledgeDoc, enabled = true): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!enabled) { setUrl(null); return; }
+    let alive = true;
+    (async () => {
+      try {
+        const r = await api.get<{ url: string }>(`/knowledge/docs/${doc.id}/link`);
+        if (alive) setUrl(`${API_URL}${r.url}`);
+      } catch { /* ignora */ }
+    })();
+    return () => { alive = false; };
+  }, [doc.id, enabled]);
+  return url;
+}
+
+// --------------------------------------------------------------------------- //
+// Modal: visualizador de arquivo (imagem / PDF / texto / download)
+// --------------------------------------------------------------------------- //
+function DocViewerModal({ doc, onClose }: { doc: KnowledgeDoc; onClose: () => void }) {
+  const kind = docKind(doc);
+  const url = useDocLink(doc, kind !== "text");
+  const [text, setText] = useState<string | null>(null);
+  useEffect(() => {
+    if (kind !== "text") return;
+    let alive = true;
+    (async () => {
+      try {
+        const r = await api.get<{ content: string }>(`/knowledge/docs/${doc.id}/text`);
+        if (alive) setText(r.content);
+      } catch { if (alive) setText(""); }
+    })();
+    return () => { alive = false; };
+  }, [doc.id, kind]);
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
+        <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+          <DocIcon d={doc} size={16} />
+          <span className="flex-1 truncate text-sm font-semibold text-ink">{doc.meta?.title || doc.filename}</span>
+          {url && (
+            <a href={url} download={doc.filename} target="_blank" rel="noreferrer noopener" title="Baixar" className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><Download size={16} /></a>
+          )}
+          <button onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={16} /></button>
+        </div>
+        <div className="min-h-[200px] flex-1 overflow-auto bg-bg">
+          {kind === "image" ? (
+            url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={url} alt={doc.filename} className="mx-auto max-h-[76vh] max-w-full object-contain" />
+            ) : <Centered><Loader2 size={20} className="animate-spin" /></Centered>
+          ) : kind === "pdf" ? (
+            url ? <iframe src={url} title={doc.filename} className="h-[76vh] w-full border-0" /> : <Centered><Loader2 size={20} className="animate-spin" /></Centered>
+          ) : kind === "text" ? (
+            text === null ? <Centered><Loader2 size={20} className="animate-spin" /></Centered>
+              : <pre className="whitespace-pre-wrap px-5 py-4 font-mono text-sm leading-relaxed text-ink">{text || "(vazio)"}</pre>
+          ) : (
+            <Centered>
+              <div className="flex flex-col items-center gap-3 text-center text-sm text-muted">
+                <FileText size={28} />
+                <p>Sem pré-visualização para este tipo de arquivo.</p>
+                {url && <a href={url} download={doc.filename} target="_blank" rel="noreferrer noopener" className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover"><Download size={15} /> Baixar</a>}
+              </div>
+            </Centered>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Centered({ children }: { children: React.ReactNode }) {
+  return <div className="flex h-full min-h-[200px] items-center justify-center text-muted">{children}</div>;
+}
+
+// --------------------------------------------------------------------------- //
 // Modal: metadados do documento
 // --------------------------------------------------------------------------- //
 function MetaModal({
@@ -609,6 +779,8 @@ function MetaModal({
   const [title, setTitle] = useState(doc.meta?.title || "");
   const [description, setDescription] = useState(doc.meta?.description || "");
   const [tags, setTags] = useState<string[]>(doc.meta?.tags || []);
+  const isImage = docKind(doc) === "image";
+  const imgUrl = useDocLink(doc, isImage);
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
@@ -618,6 +790,10 @@ function MetaModal({
           <button onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={16} /></button>
         </div>
         <div className="flex flex-col gap-3 p-4">
+          {isImage && imgUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={imgUrl} alt={doc.filename} className="max-h-56 w-full rounded-lg border border-border object-contain" />
+          )}
           <label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-muted">Título</span>
             <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título descritivo (opcional)"

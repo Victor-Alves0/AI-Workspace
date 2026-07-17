@@ -369,14 +369,37 @@ export default function ChatPage() {
   // Antes rolava SEMPRE — impossível rolar p/ ler painéis expandidos (ferramentas/
   // custo) durante o streaming ou quando o poll recarregava as mensagens: a página
   // puxava o usuário de volta pro fundo a cada evento.
-  useEffect(() => {
+  const stickToBottom = useCallback(() => {
     if (!pollRef.current.atBottom) return;
     // usuário selecionando texto: rolar agora arrasta o conteúdo sob o cursor e
     // desfaz a seleção (impossível copiar enquanto a IA responde) — pausa o grude
     const sel = typeof window !== "undefined" ? window.getSelection() : null;
     if (sel && !sel.isCollapsed) return;
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [messages, streaming, streamingReasoning, toolEvents]);
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight });
+  }, []);
+  // `composerH` entra nas dependências: quando o composer cresce (anexos, AskOptions,
+  // multilinha) o padding inferior aumenta — se estávamos no fim, re-gruda p/ a última
+  // mensagem não ficar presa atrás do composer.
+  useEffect(() => {
+    stickToBottom();
+  }, [messages, streaming, streamingReasoning, toolEvents, composerH, stickToBottom]);
+
+  // Mídia que carrega DEPOIS do layout (imagem da Base de Conhecimento, anexo) muda a
+  // altura da mensagem após a rolagem inicial → a última mensagem afundava atrás do
+  // composer e não dava p/ alcançá-la (o bug de "não rola até o fim"). 'load' não
+  // borbulha, então ouvimos na fase de captura no container e re-grudamos no fim.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onMedia = () => stickToBottom();
+    el.addEventListener("load", onMedia, true);
+    el.addEventListener("error", onMedia, true); // imagem quebrada também altera a altura
+    return () => {
+      el.removeEventListener("load", onMedia, true);
+      el.removeEventListener("error", onMedia, true);
+    };
+  }, [messages.length, stickToBottom]);
 
   // mede a altura do composer flutuante (muda com opções/anexos/linhas). O padding
   // inferior da área de rolagem = essa altura; se ela for medida CEDO demais (antes de
