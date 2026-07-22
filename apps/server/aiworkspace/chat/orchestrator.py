@@ -369,11 +369,11 @@ def _search_knowledge_tool() -> dict[str, Any]:
         "function": {
             "name": "search_knowledge",
             "description": (
-                "Search the user's knowledge base (their uploaded documents AND images/photos) "
+                "Search the user's knowledge base (their uploaded documents AND images/photos/videos) "
                 "for items relevant to a question. Use whenever the answer may depend on the "
-                "user's own files — including when they ask you to show/send a photo or image "
-                "stored there. Returns numbered passages (cite the source used with [n]); image "
-                "results include ready-to-paste markdown that DISPLAYS the image in the chat."
+                "user's own files — including when they ask you to show/send a photo, image or video "
+                "stored there. Returns numbered passages (cite the source used with [n]); image and "
+                "video results include ready-to-paste markdown that DISPLAYS/PLAYS the media in the chat."
             ),
             "parameters": {
                 "type": "object",
@@ -496,6 +496,14 @@ def _knowledge_block_and_sources(results: list[dict]) -> tuple[str, list[dict[st
             lines.append(
                 f"[{idx[did]}] IMAGE — {r.get('text') or name}. "
                 f"To SHOW this image in your reply, paste exactly: ![{name}]({sources[idx[did]-1]['url']})"
+            )
+        elif (r.get("mime") or "").startswith("video/"):
+            # o front renderiza <video> quando o `alt` do markdown termina com uma
+            # extensão de vídeo — por isso mantenha o nome do arquivo (com extensão).
+            name = r.get("filename") or "video.mp4"
+            lines.append(
+                f"[{idx[did]}] VIDEO — {r.get('text') or name}. "
+                f"To SHOW/PLAY this video in your reply, paste exactly: ![{name}]({sources[idx[did]-1]['url']})"
             )
         else:
             lines.append(f"[{idx[did]}] {r.get('text') or ''}")
@@ -717,6 +725,9 @@ class TurnSession:
     # execução autônoma (automação/canal): tools pulam fases interativas
     background: bool = False
     user_profile: dict[str, Any] | None = None
+    # Codespace: projeto vinculado a este chat (habilita code.graph.query/
+    # code.files.browse mirando ele). None = sem projeto — as tools avisam.
+    codespace_project_id: str | None = None
 
 
 @dataclass
@@ -1464,6 +1475,19 @@ class _ToolDispatcher:
         # servidor inteiro. O threadpool é o offload correto enquanto as tools não
         # forem `async def`.
         result = await run_in_threadpool(self.sift.dispatch, name, args)
+        # Recuperação: modelos fracos às vezes chamam o PATH da tool DIRETO como
+        # nome da função (ex.: função "web.search.query" com {query,limit}) em vez
+        # de execute_tool{path,params}. A SIFT devolve "unknown meta-tool"; nós
+        # reroteamos via execute_tool numa retry, tratando os args como params.
+        if (
+            isinstance(result, str)
+            and "unknown meta-tool" in result
+            and "." in name
+            and name not in {"search_tools", "execute_tool", "run_code", "get_tool_schema"}
+        ):
+            result = await run_in_threadpool(
+                self.sift.dispatch, "execute_tool", {"path": name, "params": args}
+            )
         # Path errado/fora do escopo (modelo chutou, ex.: 'web.read' em vez de
         # 'web.page.read'): enriquece o erro com o caminho de recuperação, senão
         # modelos fracos DESISTEM e dizem que a ferramenta não existe.
@@ -1596,6 +1620,8 @@ async def run_turn(
     toolctx.background.set(bool(session.background))
     # perfil do usuário visível à tool user.profile.get (nome, sobre, nascimento…)
     toolctx.user_profile.set(session.user_profile or {})
+    # projeto do Codespace vinculado a este chat, visível às tools code.graph/code.files
+    toolctx.current_codespace_project_id.set(session.codespace_project_id)
 
     # 1. contexto do turno: memória (mem0) + Base de Conhecimento (auto) + "#"refs
     g = _GatheredContext()

@@ -80,20 +80,33 @@ def _extract_docx(data: bytes) -> str:
 
 
 _IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif", ".svg")
+_VIDEO_EXTS = (".mp4", ".webm", ".mov", ".m4v", ".ogv", ".mkv")
 
 
 def is_image(filename: str, mime: str) -> bool:
     return (mime or "").lower().startswith("image/") or (filename or "").lower().endswith(_IMAGE_EXTS)
 
 
-def _image_text(filename: str) -> str:
-    """Texto indexável de uma imagem: o nome do arquivo vira descrição ("akeno-
-    himejima-dxd-27.webp" → "akeno himejima dxd"). Título/tags entram pelo
-    `_meta_prefix`, como nos demais docs. Os BYTES nunca são decodificados —
-    era isso que gerava megabytes de lixo binário e travava a indexação."""
+def is_video(filename: str, mime: str) -> bool:
+    return (mime or "").lower().startswith("video/") or (filename or "").lower().endswith(_VIDEO_EXTS)
+
+
+def _media_text(filename: str, label: str) -> str:
+    """Texto indexável de uma mídia (imagem/vídeo): o nome do arquivo vira descrição
+    ("akeno-himejima-dxd-27.webp" → "akeno himejima dxd"). Título/tags entram pelo
+    `_meta_prefix`, como nos demais docs. Os BYTES nunca são decodificados — era isso
+    que gerava megabytes de lixo binário e travava a indexação."""
     stem = re.sub(r"\.[a-z0-9]+$", "", (filename or "").strip(), flags=re.I)
     words = re.sub(r"[-_.+%#0-9]+", " ", stem).split()
-    return "Imagem: " + (" ".join(words) if words else (filename or "imagem"))
+    return f"{label}: " + (" ".join(words) if words else (filename or label.lower()))
+
+
+def _image_text(filename: str) -> str:
+    return _media_text(filename, "Imagem")
+
+
+def _video_text(filename: str) -> str:
+    return _media_text(filename, "Vídeo")
 
 
 def extract_text(filename: str, mime: str, data: bytes) -> str:
@@ -102,6 +115,8 @@ def extract_text(filename: str, mime: str, data: bytes) -> str:
     mime = (mime or "").lower()
     if is_image(filename, mime):
         return _image_text(filename)
+    if is_video(filename, mime):
+        return _video_text(filename)
     if "pdf" in mime or name.endswith(".pdf"):
         return _extract_pdf(data)
     if "wordprocessingml" in mime or name.endswith(".docx"):

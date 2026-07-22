@@ -38,6 +38,11 @@ class Chat(Base):
     model_config_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("model_configs.id", ondelete="SET NULL"), nullable=True
     )
+    # Codespace: projeto vinculado (chat "por projeto") — habilita as tools
+    # code.graph.query/code.files.browse mirando este projeto neste chat.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("codespace_projects.id", ondelete="SET NULL"), nullable=True
+    )
     title: Mapped[str] = mapped_column(String(255), default="Novo Chat")
     system_prompt: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
     model: Mapped[str] = mapped_column(String(255), default="")

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, Copy, FlaskConical, GitBranch, Image as ImageIcon, Link2, Menu, MessageSquareDashed, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
+import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, Code2, Copy, FlaskConical, GitBranch, Image as ImageIcon, Link2, Menu, MessageSquareDashed, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamRoundtable } from "@/lib/sse";
@@ -10,8 +10,10 @@ import { speak, startBrowserDictation, startRecording, transcribe } from "@/lib/
 import { browserNotify, playChime, requestNotifPermission } from "@/lib/notify";
 import { downloadJSON, downloadPDF, downloadTXT } from "@/lib/download";
 import { pickSuggestions, type Suggestion } from "@/lib/suggestions";
-import type { AskSpec, Attachment, Chat, ChatArtifact, Folder, KnowledgeRef, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User } from "@/lib/types";
+import type { AskSpec, Attachment, Chat, ChatArtifact, CodespaceProject, Folder, KnowledgeRef, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User } from "@/lib/types";
 import ArtifactPanel from "@/components/ArtifactPanel";
+import CodespaceFileBrowser, { CODESPACE_DND_MIME, extLang, stripLineNumbers } from "@/components/CodespaceFileBrowser";
+import type { CodespaceDragPayload } from "@/components/CodespaceFileBrowser";
 import Roundtable, { nextColor, RT_COLORS } from "@/components/Roundtable";
 import Markdown from "@/components/Markdown";
 import { ReasoningBlock, ToolEventsPanel, fmtTime } from "@/components/MessageItem";
@@ -110,6 +112,11 @@ export default function ChatPage() {
   // anexos (imagens/arquivos) do próximo envio
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [active, setActive] = useState<Chat | null>(null);
+  // espelho do id do chat ativo: os handlers de stream (assíncronos) consultam
+  // este ref para saber, a QUALQUER instante, se ainda estão pintando o chat que
+  // o usuário está vendo — sem isso, o parcial de um chat vaza para outro ao trocar.
+  const activeIdRef = useRef<string | null>(null);
+  const isActiveChat = (id: string | null) => (id ?? null) === activeIdRef.current;
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   // Subsistema de GERAÇÃO (streaming/tools/imagem/conhecimento/áudio/subagentes/
@@ -117,7 +124,7 @@ export default function ChatPage() {
   // getDeps é lido pós-render, então as deps podem ser declaradas mais abaixo.
   const gen = useGeneration(() => ({
     artifactsEnabled, temporary, setArtifactOpen, setActive,
-    reloadMessages, reloadArtifacts, refreshChats,
+    reloadMessages, reloadArtifacts, refreshChats, isActiveChat,
   }));
   const {
     streaming, setStreaming, streamingReasoning, setStreamingReasoning,
@@ -126,6 +133,8 @@ export default function ChatPage() {
     subagents, setSubagents, guardNote, setGuardNote, liveArtifact, setLiveArtifact,
     sending, setSending, stopRef, makeStreamHandler, resumeStream, handleStop,
   } = gen;
+  // mantém o espelho do chat ativo em dia (cobre todos os setActive de uma vez)
+  useEffect(() => { activeIdRef.current = active?.id ?? null; }, [active?.id]);
   // Artefatos (janela dedicada): lista do chat + qual está aberto (o "ao vivo"
   // vive no hook de geração)
   const [chatArtifacts, setChatArtifacts] = useState<ChatArtifact[]>([]);
@@ -166,6 +175,56 @@ export default function ChatPage() {
   const [workspaceSection, setWorkspaceSection] = useState<WorkspaceSection | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [showControls, setShowControls] = useState(false);
+  // barra lateral de arquivos do Codespace (só existe quando o chat está vinculado
+  // a um projeto — active.project_id)
+  const [csFilesOpen, setCsFilesOpen] = useState(false);
+  const [csDropOver, setCsDropOver] = useState(false);
+  // projeto do chat ativo (pro botão "Definir como padrão do projeto" saber o
+  // padrão atual); null = chat sem projeto
+  const [csProject, setCsProject] = useState<CodespaceProject | null>(null);
+  useEffect(() => {
+    const pid = active?.project_id;
+    if (!pid) { setCsProject(null); return; }
+    api.get<CodespaceProject>(`/codespace/projects/${pid}`).then(setCsProject).catch(() => setCsProject(null));
+  }, [active?.project_id]);
+
+  async function setAsProjectDefault() {
+    const pid = active?.project_id;
+    const value = curCustomId ? `custom:${curCustomId}` : curModel;
+    if (!pid || !value) return;
+    try {
+      const updated = await api.patch<CodespaceProject>(`/codespace/projects/${pid}`, { default_model: value });
+      setCsProject(updated);
+    } catch { /* melhor esforço — o botão continua mostrando o estado antigo */ }
+  }
+
+  // arraste um arquivo do explorador do Codespace até aqui pra referenciá-lo
+  async function handleComposerFileDrop(e: React.DragEvent) {
+    const raw = e.dataTransfer.getData(CODESPACE_DND_MIME);
+    if (!raw) return;
+    e.preventDefault();
+    setCsDropOver(false);
+    let payload: CodespaceDragPayload;
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    if (payload.kind !== "file") return;
+    try {
+      const r = await api.get<{ content?: string; total_lines?: number; end_line?: number; error?: string }>(
+        `/codespace/projects/${payload.projectId}/files/content?path=${encodeURIComponent(payload.path)}`,
+      );
+      if (r.error || r.content == null) return;
+      // arquivo grande vem cortado do servidor — marca o corte, senão a IA acha
+      // que o arquivo acaba ali
+      const truncated = !!r.total_lines && !!r.end_line && r.end_line < r.total_lines;
+      const body = stripLineNumbers(r.content)
+        + (truncated ? `\n… (arquivo truncado — ${r.total_lines} linhas no total)` : "");
+      const prefill = `Sobre o arquivo \`${payload.path}\`:\n\n\`\`\`${extLang(payload.path)}\n${body}\n\`\`\`\n\n`;
+      setInput((v) => (v ? `${v}\n\n${prefill}` : prefill));
+    } catch { /* falha ao ler — ignora, o usuário pode tentar de novo */ }
+  }
   const [showShare, setShowShare] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   // mobile: drawer da barra lateral + detecção de tela pequena (< md)
@@ -751,11 +810,20 @@ export default function ChatPage() {
     setDraftRt(null);
     const detail = await api.get<Chat & { messages: Message[] }>(`/chats/${id}`);
     setActive(detail);
+    // atualiza o espelho JÁ (antes do efeito pós-render) para que qualquer handler
+    // de stream do chat anterior, ainda em voo, veja na hora que não é mais o ativo.
+    activeIdRef.current = id;
     setMessages(detail.messages ?? []);
     setAtBottom(true); // abrir um chat sempre começa no fim
     setStreaming("");
     setStreamingReasoning("");
     setToolEvents([]);
+    // libera o composer: se o chat de destino tiver geração viva, o resumeStream
+    // (abaixo) religa o "gerando"; senão, não fica preso pelo turno do chat anterior.
+    setSending(false);
+    setGeneratingImage(false);
+    setSubagents([]);
+    setGuardNote(null);
     setArtifactOpen(null);
     setLiveArtifact(null);
     setChatArtifacts([]);
@@ -764,6 +832,22 @@ export default function ChatPage() {
     setCurModel(detail.model);
     // restaura o vínculo com o modelo personalizado (define ferramentas)
     setCurCustomId(detail.model_config_id ?? null);
+    // legado: chats antigos do Codespace gravaram model="custom:<id>" CRU (em vez
+    // de base_model + model_config_id) — o seletor mostrava o id e o envio
+    // falharia no provedor. Resolve pro par certo e conserta o registro na hora.
+    // No deep-link (?c= no mount) o customModels ainda não carregou — busca na hora.
+    if (detail.model?.startsWith("custom:") && !detail.model_config_id) {
+      const customs = customModels.length
+        ? customModels
+        : await api.get<ModelConfig[]>("/models").catch(() => [] as ModelConfig[]);
+      const mc = customs.find((c) => c.id === detail.model.slice(7));
+      if (mc) {
+        setCurModel(mc.base_model);
+        setCurCustomId(mc.id);
+        setActive((a) => (a ? { ...a, model: mc.base_model, model_config_id: mc.id } : a));
+        api.patch(`/chats/${id}`, { model: mc.base_model, model_config_id: mc.id }).catch(() => {});
+      }
+    }
     // se havia uma resposta sendo gerada quando o chat foi fechado/atualizado,
     // volta a acompanhá-la ao vivo em vez de mostrar só o que ficou salvo.
     resumeStream(id);
@@ -936,7 +1020,11 @@ export default function ChatPage() {
     setGuardNote(null);
     setSubagents([]);
 
-    const { handler: onEvent, state } = makeStreamHandler();
+    // chat "dono" deste turno: enquanto ele for o ativo, o stream pinta a tela;
+    // se o usuário trocar de chat, o handler para de pintar (ver useGeneration).
+    // Para rascunho, o id só existe após criar o chat abaixo — daí o getter.
+    let ownerId: string | null = active?.id ?? null;
+    const { handler: onEvent, state } = makeStreamHandler(() => ownerId);
 
     // controles definidos na home (rascunho) têm prioridade sobre o do modelo custom
     const initialSystemPrompt = draftSystemPrompt || curCustom?.system_prompt || null;
@@ -957,7 +1045,7 @@ export default function ChatPage() {
         } catch (e) {
           if (!(e instanceof DOMException && e.name === "AbortError")) throw e;
         }
-        if (state.acc) {
+        if (state.acc && isActiveChat(ownerId)) {
           setMessages((m) => [...m, { id: `a-${Date.now()}`, role: "assistant", content: state.acc, reasoning: state.reason ? { text: state.reason } : null, tool_events: state.tools.length ? state.tools : null, created_at: new Date().toISOString() }]);
         }
       } else {
@@ -971,17 +1059,23 @@ export default function ChatPage() {
             model_config_id: curCustomId,
           });
           setActive(chat);
+          ownerId = chat.id; // rascunho virou chat real: o stream agora tem dono
         }
         // persistente: o servidor cancela a geração e salva o parcial
         const cid = chat.id;
         stopRef.current = () => { api.post(`/chats/${cid}/stop`).catch(() => {}); };
         await streamMessage(chat.id, text, onEvent, undefined, turnSkillIds, turnAttachments, turnAgentId, turnRefDocIds);
-        setStreaming("");
-        setStreamingReasoning("");
         refreshChats();
-        // recarrega as mensagens reais (ids do servidor + registro de tokens/custo)
-        await reloadMessages(chat.id);
-        await reloadArtifacts(chat.id);
+        // só recarrega/limpa a tela se o usuário AINDA está neste chat — senão
+        // sobrescreveria o chat para onde ele navegou (a resposta já ficou salva
+        // no servidor e reaparece ao reabrir este chat).
+        if (isActiveChat(ownerId)) {
+          setStreaming("");
+          setStreamingReasoning("");
+          // recarrega as mensagens reais (ids do servidor + registro de tokens/custo)
+          await reloadMessages(chat.id);
+          await reloadArtifacts(chat.id);
+        }
       }
       if (state.acc) notify("Resposta pronta", state.acc.replace(/\s+/g, " ").slice(0, 90));
     } catch (e) {
@@ -992,12 +1086,16 @@ export default function ChatPage() {
       notify(e instanceof ApiError && e.status === 402 ? "Orçamento mensal atingido" : "Erro", msg);
       refreshBudget();
     } finally {
-      stopRef.current = null;
-      setStreaming("");
-      setStreamingReasoning("");
-      setGeneratingImage(false);
-      setLiveArtifact(null);
-      setSending(false);
+      // limpa o estado de geração só se o usuário continua neste chat; se ele
+      // trocou, quem manda na tela é o chat de destino (não zere o dele).
+      if (isActiveChat(ownerId)) {
+        stopRef.current = null;
+        setStreaming("");
+        setStreamingReasoning("");
+        setGeneratingImage(false);
+        setLiveArtifact(null);
+        setSending(false);
+      }
       refreshBudget(); // atualiza o gasto do mês (mantém o banner em dia)
     }
   }
@@ -1046,23 +1144,27 @@ export default function ChatPage() {
       if (i === -1) return m;
       return m.slice(0, m[i].role === "user" ? i + 1 : i);
     });
-    const { handler, state } = makeStreamHandler();
     const cid = active.id;
+    const { handler, state } = makeStreamHandler(() => cid);
     stopRef.current = () => { api.post(`/chats/${cid}/stop`).catch(() => {}); };
     try {
       await streamRegenerate(active.id, id, handler);
-      setStreaming("");
-      setStreamingReasoning("");
-      await reloadMessages(active.id);
-      await reloadArtifacts(active.id);
       refreshChats();
+      if (isActiveChat(cid)) {
+        setStreaming("");
+        setStreamingReasoning("");
+        await reloadMessages(cid);
+        await reloadArtifacts(cid);
+      }
       if (state.acc) notify("Resposta pronta", state.acc.replace(/\s+/g, " ").slice(0, 90));
     } finally {
-      stopRef.current = null;
-      setStreaming("");
-      setStreamingReasoning("");
-      setLiveArtifact(null);
-      setSending(false);
+      if (isActiveChat(cid)) {
+        stopRef.current = null;
+        setStreaming("");
+        setStreamingReasoning("");
+        setLiveArtifact(null);
+        setSending(false);
+      }
     }
   }
 
@@ -1072,22 +1174,26 @@ export default function ChatPage() {
     setStreaming("");
     setStreamingReasoning("");
     setToolEvents([]);
-    const { handler, state } = makeStreamHandler();
     const cid = active.id;
+    const { handler, state } = makeStreamHandler(() => cid);
     stopRef.current = () => { api.post(`/chats/${cid}/stop`).catch(() => {}); };
     try {
       await streamContinue(active.id, id, handler);
-      setStreaming("");
-      setStreamingReasoning("");
-      await reloadMessages(active.id);
-      await reloadArtifacts(active.id);
+      if (isActiveChat(cid)) {
+        setStreaming("");
+        setStreamingReasoning("");
+        await reloadMessages(cid);
+        await reloadArtifacts(cid);
+      }
       if (state.acc) notify("Resposta continuada", state.acc.replace(/\s+/g, " ").slice(0, 90));
     } finally {
-      stopRef.current = null;
-      setStreaming("");
-      setStreamingReasoning("");
-      setLiveArtifact(null);
-      setSending(false);
+      if (isActiveChat(cid)) {
+        stopRef.current = null;
+        setStreaming("");
+        setStreamingReasoning("");
+        setLiveArtifact(null);
+        setSending(false);
+      }
     }
   }
 
@@ -1365,6 +1471,7 @@ export default function ChatPage() {
           onShowArchived={() => { setShowArchived(true); setMobileNav(false); }}
           onOpenWorkspace={() => { setEditModelTarget(null); setWorkspaceSection(null); setWorkspaceKey((k) => k + 1); setWorkspaceOpen(true); setAutomationsOpen(false); setPlaygroundOpen(false); setMobileNav(false); }}
           onOpenAutomations={() => { setAutomationsOpen(true); setWorkspaceOpen(false); setPlaygroundOpen(false); setMobileNav(false); }}
+          onOpenCodespace={() => { setEditModelTarget(null); setWorkspaceSection("Codespace"); setWorkspaceKey((k) => k + 1); setWorkspaceOpen(true); setAutomationsOpen(false); setPlaygroundOpen(false); setMobileNav(false); }}
           onOpenPlayground={() => { setPlaygroundKey((k) => k + 1); setPlaygroundOpen(true); setWorkspaceOpen(false); setAutomationsOpen(false); setMobileNav(false); }}
           onOpenAnalytics={() => { setEditModelTarget(null); setWorkspaceSection("Analítica"); setWorkspaceKey((k) => k + 1); setWorkspaceOpen(true); setAutomationsOpen(false); setPlaygroundOpen(false); setMobileNav(false); }}
           onLogout={logout}
@@ -1379,6 +1486,7 @@ export default function ChatPage() {
             initialSection={workspaceSection}
             onModelsChanged={setCustomModels}
             onClose={() => { setWorkspaceOpen(false); setEditModelTarget(null); setWorkspaceSection(null); refreshModels(); }}
+            onOpenChat={(cid, prefill) => { selectChat(cid).then(() => { if (prefill) setInput(prefill); }).catch(() => {}); }}
           />
         ) : automationsOpen ? (
           <AutomationsView
@@ -1414,6 +1522,18 @@ export default function ChatPage() {
                   : "Definir como padrão"}
               </button>
             )}
+            {active?.project_id && (
+              <span className="flex items-center gap-2.5 pl-2 text-xs">
+                <span className="flex items-center gap-1 text-accent-hover"><Code2 size={11} /> Codespace</span>
+                {curModel && (
+                  <button onClick={setAsProjectDefault} className="text-left text-muted transition-colors hover:text-ink">
+                    {csProject?.default_model === (curCustomId ? `custom:${curCustomId}` : curModel)
+                      ? "Padrão do projeto ✓"
+                      : "Definir como padrão do projeto"}
+                  </button>
+                )}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-1">
             {active && !temporary && showShareBtn && (
@@ -1432,6 +1552,15 @@ export default function ChatPage() {
             >
               <MessageSquareDashed size={18} />
             </button>
+            {active?.project_id && (
+              <button
+                onClick={() => setCsFilesOpen((v) => !v)}
+                title="Arquivos do projeto"
+                className={`rounded-lg p-2 transition-colors ${csFilesOpen ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
+              >
+                <Code2 size={18} />
+              </button>
+            )}
             <button
               onClick={() => setShowControls((v) => !v)}
               title="Controles"
@@ -1492,7 +1621,12 @@ export default function ChatPage() {
                     <p className="text-2xl font-semibold tracking-tight text-muted">How Can I be an Assistance?</p>
                   </div>
                 </div>
-                <div className="w-full max-w-3xl">
+                <div
+                  className={`w-full max-w-3xl rounded-2xl transition-shadow ${csDropOver ? "ring-2 ring-accent/50" : ""}`}
+                  onDragOver={(e) => { if (e.dataTransfer.types.includes(CODESPACE_DND_MIME)) { e.preventDefault(); setCsDropOver(true); } }}
+                  onDragLeave={() => setCsDropOver(false)}
+                  onDrop={handleComposerFileDrop}
+                >
                   <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} temporary={temporary} />
                 </div>
                 {/* menu do "+" abre para baixo aqui (há espaço); na conversa abre para cima */}
@@ -1630,7 +1764,12 @@ export default function ChatPage() {
                 <div ref={composerRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-10">
                   <div className="pointer-events-none h-12 bg-gradient-to-t from-bg to-transparent" />
                   <div className="pointer-events-auto bg-bg px-4 pb-3">
-                    <div className="relative">
+                    <div
+                      className={`relative rounded-2xl transition-shadow ${csDropOver ? "ring-2 ring-accent/50" : ""}`}
+                      onDragOver={(e) => { if (e.dataTransfer.types.includes(CODESPACE_DND_MIME)) { e.preventDefault(); setCsDropOver(true); } }}
+                      onDragLeave={() => setCsDropOver(false)}
+                      onDrop={handleComposerFileDrop}
+                    >
                       {!atBottom && (
                         <button
                           onClick={scrollToBottom}
@@ -1663,6 +1802,28 @@ export default function ChatPage() {
                 onClose={() => { setArtifactOpen(null); setLiveArtifact(null); }}
                 onChanged={async () => { if (active) await reloadArtifacts(active.id); }}
               />
+            </div>
+          )}
+          {/* Arquivos do projeto: mesma coluna do lado, só quando o chat está vinculado */}
+          {csFilesOpen && active?.project_id && (
+            <div className="fixed inset-0 z-50 shrink-0 bg-bg p-3 md:static md:z-auto md:w-[42%] md:min-w-[360px] md:max-w-[640px] md:bg-transparent">
+              <div className="flex h-full flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-sm font-medium text-ink"><Code2 size={15} className="text-accent-hover" /> Arquivos</span>
+                  <button onClick={() => setCsFilesOpen(false)} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><X size={16} /></button>
+                </div>
+                <CodespaceFileBrowser
+                  key={active.project_id}
+                  projectId={active.project_id}
+                  dense
+                  useLabel="Inserir no chat"
+                  onUse={(path, content) => {
+                    const prefill = `Sobre o arquivo \`${path}\`:\n\n\`\`\`${extLang(path)}\n${content}\n\`\`\`\n\n`;
+                    setInput((v) => (v ? `${v}\n\n${prefill}` : prefill));
+                    setCsFilesOpen(false);
+                  }}
+                />
+              </div>
             </div>
           )}
         </div>

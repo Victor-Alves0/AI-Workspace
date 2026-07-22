@@ -18,6 +18,7 @@ from .learning_routes import router as learning_router
 from .memory_routes import router as memory_router
 from .brain_routes import router as brain_router
 from .knowledge_routes import router as knowledge_router
+from .codespace_routes import router as codespace_router
 from .share_routes import router as share_router
 from .telegram_routes import router as telegram_router
 from .discord_routes import router as discord_router
@@ -191,6 +192,7 @@ def create_app() -> FastAPI:
     app.include_router(memory_router)
     app.include_router(learning_router)
     app.include_router(knowledge_router)
+    app.include_router(codespace_router)
     app.include_router(brain_router)
     app.include_router(share_router)
     app.include_router(telegram_router)

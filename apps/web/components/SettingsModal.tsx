@@ -57,7 +57,7 @@ import DiscordPanel from "./DiscordPanel";
 import GitHubPanel from "./GitHubPanel";
 import OllamaPanel from "./OllamaPanel";
 import VoicePanel from "./VoicePanel";
-import { WebSearchPanel } from "./toolPanels";
+import { WebSearchPanel, BrowserPanel } from "./toolPanels";
 import { useConfirm, usePrompt } from "./ConfirmDialog";
 
 type Cat = "general" | "status" | "interface" | "connections" | "integrations" | "personalization" | "shortcuts" | "security" | "data" | "account" | "about";
@@ -86,6 +86,7 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Gerar título de novos chats", cat: "interface", view: "sidebar" },
   { label: "Mostrar Modelos", cat: "interface", view: "sidebar" },
   { label: "Mostrar Automações", cat: "interface", view: "sidebar" },
+  { label: "Mostrar Codespace", cat: "interface", view: "sidebar" },
   { label: "Mostrar Espaço de Trabalho", cat: "interface", view: "sidebar" },
   { label: "Mostrar Analítica", cat: "interface", view: "sidebar" },
   { label: "Mostrar Playground", cat: "interface", view: "sidebar" },
@@ -134,6 +135,8 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Web", cat: "connections", view: "web" },
   { label: "SearXNG", cat: "connections", view: "web" },
   { label: "Pesquisa na web (mecanismo padrão)", cat: "connections", view: "web" },
+  { label: "Navegador (Browser)", cat: "connections", view: "web" },
+  { label: "Testar conexão (web / navegador)", cat: "connections", view: "web" },
   { label: "Importar Chats", cat: "data" },
   { label: "Exportar Chats", cat: "data" },
   { label: "Chats Arquivados", cat: "data" },
@@ -479,6 +482,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                     onChange={(v) => set("web_search", v)}
                     status={(status ?? undefined) as Record<string, boolean> | undefined}
                   />
+                  <BrowserPanel value={profile.browser ?? {}} onChange={(v) => set("browser", v)} />
                 </DetailView>
               ) : (
                 <div>
@@ -486,7 +490,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                   <CardGrid
                     cards={[
                       { key: "apis", icon: <KeyRound size={22} />, name: "APIs", desc: "Chaves de serviços" },
-                      { key: "web", icon: <Globe size={22} />, name: "Web", desc: "Pesquisa na web / SearXNG" },
+                      { key: "web", icon: <Globe size={22} />, name: "Web", desc: "Pesquisa na web / SearXNG / Navegador" },
                       { key: "ollama", icon: <SiOllama size={22} />, name: "Ollama", desc: "Utilize modelos locais" },
                       { key: "voice", icon: <AudioLines size={22} />, name: "Voz Local", desc: "Kokoro / clonagem de voz" },
                     ]}
@@ -790,6 +794,7 @@ function SidebarSettings({ profile, set, onBack }: { profile: Record<string, any
 const SIDEBAR_ITEMS: { key: string; label: string }[] = [
   { key: "sb_models", label: "Mostrar Modelos" },
   { key: "sb_automations", label: "Mostrar Automações" },
+  { key: "sb_codespace", label: "Mostrar Codespace" },
   { key: "sb_workspace", label: "Mostrar Espaço de Trabalho" },
   { key: "sb_analytics", label: "Mostrar Analítica" },
   { key: "sb_playground", label: "Mostrar Playground" },

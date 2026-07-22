@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, BookOpen, Brain, Check, ChevronRight, Download, Eye, FilePlus2, FileText,
-  Folder, FolderInput, FolderPlus, Home, Image as ImageIcon, Loader2, Pencil, Plus, RotateCcw, Search, Tag,
-  Trash2, Upload, Waypoints, X,
+  Film as FilmIcon, Folder, FolderInput, FolderPlus, Home, Image as ImageIcon, Loader2, Pencil, Plus,
+  RotateCcw, Search, Tag, Trash2, Upload, Waypoints, X,
 } from "lucide-react";
 import { api, API_URL } from "@/lib/api";
 import type { KnowledgeBase, KnowledgeDoc, KnowledgeDocMeta, KnowledgeFolder } from "@/lib/types";
@@ -21,23 +21,26 @@ function fmtSize(n: number): string {
 
 const TEXT_RE = /\.(txt|md|markdown|csv|json|log|ya?ml)$/i;
 const IMAGE_RE = /\.(png|jpe?g|gif|webp|bmp|svg|avif)$/i;
+const VIDEO_RE = /\.(mp4|webm|mov|m4v|ogv|mkv)$/i;
 function isTextDoc(d: KnowledgeDoc): boolean {
   return (d.mime || "").startsWith("text/") || TEXT_RE.test(d.filename || "");
 }
 
-type DocKind = "image" | "pdf" | "text" | "other";
+type DocKind = "image" | "video" | "pdf" | "text" | "other";
 function docKind(d: KnowledgeDoc): DocKind {
   const mime = (d.mime || "").toLowerCase();
   const fn = d.filename || "";
   if (mime.startsWith("image/") || IMAGE_RE.test(fn)) return "image";
+  if (mime.startsWith("video/") || VIDEO_RE.test(fn)) return "video";
   if (mime === "application/pdf" || /\.pdf$/i.test(fn)) return "pdf";
   if (isTextDoc(d)) return "text";
   return "other";
 }
 function DocIcon({ d, size = 18 }: { d: KnowledgeDoc; size?: number }) {
-  return docKind(d) === "image"
-    ? <ImageIcon size={size} className="shrink-0 text-accent-hover" />
-    : <FileText size={size} className="shrink-0 text-muted" />;
+  const k = docKind(d);
+  if (k === "image") return <ImageIcon size={size} className="shrink-0 text-accent-hover" />;
+  if (k === "video") return <FilmIcon size={size} className="shrink-0 text-accent-hover" />;
+  return <FileText size={size} className="shrink-0 text-muted" />;
 }
 
 // filtro por tipo dentro de uma base
@@ -47,6 +50,7 @@ const TYPE_FILTERS: { key: "all" | "folder" | DocKind; label: string }[] = [
   { key: "pdf", label: "PDF" },
   { key: "text", label: "Texto" },
   { key: "image", label: "Imagens" },
+  { key: "video", label: "Vídeos" },
   { key: "other", label: "Outros" },
 ];
 
@@ -387,7 +391,7 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
             <Upload size={15} /> Enviar arquivos
           </button>
           {uploading && <span className="flex items-center gap-1.5 text-xs text-amber-500"><Loader2 size={12} className="animate-spin" /> enviando…</span>}
-          <input ref={fileRef} type="file" multiple hidden accept=".pdf,.docx,.txt,.md,.markdown,.csv,.json,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.avif" onChange={(e) => e.target.files && uploadFiles(e.target.files)} />
+          <input ref={fileRef} type="file" multiple hidden accept=".pdf,.docx,.txt,.md,.markdown,.csv,.json,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.avif,.mp4,.webm,.mov,.m4v,.ogv,.mkv" onChange={(e) => e.target.files && uploadFiles(e.target.files)} />
         </div>
 
         {newFolder && (
@@ -743,6 +747,10 @@ function DocViewerModal({ doc, onClose }: { doc: KnowledgeDoc; onClose: () => vo
               // eslint-disable-next-line @next/next/no-img-element
               <img src={url} alt={doc.filename} className="mx-auto max-h-[76vh] max-w-full object-contain" />
             ) : <Centered><Loader2 size={20} className="animate-spin" /></Centered>
+          ) : kind === "video" ? (
+            url ? (
+              <video src={url} controls preload="metadata" className="mx-auto max-h-[76vh] max-w-full" />
+            ) : <Centered><Loader2 size={20} className="animate-spin" /></Centered>
           ) : kind === "pdf" ? (
             url ? <iframe src={url} title={doc.filename} className="h-[76vh] w-full border-0" /> : <Centered><Loader2 size={20} className="animate-spin" /></Centered>
           ) : kind === "text" ? (
@@ -779,8 +787,10 @@ function MetaModal({
   const [title, setTitle] = useState(doc.meta?.title || "");
   const [description, setDescription] = useState(doc.meta?.description || "");
   const [tags, setTags] = useState<string[]>(doc.meta?.tags || []);
-  const isImage = docKind(doc) === "image";
-  const imgUrl = useDocLink(doc, isImage);
+  const kind = docKind(doc);
+  const isImage = kind === "image";
+  const isVideo = kind === "video";
+  const mediaUrl = useDocLink(doc, isImage || isVideo);
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-lg overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
@@ -790,9 +800,12 @@ function MetaModal({
           <button onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={16} /></button>
         </div>
         <div className="flex flex-col gap-3 p-4">
-          {isImage && imgUrl && (
+          {isImage && mediaUrl && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={imgUrl} alt={doc.filename} className="max-h-56 w-full rounded-lg border border-border object-contain" />
+            <img src={mediaUrl} alt={doc.filename} className="max-h-56 w-full rounded-lg border border-border object-contain" />
+          )}
+          {isVideo && mediaUrl && (
+            <video src={mediaUrl} controls preload="metadata" className="max-h-56 w-full rounded-lg border border-border" />
           )}
           <label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-muted">Título</span>

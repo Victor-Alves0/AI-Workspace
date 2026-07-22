@@ -20,10 +20,11 @@ import ValvesModal from "./ValvesModal";
 import AnalyticsView from "./AnalyticsView";
 import MemoryView from "./MemoryView";
 import KnowledgeView from "./KnowledgePanel";
+import CodespacePanel from "./CodespacePanel";
 
 export type Section =
   | "Modelos" | "Conhecimento" | "Cerebros" | "Prompts" | "Skills"
-  | "Ferramentas" | "Apps" | "Memoria" | "Analítica";
+  | "Ferramentas" | "Apps" | "Codespace" | "Memoria" | "Analítica";
 
 // meta dos cards da grade inicial (a contagem é injetada em runtime)
 const CARD_META: { key: Section; name: string; desc: string; icon: ReactNode; live: boolean }[] = [
@@ -34,6 +35,7 @@ const CARD_META: { key: Section; name: string; desc: string; icon: ReactNode; li
   { key: "Conhecimento", name: "Conhecimento", desc: "Banco de dados organizados", icon: <BookOpen size={22} />, live: true },
   { key: "Cerebros", name: "Cérebros", desc: "Notas interligadas da IA", icon: <Waypoints size={22} />, live: true },
   { key: "Apps", name: "Apps", desc: "Mini-aplicações e automações", icon: <LayoutGrid size={22} />, live: false },
+  { key: "Codespace", name: "Codespace", desc: "Programe com IA", icon: <Code2 size={22} />, live: true },
   { key: "Memoria", name: "Memória", desc: "O que a IA lembra de você", icon: <Brain size={22} />, live: true },
   { key: "Analítica", name: "Analítica", desc: "Uso, custos e desempenho", icon: <BarChart3 size={22} />, live: true },
 ];
@@ -140,6 +142,7 @@ export default function WorkspaceView({
   initialEditModel,
   initialSection,
   onModelsChanged,
+  onOpenChat,
 }: {
   onClose: () => void;
   /** se vier um modelo, abre direto o editor dele (ex.: "Editar" no seletor) */
@@ -149,6 +152,9 @@ export default function WorkspaceView({
   /** propaga a lista de modelos para o pai a cada mudança (salvar/toggle/excluir),
    *  para o chat refletir edições no mostrador de ferramentas sem depender do F5. */
   onModelsChanged?: (models: ModelConfig[]) => void;
+  /** Codespace: abre um chat (novo ou existente) no pai; `prefill` (opcional)
+   *  pré-preenche o composer — usado por "Referenciar no chat" na aba Arquivos. */
+  onOpenChat?: (chatId: string, prefill?: string) => void;
 }) {
   const router = useRouter();
   // null = grade inicial de cards; senão a seção aberta
@@ -699,6 +705,11 @@ export default function WorkspaceView({
       {section === "Apps" && (
         <SectionShell title="Apps" onBack={backHome}>
           <ComingSoon icon={<LayoutGrid size={26} />} title="Apps" desc="Mini-aplicações e fluxos prontos para instalar no seu workspace." />
+        </SectionShell>
+      )}
+      {section === "Codespace" && (
+        <SectionShell title="Codespace" onBack={backHome}>
+          <CodespacePanel onOpenChat={(chatId, prefill) => { onOpenChat?.(chatId, prefill); onClose(); }} />
         </SectionShell>
       )}
       {section === "Memoria" && (

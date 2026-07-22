@@ -109,8 +109,8 @@ async def update_profile(
     prof.update(changed)
     user.profile = prof  # reatribui p/ o ORM detectar a mudança do JSONB
     await db.commit()
-    # a config de busca/finanças/deep search/segurança afeta a SIFT do usuário → invalida cache
-    if any(k in changed for k in ("web_search", "finance", "deep_search", "security")):
+    # a config de busca/finanças/deep search/segurança/navegador afeta a SIFT do usuário → invalida cache
+    if any(k in changed for k in ("web_search", "finance", "deep_search", "security", "browser")):
         sift_service.invalidate(str(user.id))
     return {"ok": True, "profile": prof}
 
@@ -198,6 +198,56 @@ async def system_status(
             "signup_open": bool(await get_setting(db, ALLOW_SIGNUPS, False)),
         }
     return out
+
+
+class WebTestIn(BaseModel):
+    provider: str = "duckduckgo"
+    searxng_url: str = ""
+
+
+@router.post("/test/web")
+async def test_web_search(
+    body: WebTestIn, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Testa um mecanismo de busca (SearXNG/DuckDuckGo/Tavily/Brave) com uma consulta
+    de sonda. Devolve {ok, count, error} — sem tocar na config salva."""
+    provider = (body.provider or "duckduckgo").strip().lower()
+    tavily = await get_secret(db, user.id, TAVILY_KEY)
+    brave = await get_secret(db, user.id, BRAVE_KEY)
+    prefs = {"primary": provider, "providers": [provider], "multi": False,
+             "searxng_url": body.searxng_url or ""}
+    cfg = sift_service.search_config_from_secrets(tavily, brave, prefs)
+    try:
+        from .search import web_search
+        results = await web_search("teste de conexão", cfg)
+        return {"ok": len(results) > 0, "count": len(results),
+                "error": None if results else "Nenhum resultado retornado"}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "count": 0, "error": str(exc)[:200]}
+
+
+class BrowserTestIn(BaseModel):
+    ws_url: str = ""
+    token: str = ""
+
+
+@router.post("/test/browser")
+async def test_browser(body: BrowserTestIn, user: User = Depends(require_approved)):
+    """Testa a conexão com o Navegador headless (browserless via CDP). Devolve
+    {ok, error} — conecta e fecha um contexto, sem abrir página."""
+    from fastapi.concurrency import run_in_threadpool
+
+    from .tools.browser_driver import driver
+    endpoint = sift_service._browser_endpoint(
+        {"ws_url": body.ws_url, "token": body.token, "enabled": True}
+    )
+    if not endpoint:
+        return {"ok": False, "error": "Sem URL do navegador (configure ws_url ou BROWSER_WS_URL)"}
+    try:
+        await run_in_threadpool(driver.probe, endpoint)
+        return {"ok": True, "error": None}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc)[:200]}
 
 
 @router.get("/about")

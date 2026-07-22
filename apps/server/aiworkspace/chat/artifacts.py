@@ -44,6 +44,36 @@ _MAX_TOTAL = 80_000
 _ARTIFACT_RE = re.compile(r"<artifact\s+([^>]*?)>\r?\n?(.*?)\r?\n?</artifact>", re.DOTALL)
 _EDIT_RE = re.compile(r"<artifact-edit\s+([^>]*?)>\r?\n?(.*?)\r?\n?</artifact-edit>", re.DOTALL)
 _ATTR_RE = re.compile(r'([\w-]+)\s*=\s*"([^"]*)"')
+
+# Alguns modelos (ex.: DeepSeek) embrulham o artefato em tokens de controle
+# PRÓPRIOS em vez da tag <artifact> — ex.:
+#   <｜DSML｜tool artifact="true" identifier="x" title="y">…conteúdo…</｜DSML｜tool>
+# A âncora é `artifact="true"` (que a nossa tag canônica NUNCA emite — ela usa
+# type="…"), então normalizar isso é seguro: pareia a abertura com o próximo
+# fechamento "…tool…" e reescreve como <artifact …>. Corpo vazio = só lixo → some.
+_ALT_ARTIFACT_RE = re.compile(
+    r'(<[^<>]*?\bartifact\s*=\s*"true"[^<>]*>)(.*?)</[^<>]*?\btool\b[^<>]*>',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _normalize_alt_artifact_tags(text: str) -> str:
+    if not text or 'artifact="true"' not in text:
+        return text
+
+    def _repl(m: re.Match) -> str:
+        body = m.group(2)
+        if not body.strip():   # tag vazia/inútil: remove o lixo da resposta
+            return ""
+        attrs = dict(_ATTR_RE.findall(m.group(1)))
+        keep = " ".join(
+            f'{k}="{attrs[k]}"'
+            for k in ("identifier", "type", "language", "title")
+            if attrs.get(k)
+        )
+        return f"<artifact {keep}>{body}</artifact>"
+
+    return _ALT_ARTIFACT_RE.sub(_repl, text)
 _BLOCK_RE = re.compile(r"<<<<<<<\s*SEARCH\r?\n(.*?)\r?\n=======\r?\n(.*?)\r?\n>>>>>>>\s*REPLACE", re.DOTALL)
 
 INSTRUCTIONS = """<artifacts_info>
@@ -231,7 +261,8 @@ async def apply_ops(db, chat_id, user_id, ops: list[dict[str, Any]]) -> list[str
 async def extract_and_apply(db, chat_id, user_id, content: str) -> tuple[str, list[str]]:
     """Atalho usado ao persistir a resposta: extrai, aplica e devolve o texto
     limpo (com marcadores) + os identifiers alterados."""
-    if "<artifact" not in (content or ""):
+    content = _normalize_alt_artifact_tags(content or "")
+    if "<artifact" not in content:
         return content, []
     clean, ops = extract(content)
     if not ops:

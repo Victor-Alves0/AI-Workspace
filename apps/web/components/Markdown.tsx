@@ -63,8 +63,23 @@ function CodeBlock({ children }: { children?: React.ReactNode }) {
 /** Imagem inline com fallback: se a URL falhar (ex.: token expirado/adulterado),
  *  em vez do quadro quebrado feio mostra um chip clicável com o nome do arquivo,
  *  que abre a imagem em nova aba. */
+const _VIDEO_ALT_RE = /\.(mp4|webm|mov|m4v|ogv|mkv)\s*$/i;
+
 function MdImage({ src, alt }: { src: string; alt: string }) {
   const [broken, setBroken] = useState(false);
+  // vídeos da Base de Conhecimento chegam como ![clip.mp4](url): o nome (alt)
+  // termina numa extensão de vídeo → renderiza um player em vez de <img>.
+  if (src && !broken && _VIDEO_ALT_RE.test(alt || "")) {
+    return (
+      <video
+        src={src}
+        controls
+        preload="metadata"
+        onError={() => setBroken(true)}
+        className="my-2 max-h-96 max-w-full rounded-xl border border-border"
+      />
+    );
+  }
   if (broken || !src) {
     return (
       <a

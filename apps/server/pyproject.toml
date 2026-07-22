@@ -61,6 +61,13 @@ dependencies = [
     # node incluído no wheel, ~50MB) — os browsers NÃO são instalados aqui; o
     # Chromium roda no serviço `browser` (browserless) e conectamos via CDP.
     "playwright>=1.48",
+    # Codespace — grafo de código (tools "code.graph.query"/"code.files.browse"):
+    # GraphCodeMap (projeto próprio do Victor, ainda não publicado no PyPI — o
+    # nome "codegraph" no PyPI é de OUTRO pacote, não confundir). Pinado num
+    # commit (alpha v0.1.0, sem tags) p/ build reprodutível; import é `codegraph`.
+    # [l1] ativa o resolver via jedi (promove chamadas Python de "inferred"/
+    # "possible" a "certain" — mais lento, roda em background/sob demanda).
+    "graphcodemap[l1] @ https://github.com/Victor-Alves0/graphcodemap/archive/b77b59009cc10969da87ac0acbd0bdca854d703c.tar.gz",
 ]
 
 [project.optional-dependencies]

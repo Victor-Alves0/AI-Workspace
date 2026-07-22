@@ -71,6 +71,37 @@ async def test_sift_dispatch_success():
     assert json.loads(result)["results"][0]["title"] == "t"
 
 
+async def test_dotted_function_name_reroutes_to_execute_tool():
+    """Modelo chamou a função COM O PATH direto (web.search.query{query,limit}) em
+    vez de execute_tool. A SIFT devolve 'unknown meta-tool'; reroteamos via
+    execute_tool e o resultado bom volta (sem o modelo desistir)."""
+    calls: list[tuple[str, dict]] = []
+
+    class RecSift(FakeSift):
+        def dispatch(self, name, args):
+            calls.append((name, args))
+            return super().dispatch(name, args)
+
+    sift = RecSift({
+        "web.search.query": {"error": "unknown meta-tool 'web.search.query'"},
+        "execute_tool": {"ok": True, "results": ["r1"]},
+    })
+    d = _mk(sift=sift)
+    _, result = await _drain(d, "web.search.query", {"query": "x", "limit": 5})
+    assert json.loads(result)["ok"] is True
+    # a 2ª chamada foi execute_tool com o path e os args como params
+    assert calls[-1][0] == "execute_tool"
+    assert calls[-1][1] == {"path": "web.search.query", "params": {"query": "x", "limit": 5}}
+
+
+async def test_scope_error_not_rerouted_as_execute_tool():
+    """Um 'unknown tool' de escopo (não 'unknown meta-tool') NÃO vira execute_tool —
+    segue o caminho do hint de recuperação."""
+    d = _mk(sift=FakeSift({"web.read": {"error": "web.read not allowed in this scope"}}))
+    _, result = await _drain(d, "web.read", {})
+    assert "hint" in json.loads(result)
+
+
 async def test_sift_scope_error_gets_hint():
     """Path chutado → o erro ganha o hint de recuperação (usar search_tools)."""
     d = _mk(sift=FakeSift({"web.read": {"error": "web.read not allowed in this scope"}}))

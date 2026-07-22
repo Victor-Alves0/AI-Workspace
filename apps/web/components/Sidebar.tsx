@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   CalendarClock,
+  Code2,
   FileText,
   Folder as FolderIcon,
   FolderPlus,
@@ -144,6 +145,7 @@ export default function Sidebar({
   onShowArchived,
   onOpenWorkspace,
   onOpenAutomations,
+  onOpenCodespace,
   onOpenPlayground,
   onOpenAnalytics,
   onLogout,
@@ -168,6 +170,7 @@ export default function Sidebar({
   onShowArchived: () => void;
   onOpenWorkspace: () => void;
   onOpenAutomations: () => void;
+  onOpenCodespace: () => void;
   onOpenPlayground: () => void;
   onOpenAnalytics: () => void;
   onLogout: () => void;
@@ -254,6 +257,11 @@ export default function Sidebar({
             {unread > 0 && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-accent" />}
           </button>
         )}
+        {show("sb_codespace") && (
+          <button onClick={onOpenCodespace} title="Codespace" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
+            <Code2 size={18} />
+          </button>
+        )}
         {show("sb_workspace") && (
           <button onClick={onOpenWorkspace} title="Espaço de Trabalho" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
             <LayoutGrid size={18} />
@@ -304,6 +312,9 @@ export default function Sidebar({
             <span className="truncate">Automações</span>
             {unread > 0 && <span className="ml-auto rounded-full bg-accent px-1.5 text-[11px] font-medium text-white">{unread}</span>}
           </button>
+        )}
+        {show("sb_codespace") && (
+          <NavButton icon={<Code2 size={17} />} label="Codespace" collapsed={false} onClick={onOpenCodespace} />
         )}
         {show("sb_workspace") && (
           <NavButton icon={<LayoutGrid size={17} />} label="Espaço de Trabalho" collapsed={false} onClick={onOpenWorkspace} />

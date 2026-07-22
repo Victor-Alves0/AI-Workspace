@@ -7,10 +7,13 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # dependências de sistema (psycopg2, build de wheels nativas) + OCR:
-# tesseract (motor OCR local, idiomas pt+en) e poppler (rasteriza PDF p/ OCR)
+# tesseract (motor OCR local, idiomas pt+en) e poppler (rasteriza PDF p/ OCR).
+# git: clona os projetos do Codespace (tool code.graph/code.files) via HTTPS/SSH.
+# openssh-client: `ssh`/`ssh-keygen` — projetos Codespace por SSH (deploy key
+# gerada por-projeto, ver graph_service.generate_ssh_keypair).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential libpq-dev curl ca-certificates \
+        build-essential libpq-dev curl ca-certificates git openssh-client \
         tesseract-ocr tesseract-ocr-por tesseract-ocr-eng poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
@@ -45,10 +48,11 @@ RUN chmod +x entrypoint.sh
 
 # usuário não-root: o servidor (e o sandbox de tools, que herda o usuário)
 # não roda como root dentro do container. HOME gravável p/ caches de modelos
-# (fastembed/huggingface) usados pela SIFT e pelo mem0.
+# (fastembed/huggingface) usados pela SIFT e pelo mem0. /data/codespace guarda
+# as working copies + índices dos projetos do Codespace (volume codespace_data).
 RUN useradd --create-home --uid 10001 app \
-    && mkdir -p /home/app/.cache \
-    && chown -R app:app /home/app
+    && mkdir -p /home/app/.cache /data/codespace \
+    && chown -R app:app /home/app /data/codespace
 USER app
 ENV HOME=/home/app \
     # caches de modelos dentro do volume mlcache (fastembed baixa p/ /tmp por padrão)

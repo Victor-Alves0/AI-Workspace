@@ -22,6 +22,7 @@ from .artifact import Artifact, ArtifactVersion
 from .memory_bank import MemoryBank
 from .knowledge import KnowledgeBase, KnowledgeFolder, KnowledgeDoc, KnowledgeChunk
 from .benchmark import Benchmark, BenchmarkRun
+from .codespace_project import CodespaceProject
 
 __all__ = [
     "AuditEvent",
@@ -61,4 +62,5 @@ __all__ = [
     "KnowledgeChunk",
     "Benchmark",
     "BenchmarkRun",
+    "CodespaceProject",
 ]

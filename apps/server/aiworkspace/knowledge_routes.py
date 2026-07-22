@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,7 +30,8 @@ from .models import (
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
-_MAX_BYTES = 25 * 1024 * 1024  # 25 MB por arquivo
+_MAX_BYTES = 25 * 1024 * 1024  # 25 MB por arquivo (documentos/imagens)
+_MAX_VIDEO_BYTES = 200 * 1024 * 1024  # vídeos são maiores (guardados como bytea)
 _KINDS = ("kb", "brain")  # kb = RAG de documentos | brain = cérebro de notas
 
 _spawn_index = ingest.spawn_index
@@ -278,8 +279,13 @@ async def upload_docs(
         data = await f.read()
         if not data:
             continue
-        if len(data) > _MAX_BYTES:
-            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, f"{f.filename}: arquivo acima de 25 MB")
+        is_vid = ingest.is_video(f.filename or "", f.content_type or "")
+        cap = _MAX_VIDEO_BYTES if is_vid else _MAX_BYTES
+        if len(data) > cap:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                f"{f.filename}: arquivo acima de {cap // (1024 * 1024)} MB",
+            )
         d = KnowledgeDoc(
             base_id=base_id, user_id=user.id, folder_id=fid,
             filename=(f.filename or "documento")[:255],
@@ -563,17 +569,59 @@ async def get_doc_link(
     return {"url": sign_doc_url(str(d.id)), "mime": d.mime, "filename": d.filename}
 
 
+def _parse_range(header: str, size: int) -> tuple[int, int] | None:
+    """'bytes=start-end' → (start, end) inclusivo, ou None se ausente/ inválido.
+    Suporta sufixo ('bytes=-N' = últimos N) e fim aberto ('bytes=N-')."""
+    if not header or not header.startswith("bytes=") or size <= 0:
+        return None
+    spec = header[6:].split(",", 1)[0].strip()
+    if "-" not in spec:
+        return None
+    a, b = spec.split("-", 1)
+    try:
+        if a == "":                       # bytes=-N (últimos N)
+            n = int(b)
+            return (max(0, size - n), size - 1) if n > 0 else None
+        start = int(a)
+        end = int(b) if b else size - 1
+    except ValueError:
+        return None
+    end = min(end, size - 1)
+    if start > end or start >= size:
+        return None
+    return start, end
+
+
 @router.get("/docs/{doc_id}/raw")
-async def get_doc_raw(doc_id: uuid.UUID, t: str = "", db: AsyncSession = Depends(get_db)):
+async def get_doc_raw(
+    doc_id: uuid.UUID, request: Request, t: str = "", db: AsyncSession = Depends(get_db)
+):
     """Baixa o arquivo original de uma fonte citada. Autoriza pelo token assinado
-    `t` (URL-capacidade), então funciona num link direto sem cookie."""
+    `t` (URL-capacidade), então funciona num link direto sem cookie. Honra o header
+    `Range` (206) para que <video>/<audio> possam buscar (seek) no player."""
     if not verify_doc_token(str(doc_id), t):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Token inválido")
     d = await db.get(KnowledgeDoc, doc_id)
     if d is None or not d.data:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Documento não encontrado")
+    blob = bytes(d.data)
+    mime = d.mime or "application/octet-stream"
+    disp = f'inline; filename="{d.filename or "documento"}"'
+    rng = _parse_range(request.headers.get("range", ""), len(blob))
+    if rng is not None:
+        start, end = rng
+        return Response(
+            content=blob[start : end + 1],
+            status_code=status.HTTP_206_PARTIAL_CONTENT,
+            media_type=mime,
+            headers={
+                "Content-Disposition": disp,
+                "Content-Range": f"bytes {start}-{end}/{len(blob)}",
+                "Accept-Ranges": "bytes",
+            },
+        )
     return Response(
-        content=bytes(d.data),
-        media_type=d.mime or "application/octet-stream",
-        headers={"Content-Disposition": f'inline; filename="{d.filename or "documento"}"'},
+        content=blob,
+        media_type=mime,
+        headers={"Content-Disposition": disp, "Accept-Ranges": "bytes"},
     )

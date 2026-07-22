@@ -16,6 +16,8 @@ class ChatCreate(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     folder_id: uuid.UUID | None = None
     model_config_id: uuid.UUID | None = None
+    # Codespace: projeto vinculado (habilita code.graph.query/code.files.browse)
+    project_id: uuid.UUID | None = None
 
 
 class ChatUpdate(BaseModel):
@@ -30,6 +32,7 @@ class ChatUpdate(BaseModel):
     tags: list[str] | None = None
     folder_id: uuid.UUID | None = None
     model_config_id: uuid.UUID | None = None
+    project_id: uuid.UUID | None = None
     # memória por-chat: {"write": "...", "read": {...}} (null = herda modelo/perfil)
     memory_config: dict[str, Any] | None = None
     # base de conhecimento por-chat: {"enabled": b, "bases": [...], "mode": "auto|tool", "k": int}
@@ -86,6 +89,7 @@ class ChatOut(BaseModel):
     view_once: bool = False
     folder_id: uuid.UUID | None
     model_config_id: uuid.UUID | None
+    project_id: uuid.UUID | None = None
     memory_config: dict[str, Any] | None = None
     knowledge_config: dict[str, Any] | None = None
     brain_config: dict[str, Any] | None = None

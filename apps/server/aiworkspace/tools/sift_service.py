@@ -216,6 +216,21 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # escolhidas na engrenagem (por modelo).
     {"path": "messaging.chat.manage", "name": "Mensagens (WhatsApp/Telegram/Discord)", "description": "Agir nas conexões de chat do usuário: listar conversas, ler mensagens e enviar mensagens por WhatsApp, Telegram ou Discord.",
      "model_desc": "Act on the user's chat connections: list conversations, read messages, and send messages via WhatsApp, Telegram or Discord."},
+    # Codespace (grafo de código — GraphCodeMap): só funciona em chats vinculados a
+    # um projeto (Espaço de Trabalho → Codespace). Query estrutural (símbolos, quem
+    # chama quem, blast radius) em vez de grep — menos rodadas de leitura, mais
+    # precisão. Confiança (certain/inferred/possible) e avisos de completude NUNCA
+    # são escondidos do modelo.
+    {"path": "code.graph.query", "name": "Grafo de Código", "description": "Consulta o grafo de código do projeto vinculado: encontra símbolos, quem chama quem, o impacto de mudar algo e a vizinhança de uma função/classe.",
+     "model_desc": "Query the project's code graph: find symbols, who calls what, blast radius of a change, and a symbol's neighborhood. Use INSTEAD of grepping when a project is attached."},
+    {"path": "code.files.browse", "name": "Arquivos do Projeto", "description": "Lista, lê e busca texto nos arquivos do projeto vinculado, além do histórico de commits (respeitando o escopo liberado/bloqueado).",
+     "model_desc": "List, read and text-search the attached project's files, plus its git history/diffs (respects the project's allow/deny scope)."},
+    # Escrita: SEPARADA da leitura (code.files.browse) por princípio de menor
+    # privilégio — um modelo pode ganhar só leitura sem nunca poder escrever. Toda
+    # escrita vira um commit LOCAL automático (reversível); push/delete passam
+    # pelo mesmo toggle global "confirmar ações" que já protege GitHub/Google/Tuya.
+    {"path": "code.files.write", "name": "Editar Projeto", "description": "Cria, edita e apaga arquivos do projeto vinculado — cada mudança vira um commit local automático — e envia (push) para o repositório remoto.",
+     "model_desc": "Write/edit/delete files in the attached project (every change auto-commits locally) and push commits to the remote. Requires code.files.browse to read first."},
 ]
 # NOTA: "perguntar opções" (kind:"ask") é uma PRIMITIVA de sistema (tools/interaction.py),
 # não uma tool equipável — qualquer ferramenta a usa via `ask_options(...)` (ex.: o Lembrete
@@ -338,6 +353,24 @@ async def _store_browser_shot(user_id: str | None, chat_id: str | None, data: by
         await eng.dispose()
 
 
+def _browser_endpoint(browser_cfg: dict | None) -> str:
+    """Endpoint CDP do navegador (ws_url[?token=]) resolvido por CAMADAS:
+    config por-usuário (Conexões → Web) primeiro; senão o env (BROWSER_WS_URL/
+    BROWSER_TOKEN). Devolve "" quando desativado/sem URL — a tool avisa."""
+    cfg = browser_cfg or {}
+    if cfg.get("enabled") is False:
+        return ""
+    ws = (cfg.get("ws_url") or "").strip()
+    token = (cfg.get("token") or "").strip()
+    if not ws:
+        s = get_settings()
+        ws = (s.browser_ws_url or "").strip()
+        token = (s.browser_token or "").strip()
+    if not ws:
+        return ""
+    return f"{ws}?token={token}" if token else ws
+
+
 def _register_builtins(
     sift: Sift,
     search_cfg: SearchConfig,
@@ -349,6 +382,7 @@ def _register_builtins(
     tuya_cfg: "TuyaConfig | None" = None,
     github_cfg: "GithubConfig | None" = None,
     messaging_cfg: "MessagingConfig | None" = None,
+    browser_cfg: dict | None = None,
 ) -> None:
     """Registra as ferramentas de sistema. `allowed=None` = todas; caso contrário
     apenas os paths presentes no conjunto."""
@@ -517,9 +551,11 @@ def _register_builtins(
         ) -> dict[str, Any]:
             from .browser_driver import driver
             from ..providers import image_gen
-            if not (get_settings().browser_ws_url or "").strip():
-                return {"error": "O navegador não está ativo. Suba o serviço: "
-                        "docker compose --profile browser up -d browser"}
+            endpoint = _browser_endpoint(browser_cfg)
+            if not endpoint:
+                return {"error": "O navegador não está ativo. Configure-o em "
+                        "Configurações → Conexões → Web (ou suba o serviço: "
+                        "docker compose --profile browser up -d browser)."}
             act = (action or "").strip().lower()
             chat_id = toolctx.current_chat_id.get()
             key = chat_id or (user_id or "anon")
@@ -532,30 +568,286 @@ def _register_builtins(
                         u = "https://" + u
                     if not _public_web_url(u):
                         return {"error": "URL not allowed (only public http/https sites)"}
-                    return driver.goto(key, u)
+                    return driver.goto(endpoint, key, u)
                 if act == "read":
-                    return driver.read(key)
+                    return driver.read(endpoint, key)
                 if act == "click":
                     if not (target or "").strip():
                         return {"error": "provide 'target' (visible text or CSS selector)"}
-                    return driver.click(key, target.strip())
+                    return driver.click(endpoint, key, target.strip())
                 if act == "type":
-                    return driver.type(key, (target or "").strip(), text or "", bool(submit))
+                    return driver.type(endpoint, key, (target or "").strip(), text or "", bool(submit))
                 if act == "scroll":
-                    return driver.scroll(key, (direction or "down").strip().lower())
+                    return driver.scroll(endpoint, key, (direction or "down").strip().lower())
                 if act == "back":
-                    return driver.back(key)
+                    return driver.back(endpoint, key)
                 if act == "screenshot":
-                    png = driver.screenshot(key)
+                    png = driver.screenshot(endpoint, key)
                     iid = asyncio.run(_store_browser_shot(user_id, chat_id, png))
                     if not iid:
                         return {"error": "screenshot capturado, mas falhou ao salvar"}
                     return {"ok": True, "kind": "image", "url": image_gen.sign_image_url(iid),
                             "note": "screenshot da página atual"}
                 if act == "close":
-                    return driver.close(key)
+                    return driver.close(endpoint, key)
                 return {"error": f"unknown action '{act}' (use goto/read/click/type/scroll/back/screenshot/close)"}
             except Exception as exc:  # noqa: BLE001 - erros do browser não quebram o turno
+                return {"error": str(exc)[:300]}
+
+    # Codespace (grafo de código) — só existe se este chat estiver vinculado a um
+    # projeto (toolctx.current_codespace_project_id). O projeto é resolvido a CADA
+    # chamada (ownership check embutido em graph_service.load_project) em vez de
+    # threadado como config: cada chat pode ter um projeto diferente, mas a
+    # instância SIFT é cacheada por-USUÁRIO (não por-chat) — mesma solução do
+    # navegador (current_chat_id) e do mesmo motivo.
+    if want("code.graph.query") or want("code.files.browse") or want("code.files.write"):
+        from ..codespace import graph_service
+
+        def _cs_project():
+            """Resolve e valida o projeto do chat atual. Devolve (project, None) ou
+            (None, error_dict) — o error_dict já é a resposta pronta da tool."""
+            pid = toolctx.current_codespace_project_id.get()
+            if not pid:
+                return None, {"error": "Nenhum projeto do Codespace vinculado a este chat. "
+                              "Vincule um projeto em Espaço de Trabalho → Codespace."}
+            proj = asyncio.run(graph_service.load_project(user_id, pid))
+            if proj is None:
+                return None, {"error": "projeto não encontrado (ou não pertence a este usuário)"}
+            return proj, None
+
+        def _cs_project_ctx():
+            """Como `_cs_project`, mas também devolve se 'confirmar ações' está
+            ligado — usado pelas ações destrutivas/externas (delete/push)."""
+            pid = toolctx.current_codespace_project_id.get()
+            if not pid:
+                return None, False, {"error": "Nenhum projeto do Codespace vinculado a este chat. "
+                                      "Vincule um projeto em Espaço de Trabalho → Codespace."}
+            proj, confirm = asyncio.run(graph_service.load_project_ctx(user_id, pid))
+            if proj is None:
+                return None, False, {"error": "projeto não encontrado (ou não pertence a este usuário)"}
+            return proj, confirm, None
+
+        def _cs_confirm_guard(confirm_on: bool, summary: str, confirm: Any) -> dict | None:
+            # mesmo toggle global (Configurações → Segurança) que já protege
+            # escritas do GitHub/Google/Tuya; em background (automação/canal)
+            # não há usuário pra confirmar → executa direto, igual às demais.
+            truthy = confirm is True or (isinstance(confirm, str) and confirm.strip().lower() in ("true", "1", "yes", "sim", "on"))
+            if confirm_on and not truthy and not toolctx.background.get():
+                from .interaction import ask_options
+                return ask_options(
+                    summary,
+                    [
+                        {"label": "Confirmar", "value": "Sim, confirmo — refaça a ação agora com confirm=true."},
+                        {"label": "Cancelar", "value": "Cancele, não execute a ação."},
+                    ],
+                    allow_custom=False,
+                )
+            return None
+
+        _CS_STATUS_MSG = {
+            "pending": "o projeto ainda não começou a clonar — aguarde alguns segundos e tente de novo",
+            "cloning": "o projeto está sendo clonado — aguarde e tente de novo em instantes",
+            "indexing": "o projeto está sendo indexado — aguarde e tente de novo em instantes",
+            "error": "a última indexação falhou: {err}",
+        }
+
+        def _cs_require_ready(proj):
+            if proj.index_status == "ready":
+                return None
+            msg = _CS_STATUS_MSG.get(proj.index_status, proj.index_status)
+            if proj.index_status == "error":
+                msg = msg.format(err=(proj.error_message or "erro desconhecido")[:300])
+            return {"error": msg}
+
+    if want("code.graph.query"):
+        @sift.tool(
+            "code.graph.query",
+            description=(
+                "Query the code graph of the project attached to this chat — structural, not text "
+                "search: exact call sites, blast radius, symbol neighborhood. Prefer this over "
+                "grepping when a project is attached. `action`: 'find' (locate a symbol by name; "
+                "returns fqn/kind/path/line/signature — use its `fqn` in the other actions), "
+                "'callers' (who calls this symbol — exact call sites with confidence), 'impact' "
+                "(what breaks if you change this symbol — transitive callers up to `depth`), 'ego' "
+                "(a symbol's neighborhood: parent/children/calls/called_by), 'status' (index health: "
+                "files/symbols/edges counts). Edges carry a confidence level (certain/inferred/"
+                "possible) — static analysis, so treat 'possible' as a hint, not a fact."
+            ),
+            params={
+                "action": "string:r::find | callers | impact | ego | status",
+                "query": "string:o::find: symbol name or substring to search for",
+                "symbol": "string:o::callers/impact/ego: the fully-qualified name (fqn) from a previous 'find'",
+                "depth": "number:o::callers/impact: hops to follow (callers 1-4, impact 1-5)",
+                "limit": "number:o:10:find: max matches to return",
+            },
+            returns=["symbols", "target", "callers", "affects", "symbol", "children", "calls",
+                     "called_by", "total_found", "warnings", "files", "edges", "error"],
+            examples=["find the function validate_token", "who calls run_turn?",
+                      "what breaks if I change _register_builtins?", "show the neighborhood of TokenService"],
+        )
+        def _code_graph_query(action: str = "", query: str = "", symbol: str = "",
+                               depth: Any = None, limit: Any = 10) -> dict[str, Any]:
+            proj, err = _cs_project()
+            if err:
+                return err
+            act = (action or "").strip().lower()
+            if act != "status":
+                bad = _cs_require_ready(proj)
+                if bad:
+                    return bad
+            uid, pid = str(proj.user_id), str(proj.id)
+            try:
+                if act == "find":
+                    if not (query or "").strip():
+                        return {"error": "provide 'query' (symbol name to search for)"}
+                    lim = int(limit) if limit not in (None, "") else 10
+                    return graph_service.find(uid, pid, query.strip(), limit=lim)
+                if act in ("callers", "impact", "ego"):
+                    if not (symbol or "").strip():
+                        return {"error": f"provide 'symbol' (fqn from a previous 'find') for '{act}'"}
+                    if act == "callers":
+                        d = int(depth) if depth not in (None, "") else 1
+                        return graph_service.callers(uid, pid, symbol.strip(), depth=d)
+                    if act == "impact":
+                        d = int(depth) if depth not in (None, "") else 3
+                        return graph_service.impact(uid, pid, symbol.strip(), depth=d)
+                    return graph_service.ego(uid, pid, symbol.strip())
+                if act == "status":
+                    return graph_service.status(uid, pid)
+                return {"error": f"unknown action '{act}' (use find/callers/impact/ego/status)"}
+            except Exception as exc:  # noqa: BLE001 - erro do grafo não quebra o turno
+                return {"error": str(exc)[:300]}
+
+    if want("code.files.browse"):
+        @sift.tool(
+            "code.files.browse",
+            description=(
+                "List/read/search the files of the project attached to this chat, plus its git "
+                "history (respects the project's allow/deny scope — a path outside it is refused). "
+                "`action`: 'list' (directory tree from `path`, default the project root), 'read' "
+                "(file content, numbered lines; use `start_line`/`end_line` for a range on large "
+                "files), 'search' (text search across the project, optionally filtered by `glob`, "
+                "e.g. '*.py'), 'log' (recent commits — every write/edit/delete auto-commits), 'diff' "
+                "(what changed; empty `ref` = uncommitted changes, or pass a sha/'HEAD~N')."
+            ),
+            params={
+                "action": "string:r::list | read | search | log | diff",
+                "path": "string:o::list/read/diff: path relative to the project root (default: root)",
+                "query": "string:o::search: text to look for",
+                "glob": "string:o::search: restrict to files matching this glob (e.g. 'src/**/*.py')",
+                "start_line": "number:o:1:read: first line to return",
+                "end_line": "number:o::read: last line to return (default: start_line + 400)",
+                "depth": "number:o:3:list: how many directory levels to descend",
+                "limit": "number:o:20:log: how many commits to return",
+                "ref": "string:o::diff: sha/'HEAD~N' to compare against (default: uncommitted changes)",
+            },
+            returns=["entries", "content", "results", "commits", "diff", "path", "total_lines",
+                     "start_line", "end_line", "truncated", "error"],
+            examples=["list the src folder", "read config.py", "search TODO in the project",
+                      "show the last 5 commits", "what did the last commit change?"],
+        )
+        def _code_files_browse(action: str = "", path: str = "", query: str = "", glob: str = "",
+                                start_line: Any = 1, end_line: Any = None, depth: Any = 3,
+                                limit: Any = 20, ref: str = "") -> dict[str, Any]:
+            proj, err = _cs_project()
+            if err:
+                return err
+            if proj.index_status not in ("indexing", "ready"):
+                bad = _cs_require_ready(proj)
+                if bad:
+                    return bad
+            uid, pid, scope = str(proj.user_id), str(proj.id), proj.scope or {}
+            act = (action or "").strip().lower()
+            try:
+                if act == "list":
+                    d = int(depth) if depth not in (None, "") else 3
+                    return graph_service.list_files(uid, pid, scope, path=path or "", max_depth=d)
+                if act == "read":
+                    lo = int(start_line) if start_line not in (None, "") else 1
+                    hi = int(end_line) if end_line not in (None, "") else None
+                    if not (path or "").strip():
+                        return {"error": "provide 'path'"}
+                    return graph_service.read_file(uid, pid, scope, path.strip(), start_line=lo, end_line=hi)
+                if act == "search":
+                    return graph_service.search_files(uid, pid, scope, query or "", glob=glob or "")
+                if act == "log":
+                    lim = int(limit) if limit not in (None, "") else 20
+                    return graph_service.git_log(uid, pid, limit=lim)
+                if act == "diff":
+                    return graph_service.git_diff(uid, pid, scope, path=path or "", ref=ref or "")
+                return {"error": f"unknown action '{act}' (use list/read/search/log/diff)"}
+            except ValueError as exc:
+                return {"error": str(exc)}
+            except Exception as exc:  # noqa: BLE001 - erro de arquivo não quebra o turno
+                return {"error": str(exc)[:300]}
+
+    if want("code.files.write"):
+        @sift.tool(
+            "code.files.write",
+            description=(
+                "Write/edit/delete files in the project attached to this chat, and push commits to "
+                "the remote. Every write/edit/delete AUTO-COMMITS locally (reversible, no extra step "
+                "needed) — provide `message` describing WHY, it becomes the commit message. "
+                "`action`: 'write' (full file content — creates the file/folders if needed), 'edit' "
+                "(SEARCH/REPLACE: `search` must match EXACTLY and be UNIQUE in the file — copy it "
+                "verbatim from a prior 'read'; if unsure, use 'write' with the full new content "
+                "instead), 'delete' (removes a file — asks for confirmation unless confirm=true), "
+                "'push' (sends local commits to the remote — asks for confirmation unless "
+                "confirm=true). Read the file with code.files.browse BEFORE editing it."
+            ),
+            params={
+                "action": "string:r::write | edit | delete | push",
+                "path": "string:o::write/edit/delete: path relative to the project root",
+                "content": "string:o::write: the FULL new content of the file",
+                "search": "string:o::edit: exact text to find (must be unique in the file)",
+                "replace": "string:o::edit: text to replace it with",
+                "message": "string:o::write/edit/delete: commit message describing WHY (optional, a generic one is used otherwise)",
+                "confirm": "boolean:o::set true only after the user confirmed delete/push",
+            },
+            returns=["ok", "path", "created", "commit", "branch", "error",
+                     "kind", "question", "options", "allow_custom", "custom_label"],
+            risk=True,
+            examples=["create a new file utils/helpers.py with this content", "fix the typo in README.md",
+                      "delete the old config.json", "push my changes"],
+        )
+        def _code_files_write(action: str = "", path: str = "", content: str = "", search: str = "",
+                               replace: str = "", message: str = "", confirm: Any = None) -> dict[str, Any]:
+            proj, confirm_on, err = _cs_project_ctx()
+            if err:
+                return err
+            # Diferente de code.files.browse: aqui NÃO se abre exceção para
+            # "indexing" — write/edit/delete disparam _reindex_after_write, que
+            # chama cg.index() na MESMA instância CodeGraph que a indexação de
+            # fundo já está usando (graph_service._get_graph é cacheada por
+            # projeto); rodar os dois ao mesmo tempo, em threads diferentes,
+            # arrisca "database is locked"/corromper o graph.db. Só libera
+            # escrita com o índice inicial já concluído (ready).
+            bad = _cs_require_ready(proj)
+            if bad:
+                return bad
+            uid, pid, scope = str(proj.user_id), str(proj.id), proj.scope or {}
+            act = (action or "").strip().lower()
+            if not (path or "").strip() and act in ("write", "edit", "delete"):
+                return {"error": "provide 'path'"}
+            try:
+                if act == "write":
+                    return graph_service.write_file(uid, pid, scope, path.strip(), content, message=message)
+                if act == "edit":
+                    return graph_service.edit_file(uid, pid, scope, path.strip(), search, replace, message=message)
+                if act == "delete":
+                    block = _cs_confirm_guard(confirm_on, f"Apagar '{path.strip()}' do projeto '{proj.name}'?", confirm)
+                    if block:
+                        return block
+                    return graph_service.delete_file(uid, pid, scope, path.strip(), message=message)
+                if act == "push":
+                    block = _cs_confirm_guard(confirm_on, f"Enviar os commits locais de '{proj.name}' para o repositório remoto?", confirm)
+                    if block:
+                        return block
+                    return asyncio.run(graph_service.push(uid, pid))
+                return {"error": f"unknown action '{act}' (use write/edit/delete/push)"}
+            except ValueError as exc:
+                return {"error": str(exc)}
+            except Exception as exc:  # noqa: BLE001 - erro de escrita não quebra o turno
                 return {"error": str(exc)[:300]}
 
     if want("diagram.excalidraw.render"):
@@ -1563,6 +1855,7 @@ def _signature(
     tuya_cfg: "TuyaConfig | None" = None,
     github_cfg: "GithubConfig | None" = None,
     messaging_cfg: "MessagingConfig | None" = None,
+    browser_cfg: dict | None = None,
 ) -> tuple:
     rows = tuple(
         sorted(
@@ -1628,6 +1921,11 @@ def _signature(
         ty,
         ghc,
         msgc,
+        # config do browser por-usuário: muda ws_url/token/enabled → rebuild (o
+        # endpoint é capturado no closure da tool). O token entra aqui (é infra
+        # local do próprio usuário, não um segredo de terceiros).
+        ((browser_cfg or {}).get("ws_url", ""), (browser_cfg or {}).get("token", ""),
+         (browser_cfg or {}).get("enabled", True)),
     )
 
 
@@ -1674,6 +1972,7 @@ def build_user_sift(
     tuya_cfg: "TuyaConfig | None" = None,
     github_cfg: "GithubConfig | None" = None,
     messaging_cfg: "MessagingConfig | None" = None,
+    browser_cfg: dict | None = None,
 ) -> Sift | None:
     """Constrói a instância SIFT completa do usuário (builtins + tools dele).
 
@@ -1698,7 +1997,7 @@ def build_user_sift(
             on_result=_record_call,
             index_cache=_index_cache_path(user_id),
         )
-        _register_builtins(sift, search_cfg, None, finance_cfg, deep_cfg, user_id, google_cfg, tuya_cfg, github_cfg, messaging_cfg)
+        _register_builtins(sift, search_cfg, None, finance_cfg, deep_cfg, user_id, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg)
         for t in tool_rows:
             if not t.enabled:
                 continue
@@ -1733,12 +2032,13 @@ def get_user_sift(
     tuya_cfg: "TuyaConfig | None" = None,
     github_cfg: "GithubConfig | None" = None,
     messaging_cfg: "MessagingConfig | None" = None,
+    browser_cfg: dict | None = None,
 ) -> Sift | None:
-    sig = _signature(tool_rows, search_cfg, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg)
+    sig = _signature(tool_rows, search_cfg, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg)
     cached = _cache.get(user_id)
     if cached is not None and cached[0] == sig:
         return cached[1]
-    sift = build_user_sift(tool_rows, search_cfg, user_id, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg)
+    sift = build_user_sift(tool_rows, search_cfg, user_id, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg)
     _cache[user_id] = (sig, sift)
     return sift
 

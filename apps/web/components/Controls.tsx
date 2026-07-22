@@ -274,10 +274,13 @@ export default function Controls({
   // memória do chat: memory=null → herda o padrão (memoryDefault). `mem` é a config
   // EFETIVA mostrada; ao mexer, materializa uma config explícita (com enabled:true
   // quando ligada) e aplica na hora via onMemoryChange.
-  const base = memory ?? memoryDefault ?? MEM_DEFAULT;
+  // EMPILHA padrão → chat (igual ao _resolve_memory do servidor): o memory_config
+  // pode ser PARCIAL (ex.: chats de projeto do Codespace nascem só com {banks}) —
+  // as chaves ausentes herdam do padrão do usuário, nunca de MEM_DEFAULT direto
+  // (que tem enabled:true e mostraria "ligada" com o padrão do usuário desligado).
   const mem: Required<MemoryConfig> = {
-    ...MEM_DEFAULT, ...base,
-    read: { ...MEM_DEFAULT.read, ...(base.read ?? {}) },
+    ...MEM_DEFAULT, ...(memoryDefault ?? {}), ...(memory ?? {}),
+    read: { ...MEM_DEFAULT.read, ...(memoryDefault?.read ?? {}), ...(memory?.read ?? {}) },
   };
   const inheriting = !memory;
   const memEnabled = mem.enabled !== false;

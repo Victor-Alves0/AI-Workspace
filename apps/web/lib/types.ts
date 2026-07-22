@@ -43,6 +43,8 @@ export interface Chat {
   view_once?: boolean;
   folder_id: string | null;
   model_config_id: string | null;
+  /** Codespace: projeto vinculado (habilita code.graph.query/code.files.browse) */
+  project_id?: string | null;
   /** memória por-chat (null = herda do modelo/perfil) */
   memory_config?: MemoryConfig | null;
   /** base de conhecimento por-chat (null = herda do modelo/perfil) */
@@ -712,4 +714,127 @@ export interface ChatArtifactVersion {
   label: "ai" | "user" | "restore";
   size: number;
   created_at: string | null;
+}
+
+// Codespace: projeto (repositório clonado + grafo de código)
+export interface CodespaceStats {
+  files?: number;
+  symbols?: number;
+  edges?: number;
+  edges_resolved?: number;
+  edges_dangling?: number;
+  index_seconds?: number;
+  refined?: boolean;
+  refine_promoted?: number;
+  by_language?: Record<string, number>;
+}
+
+export interface CodespaceProject {
+  id: string;
+  name: string;
+  source: "git" | "git-ssh" | "local";
+  repo_url: string;
+  branch: string;
+  github_account_id: string | null;
+  ssh_public_key: string | null;
+  memory_bank_id: string | null;
+  /** modelo padrão dos novos chats do projeto ("custom:<id>" ou modelo base); nulo = padrão do usuário */
+  default_model: string | null;
+  scope: { allow?: string[]; deny?: string[] };
+  index_status: "pending" | "cloning" | "indexing" | "ready" | "error";
+  error_message: string | null;
+  stats: CodespaceStats | null;
+  last_indexed_at: string | null;
+}
+
+export interface CodespaceChatLite {
+  id: string;
+  title: string;
+  updated_at: string;
+  archived: boolean;
+}
+
+export interface CodespaceFileEntry {
+  path: string;
+  kind: "dir" | "file";
+}
+
+export interface CodespaceFileList {
+  entries?: CodespaceFileEntry[];
+  error?: string;
+}
+
+export interface CodespaceFileSearch {
+  entries?: CodespaceFileEntry[];
+  truncated?: boolean;
+  error?: string;
+}
+
+export interface CodespaceFileContent {
+  path?: string;
+  total_lines?: number;
+  start_line?: number;
+  end_line?: number;
+  content?: string;
+  error?: string;
+}
+
+export interface CodespaceSymbol {
+  fqn: string | null;
+  kind: string | null;
+  path: string | null;
+  line: number | null;
+  end_line?: number | null;
+  signature: string | null;
+  doc: string | null;
+}
+
+export interface CodespaceFindResult {
+  symbols: CodespaceSymbol[];
+  warnings: string[];
+}
+
+export interface CodespaceEgoEdge {
+  fqn: string | null;
+  path: string | null;
+  line: number | null;
+  confidence: string | null;
+}
+
+export interface CodespaceEgoChild {
+  name: string;
+  kind: string | null;
+  line: number | null;
+}
+
+export interface CodespaceEgo {
+  symbol: CodespaceSymbol | null;
+  children: CodespaceEgoChild[];
+  calls: CodespaceEgoEdge[];
+  called_by: CodespaceEgoEdge[];
+  warnings: string[];
+  error?: string;
+}
+
+// Grafo do projeto inteiro (visão geral estilo Obsidian) — GET /graph/visualize
+export interface CodespaceVizNode {
+  id: number;
+  label: string;
+  domain: number | null;
+  weight: number;
+  n: number;
+}
+
+export interface CodespaceVizLink {
+  source: number;
+  target: number;
+  w: number;
+}
+
+export interface CodespaceViz {
+  level: string;
+  nodes: CodespaceVizNode[];
+  links: CodespaceVizLink[];
+  domains: { id: number; size: number; label: string | null }[];
+  warnings: string[];
 }

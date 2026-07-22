@@ -79,6 +79,8 @@ class ProfileIn(BaseModel):
     text_extraction: dict[str, Any] | None = None
     # conexão "Pesquisa na Web": mecanismo(s), multi, filtros
     web_search: dict[str, Any] | None = None
+    # conexão "Navegador" headless: {ws_url, token, enabled} (Conexões → Web)
+    browser: dict[str, Any] | None = None
     # conexão "Finanças": ordem de provedores de cotação + fallback web
     finance: dict[str, Any] | None = None
     # integração "Deep Search": modelo interno + amplitude/profundidade

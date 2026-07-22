@@ -26,7 +26,7 @@ from .. import crypto
 from ..auth.deps import require_approved
 from ..auth.security import hash_password
 from ..db import get_db
-from ..models import Artifact, Chat, Message, User
+from ..models import Artifact, Chat, CodespaceProject, Message, User
 from ..schemas.chat import (
     ChatCreate,
     ChatDetail,
@@ -75,10 +75,32 @@ async def list_chats(
     return list(rows)
 
 
+async def _owned_project_id(db: AsyncSession, user: User, project_id: uuid.UUID | None) -> uuid.UUID | None:
+    """Só devolve o project_id se pertencer a este usuário — o Codespace expõe
+    CÓDIGO-FONTE via tool; vincular o chat ao projeto de outro usuário vazaria
+    arquivos que não são dele. Diferente de folder_id/model_config_id (presets
+    de UI, sem esse risco), este vínculo é validado explicitamente aqui."""
+    if project_id is None:
+        return None
+    p = await db.get(CodespaceProject, project_id)
+    if p is None or p.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Projeto do Codespace não encontrado")
+    return project_id
+
+
 @router.post("", response_model=ChatOut)
 async def create_chat(
     body: ChatCreate, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
 ):
+    project_id = await _owned_project_id(db, user, body.project_id)
+    memory_config: dict | None = None
+    if project_id is not None:
+        # o chat nasce lendo/escrevendo o banco de memória do projeto (ver
+        # codespace_routes.create_project) — contexto já compartilhado entre
+        # os chats do mesmo Codespace, sem precisar acoplar manualmente.
+        proj = await db.get(CodespaceProject, project_id)
+        if proj is not None and proj.memory_bank_id:
+            memory_config = {"banks": [str(proj.memory_bank_id)]}
     chat = Chat(
         user_id=user.id,
         title=body.title,
@@ -87,6 +109,8 @@ async def create_chat(
         params=body.params,
         folder_id=body.folder_id,
         model_config_id=body.model_config_id,
+        project_id=project_id,
+        memory_config=memory_config,
     )
     db.add(chat)
     await db.commit()
@@ -152,7 +176,10 @@ async def update_chat(
     db: AsyncSession = Depends(get_db),
 ):
     chat = await _get_owned_chat(db, chat_id, user)
-    for field, value in body.model_dump(exclude_unset=True).items():
+    fields = body.model_dump(exclude_unset=True)
+    if "project_id" in fields:
+        fields["project_id"] = await _owned_project_id(db, user, fields["project_id"])
+    for field, value in fields.items():
         setattr(chat, field, value)
     await db.commit()
     await db.refresh(chat)

@@ -1,10 +1,37 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Globe } from "lucide-react";
+import { Check, Globe, Loader2, Monitor, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Model } from "@/lib/types";
 import ModelField from "./ModelField";
+
+/* Botão "Testar conexão": chama um endpoint e mostra ok/erro inline. */
+type TestResult = { ok: boolean; error?: string | null; count?: number };
+function TestButton({ run, label = "Testar conexão" }: { run: () => Promise<TestResult>; label?: string }) {
+  const [state, setState] = useState<"idle" | "busy" | "ok" | "fail">("idle");
+  const [msg, setMsg] = useState("");
+  async function go() {
+    setState("busy"); setMsg("");
+    try {
+      const r = await run();
+      if (r.ok) { setState("ok"); setMsg(typeof r.count === "number" ? `${r.count} resultado(s)` : "Conectado"); }
+      else { setState("fail"); setMsg(r.error || "Falhou"); }
+    } catch (e: any) {
+      setState("fail"); setMsg(e?.message || "Falhou");
+    }
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <button onClick={go} disabled={state === "busy"}
+        className="flex items-center gap-1.5 rounded-lg border border-border bg-surface2 px-3 py-1.5 text-xs text-ink-soft transition-colors hover:bg-hover disabled:opacity-60">
+        {state === "busy" ? <Loader2 size={13} className="animate-spin" /> : <Globe size={13} />} {label}
+      </button>
+      {state === "ok" && <span className="flex items-center gap-1 text-xs text-green-400"><Check size={13} /> {msg}</span>}
+      {state === "fail" && <span className="flex items-center gap-1 text-xs text-red-400"><X size={13} /> <span className="max-w-[220px] truncate" title={msg}>{msg}</span></span>}
+    </div>
+  );
+}
 
 /* Painéis de configuração POR-MODELO das ferramentas internas (Pesquisa na Web,
  * Deep Search, Extração de Texto, Finanças). Usados no editor de modelos, ao
@@ -135,6 +162,9 @@ export function WebSearchPanel({ value, onChange, status, scope = "model" }: Pan
             {e.key === "tavily" && <KeyStatus label="Chave Tavily" configured={status?.tavily ?? false} />}
             {e.key === "brave" && <KeyStatus label="Chave Brave Search" configured={status?.brave ?? false} />}
             {e.key === "duckduckgo" && <p className="pt-1 text-xs text-muted">Não requer configuração.</p>}
+            <div className="pt-2">
+              <TestButton run={() => api.post<TestResult>("/settings/test/web", { provider: e.key, searxng_url: ws.searxng_url ?? "" })} />
+            </div>
           </div>
         ))}
       </div>
@@ -146,6 +176,40 @@ export function WebSearchPanel({ value, onChange, status, scope = "model" }: Pan
           <p className="mb-1 text-sm text-ink-soft">Excluir domínios</p>
           <input value={ws.domain_filter ?? ""} onChange={(e) => wsSet("domain_filter", e.target.value)} placeholder="ex.: pinterest.com, exemplo.org"
             className="w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------- Navegador (headless Chromium) -------------------- */
+export function BrowserPanel({ value, onChange }: { value: Record<string, any>; onChange: (v: Record<string, any>) => void }) {
+  const b = value ?? {};
+  const set = (k: string, v: any) => onChange({ ...b, [k]: v });
+  const enabled = b.enabled !== false; // padrão: ligado (usa o env se sem ws_url)
+  return (
+    <div className="mt-6">
+      <Heading>Navegador (Browser)</Heading>
+      <p className="mb-2 text-xs leading-5 text-muted">
+        Um Chromium headless que a IA controla (navega com JS, clica, digita, tira screenshot).
+        Requer o serviço <code className="rounded bg-surface2 px-1">browser</code> (browserless).
+        Deixe a URL em branco para usar a configuração do servidor (BROWSER_WS_URL).
+      </p>
+      <div className="rounded-xl border border-border bg-surface px-3">
+        <Row label="Ativado" sub="Desligue para bloquear a ferramenta do navegador">
+          <Toggle on={enabled} onClick={() => set("enabled", !enabled)} />
+        </Row>
+        <div className="border-t border-border py-2.5">
+          <div className="flex items-center gap-2 text-sm font-medium text-ink"><Monitor size={14} className="text-accent-hover" /> Endpoint CDP</div>
+          <p className="mb-1 mt-2 text-xs text-muted">URL WebSocket (ws://host:porta)</p>
+          <input value={b.ws_url ?? ""} onChange={(e) => set("ws_url", e.target.value)} placeholder="ws://browser:3000"
+            className="w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-xs text-ink outline-none focus:border-accent" />
+          <p className="mb-1 mt-2 text-xs text-muted">Token (opcional — protege o endpoint)</p>
+          <input value={b.token ?? ""} onChange={(e) => set("token", e.target.value)} type="password" placeholder="BROWSER_TOKEN"
+            className="w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-xs text-ink outline-none focus:border-accent" />
+        </div>
+        <div className="border-t border-border py-2.5">
+          <TestButton run={() => api.post<TestResult>("/settings/test/browser", { ws_url: b.ws_url ?? "", token: b.token ?? "" })} />
         </div>
       </div>
     </div>

@@ -14,6 +14,14 @@ current_chat_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "current_chat_id", default=None
 )
 
+# Projeto do Codespace vinculado a ESTE chat (None = nenhum). As tools
+# code.graph.query/code.files.browse leem daqui em vez de receber o projeto como
+# parâmetro — evita threadar um "codespace_cfg" por toda a cadeia de registro/
+# cache da SIFT (que é por-USUÁRIO, não por-chat), igual ao current_chat_id.
+current_codespace_project_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "current_codespace_project_id", default=None
+)
+
 # Fuso IANA do usuário no turno (ex.: "America/Sao_Paulo"), vindo do navegador.
 # Vazio = desconhecido → tratar como UTC. Usado por lembretes e eventos de agenda
 # para interpretar horários no fuso local do usuário, não no do servidor (UTC).

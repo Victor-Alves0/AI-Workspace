@@ -34,6 +34,9 @@ export interface GenerationDeps {
   reloadMessages: (id: string) => Promise<void>;
   reloadArtifacts: (id: string) => Promise<void>;
   refreshChats: () => void;
+  // true se `id` ainda é o chat que o usuário está vendo (checado ao vivo). Os
+  // handlers de stream só pintam o estado global quando o dono deles está ativo.
+  isActiveChat: (id: string | null) => boolean;
 }
 
 /**
@@ -66,9 +69,14 @@ export function useGeneration(getDeps: () => GenerationDeps) {
   // p/ chats persistentes; abort local p/ temporários). null = nada para parar.
   const stopRef = useRef<(() => void) | null>(null);
 
-  function makeStreamHandler() {
+  function makeStreamHandler(getOwnerId?: () => string | null) {
     const deps = getDeps();
     const state: StreamState = { acc: "", reason: "", tools: [] };
+    // dono deste stream ainda é o chat ativo? (checado ao vivo a cada evento).
+    // Enquanto for, pinta o estado global; se o usuário trocou de chat, o handler
+    // segue ACUMULANDO em `state` (p/ notify/persistência) mas NÃO toca a UI —
+    // assim o parcial de um chat nunca aparece/apaga no outro.
+    const paint = () => deps.isActiveChat(getOwnerId ? getOwnerId() : null);
     // Artefatos ao vivo: blocos <artifact> saem da bolha e vão pro painel.
     // (desativado em chats temporários — o servidor não injeta as instruções lá)
     const artsLive = deps.artifactsEnabled && !deps.temporary;
@@ -78,6 +86,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
     let lastFlush = 0;
     const flush = () => {
       lastFlush = Date.now();
+      if (!paint()) return;
       if (artsLive && state.acc.includes("<artifact")) {
         const { text, live } = splitStreamArtifacts(state.acc);
         setStreaming(text);
@@ -93,7 +102,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
     const maybeFlush = () => { if (Date.now() - lastFlush >= 70) flush(); };
     const handler = (ev: any) => {
       if (ev.type === "token") {
-        if (state.acc === "") setGeneratingImage(false); // 1º token = respondendo em texto
+        if (state.acc === "" && paint()) setGeneratingImage(false); // 1º token = respondendo em texto
         state.acc += ev.text;
         maybeFlush();
       } else if (ev.type === "reasoning") {
@@ -102,42 +111,50 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       } else if (ev.type === "tool_call") {
         const t: ToolEvent = { kind: "call", name: ev.name, data: ev.arguments };
         state.tools.push(t);
-        setToolEvents((x) => [...x, t]);
+        if (paint()) setToolEvents((x) => [...x, t]);
       } else if (ev.type === "tool_result") {
         const t: ToolEvent = { kind: "result", name: ev.name, data: ev.result };
         state.tools.push(t);
-        setToolEvents((x) => [...x, t]);
-        setGeneratingImage(false); // a imagem (ou o erro) chegou
-        setConsultingKnowledge(false); // os trechos/fontes chegaram
+        if (paint()) {
+          setToolEvents((x) => [...x, t]);
+          setGeneratingImage(false); // a imagem (ou o erro) chegou
+          setConsultingKnowledge(false); // os trechos/fontes chegaram
+        }
       } else if (ev.type === "image_gen") {
-        setGeneratingImage(ev.status === "start");
+        if (paint()) setGeneratingImage(ev.status === "start");
       } else if (ev.type === "knowledge") {
-        setConsultingKnowledge(ev.status === "start");
+        if (paint()) setConsultingKnowledge(ev.status === "start");
       } else if (ev.type === "audio_router") {
-        setTranscribingAudio(ev.status === "start");
+        if (paint()) setTranscribingAudio(ev.status === "start");
       } else if (ev.type === "subagent") {
         // orquestrador delegou a um operário — mostra/atualiza os chips
+        if (!paint()) return;
         if (ev.status === "start") setSubagents((s) => (ev.agent && !s.some((x) => x.name === ev.agent) ? [...s, { name: ev.agent, ctx: ev.ctx, mem: ev.mem }] : s));
         else if (ev.status === "done") setSubagents((s) => s.filter((x) => x.name !== ev.agent));
       } else if (ev.type === "guard") {
         // um Guarda de saída detectou algo e vai refazer a resposta
-        setGuardNote({ name: ev.name, action: ev.action, fallback_model: ev.fallback_model });
+        if (paint()) setGuardNote({ name: ev.name, action: ev.action, fallback_model: ev.fallback_model });
       } else if (ev.type === "guard_reset") {
         // descarta a tentativa anterior — a resposta boa vem na próxima
         state.acc = ""; state.reason = ""; state.tools = [];
-        setToolEvents([]);
-        setGeneratingImage(false);
-        setConsultingKnowledge(false);
-        setTranscribingAudio(false);
+        if (paint()) {
+          setToolEvents([]);
+          setGeneratingImage(false);
+          setConsultingKnowledge(false);
+          setTranscribingAudio(false);
+        }
         flush();
       } else if (ev.type === "error") {
         state.acc += `\n\n⚠️ Erro: ${ev.message}`;
-        setGeneratingImage(false);
-        setConsultingKnowledge(false);
-        setTranscribingAudio(false);
+        if (paint()) {
+          setGeneratingImage(false);
+          setConsultingKnowledge(false);
+          setTranscribingAudio(false);
+        }
         flush();
       } else if (ev.type === "artifacts") {
         // resposta persistida criou/atualizou artefatos: abre o último no painel
+        if (!paint()) return;
         const ids: string[] = ev.ids ?? [];
         if (ids.length) deps.setArtifactOpen(ids[ids.length - 1]);
         setLiveArtifact(null);
@@ -149,11 +166,11 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         const evs = (ev.tool_events ?? []) as ToolEvent[];
         if (evs.length) {
           state.tools = evs;
-          setToolEvents(evs);
+          if (paint()) setToolEvents(evs);
         }
       } else if (ev.type === "title") {
         // título gerado por IA na 1ª troca: atualiza o cabeçalho na hora
-        deps.setActive((a) => (a && ev.title ? { ...a, title: ev.title } : a));
+        if (paint()) deps.setActive((a) => (a && ev.title ? { ...a, title: ev.title } : a));
       }
     };
     return { handler, state };
@@ -166,25 +183,31 @@ export function useGeneration(getDeps: () => GenerationDeps) {
   async function resumeStream(id: string) {
     const deps = getDeps();
     let started = false;
-    const { handler } = makeStreamHandler();
+    const { handler } = makeStreamHandler(() => id);
     try {
       await streamResume(id, (ev) => {
         if (ev.type === "idle") return;
         if (!started) {
           started = true;
-          setSending(true);
-          setStreaming("");
-          setStreamingReasoning("");
-          setToolEvents([]);
-          // geração retomada (pós-F5) também pode ser parada
-          stopRef.current = () => { api.post(`/chats/${id}/stop`).catch(() => {}); };
+          // só liga o estado "gerando" se este chat ainda é o que o usuário vê
+          // (ele pode ter trocado de chat antes do 1º evento chegar).
+          if (deps.isActiveChat(id)) {
+            setSending(true);
+            setStreaming("");
+            setStreamingReasoning("");
+            setToolEvents([]);
+            // geração retomada (pós-F5) também pode ser parada
+            stopRef.current = () => { api.post(`/chats/${id}/stop`).catch(() => {}); };
+          }
         }
         handler(ev);
       });
     } catch {
       /* falha ao re-assinar: ignora — as mensagens persistidas já estão na tela */
     }
-    if (started) {
+    // ao encerrar, só mexe na UI/recarrega se o chat ainda está aberto — senão
+    // sobrescreveria a tela do chat para onde o usuário navegou.
+    if (started && deps.isActiveChat(id)) {
       stopRef.current = null;
       setStreaming("");
       setStreamingReasoning("");

@@ -1,0 +1,903 @@
+"""Serviço do Codespace: clona/indexa projetos e responde às tools de grafo de
+código e arquivos.
+
+**O código é a fonte da verdade; `.codegraph/graph.db` é um cache derivado**
+(GraphCodeMap — projeto próprio do Victor: symbols, call graph, impact analysis,
+local-first, staleness-aware). Guardamos a working copy + o índice fora do
+repositório em si: `/data/codespace/<user_id>/<project_id>/{src,graph.db}`.
+
+Clonagem e indexação rodam em BACKGROUND (mesmo padrão do `knowledge/ingest.py`:
+engine efêmero NullPool + status pending→cloning→indexing→ready/error), então a
+criação do projeto responde na hora. As queries (SQLite síncrono) e as operações
+de arquivo (path-jail + escopo allow/deny) são baratas o bastante para rodar
+inline no threadpool das tools SIFT.
+
+Slice 1: só leitura, origem `git` (clone HTTPS, com o PAT/OAuth de uma conta
+GitHub conectada quando o repo é privado). SSH fica para depois.
+
+Slice 2: escrita de arquivos (write/edit/delete) + git. **Toda escrita vira um
+commit LOCAL automático** — reversível, sem fricção, é o "sempre versionar as
+etapas" que o Victor pediu. `push` (afeta o remoto — visível a terceiros, menos
+reversível) é uma ação SEPARADA e explícita, sujeita ao mesmo toggle global
+`confirm_actions` que já protege escritas do GitHub/Google/Tuya (padrão OFF).
+`delete` também passa por esse toggle (destrutivo, mesmo commitado antes)."""
+
+from __future__ import annotations
+
+import base64
+import logging
+import os
+import re
+import shutil
+import subprocess
+import tempfile
+import time
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import pathspec
+from fastapi.concurrency import run_in_threadpool
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
+
+from ..config import get_settings
+from ..models import CodespaceProject, User
+
+logger = logging.getLogger(__name__)
+
+_DATA_ROOT = Path("/data/codespace")
+
+# tetos anti-explosão de contexto: o ganho do grafo é reduzir o que volta ao
+# modelo, não devolver o banco inteiro numa chamada.
+_MAX_SIG = 800
+_MAX_DOC = 300
+_MAX_RESULTS = 30
+_MAX_FILE_LINES = 400
+_MAX_FILE_BYTES = 300_000
+_MAX_LIST_ENTRIES = 300
+_MAX_SEARCH_RESULTS = 40
+_CLONE_TIMEOUT_S = 300
+
+# instâncias CodeGraph vivas (uma por projeto) — reabrir a cada chamada reabriria
+# o sqlite à toa; index()/reindex/clone invalida explicitamente.
+_cache: dict[str, Any] = {}
+
+# tasks de indexação em voo (evita GC prematuro do asyncio.create_task)
+_TASKS: set = set()
+
+
+# --------------------------------------------------------------------------- #
+# Caminhos
+# --------------------------------------------------------------------------- #
+def _project_dir(user_id: str, project_id: str) -> Path:
+    return _DATA_ROOT / str(user_id) / str(project_id)
+
+
+def working_copy_path(user_id: str, project_id: str) -> Path:
+    return _project_dir(user_id, project_id) / "src"
+
+
+def _db_path(user_id: str, project_id: str) -> Path:
+    return _project_dir(user_id, project_id) / "graph.db"
+
+
+# --------------------------------------------------------------------------- #
+# CodeGraph — instância cacheada por projeto
+# --------------------------------------------------------------------------- #
+def _get_graph(user_id: str, project_id: str):
+    from codegraph import CodeGraph  # import preguiçoso (como playwright no browser_driver)
+
+    key = str(project_id)
+    cg = _cache.get(key)
+    if cg is None:
+        root = working_copy_path(user_id, project_id)
+        db_path = _db_path(user_id, project_id)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        cg = CodeGraph(str(root), db_path=str(db_path))
+        _cache[key] = cg
+    return cg
+
+
+def invalidate(project_id: str) -> None:
+    cg = _cache.pop(str(project_id), None)
+    if cg is not None:
+        try:
+            cg.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+# --------------------------------------------------------------------------- #
+# Clonagem (git via HTTPS ou SSH) + projeto local (sem remoto)
+# --------------------------------------------------------------------------- #
+def _auth_header(token: str) -> str:
+    # Basic auth por HEADER (não na URL): não fica gravado em .git/config da
+    # working copy, então nenhuma tool de arquivo/skim consegue ler o token de volta.
+    b64 = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+    return f"Authorization: Basic {b64}"
+
+
+def generate_ssh_keypair() -> tuple[str, str]:
+    """Gera um par de chaves ed25519 (deploy key) NOVO por projeto — a privada
+    nunca é vista pelo usuário (fica criptografada no banco); só a pública é
+    exibida, pra ele colar como deploy key no GitHub/GitLab/VPS. Nunca reusa uma
+    chave pessoal do usuário (diferente de "colar sua própria chave")."""
+    with tempfile.TemporaryDirectory() as tmp:
+        key_path = Path(tmp) / "id_ed25519"
+        proc = subprocess.run(
+            ["ssh-keygen", "-t", "ed25519", "-N", "", "-C", "codespace-ai", "-f", str(key_path)],
+            capture_output=True, text=True, timeout=30,
+        )
+        if proc.returncode != 0:
+            raise RuntimeError(f"ssh-keygen falhou: {(proc.stderr or proc.stdout).strip()[-400:]}")
+        return key_path.read_text(), (key_path.with_suffix(".pub")).read_text().strip()
+
+
+def _ssh_env(private_key: str) -> tuple[dict[str, str], Any]:
+    """Escreve a chave privada num arquivo temporário (0600) e devolve o
+    `GIT_SSH_COMMAND` que aponta pra ele — o arquivo (via `tempfile.NamedTemporaryFile`,
+    devolvido junto) precisa ficar vivo até o subprocess terminar; o chamador o
+    fecha (e apaga) num `finally`. `UserKnownHostsFile=/dev/null` + `accept-new`:
+    nunca persistimos known_hosts por-projeto, cada chamada reconecta do zero —
+    aceitável (não é um loop de muitas chamadas)."""
+    tf = tempfile.NamedTemporaryFile(mode="w", suffix="_id_ed25519", delete=False)
+    tf.write(private_key if private_key.endswith("\n") else private_key + "\n")
+    tf.close()
+    os.chmod(tf.name, 0o600)
+    ssh_cmd = (
+        f"ssh -i {tf.name} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new "
+        "-o UserKnownHostsFile=/dev/null -o BatchMode=yes"
+    )
+    return {"GIT_SSH_COMMAND": ssh_cmd}, tf
+
+
+def _clone_or_refresh(repo_url: str, branch: str, dest: Path, token: str | None,
+                       ssh_key: str | None = None) -> None:
+    """(Re)clona um repo git (shallow, --depth 1) numa working copy nova.
+
+    v1: sempre recria do zero (rm -rf + clone) em vez de fetch/pull incremental —
+    mais simples e sem casos de borda de merge/estado sujo. O índice do
+    GraphCodeMap é que faz a parte incremental de verdade (content-hash)."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists():
+        shutil.rmtree(dest)
+    cmd = ["git"]
+    env = None
+    keyfile = None
+    if ssh_key:
+        env_extra, keyfile = _ssh_env(ssh_key)
+        env = {**os.environ, **env_extra}
+    elif token:
+        cmd += ["-c", f"http.extraHeader={_auth_header(token)}"]
+    cmd += ["clone", "--branch", branch or "main", "--single-branch", "--depth", "1", repo_url, str(dest)]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_CLONE_TIMEOUT_S, env=env)
+    finally:
+        if keyfile is not None:
+            try:
+                os.unlink(keyfile.name)
+            except OSError:
+                pass
+    if proc.returncode != 0:
+        raise RuntimeError(f"git clone falhou: {proc.stderr.strip()[-500:] or proc.stdout.strip()[-500:]}")
+
+
+def _init_local(dest: Path, branch: str) -> None:
+    """Projeto SEM remoto: só um `git init` vazio — o usuário/a IA populam os
+    arquivos do zero. Nunca reclona/descarta (não há origem pra puxar de novo)."""
+    if dest.exists():
+        return
+    dest.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(["git", "init", "-b", branch or "main", str(dest)], capture_output=True, text=True, timeout=30)
+    if proc.returncode != 0:
+        raise RuntimeError(f"git init falhou: {(proc.stderr or proc.stdout).strip()[-400:]}")
+
+
+# --------------------------------------------------------------------------- #
+# Indexação em background (clona/atualiza → CodeGraph.index() → persiste status)
+# --------------------------------------------------------------------------- #
+def spawn_index(project_id: uuid.UUID, reclone: bool = True) -> None:
+    """Agenda indexação em background (fire-and-forget seguro).
+
+    `reclone=True` (padrão — 1ª indexação, ou "Ressincronizar" explícito): apaga a
+    working copy e clona de novo do zero — DESCARTA commits locais não enviados
+    (inclusive os que a IA fez). `reclone=False` ("Reindexar" normal): reaproveita
+    a working copy atual, só reroda o índice (incremental, por content-hash) —
+    seguro de chamar a qualquer momento, nunca perde trabalho da IA."""
+    import asyncio
+
+    t = asyncio.create_task(_index_project(project_id, reclone))
+    _TASKS.add(t)
+    t.add_done_callback(_TASKS.discard)
+
+
+async def _mark(Session, project_id: uuid.UUID, **fields: Any) -> None:
+    async with Session() as db:
+        p = await db.get(CodespaceProject, project_id)
+        if p is None:
+            return
+        for k, v in fields.items():
+            setattr(p, k, v)
+        await db.commit()
+
+
+async def _index_project(project_id: uuid.UUID, reclone: bool = True) -> None:
+    eng = create_async_engine(get_settings().database_url, poolclass=NullPool)
+    try:
+        Session = async_sessionmaker(eng, expire_on_commit=False)
+        async with Session() as db:
+            proj = await db.get(CodespaceProject, project_id)
+            if proj is None:
+                return
+            user_id = str(proj.user_id)
+            repo_url, branch, source = proj.repo_url, proj.branch, proj.source
+            gh_account_id = str(proj.github_account_id) if proj.github_account_id else None
+            ssh_key = proj.ssh_private_key
+
+        dest = working_copy_path(user_id, str(project_id))
+        # "local" nunca reclona (não há origem pra puxar de novo) — só inicializa
+        # uma vez; reaproveita a working copy em qualquer outra chamada.
+        need_clone = (not dest.exists()) if source == "local" else (reclone or not dest.exists())
+
+        if need_clone:
+            await _mark(Session, project_id, index_status="cloning", error_message=None)
+            try:
+                if source == "local":
+                    await run_in_threadpool(_init_local, dest, branch)
+                elif source == "git-ssh":
+                    if not ssh_key:
+                        raise RuntimeError("projeto sem deploy key gerada")
+                    await run_in_threadpool(_clone_or_refresh, repo_url, branch, dest, None, ssh_key)
+                elif source == "git":
+                    token = None
+                    if gh_account_id:
+                        from ..integrations import github_service
+
+                        token = await github_service.get_token(gh_account_id)
+                    await run_in_threadpool(_clone_or_refresh, repo_url, branch, dest, token)
+                else:
+                    raise RuntimeError(f"origem '{source}' desconhecida")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("codespace clone falhou (%s): %s", project_id, exc)
+                await _mark(Session, project_id, index_status="error", error_message=str(exc)[:1000])
+                return
+            invalidate(str(project_id))  # working copy nova — reabre do zero
+
+        await _mark(Session, project_id, index_status="indexing", error_message=None)
+
+        try:
+            t0 = time.time()
+            cg = await run_in_threadpool(_get_graph, user_id, str(project_id))
+            # force=True só numa working copy RECÉM-clonada (tudo "novo" p/ o
+            # indexador); caso contrário força incremental (content-hash) — mais
+            # rápido e é o que faz o reindex pós-escrita da IA ser barato.
+            await run_in_threadpool(cg.index, need_clone)
+            elapsed = round(time.time() - t0, 2)
+            stats = await run_in_threadpool(cg.stats)
+            stats["index_seconds"] = elapsed
+            stats["refined"] = False
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("codespace index falhou (%s): %s", project_id, exc)
+            await _mark(Session, project_id, index_status="error", error_message=str(exc)[:1000])
+            return
+
+        await _mark(
+            Session, project_id,
+            index_status="ready", stats=stats, last_indexed_at=datetime.now(timezone.utc),
+        )
+    finally:
+        await eng.dispose()
+
+
+def spawn_refine(project_id: uuid.UUID, user_id: str) -> None:
+    """Resolução L1 (jedi p/ Python): promove arestas 'inferred'/'possible' a
+    'certain'. Fica FORA do fluxo padrão de indexação — é caro (dezenas de
+    segundos mesmo em repos pequenos) — o usuário aciona quando quiser precisão
+    maior nas respostas de callers/impact."""
+    import asyncio
+
+    t = asyncio.create_task(_refine_project(project_id, user_id))
+    _TASKS.add(t)
+    t.add_done_callback(_TASKS.discard)
+
+
+async def _refine_project(project_id: uuid.UUID, user_id: str) -> None:
+    eng = create_async_engine(get_settings().database_url, poolclass=NullPool)
+    try:
+        Session = async_sessionmaker(eng, expire_on_commit=False)
+        try:
+            from codegraph import Indexer, l1
+
+            root = working_copy_path(user_id, str(project_id))
+            db_path = _db_path(user_id, str(project_id))
+            ix = await run_in_threadpool(Indexer, str(root), str(db_path))
+            r = await run_in_threadpool(l1.refine, ix)
+            invalidate(str(project_id))  # próxima query relê o db já refinado
+            cg = await run_in_threadpool(_get_graph, user_id, str(project_id))
+            stats = await run_in_threadpool(cg.stats)
+            stats["refined"] = True
+            stats["refine_promoted"] = r.get("promoted", 0)
+            await _mark(Session, project_id, stats=stats)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("codespace refine falhou (%s): %s", project_id, exc)
+    finally:
+        await eng.dispose()
+
+
+async def load_project(user_id: str, project_id: str) -> CodespaceProject | None:
+    """Carrega o projeto SÓ se pertence a `user_id` — chamado de dentro da tool
+    (contexto síncrono) via `asyncio.run(...)`, igual a `_store_browser_shot` no
+    browser. Defesa em profundidade: mesmo que um chat aponte (por engano ou
+    manipulação da API) para um project_id de outro usuário, a tool nunca lê os
+    arquivos/grafo de quem não é dono — a rota já valida isso ao vincular, mas a
+    tool NÃO confia só nisso."""
+    eng = create_async_engine(get_settings().database_url, poolclass=NullPool)
+    try:
+        Session = async_sessionmaker(eng, expire_on_commit=False)
+        async with Session() as db:
+            try:
+                pid = uuid.UUID(str(project_id))
+            except ValueError:
+                return None
+            p = await db.get(CodespaceProject, pid)
+            if p is None or str(p.user_id) != str(user_id):
+                return None
+            return p
+    finally:
+        await eng.dispose()
+
+
+def delete_project_files(user_id: str, project_id: str) -> None:
+    """Remove a working copy + índice do disco (chamado ao apagar o projeto)."""
+    invalidate(project_id)
+    d = _project_dir(user_id, project_id)
+    if d.exists():
+        shutil.rmtree(d, ignore_errors=True)
+
+
+async def load_project_ctx(user_id: str, project_id: str) -> tuple[CodespaceProject | None, bool]:
+    """Como `load_project`, mas TAMBÉM devolve se `confirm_actions` está ligado
+    (Configurações → Segurança) — usado pelas ações destrutivas/externas
+    (delete/push) da tool de escrita, mesma engine efêmera/mesma sessão (1 round
+    trip a mais, não 2 chamadas separadas)."""
+    eng = create_async_engine(get_settings().database_url, poolclass=NullPool)
+    try:
+        Session = async_sessionmaker(eng, expire_on_commit=False)
+        async with Session() as db:
+            try:
+                pid = uuid.UUID(str(project_id))
+                uid = uuid.UUID(str(user_id))
+            except ValueError:
+                return None, False
+            p = await db.get(CodespaceProject, pid)
+            if p is None or str(p.user_id) != str(user_id):
+                return None, False
+            u = await db.get(User, uid)
+            confirm = bool(((u.profile or {}).get("security") or {}).get("confirm_actions", False)) if u else False
+            return p, confirm
+    finally:
+        await eng.dispose()
+
+
+# --------------------------------------------------------------------------- #
+# Queries do grafo — moldadas p/ o modelo (compactas; confiança/avisos NUNCA somem)
+# --------------------------------------------------------------------------- #
+def _short(sym: dict | None) -> dict | None:
+    if sym is None:
+        return None
+    sig = (sym.get("signature") or "").strip()
+    if len(sig) > _MAX_SIG:
+        sig = sig[:_MAX_SIG] + "…"
+    doc = (sym.get("doc") or "").strip()
+    return {
+        "fqn": sym.get("fqn"), "kind": sym.get("kind"),
+        "path": sym.get("path"), "line": sym.get("start_line"), "end_line": sym.get("end_line"),
+        "signature": sig or None, "doc": (doc[:_MAX_DOC] or None) if doc else None,
+    }
+
+
+def find(user_id: str, project_id: str, query: str, limit: int = 10) -> dict:
+    cg = _get_graph(user_id, project_id)
+    symbols, env = cg.find_symbol(query, limit=min(max(limit, 1), _MAX_RESULTS))
+    return {"symbols": [_short(s) for s in symbols], "warnings": env.warnings}
+
+
+def callers(user_id: str, project_id: str, selector: str, depth: int = 1) -> dict:
+    cg = _get_graph(user_id, project_id)
+    target, edges, env = cg.callers(selector, depth=max(1, min(depth, 4)))
+    return {
+        "target": _short(target),
+        "callers": [
+            {
+                "fqn": e.get("other_fqn"), "path": e.get("site_path"), "line": e.get("line"),
+                "confidence": e.get("confidence"), "depth": e.get("depth"),
+            }
+            for e in edges[:_MAX_RESULTS]
+        ],
+        "total_found": len(edges),
+        "warnings": env.warnings,
+    }
+
+
+def impact(user_id: str, project_id: str, selector: str, depth: int = 3) -> dict:
+    cg = _get_graph(user_id, project_id)
+    target, edges, env = cg.impact(selector, depth=max(1, min(depth, 5)))
+    return {
+        "target": _short(target),
+        "affects": [
+            {
+                "fqn": e.get("fqn"), "path": e.get("path"), "line": e.get("start_line"),
+                "depth": e.get("depth"), "confidence": e.get("confidence"), "via": e.get("via"),
+            }
+            for e in edges[:_MAX_RESULTS]
+        ],
+        "total_found": len(edges),
+        "warnings": env.warnings,
+    }
+
+
+def ego(user_id: str, project_id: str, selector: str) -> dict:
+    cg = _get_graph(user_id, project_id)
+    data, env = cg.ego_graph(selector)
+
+    def _edge(e: dict) -> dict:
+        return {
+            "fqn": e.get("other_fqn") or e.get("dst_name"), "path": e.get("site_path"),
+            "line": e.get("line"), "confidence": e.get("confidence"),
+        }
+
+    return {
+        "symbol": _short(data.get("symbol")),
+        "children": [
+            {"name": c.get("name"), "kind": c.get("kind"), "line": c.get("start_line")}
+            for c in (data.get("children") or [])[:_MAX_RESULTS]
+        ],
+        "calls": [_edge(e) for e in (data.get("out") or [])[:_MAX_RESULTS]],
+        "called_by": [_edge(e) for e in (data.get("in") or [])[:_MAX_RESULTS]],
+        "warnings": env.warnings,
+    }
+
+
+def status(user_id: str, project_id: str) -> dict:
+    return _get_graph(user_id, project_id).stats()
+
+
+_MAX_VIZ_NODES = 400
+
+
+def visualize(user_id: str, project_id: str, level: str = "file", scope: str = "", top: int = 200) -> dict:
+    """Grafo do projeto inteiro (nós/arestas/comunidades) pra visualização estilo
+    Obsidian — diferente de `ego`/`find` (vizinhança de UM símbolo), aqui é a visão
+    geral. `level="file"` (padrão) agrega por arquivo — MUITO mais legível que
+    símbolo-a-símbolo num repo de milhares de símbolos; `level="symbol"` existe pra
+    repos pequenos/escopo estreito. `top` limita nós (a lib já poda pelos mais
+    conectados; aqui só reforçamos o teto de contexto/render)."""
+    cg = _get_graph(user_id, project_id)
+    lvl = level if level in ("file", "symbol") else "file"
+    data, env = cg.visualize(level=lvl, scope=scope or None, top=min(max(top, 10), _MAX_VIZ_NODES))
+    return {
+        "level": data.get("level", lvl),
+        "nodes": data.get("nodes", []),
+        "links": data.get("links", []),
+        "domains": data.get("domains", []),
+        "warnings": env.warnings,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Arquivos — path-jail + escopo allow/deny (globs estilo .gitignore via pathspec)
+# --------------------------------------------------------------------------- #
+_DEFAULT_DENY = [".git/", "__pycache__/", "*.pyc", "node_modules/", ".codegraph/"]
+
+
+def _spec(patterns: list[str]) -> pathspec.PathSpec | None:
+    return pathspec.PathSpec.from_lines("gitwildmatch", patterns) if patterns else None
+
+
+def safe_path(root: Path, rel: str) -> Path:
+    """Resolve `rel` DENTRO de `root`; recusa `..`, absoluto ou escape via symlink."""
+    rel = (rel or "").strip().replace("\\", "/").lstrip("/")
+    root_r = root.resolve()
+    candidate = (root_r / rel).resolve() if rel else root_r
+    if candidate != root_r and root_r not in candidate.parents:
+        raise ValueError("caminho fora do projeto")
+    return candidate
+
+
+def _rel(root: Path, path: Path) -> str:
+    root_r = root.resolve()
+    return "." if path == root_r else path.relative_to(root_r).as_posix()
+
+
+def is_allowed(root: Path, path: Path, scope: dict | None) -> bool:
+    scope = scope or {}
+    deny_spec = _spec((scope.get("deny") or []) + _DEFAULT_DENY)
+    allow_spec = _spec(scope.get("allow") or [])
+    rel = _rel(root, path)
+    # patterns de diretório ("x/") só casam contra um path que TERMINA em "/" —
+    # sem isso, ".git/" nunca bate com a entrada ".git" nem com ".git/config".
+    match_rel = f"{rel}/" if path.is_dir() and rel != "." else rel
+    if deny_spec and deny_spec.match_file(match_rel):
+        return False
+    if allow_spec and rel != "." and not allow_spec.match_file(match_rel):
+        return False
+    return True
+
+
+def list_files(user_id: str, project_id: str, scope: dict | None, path: str = "", max_depth: int = 3) -> dict:
+    root = working_copy_path(user_id, project_id)
+    if not root.exists():
+        return {"error": "projeto ainda não indexado/clonado"}
+    start = safe_path(root, path)
+    if not start.exists():
+        return {"error": f"caminho não encontrado: {path}"}
+    root_r = root.resolve()
+    base_depth = len(start.relative_to(root_r).parts) if start != root_r else 0
+    out: list[dict] = []
+    truncated = False
+
+    def _walk(d: Path) -> None:
+        nonlocal truncated
+        if truncated:
+            return
+        try:
+            children = sorted(d.iterdir())
+        except OSError:
+            return
+        for p in children:
+            # poda ANTES de descer: um diretório negado (.git, node_modules…)
+            # nunca é caminhado por dentro — não só filtrado depois.
+            if not is_allowed(root, p, scope):
+                continue
+            out.append({"path": _rel(root, p), "kind": "dir" if p.is_dir() else "file"})
+            if len(out) >= _MAX_LIST_ENTRIES:
+                truncated = True
+                return
+            if p.is_dir():
+                depth = len(p.relative_to(root_r).parts) - base_depth
+                if depth < max_depth:
+                    _walk(p)
+                    if truncated:
+                        return
+
+    _walk(start)
+    if truncated:
+        out.append({"note": f"truncado em {_MAX_LIST_ENTRIES} entradas — refine o `path`"})
+    return {"entries": out}
+
+
+def read_file(user_id: str, project_id: str, scope: dict | None, path: str,
+              start_line: int = 1, end_line: int | None = None) -> dict:
+    root = working_copy_path(user_id, project_id)
+    if not root.exists():
+        return {"error": "projeto ainda não indexado/clonado"}
+    target = safe_path(root, path)
+    if not target.is_file():
+        return {"error": f"arquivo não encontrado: {path}"}
+    if not is_allowed(root, target, scope):
+        return {"error": "arquivo fora do escopo liberado deste projeto"}
+    if target.stat().st_size > _MAX_FILE_BYTES:
+        return {"error": f"arquivo grande demais ({target.stat().st_size} bytes) — peça um trecho por range"}
+    text = target.read_text(encoding="utf-8", errors="replace")
+    lines = text.splitlines()
+    lo = max(1, start_line)
+    hi = min(len(lines), end_line or (lo + _MAX_FILE_LINES - 1), lo + _MAX_FILE_LINES - 1)
+    numbered = "\n".join(f"{i}\t{lines[i - 1]}" for i in range(lo, hi + 1))
+    return {
+        "path": _rel(root, target), "total_lines": len(lines),
+        "start_line": lo, "end_line": hi, "content": numbered,
+    }
+
+
+_TEXT_EXTS = (
+    ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java", ".kt", ".cs", ".c", ".h",
+    ".cpp", ".hpp", ".php", ".rb", ".lua", ".swift", ".scala", ".clj", ".md", ".txt",
+    ".json", ".yml", ".yaml", ".toml", ".cfg", ".ini", ".sh", ".sql", ".html", ".css",
+)
+
+
+def search_files(user_id: str, project_id: str, scope: dict | None, query: str,
+                  glob: str = "") -> dict:
+    root = working_copy_path(user_id, project_id)
+    if not root.exists():
+        return {"error": "projeto ainda não indexado/clonado"}
+    if not (query or "").strip():
+        return {"error": "`query` é obrigatório"}
+    try:
+        pattern = re.compile(re.escape(query), re.IGNORECASE)
+    except re.error:
+        return {"error": "query inválida"}
+    glob_spec = _spec([glob]) if glob else None
+    results: list[dict] = []
+
+    def _walk(d: Path) -> None:
+        try:
+            children = sorted(d.iterdir())
+        except OSError:
+            return
+        for p in children:
+            if len(results) >= _MAX_SEARCH_RESULTS:
+                return
+            # poda diretórios negados (.git, node_modules…) ANTES de descer —
+            # evita vasculhar objetos git/binários à toa num repo grande.
+            if not is_allowed(root, p, scope):
+                continue
+            if p.is_dir():
+                _walk(p)
+                continue
+            if p.suffix.lower() not in _TEXT_EXTS:
+                continue
+            rel = _rel(root, p)
+            if glob_spec and not glob_spec.match_file(rel):
+                continue
+            try:
+                if p.stat().st_size > _MAX_FILE_BYTES:
+                    continue
+                for i, line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
+                    if pattern.search(line):
+                        results.append({"path": rel, "line": i, "text": line.strip()[:300]})
+                        if len(results) >= _MAX_SEARCH_RESULTS:
+                            return
+            except OSError:
+                continue
+
+    _walk(root)
+    return {"results": results, "truncated": len(results) >= _MAX_SEARCH_RESULTS}
+
+
+# --------------------------------------------------------------------------- #
+# Escrita + git — toda escrita vira um commit LOCAL automático (reversível, sem
+# fricção); push é ação SEPARADA e explícita (afeta o remoto, menos reversível).
+# --------------------------------------------------------------------------- #
+_GIT_AUTHOR = ("Codespace AI", "codespace-ai@ai-workspace.local")
+
+
+def _git(root: Path, *args: str, timeout: float = 30) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=timeout)
+
+
+def _git_commit(root: Path, message: str) -> dict | None:
+    """`git add -A` + commit (identidade via `-c`, NÃO persiste em `.git/config`).
+    Devolve {sha, message} ou None se não havia nada pra commitar (working tree
+    já limpa — ex.: `write` com o MESMO conteúdo que já existia)."""
+    name, email = _GIT_AUTHOR
+    _git(root, "add", "-A")
+    proc = _git(root, "-c", f"user.name={name}", "-c", f"user.email={email}", "commit", "-m", message[:500])
+    if proc.returncode != 0:
+        if "nothing to commit" in (proc.stdout + proc.stderr).lower():
+            return None
+        raise RuntimeError(f"git commit falhou: {(proc.stderr or proc.stdout).strip()[-400:]}")
+    sha = _git(root, "rev-parse", "--short", "HEAD").stdout.strip()
+    return {"sha": sha, "message": message}
+
+
+def _reindex_after_write(user_id: str, project_id: str) -> None:
+    """Reindexação SÍNCRONA e INCREMENTAL (content-hash) logo após um write/edit/
+    delete — sem isso, uma query de grafo NO MESMO turno veria dados velhos.
+    Falha aqui não derruba o resultado da escrita: o arquivo já foi salvo e
+    commitado: o pior caso é o grafo ficar 1 chamada atrasado."""
+    try:
+        cg = _get_graph(user_id, project_id)
+        cg.index()  # force=False: só reparsa o que mudou (rápido)
+    except Exception:  # noqa: BLE001
+        logger.warning("reindex pós-escrita falhou (%s/%s)", user_id, project_id, exc_info=True)
+
+
+def write_file(user_id: str, project_id: str, scope: dict | None, path: str,
+                content: str, message: str = "") -> dict:
+    root = working_copy_path(user_id, project_id)
+    if not root.exists():
+        return {"error": "projeto ainda não clonado"}
+    target = safe_path(root, path)
+    if not is_allowed(root, target, scope):
+        return {"error": "caminho fora do escopo liberado deste projeto"}
+    if len(content.encode("utf-8", errors="replace")) > _MAX_FILE_BYTES:
+        return {"error": f"conteúdo grande demais (máx {_MAX_FILE_BYTES} bytes) — escreva em partes menores"}
+    is_new = not target.exists()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(content, encoding="utf-8")
+    rel = _rel(root, target)
+    commit = _git_commit(root, message.strip() or f"AI: {'cria' if is_new else 'atualiza'} {rel}")
+    _reindex_after_write(user_id, project_id)
+    return {"ok": True, "path": rel, "created": is_new, "commit": commit}
+
+
+def edit_file(user_id: str, project_id: str, scope: dict | None, path: str,
+              search: str, replace: str, message: str = "") -> dict:
+    """SEARCH/REPLACE: `search` precisa bater EXATAMENTE (copiado do `read`) e
+    ser ÚNICO no arquivo — mesma disciplina do `<artifact-edit>` do chat, evita
+    o modelo trocar o trecho errado por ambiguidade."""
+    root = working_copy_path(user_id, project_id)
+    if not root.exists():
+        return {"error": "projeto ainda não clonado"}
+    target = safe_path(root, path)
+    if not target.is_file():
+        return {"error": f"arquivo não encontrado: {path}"}
+    if not is_allowed(root, target, scope):
+        return {"error": "caminho fora do escopo liberado deste projeto"}
+    if not search:
+        return {"error": "`search` é obrigatório"}
+    text = target.read_text(encoding="utf-8", errors="replace")
+    count = text.count(search)
+    if count == 0:
+        return {"error": "texto de `search` não encontrado — copie exatamente do `read` (indentação inclusa)"}
+    if count > 1:
+        return {"error": f"texto de `search` aparece {count} vezes — inclua mais contexto para ficar único"}
+    target.write_text(text.replace(search, replace, 1), encoding="utf-8")
+    rel = _rel(root, target)
+    commit = _git_commit(root, message.strip() or f"AI: edita {rel}")
+    _reindex_after_write(user_id, project_id)
+    return {"ok": True, "path": rel, "commit": commit}
+
+
+_MAX_FIND_RESULTS = 200
+
+
+def find_files(user_id: str, project_id: str, scope: dict | None, query: str, limit: int = 100) -> dict:
+    """Busca arquivos pelo NOME (substring, case-insensitive) — o explorador do
+    chat/Espaço de Trabalho; diferente de `search_files` (busca por conteúdo)."""
+    root = working_copy_path(user_id, project_id)
+    if not root.exists():
+        return {"error": "projeto ainda não indexado/clonado"}
+    q = (query or "").strip().lower()
+    if not q:
+        return {"entries": []}
+    cap = max(1, min(limit, _MAX_FIND_RESULTS))
+    out: list[dict] = []
+
+    def _walk(d: Path) -> None:
+        try:
+            children = sorted(d.iterdir())
+        except OSError:
+            return
+        for p in children:
+            if len(out) >= cap:
+                return
+            if not is_allowed(root, p, scope):
+                continue
+            if p.is_dir():
+                _walk(p)
+                continue
+            if q in p.name.lower():
+                out.append({"path": _rel(root, p), "kind": "file"})
+
+    _walk(root)
+    return {"entries": out, "truncated": len(out) >= cap}
+
+
+def move_file(user_id: str, project_id: str, scope: dict | None, path: str,
+              dest_path: str, message: str = "") -> dict:
+    """Mover/renomear (arraste-e-solte ou "Renomear" no explorador humano)."""
+    root = working_copy_path(user_id, project_id)
+    if not root.exists():
+        return {"error": "projeto ainda não clonado"}
+    src = safe_path(root, path)
+    if not src.exists():
+        return {"error": f"caminho não encontrado: {path}"}
+    dest = safe_path(root, dest_path)
+    if not is_allowed(root, src, scope) or not is_allowed(root, dest, scope):
+        return {"error": "caminho fora do escopo liberado deste projeto"}
+    if dest.exists():
+        return {"error": f"já existe um item em {dest_path}"}
+    if src.is_dir():
+        try:
+            dest.relative_to(src)
+            return {"error": "não é possível mover uma pasta para dentro dela mesma"}
+        except ValueError:
+            pass
+    rel_src = _rel(root, src)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    src.rename(dest)
+    rel_dest = _rel(root, dest)
+    commit = _git_commit(root, message.strip() or f"Move {rel_src} -> {rel_dest}")
+    _reindex_after_write(user_id, project_id)
+    return {"ok": True, "path": rel_dest, "commit": commit}
+
+
+def delete_file(user_id: str, project_id: str, scope: dict | None, path: str, message: str = "") -> dict:
+    root = working_copy_path(user_id, project_id)
+    if not root.exists():
+        return {"error": "projeto ainda não clonado"}
+    target = safe_path(root, path)
+    if not target.exists():
+        return {"error": f"caminho não encontrado: {path}"}
+    if not is_allowed(root, target, scope):
+        return {"error": "caminho fora do escopo liberado deste projeto"}
+    rel = _rel(root, target)
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+    commit = _git_commit(root, message.strip() or f"AI: remove {rel}")
+    _reindex_after_write(user_id, project_id)
+    return {"ok": True, "path": rel, "commit": commit}
+
+
+def git_log(user_id: str, project_id: str, limit: int = 20) -> dict:
+    root = working_copy_path(user_id, project_id)
+    if not root.exists():
+        return {"error": "projeto ainda não clonado"}
+    proc = _git(root, "log", f"-{max(1, min(limit, 100))}", "--pretty=format:%h|%ad|%s", "--date=iso-strict")
+    if proc.returncode != 0:
+        return {"error": (proc.stderr or "git log falhou")[:300]}
+    commits = []
+    for line in proc.stdout.splitlines():
+        parts = line.split("|", 2)
+        if len(parts) == 3:
+            commits.append({"sha": parts[0], "date": parts[1], "message": parts[2]})
+    return {"commits": commits}
+
+
+def git_diff(user_id: str, project_id: str, scope: dict | None, path: str = "", ref: str = "") -> dict:
+    """`ref` vazio = mudanças não commitadas (normalmente vazio — cada escrita já
+    commita); passe um sha/`HEAD~N` pra ver o que uma mudança específica fez."""
+    root = working_copy_path(user_id, project_id)
+    if not root.exists():
+        return {"error": "projeto ainda não clonado"}
+    if ref.startswith("-"):
+        # `ref` vira um argumento solto pro `git diff`: sem essa checagem, um
+        # ref tipo "--output=/data/codespace/..." é lido como FLAG (não revisão)
+        # e faz o git ESCREVER o diff em qualquer arquivo que o usuário `app`
+        # consiga tocar — injeção de argumento, não só um ref inválido.
+        return {"error": "ref inválido"}
+    args = ["diff"] + ([ref] if ref else [])
+    if path:
+        target = safe_path(root, path)
+        if not is_allowed(root, target, scope):
+            return {"error": "caminho fora do escopo liberado deste projeto"}
+        args += ["--", _rel(root, target)]
+    proc = _git(root, *args)
+    if proc.returncode != 0:
+        return {"error": (proc.stderr or "git diff falhou")[:400]}
+    diff = proc.stdout
+    if len(diff) > _MAX_FILE_BYTES:
+        diff = diff[:_MAX_FILE_BYTES] + "\n…[truncado]"
+    return {"diff": diff or "(sem mudanças)"}
+
+
+def _push(root: Path, branch: str, token: str | None, ssh_key: str | None = None) -> None:
+    cmd = ["git", "-C", str(root)]
+    env = None
+    keyfile = None
+    if ssh_key:
+        env_extra, keyfile = _ssh_env(ssh_key)
+        env = {**os.environ, **env_extra}
+    elif token:
+        cmd += ["-c", f"http.extraHeader={_auth_header(token)}"]
+    cmd += ["push", "origin", f"HEAD:{branch}"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_CLONE_TIMEOUT_S, env=env)
+    finally:
+        if keyfile is not None:
+            try:
+                os.unlink(keyfile.name)
+            except OSError:
+                pass
+    if proc.returncode != 0:
+        raise RuntimeError(f"git push falhou: {(proc.stderr or proc.stdout).strip()[-500:]}")
+
+
+async def push(user_id: str, project_id: str) -> dict:
+    """Envia os commits locais (feitos pela IA ou não) para o `origin`. Reusa o
+    MESMO auth por header/deploy-key do clone (token/chave nunca tocam a
+    URL/`.git/config`). Projeto "local" não tem origin — erro amigável."""
+    proj = await load_project(user_id, project_id)
+    if proj is None:
+        return {"error": "projeto não encontrado (ou não pertence a este usuário)"}
+    if proj.source == "local":
+        return {"error": "projeto local não tem repositório remoto — nada para enviar"}
+    root = working_copy_path(user_id, project_id)
+    if not root.exists():
+        return {"error": "projeto ainda não clonado"}
+    token = None
+    if proj.source == "git" and proj.github_account_id:
+        from ..integrations import github_service
+
+        token = await github_service.get_token(str(proj.github_account_id))
+    try:
+        await run_in_threadpool(_push, root, proj.branch, token, proj.ssh_private_key)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)[:400]}
+    return {"ok": True, "branch": proj.branch}
