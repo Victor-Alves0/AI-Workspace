@@ -700,6 +700,13 @@ function ProjectDetail({
                 {project.stats?.refined && <span className="ml-1.5 inline-flex items-center gap-1 text-accent-hover"><Sparkles size={11} /> refinado</span>}
               </p>
             )}
+            {project.index_status === "ready" && !project.stats?.files && (
+              <p className="mt-1 text-xs text-amber-400">
+                Nenhum arquivo com símbolos para o grafo
+                {project.stats?.unsupported_ext?.length ? ` (${project.stats.unsupported_ext.join(", ")})` : ""}
+                {" — "}os arquivos continuam legíveis e pesquisáveis pela IA.
+              </p>
+            )}
             {project.index_status === "error" && <p className="mt-1 text-xs text-red-400">{project.error_message}</p>}
           </div>
         </div>
@@ -752,7 +759,7 @@ function ProjectDetail({
         </p>
       ) : (
         <>
-          <div className="mb-3 flex items-center gap-1 border-b border-border">
+          <div className="mb-3 flex items-center gap-1 overflow-x-auto border-b border-border">
             {([
               ["chats", "Chats"], ["arquivos", "Arquivos"], ["grafo", "Grafo"], ["memoria", "Memória"],
             ] as [Tab, string][]).map(([key, label]) => (

@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import extraction
 from ..config import get_settings
 from ..db import SessionLocal
-from ..integrations import ollama_service
+from ..integrations import chatgpt_service, ollama_service
 from ..models import Artifact, Chat, KnowledgeBase, KnowledgeDoc, Message, ModelConfig, Skill, User
 from ..secrets_service import IMAGEGEN_KEY, OPENROUTER_KEY, VOICE_KEY, get_secret
 from ..tools.loader import get_sift_for_user, tool_config
@@ -117,8 +117,10 @@ def _usage_record(usage: dict | None, model: str, model_config: ModelConfig | No
         "model": model,
         "model_config_id": str(model_config.id) if model_config else None,
         "model_name": model_config.name if model_config else model,
-        # separação das FONTES no ledger: modelos locais (Ollama) ≠ API (OpenRouter)
-        "provider": "ollama" if (model or "").startswith("ollama/") else "openrouter",
+        # separação das FONTES no ledger: local (Ollama) ≠ assinatura (ChatGPT) ≠ API
+        "provider": ("ollama" if (model or "").startswith("ollama/")
+                     else "chatgpt" if (model or "").startswith("codex/")
+                     else "openrouter"),
         "prompt_tokens": int(u.get("prompt_tokens", 0) or 0),
         "completion_tokens": int(u.get("completion_tokens", 0) or 0),
         "total_tokens": int(u.get("total_tokens", 0) or 0),
@@ -178,6 +180,8 @@ async def _load_skills(
 async def _resolve_provider(db: AsyncSession, user: User, model: str) -> tuple[str, str | None]:
     """Resolve o provedor a partir do id do modelo → (api_key, base_url).
     Modelo `ollama/*` → servidor Ollama local do usuário (OpenAI-compat, sem chave);
+    `codex/*` → assinatura ChatGPT conectada (a "api_key" vira o sentinela
+    `codex:<uid>` — o token real é buscado/renovado no adaptador por chamada);
     senão → OpenRouter (chave do usuário). base_url=None significa OpenRouter."""
     if (model or "").startswith(ollama_service.MODEL_PREFIX):
         base = await ollama_service.get_base_url(db, user.id)
@@ -187,6 +191,13 @@ async def _resolve_provider(db: AsyncSession, user: User, model: str) -> tuple[s
                 "Ollama não configurado. Ative em Configurações → Conexões → Ollama, ou escolha outro modelo.",
             )
         return "ollama", base.rstrip("/") + "/v1"
+    if (model or "").startswith(chatgpt_service.MODEL_PREFIX):
+        if not await chatgpt_service.is_connected(db, str(user.id)):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "ChatGPT não conectado. Conecte em Configurações → Conexões → Assinaturas, ou escolha outro modelo.",
+            )
+        return f"codex:{user.id}", None
     api_key = await get_secret(db, user.id, OPENROUTER_KEY)
     if not api_key:
         raise HTTPException(
@@ -201,7 +212,10 @@ async def _prepare_turn(db: AsyncSession, user: User, chat: Chat):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Selecione um modelo no chat")
     api_key, base_url = await _resolve_provider(db, user, chat.model)
     model_config = await _get_model_config(db, chat.model_config_id, user)
-    sift = await get_sift_for_user(db, user.id, model_config)
+    sift = await get_sift_for_user(
+        db, user.id, model_config,
+        codespace_project_id=str(chat.project_id) if chat.project_id else None,
+    )
     skills = await _load_skills(db, user, model_config)
     return api_key, base_url, model_config, sift, skills
 

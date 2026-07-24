@@ -1523,6 +1523,9 @@ def _shape_tool_result(result: Any) -> tuple[str, Any]:
         event_result = result
     if isinstance(event_result, dict) and event_result.get("kind") == "image":
         content = json.dumps({"ok": True, "note": "Image generated and shown to the user."})
+    elif isinstance(event_result, dict) and event_result.get("kind") == "video":
+        content = json.dumps({"ok": True, "note": "Video generated and shown to the user "
+                                                  "in a player. Do not paste the url back."})
     elif isinstance(event_result, dict) and event_result.get("kind") == "email_draft":
         content = json.dumps({
             "ok": True,

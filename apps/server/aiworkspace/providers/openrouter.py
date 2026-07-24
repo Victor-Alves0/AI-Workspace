@@ -54,7 +54,12 @@ async def complete(
 
     Usada em etapas de pré-processamento (ex.: Vision Router descrevendo imagens),
     onde não faz sentido streamar ao usuário — queremos só o texto resultante.
-    `base_url` roteia p/ um provedor OpenAI-compatível (Ollama); None = OpenRouter."""
+    `base_url` roteia p/ um provedor OpenAI-compatível (Ollama); None = OpenRouter.
+    Modelos `codex/*` (assinatura ChatGPT) delegam ao adaptador de protocolo —
+    TODOS os call sites (títulos, roteadores, juízes) funcionam sem saber disso."""
+    from . import chatgpt_codex
+    if chatgpt_codex.is_codex_model(model):
+        return await chatgpt_codex.complete(api_key, model, messages, params=params, timeout=timeout)
     settings = get_settings()
     _RESERVED = {"model", "messages", "stream", "stream_options", "tools", "tool_choice"}
     safe_params = {k: v for k, v in (params or {}).items() if k not in _RESERVED}
@@ -91,6 +96,15 @@ async def complete_verbose(
     no OpenRouter (extensão `usage.include`); em compat (Ollama) fica None."""
     import time
 
+    from . import chatgpt_codex
+    if chatgpt_codex.is_codex_model(model):
+        t0 = time.monotonic()
+        try:
+            text = await chatgpt_codex.complete(api_key, model, messages, params=params, timeout=timeout)
+            return {"text": text, "prompt_tokens": None, "completion_tokens": None,
+                    "cost": None, "latency_ms": int((time.monotonic() - t0) * 1000)}
+        except Exception as exc:  # noqa: BLE001
+            return {"error": str(exc), "latency_ms": int((time.monotonic() - t0) * 1000)}
     settings = get_settings()
     _RESERVED = {"model", "messages", "stream", "stream_options", "usage", "tools", "tool_choice"}
     safe_params = {k: v for k, v in (params or {}).items() if k not in _RESERVED}
@@ -146,8 +160,14 @@ async def stream_chat(
     O chamador (orchestrator) decide o que fazer com deltas de texto vs tool_calls.
     `base_url` roteia p/ um provedor OpenAI-compatível (Ollama = modelos locais);
     None = OpenRouter. Em compat, omitimos campos só-OpenRouter (usage/modalities/
-    reasoning) que o servidor local pode rejeitar.
+    reasoning) que o servidor local pode rejeitar. Modelos `codex/*` (assinatura
+    ChatGPT) delegam ao adaptador de protocolo (Responses API → mesmos chunks).
     """
+    from . import chatgpt_codex
+    if chatgpt_codex.is_codex_model(model):
+        async for chunk in chatgpt_codex.stream_chat(api_key, model, messages, tools=tools, params=params):
+            yield chunk
+        return
     settings = get_settings()
     compat = bool(base_url)
     # `params` vem da config do chat (controlada pelo usuário). São parâmetros de

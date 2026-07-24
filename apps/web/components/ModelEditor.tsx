@@ -6,6 +6,7 @@ import { api, ApiError } from "@/lib/api";
 import { fileToAvatarDataUrl } from "@/lib/image";
 import type { KnowledgeBase, MemoryBank, Model, ModelConfig, Skill, SystemTool, Tool } from "@/lib/types";
 import TransferModal, { type TransferItem } from "./TransferModal";
+import { toolCategoryIcon, toolCategoryTitle } from "./toolCategory";
 import ModelField from "./ModelField";
 import { Toggle } from "./ui";
 import { WebSearchPanel, FinancePanel, TextExtractionPanel, DeepSearchPanel, GooglePanel, TuyaToolPanel, GithubToolPanel, MessagingToolPanel } from "./toolPanels";
@@ -569,7 +570,8 @@ export default function ModelEditor({
     Promise.all([
       api.get<Model[]>("/settings/models").catch(() => [] as Model[]),
       api.get<Model[]>("/integrations/ollama/models").catch(() => [] as Model[]),
-    ]).then(([ext, local]) => setBaseModels([...ext, ...local])).catch(() => {});
+      api.get<Model[]>("/integrations/subscriptions/chatgpt/models").catch(() => [] as Model[]),
+    ]).then(([ext, local, subs]) => setBaseModels([...ext, ...local, ...subs])).catch(() => {});
     api.get<Tool[]>("/tools").then(setTools).catch(() => {});
     api.get<SystemTool[]>("/tools/system").then(setSystemTools).catch(() => {});
     api.get<Skill[]>("/skills").then(setSkills).catch(() => {});
@@ -593,7 +595,8 @@ export default function ModelEditor({
   // ferramentas de sistema são gravadas como "builtin:<path>"
   const builtinKey = (path: string) => `builtin:${path}`;
 
-  // itens do popup de transferência: sistema (builtin:<path>) + do usuário (uuid)
+  // itens do popup de transferência: sistema (builtin:<path>) + do usuário (uuid).
+  // O ícone/hover indicam a ORIGEM (Nativo / Codespace / Integração: <nome>).
   const transferItems: TransferItem[] = useMemo(
     () => [
       ...systemTools.map((st) => ({
@@ -602,6 +605,8 @@ export default function ModelEditor({
         sublabel: st.description,
         group: "Sistema",
         system: true,
+        icon: toolCategoryIcon(st.category),
+        iconTitle: toolCategoryTitle(st.category, st.integration),
       })),
       ...tools.map((t) => ({
         key: t.id,
@@ -614,6 +619,13 @@ export default function ModelEditor({
   );
   const toolLabel = (key: string) =>
     transferItems.find((i) => i.key === key)?.label ?? key;
+  // origem (ícone + hover) de uma ferramenta ativa; null p/ tools do usuário
+  const toolOrigin = (key: string) => {
+    if (!key.startsWith("builtin:")) return null;
+    const st = systemTools.find((s) => s.path === key.slice(8));
+    if (!st) return null;
+    return { icon: toolCategoryIcon(st.category, 13), title: toolCategoryTitle(st.category, st.integration) };
+  };
   // ferramentas ativas visíveis (após a busca da lista)
   const toolQuery = toolSearch.trim().toLowerCase();
   const shownToolIds = toolQuery
@@ -1038,8 +1050,14 @@ export default function ModelEditor({
                         {shownToolIds.map((tid) => {
                           const pinned = !codeMode && pinnedIds.includes(tid);
                           const cfg = TOOL_CFG[tid];
+                          const origin = toolOrigin(tid);
                           return (
                             <div key={tid} className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5">
+                              {origin && (
+                                <span title={origin.title} className="flex shrink-0 items-center text-muted">
+                                  {origin.icon}
+                                </span>
+                              )}
                               {pinned && (
                                 <span title="Fixada (pin)" className="flex shrink-0 items-center text-accent-hover">
                                   <Pin size={12} className="fill-accent-hover" />

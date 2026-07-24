@@ -1,0 +1,346 @@
+"""Transcrição de vídeo/áudio a partir de uma URL — YouTube e ~1800 outros sites
+(Vimeo, TikTok, notícias, podcasts, links diretos de mídia…) via **yt-dlp**.
+
+Duas estratégias, em ordem de custo:
+  1. LEGENDAS: se o vídeo tem captions (próprias ou automáticas), baixa e converte
+     em texto — rápido, sem GPU, sem STT.
+  2. FALA (fallback): sem legendas, baixa o áudio (yt-dlp), recomprime p/ 16 kHz mono
+     e fatia em pedaços abaixo do teto do Whisper (ffmpeg), e transcreve cada pedaço
+     pelo STT do usuário (conexão de Voz Local → provedor global), concatenando.
+
+Nunca levanta p/ fora — devolve `{"error": ...}` para a tool repassar.
+
+As funções de I/O externo (`_extract_info`, `_download_audio`, `_segment_audio`,
+`_http_get_text`, `_stt_one`) são costuras finas, isoladas de propósito para os
+testes hérmeticos as substituírem sem rede/binários.
+"""
+
+from __future__ import annotations
+
+import glob
+import logging
+import os
+import re
+import subprocess
+import tempfile
+from typing import Any
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+# teto do Whisper é 25 MB; fatiamos bem abaixo p/ folga (headers multipart etc.)
+_STT_LIMIT = 24 * 1024 * 1024
+# fatia de ~10 min em 16 kHz mono mp3 48 kbps ≈ 3,6 MB (folgado abaixo do teto);
+# fatiar por TEMPO (não por bytes) mantém as fronteiras em silêncio/fala natural.
+_SEGMENT_SECONDS = 600
+# limite de duração p/ conter custo/tempo do caminho de FALA (legendas não têm limite).
+_MAX_SPEECH_DURATION = 4 * 3600
+_UA = "Mozilla/5.0 (compatible; AIWorkspace/1.0)"
+# preferência de formato de legenda: json3 (YouTube, limpo) → vtt (universal) → resto.
+_SUB_FORMAT_PREF = ("json3", "vtt", "srv3", "srv1", "ttml")
+
+
+# --------------------------------------------------------------------------- #
+# Costuras de I/O externo (substituíveis nos testes)
+# --------------------------------------------------------------------------- #
+def _extract_info(url: str) -> dict[str, Any]:
+    """Metadados do yt-dlp (título, duração, legendas) SEM baixar o vídeo."""
+    import yt_dlp
+
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "noplaylist": True,
+        "socket_timeout": 20,
+        "extract_flat": False,
+    }
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        return ydl.extract_info(url, download=False) or {}
+
+
+def _download_audio(url: str, tmpdir: str) -> str | None:
+    """Baixa a melhor faixa de áudio p/ `tmpdir`; devolve o caminho do arquivo."""
+    import yt_dlp
+
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "socket_timeout": 20,
+        "format": "bestaudio/best",
+        "outtmpl": os.path.join(tmpdir, "audio.%(ext)s"),
+    }
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        ydl.download([url])
+    files = [p for p in glob.glob(os.path.join(tmpdir, "audio.*")) if os.path.isfile(p)]
+    return files[0] if files else None
+
+
+def _segment_audio(path: str, tmpdir: str) -> list[str]:
+    """Recomprime p/ 16 kHz mono mp3 48 kbps e fatia em pedaços de `_SEGMENT_SECONDS`.
+    Um só arquivo se o vídeo for curto. Requer ffmpeg no PATH (imagem do server)."""
+    out = os.path.join(tmpdir, "seg%03d.mp3")
+    subprocess.run(
+        [
+            "ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", path, "-vn", "-ac", "1", "-ar", "16000",
+            "-c:a", "libmp3lame", "-b:a", "48k",
+            "-f", "segment", "-segment_time", str(_SEGMENT_SECONDS),
+            out,
+        ],
+        check=True,
+        timeout=1800,
+    )
+    return sorted(glob.glob(os.path.join(tmpdir, "seg*.mp3")))
+
+
+async def _http_get_text(url: str) -> str:
+    """Baixa uma legenda (vtt/json3) como texto."""
+    async with httpx.AsyncClient(follow_redirects=True, timeout=20) as client:
+        r = await client.get(url, headers={"User-Agent": _UA})
+    r.raise_for_status()
+    return r.text
+
+
+async def _stt_one(cand: dict[str, str], filename: str, audio: bytes) -> str | None:
+    """Uma tentativa de transcrição OpenAI-compat. None quando o servidor não faz
+    STT (404/405/501 — ex.: Kokoro) ou está fora do ar; texto quando transcreve."""
+    try:
+        async with httpx.AsyncClient(timeout=180) as client:
+            resp = await client.post(
+                f"{cand['base_url']}/audio/transcriptions",
+                headers={"Authorization": f"Bearer {cand['api_key']}"},
+                files={"file": (filename, audio, "audio/mpeg")},
+                data={"model": cand["model"]},
+            )
+    except httpx.HTTPError:
+        return None
+    if resp.status_code in (404, 405, 501):
+        return None
+    if resp.status_code != 200:
+        raise RuntimeError(f"STT HTTP {resp.status_code}: {resp.text[:200]}")
+    try:
+        return (resp.json() or {}).get("text") or ""
+    except ValueError:
+        return resp.text
+
+
+# --------------------------------------------------------------------------- #
+# Parsing de legendas
+# --------------------------------------------------------------------------- #
+_VTT_TS = re.compile(r"^\d{1,2}:\d{2}:\d{2}[.,]\d{3}\s*-->\s")
+_TAG = re.compile(r"<[^>]+>")
+
+
+def _vtt_to_text(vtt: str) -> str:
+    """WEBVTT/SRT → texto corrido. Remove cabeçalho, timestamps, tags e a
+    DUPLICAÇÃO rolante das legendas automáticas (linhas repetidas em sequência)."""
+    lines: list[str] = []
+    for raw in vtt.splitlines():
+        s = raw.strip()
+        if not s or s.upper().startswith("WEBVTT") or s.startswith("NOTE"):
+            continue
+        if _VTT_TS.match(s) or "-->" in s:
+            continue
+        if s.isdigit():  # índice de cue do SRT
+            continue
+        s = _TAG.sub("", s).strip()
+        if not s:
+            continue
+        if lines and lines[-1] == s:  # dedup rolante das auto-captions
+            continue
+        lines.append(s)
+    # dedup adicional: janela curta (auto-captions repetem a última linha do bloco anterior)
+    out: list[str] = []
+    for s in lines:
+        if s in out[-2:]:
+            continue
+        out.append(s)
+    return " ".join(out)
+
+
+def _json3_to_text(data: Any) -> str:
+    """Formato json3 do YouTube: events[].segs[].utf8 concatenados."""
+    import json
+
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except ValueError:
+            return ""
+    # os segs de UM evento são pedaços da mesma frase (juntam direto); eventos
+    # diferentes são cues distintas (juntam com espaço, senão colam palavras).
+    lines: list[str] = []
+    for ev in (data or {}).get("events") or []:
+        seg_text = "".join(
+            seg.get("utf8", "") for seg in ev.get("segs") or []
+            if seg.get("utf8") and seg["utf8"] != "\n"
+        ).strip()
+        if seg_text:
+            lines.append(seg_text)
+    return re.sub(r"\s+", " ", " ".join(lines)).strip()
+
+
+def _pick_subtitle(info: dict[str, Any], lang: str) -> tuple[str, str, str] | None:
+    """Escolhe a melhor legenda: idioma pedido → inglês → qualquer; manuais antes das
+    automáticas; formato por `_SUB_FORMAT_PREF`. Devolve (lang, ext, url) ou None."""
+    manual = info.get("subtitles") or {}
+    auto = info.get("automatic_captions") or {}
+
+    def lang_order() -> list[str]:
+        pref = [lang] if lang else []
+        pref += ["en", "en-US", "en-GB", "pt", "pt-BR", "pt-PT"]
+        # + o que existir, mantendo a ordem de preferência primeiro
+        seen = set(pref)
+        rest = [k for k in (*manual.keys(), *auto.keys()) if k not in seen]
+        return [k for k in pref if k in manual or k in auto] + rest
+
+    for source in (manual, auto):  # manuais primeiro (mais precisas)
+        for code in lang_order():
+            fmts = source.get(code)
+            if not fmts:
+                continue
+            by_ext = {f.get("ext"): f.get("url") for f in fmts if f.get("url")}
+            for ext in _SUB_FORMAT_PREF:
+                if by_ext.get(ext):
+                    return code, ext, by_ext[ext]
+            # nenhum formato preferido: usa o primeiro que tiver URL
+            for f in fmts:
+                if f.get("url"):
+                    return code, f.get("ext") or "vtt", f["url"]
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# Orquestração
+# --------------------------------------------------------------------------- #
+def _clip(text: str, cap: int) -> dict[str, Any]:
+    full = len(text)
+    clipped = text[:cap]
+    out: dict[str, Any] = {"text": clipped, "chars": len(clipped), "full_chars": full}
+    if full > cap:
+        out["truncated"] = True
+        out["note"] = (
+            f"Transcript truncated to {cap} of {full} chars. Summarize from this, or call "
+            "again with a larger max_chars for the full text."
+        )
+    return out
+
+
+async def _via_captions(info: dict[str, Any], lang: str) -> tuple[str, str] | None:
+    """(texto, lang) da legenda, ou None se não houver/parsing vazio."""
+    pick = _pick_subtitle(info, lang)
+    if not pick:
+        return None
+    code, ext, url = pick
+    try:
+        raw = await _http_get_text(url)
+    except Exception as exc:  # noqa: BLE001
+        logger.info("Falha ao baixar legenda (%s); tentando fala", exc)
+        return None
+    text = _json3_to_text(raw) if ext == "json3" else _vtt_to_text(raw)
+    text = text.strip()
+    return (text, code) if text else None
+
+
+async def _via_speech(url: str, info: dict[str, Any], stt_candidates: list[dict]) -> dict[str, Any]:
+    """Baixa o áudio, fatia e transcreve pelo STT. Devolve dict de resultado/erro."""
+    if not stt_candidates:
+        return {"error": (
+            "O vídeo não tem legendas e não há servidor de transcrição (STT) configurado. "
+            "Configure uma conexão de Voz Local ou a chave do provedor de voz em "
+            "Configurações → Voz para transcrever a fala."
+        )}
+    duration = info.get("duration") or 0
+    if duration and duration > _MAX_SPEECH_DURATION:
+        return {"error": (
+            f"Mídia muito longa p/ transcrever pela fala ({int(duration) // 60} min; teto "
+            f"{_MAX_SPEECH_DURATION // 3600} h). Peça um trecho ou um vídeo com legendas."
+        )}
+    with tempfile.TemporaryDirectory(prefix="aw-transcribe-") as tmp:
+        audio = _download_audio(url, tmp)
+        if not audio:
+            return {"error": "não consegui baixar o áudio dessa URL"}
+        try:
+            segments = _segment_audio(audio, tmp)
+        except FileNotFoundError:
+            return {"error": "ffmpeg indisponível no servidor (necessário p/ transcrever a fala)"}
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+            return {"error": f"falha ao processar o áudio: {str(exc)[:150]}"}
+        if not segments:
+            return {"error": "não consegui extrair áudio dessa URL"}
+        pieces: list[str] = []
+        for i, seg in enumerate(segments):
+            data = _read_capped(seg)
+            if data is None:
+                continue
+            txt = await _transcribe_bytes(stt_candidates, f"part{i:03d}.mp3", data)
+            if txt is None:
+                return {"error": (
+                    "nenhum servidor de transcrição respondeu (a conexão de Voz Local pode "
+                    "não fazer STT e/ou não há chave do provedor de voz)"
+                )}
+            if txt.strip():
+                pieces.append(txt.strip())
+        text = " ".join(pieces).strip()
+        if not text:
+            return {"error": "a transcrição da fala veio vazia (áudio sem voz?)"}
+        return {"ok": True, "source": "speech", "text": text}
+
+
+def _read_capped(path: str) -> bytes | None:
+    """Lê a fatia respeitando `_STT_LIMIT` (fatias já são pequenas; guarda contra o
+    caso raro de uma faixa não fatiável). None se estourar."""
+    try:
+        if os.path.getsize(path) > _STT_LIMIT:
+            logger.warning("Fatia de áudio %s acima do teto do STT; pulando", path)
+            return None
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+async def _transcribe_bytes(cands: list[dict], filename: str, data: bytes) -> str | None:
+    """Tenta cada candidato de STT em ordem; None se nenhum aceitar (todos 404/fora)."""
+    for cand in cands:
+        txt = await _stt_one(cand, filename, data)
+        if txt is not None:
+            return txt
+    return None
+
+
+async def transcribe_url(
+    url: str, lang: str, max_chars: int, stt_candidates: list[dict],
+) -> dict[str, Any]:
+    """Ponto de entrada: legendas primeiro, fala como fallback."""
+    try:
+        info = _extract_info(url)
+    except Exception as exc:  # noqa: BLE001 - yt_dlp.DownloadError e afins
+        msg = str(exc)
+        if "Unsupported URL" in msg or "not a valid URL" in msg:
+            return {"error": "essa URL não é um vídeo/áudio reconhecido"}
+        return {"error": f"não consegui abrir a mídia: {msg[:180]}"}
+    if not info:
+        return {"error": "não consegui abrir a mídia nessa URL"}
+
+    title = info.get("title") or ""
+    duration = info.get("duration") or 0
+
+    cap = await _via_captions(info, lang)
+    if cap is not None:
+        text, code = cap
+        return {
+            "ok": True, "source": "captions", "title": title, "lang": code,
+            "duration": int(duration) or None, **_clip(text, max_chars),
+        }
+
+    result = await _via_speech(url, info, stt_candidates)
+    if "error" in result:
+        return result
+    return {
+        "ok": True, "source": "speech", "title": title, "lang": lang or "auto",
+        "duration": int(duration) or None, **_clip(result["text"], max_chars),
+    }

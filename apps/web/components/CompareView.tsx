@@ -46,7 +46,8 @@ export default function CompareView() {
     Promise.all([
       api.get<Model[]>("/settings/models").catch(() => [] as Model[]),
       api.get<Model[]>("/integrations/ollama/models").catch(() => [] as Model[]),
-    ]).then(([e, l]) => setExt([...e, ...l])).catch(() => {});
+      api.get<Model[]>("/integrations/subscriptions/chatgpt/models").catch(() => [] as Model[]),
+    ]).then(([e, l, s]) => setExt([...e, ...l, ...s])).catch(() => {});
     return () => abortRef.current?.abort();
   }, []);
 

@@ -214,7 +214,10 @@ async def send_message(
     title_prompt = iface.get("title_prompt") or ""
 
     # SIFT do usuário, filtrada pelas ferramentas do modelo personalizado do chat
-    sift = await get_sift_for_user(db, user.id, model_config)
+    sift = await get_sift_for_user(
+        db, user.id, model_config,
+        codespace_project_id=str(chat.project_id) if chat.project_id else None,
+    )
     skills = await _load_skills(db, user, model_config, body.skill_ids)
 
     # valores efetivos do turno: do agente mencionado (@) ou os padrões do chat

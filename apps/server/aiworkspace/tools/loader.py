@@ -99,11 +99,34 @@ def _pinned_paths(pinned_ids: list[str], rows: list[Any]) -> list[str]:
 # resultado — que o pai continua computando e pagando — é DESCARTADO. No Modo
 # Código, promovemos essas tools a specs de 1ª classe (nome flat, ex.:
 # research__deep__run): o modelo as chama direto e elas rodam fora do sandbox.
-_CODE_MODE_PROMOTE = ("research.deep.run",)
+# media.video.transcribe entra aqui pelo mesmo motivo (baixar áudio + STT leva minutos).
+_CODE_MODE_PROMOTE = ("research.deep.run", "media.video.transcribe")
+
+# Codespace: num chat VINCULADO a um projeto, as tools de LEITURA de código são
+# liberadas mesmo sem estarem marcadas no modelo — vincular o chat ao projeto já
+# é o consentimento explícito de ler aquele código, e sem isso o chat de projeto
+# fica inútil (foi o que aconteceu: um modelo sem elas equipadas abria o chat do
+# projeto sem conseguir navegar nada). A de ESCRITA continua OPT-IN por-modelo:
+# cria/apaga arquivos e faz push, então exige permissão explícita como as demais
+# ações destrutivas.
+_CODESPACE_READ = ("code.graph.query", "code.files.browse", "code.flow.analyze")
+_CODESPACE_WRITE = "code.files.write"
+_CODESPACE_ALL = (*_CODESPACE_READ, _CODESPACE_WRITE)
 
 
 def _allow_match(path: str, allow: list[str]) -> bool:
     return any(path == a or (a.endswith(".*") and path.startswith(a[:-1])) for a in allow)
+
+
+def codespace_allow(allow: list[str]) -> list[str]:
+    """Escopo de um chat de projeto: o do modelo + as tools de LEITURA de código."""
+    return sorted(set(allow) | set(_CODESPACE_READ))
+
+
+def codespace_pins(pin_paths: list[str], allow: list[str]) -> list[str]:
+    """Pins de um chat de projeto: os do modelo + as tools de código QUE ESTÃO no
+    escopo (a de escrita só entra se o modelo a equipou — nunca é auto-liberada)."""
+    return sorted(set(pin_paths) | {p for p in _CODESPACE_ALL if _allow_match(p, allow)})
 
 
 def _allow_patterns(tool_ids: list[str], rows: list[Any]) -> list[str]:
@@ -211,7 +234,14 @@ async def _assemble_configs(db: AsyncSession, user_id: uuid.UUID, model_config: 
     # ficam no profile.browser; o endpoint efetivo (com fallback ao env) é resolvido
     # na tool. Só um dict simples — sem segredo de terceiros.
     browser_cfg = dict(prof.get("browser") or {})
-    return cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg
+    # Higgsfield: conexão por-usuário (app_settings) — mesmo padrão da Tuya: só
+    # busca se este modelo de fato equipou a tool (evita ler config à toa).
+    higgsfield_cfg = None
+    if any(tid == f"{_BUILTIN_PREFIX}higgsfield.media.generate" for tid in tool_ids):
+        from ..integrations import higgsfield_service
+        hf_conn = await higgsfield_service.get_config(db, str(user_id))
+        higgsfield_cfg = sift_service.higgsfield_config_from_secrets(hf_conn)
+    return cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg
 
 
 async def build_full_sift_for_user(db: AsyncSession, user_id: uuid.UUID):
@@ -219,9 +249,9 @@ async def build_full_sift_for_user(db: AsyncSession, user_id: uuid.UUID):
     Debug de Tools chamar qualquer ferramenta direto (`sift.execute_tool(path, params)`).
     Usa as configs globais do usuário (sem gating por-modelo). None se a SIFT falhar."""
     rows = list(await db.scalars(select(Tool).where(Tool.user_id == user_id)))
-    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg = await _assemble_configs(db, user_id, None, [])
+    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg = await _assemble_configs(db, user_id, None, [])
     return await run_in_threadpool(
-        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg
+        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg
     )
 
 
@@ -229,24 +259,34 @@ async def get_sift_for_user(
     db: AsyncSession,
     user_id: uuid.UUID,
     model_config: Any | None = None,
+    codespace_project_id: str | None = None,
 ):
+    """`codespace_project_id`: chat vinculado a um projeto do Codespace — libera as
+    tools de leitura de código (ver `_CODESPACE_READ`) e FIXA as de código que
+    estiverem no escopo, para o modelo vê-las direto em vez de depender do
+    discovery (`search_tools`)."""
     # sem modelo personalizado, ou com SIFT desligada => sem ferramentas
+    # (o mestre `tools_enabled` manda mesmo num chat de projeto — se o usuário
+    # desligou as ferramentas do modelo, o Codespace não passa por cima)
     if model_config is None or not getattr(model_config, "tools_enabled", False):
         return None
     tool_ids = model_config.tool_ids or []
-    if not tool_ids:
+    in_codespace = bool(codespace_project_id)
+    if not tool_ids and not in_codespace:
         return None  # SIFT ligada mas nada marcado => sem ferramentas
 
     rows = list(await db.scalars(select(Tool).where(Tool.user_id == user_id)))
     allow = _allow_patterns(tool_ids, rows)
+    if in_codespace:
+        allow = codespace_allow(allow)
     if not allow:
         return None
 
-    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg = await _assemble_configs(
+    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg = await _assemble_configs(
         db, user_id, model_config, tool_ids
     )
     full = await run_in_threadpool(
-        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg
+        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg
     )
     if full is None:
         return None
@@ -264,6 +304,13 @@ async def get_sift_for_user(
             pin_paths = [p for p in _CODE_MODE_PROMOTE if _allow_match(p, allow)]
         else:
             pin_paths = _pinned_paths(sift_config.get("pinned") or [], rows)
+        if in_codespace:
+            # num chat de projeto as tools de código são as "quentes" por
+            # definição: entram como specs de 1ª classe (sem discovery), senão o
+            # modelo precisa adivinhar que elas existem via search_tools — o
+            # caminho onde modelos fracos desistem e respondem "não tenho acesso
+            # ao código" (ver [[tool-exposure-hallucination]]).
+            pin_paths = codespace_pins(pin_paths, allow)
         try:
             scope = full.scope(allow=allow, pin=pin_paths or None)
         except Exception as exc:  # noqa: BLE001 - pin fora do allow etc.: segue sem pin

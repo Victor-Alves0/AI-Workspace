@@ -48,6 +48,7 @@ function flattenRefs(refs: KnowledgeRef[]): RefDoc[] {
 }
 import { fileToBase64, fileToImageDataUrl, fileToText } from "@/lib/image";
 import { MenuItem, useClickOutside } from "./ui";
+import { toolCategoryIcon, toolCategoryTitle } from "./toolCategory";
 
 // docs binários com extração server-side (integração "Extração de Texto")
 const DOC_RE = /\.(pdf|docx|xlsx|xlsm|pptx|csv)$/i;
@@ -172,7 +173,7 @@ function ThinkingSelect({
 
 // Lista (com busca) das ferramentas que ESTE modelo pode usar. Abre para cima,
 // no canto inferior-esquerdo, ao clicar no ícone da chave inglesa.
-function ToolsMenu({ tools }: { tools: { name: string; description?: string }[] }) {
+function ToolsMenu({ tools }: { tools: { name: string; description?: string; category?: "native" | "codespace" | "integration"; integration?: string }[] }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const ref = useClickOutside<HTMLDivElement>(() => setOpen(false));
@@ -207,7 +208,12 @@ function ToolsMenu({ tools }: { tools: { name: string; description?: string }[] 
               ) : (
                 filtered.map((t, i) => (
                   <div key={i} className="px-3 py-1.5">
-                    <p className="flex items-center gap-1.5 text-sm text-ink"><Wrench size={12} className="shrink-0 text-accent-hover" /> {t.name}</p>
+                    <p className="flex items-center gap-1.5 text-sm text-ink">
+                      <span title={toolCategoryTitle(t.category, t.integration)} className="flex shrink-0 items-center text-accent-hover">
+                        {toolCategoryIcon(t.category)}
+                      </span>
+                      {t.name}
+                    </p>
                     {t.description && <p className="mt-0.5 line-clamp-2 pl-[18px] text-xs text-muted">{t.description}</p>}
                   </div>
                 ))
@@ -264,7 +270,7 @@ export default function PromptBox({
   recording: boolean;
   onToggleMic: () => void;
   /** ferramentas que o modelo ativo pode usar (nome + descrição) */
-  modelTools?: { name: string; description?: string }[];
+  modelTools?: { name: string; description?: string; category?: "native" | "codespace" | "integration"; integration?: string }[];
   prompts?: Prompt[];
   /** skills do usuário, invocáveis com "$" no campo de mensagem */
   skills?: Skill[];

@@ -23,6 +23,7 @@ type Artifact =
   | { kind: "stock_card"; data: StockQuote }
   | { kind: "deep_research"; data: DeepResearch }
   | { kind: "image"; data: { url: string; prompt?: string } }
+  | { kind: "video"; data: { url: string; prompt?: string } }
   | { kind: "email_draft"; data: EmailDraft }
   | { kind: "skill_proposal"; data: SkillProposal }
   | { kind: "brain_note"; data: BrainNoteEvent };
@@ -59,6 +60,10 @@ function collect(node: unknown, out: Artifact[], seen: Set<string>, depth = 0): 
   }
   if (kind === "image" && typeof o.url === "string" && o.url) {
     if (!seen.has("i:" + o.url)) { seen.add("i:" + o.url); out.push({ kind, data: { url: o.url, prompt: typeof o.prompt === "string" ? o.prompt : undefined } }); }
+    return;
+  }
+  if (kind === "video" && typeof o.url === "string" && o.url) {
+    if (!seen.has("v:" + o.url)) { seen.add("v:" + o.url); out.push({ kind, data: { url: o.url, prompt: typeof o.prompt === "string" ? o.prompt : undefined } }); }
     return;
   }
   if (kind === "email_draft" && typeof o.draft_id === "string") {
@@ -206,6 +211,8 @@ function renderArtifact(a: Artifact, key: React.Key) {
     <DeepResearchCard key={key} data={a.data} />
   ) : a.kind === "image" ? (
     <ImageCard key={key} url={a.data.url} prompt={a.data.prompt} />
+  ) : a.kind === "video" ? (
+    <VideoCard key={key} url={a.data.url} prompt={a.data.prompt} />
   ) : a.kind === "email_draft" ? (
     <EmailComposer key={key} draft={a.data} />
   ) : a.kind === "skill_proposal" ? (
@@ -503,6 +510,17 @@ function BrainNoteCard({ note }: { note: BrainNoteEvent }) {
 }
 
 /** Card de uma imagem gerada pela IA (servida por /images/{id}?t=…). */
+function VideoCard({ url, prompt }: { url: string; prompt?: string }) {
+  const src = url.startsWith("http") ? url : `${API_URL}${url}`;
+  return (
+    <div className="my-2 max-w-md overflow-hidden rounded-xl border border-border bg-surface">
+      {/* /images/{id} honra Range → o seek do player funciona */}
+      <video src={src} controls preload="metadata" className="block h-auto w-full" />
+      {prompt && <p className="truncate px-3 py-1.5 text-xs text-muted" title={prompt}>{prompt}</p>}
+    </div>
+  );
+}
+
 function ImageCard({ url, prompt }: { url: string; prompt?: string }) {
   const src = url.startsWith("http") ? url : `${API_URL}${url}`;
   return (

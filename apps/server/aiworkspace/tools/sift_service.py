@@ -142,6 +142,15 @@ class GithubConfig:
 
 
 @dataclass
+class HiggsfieldConfig:
+    """Config da tool Higgsfield (geração de imagem/vídeo). `conn` = {api_key,
+    api_secret} decifrado do app_settings — diferente do Google/GitHub, a chave
+    VIAJA na config: a tool fala com a API direto (sem refresh de token), e a
+    conexão é por-usuário como a Tuya."""
+    conn: dict = field(default_factory=dict)
+
+
+@dataclass
 class MessagingConfig:
     """Config por-modelo da tool de mensagens (agir nas conexões de chat do usuário:
     WhatsApp/Telegram/Discord). Nada de token/instância aqui — resolvidos ao vivo por
@@ -181,6 +190,12 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # tira screenshot. Para sites com JS/SPA, login e formulários que o "Ler Página" não dá.
     {"path": "web.browser.use", "name": "Navegador (Browser)", "description": "Controla um Chromium headless: navega (com JS), lê, clica, digita, rola e tira screenshot — mantém a página aberta entre as ações.",
      "model_desc": "Drive a headless Chromium (renders JS; live tab across calls): goto, read, click, type, scroll, back, screenshot."},
+    # Transcrição de vídeo/áudio (YouTube e ~1800 sites via yt-dlp). Usa as legendas
+    # quando existem (rápido); senão baixa o áudio e transcreve a fala pelo STT do
+    # usuário (conexão de Voz Local → provedor global). Dá à IA o CONTEÚDO falado de
+    # um link de vídeo p/ resumir/responder. ffmpeg no servidor cobre o caminho de fala.
+    {"path": "media.video.transcribe", "name": "Transcrever Vídeo/Áudio", "description": "Extrai o conteúdo falado de um link de vídeo/áudio (YouTube e ~1800 outros sites) como texto, para resumir ou responder perguntas — usa as legendas quando há, senão transcreve a fala.",
+     "model_desc": "Transcribe the spoken content of a video/audio URL (YouTube + ~1800 sites) to text — captions when available, else speech-to-text. Use when the user shares a video/audio link and wants its content, a summary, or Q&A."},
     {"path": "diagram.excalidraw.render", "name": "Excalidraw (Diagrama)", "description": "Desenha um diagrama/fluxograma editável (canvas) a partir de Mermaid.",
      "model_desc": "Draw an editable diagram from a Mermaid flowchart."},
     {"path": "chart.render.plot", "name": "Gráfico", "description": "Desenha um gráfico (linha, barra, área ou pizza) a partir de dados.",
@@ -216,6 +231,12 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # escolhidas na engrenagem (por modelo).
     {"path": "messaging.chat.manage", "name": "Mensagens (WhatsApp/Telegram/Discord)", "description": "Agir nas conexões de chat do usuário: listar conversas, ler mensagens e enviar mensagens por WhatsApp, Telegram ou Discord.",
      "model_desc": "Act on the user's chat connections: list conversations, read messages, and send messages via WhatsApp, Telegram or Discord."},
+    # Higgsfield (requer conexão em Configurações → Conexões). Geração de imagem
+    # (Soul, Seedream, FLUX) e vídeo (DoP, Kling, Seedance) pela API oficial;
+    # resultado baixado e guardado no banco (as URLs deles expiram) e mostrado
+    # no chat pelos cards de imagem/vídeo.
+    {"path": "higgsfield.media.generate", "name": "Higgsfield (Imagem/Vídeo)", "description": "Gera imagens (Soul, Seedream, FLUX) e vídeos a partir de imagem (DoP, Kling, Seedance) com os modelos da Higgsfield.",
+     "model_desc": "Generate images (Soul, Seedream, FLUX) and image-to-video (DoP, Kling, Seedance) via Higgsfield."},
     # Codespace (grafo de código — GraphCodeMap): só funciona em chats vinculados a
     # um projeto (Espaço de Trabalho → Codespace). Query estrutural (símbolos, quem
     # chama quem, blast radius) em vez de grep — menos rodadas de leitura, mais
@@ -231,6 +252,11 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # pelo mesmo toggle global "confirmar ações" que já protege GitHub/Google/Tuya.
     {"path": "code.files.write", "name": "Editar Projeto", "description": "Cria, edita e apaga arquivos do projeto vinculado — cada mudança vira um commit local automático — e envia (push) para o repositório remoto.",
      "model_desc": "Write/edit/delete files in the attached project (every change auto-commits locally) and push commits to the remote. Requires code.files.browse to read first."},
+    # Fluxo de dados/taint: análise de SEGURANÇA, separada das consultas normais
+    # do grafo — é uma capacidade com identidade própria (e um modelo pode ter o
+    # grafo sem ter isto). Estática e "may-taint": over-aproxima de propósito.
+    {"path": "code.flow.analyze", "name": "Fluxo e Segurança do Código", "description": "Analisa para onde os dados fluem no projeto vinculado: o que um parâmetro alcança, se algo chega a um destino sensível (rede, banco, disco) e entradas não confiáveis que chegam a pontos perigosos.",
+     "model_desc": "Data-flow and taint analysis on the attached project: where a function's parameters flow, whether a symbol reaches a sink (http/db/fs), and untrusted input reaching dangerous sinks. Static may-analysis — findings are candidates to verify, not proof."},
 ]
 # NOTA: "perguntar opções" (kind:"ask") é uma PRIMITIVA de sistema (tools/interaction.py),
 # não uma tool equipável — qualquer ferramenta a usa via `ask_options(...)` (ex.: o Lembrete
@@ -252,8 +278,31 @@ def normalize_sift_path(path: str) -> str:
     return ".".join(parts)
 
 
+# Nome da integração por PREFIXO de path — uma regra, não uma flag por entrada.
+# Tools de integração dependem de uma conta/conexão externa; as "code.*" só
+# funcionam num chat de projeto (Codespace); o resto é nativo do app.
+_INTEGRATION_PREFIXES: dict[str, str] = {
+    "google.": "Google",
+    "smartlife.": "Tuya Smart Life",
+    "github.": "GitHub",
+    "messaging.": "Mensagens",
+    "higgsfield.": "Higgsfield",
+}
+
+
+def tool_category(path: str) -> dict[str, str]:
+    """{"category": "native"|"codespace"|"integration"[, "integration": nome]}
+    — a UI usa p/ ícone + hover; derivada do path, nunca configurada à mão."""
+    if path.startswith("code."):
+        return {"category": "codespace"}
+    for prefix, name in _INTEGRATION_PREFIXES.items():
+        if path.startswith(prefix):
+            return {"category": "integration", "integration": name}
+    return {"category": "native"}
+
+
 def system_tools() -> list[dict[str, str]]:
-    return BUILTIN_TOOLS
+    return [{**t, **tool_category(t["path"])} for t in BUILTIN_TOOLS]
 
 
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
@@ -321,13 +370,18 @@ def _public_web_url(url: str) -> bool:
     return True
 
 
-async def _store_browser_shot(user_id: str | None, chat_id: str | None, data: bytes) -> str | None:
-    """Guarda um screenshot como GeneratedImage e devolve o id (p/ servir por URL).
+async def _store_media(
+    user_id: str | None, chat_id: str | None, data: bytes,
+    mime: str = "image/png", prompt: str = "", model: str = "",
+) -> str | None:
+    """Guarda mídia gerada (screenshot, imagem/vídeo da Higgsfield) como
+    GeneratedImage e devolve o id (p/ servir por URL assinada — que já honra
+    Range, então <video> também funciona).
 
     Usa um engine EFÊMERO com NullPool: a tool chama isto via `asyncio.run` (loop
     próprio, em threadpool), e o pool compartilhado do engine global prende conexões
     a OUTRO loop (erro 'attached to a different loop'). Uma conexão nova, criada e
-    descartada neste mesmo loop, evita o problema (screenshots são raros)."""
+    descartada neste mesmo loop, evita o problema (gerações são raras)."""
     if not user_id or not data:
         return None
     import uuid as _uuid
@@ -343,7 +397,7 @@ async def _store_browser_shot(user_id: str | None, chat_id: str | None, data: by
             row = GeneratedImage(
                 user_id=_uuid.UUID(user_id),
                 chat_id=_uuid.UUID(chat_id) if chat_id else None,
-                mime="image/png", data=data, prompt="browser screenshot", model="browser",
+                mime=mime, data=data, prompt=prompt, model=model,
             )
             db.add(row)
             await db.commit()
@@ -351,6 +405,68 @@ async def _store_browser_shot(user_id: str | None, chat_id: str | None, data: by
             return str(row.id)
     finally:
         await eng.dispose()
+
+
+async def _load_media(image_id: str) -> tuple[bytes, str] | None:
+    """Bytes + mime de uma mídia gerada (p/ reusar como referência num vídeo:
+    a Higgsfield não alcança nossas URLs de LAN, então subimos os bytes)."""
+    import uuid as _uuid
+
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from ..config import get_settings
+    from ..models import GeneratedImage
+    try:
+        iid = _uuid.UUID(image_id)
+    except ValueError:
+        return None
+    eng = create_async_engine(get_settings().database_url, poolclass=NullPool)
+    try:
+        async with AsyncSession(eng, expire_on_commit=False) as db:
+            row = await db.get(GeneratedImage, iid)
+            if row is None or not row.data:
+                return None
+            return bytes(row.data), row.mime or "image/png"
+    finally:
+        await eng.dispose()
+
+
+async def _stt_candidates(user_id: str | None) -> list[dict[str, str]]:
+    """Candidatos de STT (base_url/api_key/model) do usuário, EM ORDEM: conexão de
+    Voz Local primeiro (speaches/faster-whisper), provedor global depois. Resolvido
+    ao vivo por sessão efêmera (mesmo motivo do `_store_media`: loop próprio da tool)
+    em vez de threadado como config. Vazio = sem STT (o caminho de fala avisa)."""
+    if not user_id:
+        return []
+    import uuid as _uuid
+
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from ..config import get_settings
+    from ..integrations import voice_service
+    from ..secrets_service import VOICE_KEY, get_secret
+    try:
+        uid = _uuid.UUID(user_id)
+    except ValueError:
+        return []
+    s = get_settings()
+    cands: list[dict[str, str]] = []
+    eng = create_async_engine(get_settings().database_url, poolclass=NullPool)
+    try:
+        async with AsyncSession(eng, expire_on_commit=False) as db:
+            prov = await voice_service.get_provider(db, uid)
+            if prov:
+                cands.append({"base_url": prov["base_url"], "api_key": prov["api_key"],
+                              "model": s.stt_model})
+            key = await get_secret(db, uid, VOICE_KEY)
+            if key:
+                cands.append({"base_url": s.voice_base_url, "api_key": key,
+                              "model": s.stt_model})
+    finally:
+        await eng.dispose()
+    return cands
 
 
 def _browser_endpoint(browser_cfg: dict | None) -> str:
@@ -371,6 +487,25 @@ def _browser_endpoint(browser_cfg: dict | None) -> str:
     return f"{ws}?token={token}" if token else ws
 
 
+# Chaves que a SIFT deixa passar no retorno de `code.graph.query`. É um FILTRO:
+# o que não está aqui é descartado antes de chegar ao modelo — foi assim que
+# 'status'/'doctor' acabaram respondendo só "files/symbols", justo as duas ações
+# cujo valor é explicar um índice vazio ou uma busca que não acha nada. O bloco
+# de diagnóstico está coberto por teste contra o retorno REAL do graph_service.
+CODE_GRAPH_RETURNS = [
+    # consultas estruturais
+    "symbols", "target", "callers", "callees", "references", "affects", "symbol",
+    "children", "calls", "called_by", "counts", "domain", "communities", "meta",
+    "total_found", "total_files", "warnings", "files", "edges", "error",
+    # diagnóstico (status/doctor)
+    "by_language", "edges_resolved", "edges_dangling", "parse_partial",
+    "parse", "parse_failed_total", "parse_failed_sample", "call_edges",
+    "confidence", "certain_pct", "dangling", "l1_resolvers",
+    "last_full_scan_age_s", "indexer_version",
+    "root_name",  # doctor() >= 45a35c4: só o NOME do diretório (não vaza path)
+]
+
+
 def _register_builtins(
     sift: Sift,
     search_cfg: SearchConfig,
@@ -383,6 +518,7 @@ def _register_builtins(
     github_cfg: "GithubConfig | None" = None,
     messaging_cfg: "MessagingConfig | None" = None,
     browser_cfg: dict | None = None,
+    higgsfield_cfg: "HiggsfieldConfig | None" = None,
 ) -> None:
     """Registra as ferramentas de sistema. `allowed=None` = todas; caso contrário
     apenas os paths presentes no conjunto."""
@@ -583,7 +719,10 @@ def _register_builtins(
                     return driver.back(endpoint, key)
                 if act == "screenshot":
                     png = driver.screenshot(endpoint, key)
-                    iid = asyncio.run(_store_browser_shot(user_id, chat_id, png))
+                    iid = asyncio.run(_store_media(
+                        user_id, chat_id, png,
+                        mime="image/png", prompt="browser screenshot", model="browser",
+                    ))
                     if not iid:
                         return {"error": "screenshot capturado, mas falhou ao salvar"}
                     return {"ok": True, "kind": "image", "url": image_gen.sign_image_url(iid),
@@ -594,13 +733,57 @@ def _register_builtins(
             except Exception as exc:  # noqa: BLE001 - erros do browser não quebram o turno
                 return {"error": str(exc)[:300]}
 
+    if want("media.video.transcribe"):
+        @sift.tool(
+            "media.video.transcribe",
+            description=(
+                "Get the spoken CONTENT of a video or audio at a URL — YouTube and ~1800 "
+                "other sites (Vimeo, TikTok, news sites, podcasts, direct media links…). "
+                "Returns a text transcript so you can summarize it, answer questions about "
+                "it, or quote it. Uses the video's captions when available (fast); otherwise "
+                "downloads the audio and transcribes the speech. Use whenever the user shares "
+                "a video/audio link and wants its content, a summary, or Q&A. Public http/https "
+                "only; long media can take a while."
+            ),
+            params={
+                "url": "string:r::the video/audio URL (http/https)",
+                "lang": "string:o::preferred caption language code, e.g. 'en' or 'pt' (optional)",
+                "max_chars": "number:o:12000:max characters of transcript to return (1000-50000)",
+            },
+            returns=["ok", "source", "title", "lang", "duration", "text", "chars",
+                     "full_chars", "truncated", "note", "error"],
+        )
+        def _media_transcribe(url: str = "", lang: str = "", max_chars: Any = 12000) -> dict[str, Any]:
+            from ..integrations import transcribe_service
+            u = (url or "").strip()
+            if not u:
+                return {"error": "provide a video/audio URL (http/https)"}
+            if not u.lower().startswith(("http://", "https://")):
+                u = "https://" + u
+            if not _public_web_url(u):
+                return {"error": "URL not allowed (only public http/https sites)"}
+            try:
+                cap = max(1000, min(int(max_chars or 12000), 50000))
+            except (TypeError, ValueError):
+                cap = 12000
+
+            async def _go() -> dict[str, Any]:
+                cands = await _stt_candidates(user_id)
+                return await transcribe_service.transcribe_url(u, (lang or "").strip(), cap, cands)
+
+            try:
+                return asyncio.run(_go())
+            except Exception as exc:  # noqa: BLE001 - falhas de rede/yt-dlp não quebram o turno
+                return {"error": str(exc)[:300]}
+
     # Codespace (grafo de código) — só existe se este chat estiver vinculado a um
     # projeto (toolctx.current_codespace_project_id). O projeto é resolvido a CADA
     # chamada (ownership check embutido em graph_service.load_project) em vez de
     # threadado como config: cada chat pode ter um projeto diferente, mas a
     # instância SIFT é cacheada por-USUÁRIO (não por-chat) — mesma solução do
     # navegador (current_chat_id) e do mesmo motivo.
-    if want("code.graph.query") or want("code.files.browse") or want("code.files.write"):
+    if (want("code.graph.query") or want("code.files.browse") or want("code.files.write")
+            or want("code.flow.analyze")):
         from ..codespace import graph_service
 
         def _cs_project():
@@ -665,56 +848,89 @@ def _register_builtins(
             description=(
                 "Query the code graph of the project attached to this chat — structural, not text "
                 "search: exact call sites, blast radius, symbol neighborhood. Prefer this over "
-                "grepping when a project is attached. `action`: 'find' (locate a symbol by name; "
-                "returns fqn/kind/path/line/signature — use its `fqn` in the other actions), "
-                "'callers' (who calls this symbol — exact call sites with confidence), 'impact' "
-                "(what breaks if you change this symbol — transitive callers up to `depth`), 'ego' "
-                "(a symbol's neighborhood: parent/children/calls/called_by), 'status' (index health: "
-                "files/symbols/edges counts). Edges carry a confidence level (certain/inferred/"
-                "possible) — static analysis, so treat 'possible' as a hint, not a fact."
+                "grepping when a project is attached. `action`: 'overview' (START HERE on an "
+                "unfamiliar project — the important files/symbols ranked by relevance, within a "
+                "token budget), 'find' (locate a symbol by name; returns fqn/kind/path/line/"
+                "signature — use its `fqn` in the other actions), 'callers' (who calls this symbol), "
+                "'callees' (what this symbol calls), 'references' (EVERY reference, not just calls "
+                "— includes imports), 'impact' (what breaks if you change this — transitive callers), "
+                "'ego' (neighborhood: parent/children/calls/called_by), 'info' (definition + how many "
+                "callers/callees/references it has), 'communities' (how the codebase clusters into "
+                "modules), 'status' (index counts), 'doctor' (index health: files that failed to "
+                "parse, %% of certain edges — use when a symbol you expect is missing). Edges carry "
+                "a confidence level (certain/inferred/possible) — static analysis, so treat "
+                "'possible' as a hint, not a fact."
             ),
             params={
-                "action": "string:r::find | callers | impact | ego | status",
+                "action": ("string:r::overview | find | callers | callees | references | impact | "
+                           "ego | info | communities | status | doctor"),
                 "query": "string:o::find: symbol name or substring to search for",
-                "symbol": "string:o::callers/impact/ego: the fully-qualified name (fqn) from a previous 'find'",
-                "depth": "number:o::callers/impact: hops to follow (callers 1-4, impact 1-5)",
+                "symbol": "string:o::callers/callees/references/impact/ego/info: the fully-qualified name (fqn) from a previous 'find'",
+                "depth": "number:o::callers/callees/impact: hops to follow (1-4, impact 1-5)",
                 "limit": "number:o:10:find: max matches to return",
+                "scope": "string:o::overview: restrict to a subtree (e.g. 'src/api')",
+                "token_budget": "number:o:2000:overview: how big the map may be (200-8000)",
+                "kind": "string:o::references: filter by reference kind (e.g. 'calls', 'imports')",
             },
-            returns=["symbols", "target", "callers", "affects", "symbol", "children", "calls",
-                     "called_by", "total_found", "warnings", "files", "edges", "error"],
-            examples=["find the function validate_token", "who calls run_turn?",
-                      "what breaks if I change _register_builtins?", "show the neighborhood of TokenService"],
+            returns=CODE_GRAPH_RETURNS,
+            examples=["give me an overview of this project", "find the function validate_token",
+                      "who calls run_turn?", "what does handle_request call?",
+                      "find all references to Settings", "what breaks if I change _register_builtins?",
+                      "why can't you find my Rust files?"],
         )
         def _code_graph_query(action: str = "", query: str = "", symbol: str = "",
-                               depth: Any = None, limit: Any = 10) -> dict[str, Any]:
+                               depth: Any = None, limit: Any = 10, scope: str = "",
+                               token_budget: Any = 2000, kind: str = "") -> dict[str, Any]:
             proj, err = _cs_project()
             if err:
                 return err
             act = (action or "").strip().lower()
-            if act != "status":
+            # 'status'/'doctor' respondem SOBRE o índice — úteis justamente quando
+            # ele ainda não está pronto; as demais exigem 'ready'.
+            if act not in ("status", "doctor"):
                 bad = _cs_require_ready(proj)
                 if bad:
                     return bad
             uid, pid = str(proj.user_id), str(proj.id)
+
+            def _int(v: Any, default: int) -> int:
+                try:
+                    return int(v) if v not in (None, "") else default
+                except (TypeError, ValueError):
+                    return default
+
             try:
+                if act == "overview":
+                    return graph_service.overview(
+                        uid, pid, scope=scope or "", token_budget=_int(token_budget, 2000)
+                    )
                 if act == "find":
                     if not (query or "").strip():
                         return {"error": "provide 'query' (symbol name to search for)"}
-                    lim = int(limit) if limit not in (None, "") else 10
-                    return graph_service.find(uid, pid, query.strip(), limit=lim)
-                if act in ("callers", "impact", "ego"):
+                    return graph_service.find(uid, pid, query.strip(), limit=_int(limit, 10))
+                if act in ("callers", "callees", "references", "impact", "ego", "info"):
                     if not (symbol or "").strip():
                         return {"error": f"provide 'symbol' (fqn from a previous 'find') for '{act}'"}
+                    sym = symbol.strip()
                     if act == "callers":
-                        d = int(depth) if depth not in (None, "") else 1
-                        return graph_service.callers(uid, pid, symbol.strip(), depth=d)
+                        return graph_service.callers(uid, pid, sym, depth=_int(depth, 1))
+                    if act == "callees":
+                        return graph_service.callees(uid, pid, sym, depth=_int(depth, 1))
+                    if act == "references":
+                        return graph_service.references(uid, pid, sym, kind=kind or "")
                     if act == "impact":
-                        d = int(depth) if depth not in (None, "") else 3
-                        return graph_service.impact(uid, pid, symbol.strip(), depth=d)
-                    return graph_service.ego(uid, pid, symbol.strip())
+                        return graph_service.impact(uid, pid, sym, depth=_int(depth, 3))
+                    if act == "info":
+                        return graph_service.symbol_info(uid, pid, sym)
+                    return graph_service.ego(uid, pid, sym)
+                if act == "communities":
+                    return graph_service.communities(uid, pid, limit=_int(limit, 20))
                 if act == "status":
                     return graph_service.status(uid, pid)
-                return {"error": f"unknown action '{act}' (use find/callers/impact/ego/status)"}
+                if act == "doctor":
+                    return graph_service.doctor(uid, pid, failed_limit=_int(limit, 20))
+                return {"error": f"unknown action '{act}' (use overview/find/callers/callees/"
+                                 "references/impact/ego/info/communities/status/doctor)"}
             except Exception as exc:  # noqa: BLE001 - erro do grafo não quebra o turno
                 return {"error": str(exc)[:300]}
 
@@ -726,29 +942,38 @@ def _register_builtins(
                 "history (respects the project's allow/deny scope — a path outside it is refused). "
                 "`action`: 'list' (directory tree from `path`, default the project root), 'read' "
                 "(file content, numbered lines; use `start_line`/`end_line` for a range on large "
-                "files), 'search' (text search across the project, optionally filtered by `glob`, "
-                "e.g. '*.py'), 'log' (recent commits — every write/edit/delete auto-commits), 'diff' "
-                "(what changed; empty `ref` = uncommitted changes, or pass a sha/'HEAD~N')."
+                "files), 'search' (grep across the project — literal by default, set `regex=true` "
+                "for a pattern; `files_only=true` answers \"which files mention X\" far cheaper; "
+                "`context` shows surrounding lines), 'log' (recent commits — every write/edit/delete "
+                "auto-commits), 'diff' (what changed; empty `ref` = uncommitted changes, or pass a "
+                "sha/'HEAD~N')."
             ),
             params={
                 "action": "string:r::list | read | search | log | diff",
                 "path": "string:o::list/read/diff: path relative to the project root (default: root)",
-                "query": "string:o::search: text to look for",
+                "query": "string:o::search: text (or regex, with regex=true) to look for",
                 "glob": "string:o::search: restrict to files matching this glob (e.g. 'src/**/*.py')",
+                "regex": "boolean:o::search: treat `query` as a regular expression instead of literal text",
+                "case_sensitive": "boolean:o::search: match case exactly (default: case-insensitive)",
+                "context": "number:o:0:search: lines of context to show around each match (0-5)",
+                "files_only": "boolean:o::search: return only the list of matching files, not each line",
                 "start_line": "number:o:1:read: first line to return",
                 "end_line": "number:o::read: last line to return (default: start_line + 400)",
                 "depth": "number:o:3:list: how many directory levels to descend",
                 "limit": "number:o:20:log: how many commits to return",
                 "ref": "string:o::diff: sha/'HEAD~N' to compare against (default: uncommitted changes)",
             },
-            returns=["entries", "content", "results", "commits", "diff", "path", "total_lines",
-                     "start_line", "end_line", "truncated", "error"],
+            returns=["entries", "content", "results", "files", "commits", "diff", "path",
+                     "total_lines", "start_line", "end_line", "truncated", "error"],
             examples=["list the src folder", "read config.py", "search TODO in the project",
+                      "which files mention DATABASE_URL?", "find all functions starting with handle_",
                       "show the last 5 commits", "what did the last commit change?"],
         )
         def _code_files_browse(action: str = "", path: str = "", query: str = "", glob: str = "",
                                 start_line: Any = 1, end_line: Any = None, depth: Any = 3,
-                                limit: Any = 20, ref: str = "") -> dict[str, Any]:
+                                limit: Any = 20, ref: str = "", regex: Any = None,
+                                case_sensitive: Any = None, context: Any = 0,
+                                files_only: Any = None) -> dict[str, Any]:
             proj, err = _cs_project()
             if err:
                 return err
@@ -769,7 +994,19 @@ def _register_builtins(
                         return {"error": "provide 'path'"}
                     return graph_service.read_file(uid, pid, scope, path.strip(), start_line=lo, end_line=hi)
                 if act == "search":
-                    return graph_service.search_files(uid, pid, scope, query or "", glob=glob or "")
+                    def _truthy(v: Any) -> bool:
+                        if v is True:
+                            return True
+                        return isinstance(v, str) and v.strip().lower() in ("true", "1", "yes", "sim", "on")
+                    try:
+                        ctx = int(context) if context not in (None, "") else 0
+                    except (TypeError, ValueError):
+                        ctx = 0
+                    return graph_service.search_files(
+                        uid, pid, scope, query or "", glob=glob or "",
+                        regex=_truthy(regex), case_sensitive=_truthy(case_sensitive),
+                        context=ctx, files_only=_truthy(files_only),
+                    )
                 if act == "log":
                     lim = int(limit) if limit not in (None, "") else 20
                     return graph_service.git_log(uid, pid, limit=lim)
@@ -805,6 +1042,9 @@ def _register_builtins(
                 "confirm": "boolean:o::set true only after the user confirmed delete/push",
             },
             returns=["ok", "path", "created", "commit", "branch", "error",
+                     # símbolos que a escrita mudou (added/removed/signature_changed,
+                     # do reindex incremental) — o modelo checa `impact` na hora
+                     "symbol_changes",
                      "kind", "question", "options", "allow_custom", "custom_label"],
             risk=True,
             examples=["create a new file utils/helpers.py with this content", "fix the typo in README.md",
@@ -848,6 +1088,75 @@ def _register_builtins(
             except ValueError as exc:
                 return {"error": str(exc)}
             except Exception as exc:  # noqa: BLE001 - erro de escrita não quebra o turno
+                return {"error": str(exc)[:300]}
+
+    if want("code.flow.analyze"):
+        @sift.tool(
+            "code.flow.analyze",
+            description=(
+                "Data-flow and taint analysis on the project attached to this chat — answers where "
+                "values GO, which the call graph alone cannot. `action`: 'data_flow' (where do this "
+                "function's parameters end up — returned? passed to which callees?), 'reaches' (does "
+                "`symbol` reach a `sink` — 'http', 'db', 'fs', … — returning the call chains that get "
+                "there), 'taint' (scan for untrusted input reaching dangerous sinks; without `entry` "
+                "it scans the project, with `entry` it starts from one function). This is STATIC "
+                "may-analysis: it over-approximates on purpose, so results are candidates to verify "
+                "by reading the code, never proof of a vulnerability. Always report the `warnings` "
+                "and the per-result `confidence` to the user instead of stating findings as fact."
+            ),
+            params={
+                "action": "string:r::data_flow | reaches | taint",
+                "symbol": "string:o::data_flow/reaches: fully-qualified name (fqn) from code.graph.query 'find'",
+                "sink": "string:o:http:reaches: the sink to test against (e.g. 'http', 'db', 'fs')",
+                "via": "string:o::reaches: only count paths passing through this symbol",
+                "entry": "string:o::taint: start from this function instead of scanning everything",
+                "scope": "string:o::taint: restrict the scan to a subtree (e.g. 'src/api')",
+                "depth": "number:o::how many hops to follow (data_flow 1-5, reaches 1-12, taint 1-8)",
+            },
+            returns=["function", "supported", "params", "target", "sink", "via", "paths",
+                     "mode", "findings", "scanned", "total_found", "warnings", "error"],
+            examples=["where does the `user` parameter of handle_request end up?",
+                      "does login() reach the network?",
+                      "is there untrusted input reaching a database call?"],
+        )
+        def _code_flow_analyze(action: str = "", symbol: str = "", sink: str = "http",
+                                via: str = "", entry: str = "", scope: str = "",
+                                depth: Any = None) -> dict[str, Any]:
+            proj, err = _cs_project()
+            if err:
+                return err
+            bad = _cs_require_ready(proj)
+            if bad:
+                return bad
+            uid, pid = str(proj.user_id), str(proj.id)
+            act = (action or "").strip().lower()
+
+            def _int(v: Any, default: int) -> int:
+                try:
+                    return int(v) if v not in (None, "") else default
+                except (TypeError, ValueError):
+                    return default
+
+            try:
+                if act in ("data_flow", "dataflow", "flow"):
+                    if not (symbol or "").strip():
+                        return {"error": "provide 'symbol' (fqn of the function to trace)"}
+                    return graph_service.data_flow(uid, pid, symbol.strip(), depth=_int(depth, 2))
+                if act == "reaches":
+                    if not (symbol or "").strip():
+                        return {"error": "provide 'symbol' (fqn of the starting point)"}
+                    return graph_service.reaches(
+                        uid, pid, symbol.strip(), sink=sink or "http",
+                        via=via or "", depth=_int(depth, 8),
+                    )
+                if act == "taint":
+                    return graph_service.taint(
+                        uid, pid, scope=scope or "", entry=entry or "", depth=_int(depth, 4)
+                    )
+                return {"error": f"unknown action '{act}' (use data_flow/reaches/taint)"}
+            except ValueError as exc:
+                return {"error": str(exc)}
+            except Exception as exc:  # noqa: BLE001 - erro da análise não quebra o turno
                 return {"error": str(exc)[:300]}
 
     if want("diagram.excalidraw.render"):
@@ -1488,6 +1797,178 @@ def _register_builtins(
                 return {"error": str(exc)}
 
     # ------------------------------ GitHub ------------------------------------ #
+    if want("higgsfield.media.generate"):
+        hf_conn = higgsfield_cfg.conn if higgsfield_cfg else {}
+
+        def _hf_finish(user_id_: str | None, result: dict, model_id: str, prompt_: str) -> dict:
+            """Resultado 'completed' → baixa a mídia, guarda no banco e devolve o
+            card. As URLs do CDN deles expiram — os bytes ficam conosco."""
+            from ..integrations import higgsfield_service as hf
+            from ..providers import image_gen
+
+            url = ""
+            kind = "image"
+            imgs = result.get("images")
+            if isinstance(imgs, list) and imgs and isinstance(imgs[0], dict):
+                url = imgs[0].get("url") or ""
+            vid = result.get("video")
+            if not url and isinstance(vid, dict):
+                url, kind = vid.get("url") or "", "video"
+            vids = result.get("videos")
+            if not url and isinstance(vids, list) and vids and isinstance(vids[0], dict):
+                url, kind = vids[0].get("url") or "", "video"
+            if not url:
+                return {"error": f"generation finished but no media url in response: {str(result)[:200]}"}
+            got = hf.download(url)
+            if isinstance(got, dict):
+                return got
+            data, mime = got
+            if kind == "image" and mime.startswith("video/"):
+                kind = "video"  # confia no mime real, não na chave do JSON
+            chat_id = toolctx.current_chat_id.get()
+            iid = asyncio.run(_store_media(
+                user_id_, chat_id, data, mime=mime, prompt=prompt_, model=model_id,
+            ))
+            if not iid:
+                return {"error": "media generated but failed to store it"}
+            return {"kind": kind, "url": image_gen.sign_image_url(iid), "prompt": prompt_,
+                    "model": model_id}
+
+        def _hf_resolve_reference(image_url: str) -> str | dict:
+            """`image_url` p/ um formato que a Higgsfield alcança: URL nossa
+            (/images/<id>) → sobe os bytes; URL privada → erro; pública → passa."""
+            from ..integrations import higgsfield_service as hf
+
+            m = re.search(r"/images/([0-9a-f-]{36})", image_url)
+            if m:
+                got = asyncio.run(_load_media(m.group(1)))
+                if got is None:
+                    return {"error": "referenced image not found"}
+                data, mime = got
+                return hf.upload_bytes(hf_conn, data, mime)
+            if not _public_web_url(image_url):
+                return {"error": "image_url must be public (or a generated /images/<id> url)"}
+            return image_url
+
+        @sift.tool(
+            "higgsfield.media.generate",
+            description=(
+                "Generate images and videos with Higgsfield's models (Soul, Seedream, FLUX, "
+                "DoP, Kling, Seedance). `action`: 'image' (text-to-image from `prompt`; "
+                "optional `model`, `aspect_ratio` like '16:9', `resolution` like '1080p'; "
+                "edit models take `image_url`), 'video' (image-to-video: `image_url` REQUIRED "
+                "— a previously generated /images/... url or any public image — plus `prompt` "
+                "describing the motion; optional `model`, `duration` in seconds), 'models' "
+                "(the catalog: ids + what each accepts), 'status' (resume a generation that "
+                "was still running, by `request_id`). The tool waits for the result and the "
+                "media is shown to the user automatically — do not paste the url back."
+            ),
+            params={
+                "action": "string:n::image | video | models | status",
+                "prompt": "string:o::image/video: what to generate / how to animate",
+                "model": "string:o::model id from action 'models' (default: Soul for image, DoP for video)",
+                "image_url": "string:o::video (required) and edit models: source image url",
+                "aspect_ratio": "string:o::image: e.g. '1:1', '16:9', '9:16'",
+                "resolution": "string:o::image: e.g. '720p', '1080p', '2K'",
+                "duration": "number:o:5:video: length in seconds",
+                "seed": "number:o::image: reproducible output (models that support it)",
+                "request_id": "string:o::status: id returned when a generation kept running",
+            },
+            returns=["kind", "url", "prompt", "model", "models", "status", "request_id",
+                     "note", "error"],
+            examples=["generate a photorealistic portrait with higgsfield",
+                      "crie uma imagem de um lago ao pôr do sol",
+                      "anime essa imagem em um vídeo de 5 segundos",
+                      "which higgsfield models are available?"],
+        )
+        def _higgsfield_generate(action: str = "", prompt: str = "", model: str = "",
+                                 image_url: str = "", aspect_ratio: str = "",
+                                 resolution: str = "", duration: Any = None,
+                                 seed: Any = None, request_id: str = "") -> dict[str, Any]:
+            from ..integrations import higgsfield_service as hf
+
+            act = (action or "").strip().lower()
+            if act == "models":
+                return {"models": {
+                    "image": [{"id": k, **v} for k, v in hf.IMAGE_MODELS.items()],
+                    "video": [{"id": k, **v} for k, v in hf.VIDEO_MODELS.items()],
+                }}
+            if not hf_conn:
+                return {"error": "Higgsfield is not connected. Ask the user to add their "
+                                 "API key in Settings → Connections → Higgsfield."}
+
+            def _int(v: Any, default: int) -> int:
+                try:
+                    return int(v) if v not in (None, "") else default
+                except (TypeError, ValueError):
+                    return default
+
+            if act == "status":
+                rid = (request_id or "").strip()
+                if not rid:
+                    return {"error": "provide 'request_id'"}
+                st = hf.fetch_status(hf_conn, rid)
+                if st.get("error"):
+                    return st
+                if st.get("status") == "completed":
+                    return _hf_finish(user_id, st, model or "higgsfield", prompt)
+                return {"status": st.get("status"), "request_id": rid,
+                        "note": "still running — call action 'status' again in a moment"}
+
+            if act in ("image", "video"):
+                p = (prompt or "").strip()
+                if not p and act == "image":
+                    return {"error": "provide 'prompt'"}
+                catalog = hf.IMAGE_MODELS if act == "image" else hf.VIDEO_MODELS
+                model_id = (model or "").strip() or (
+                    hf.DEFAULT_IMAGE_MODEL if act == "image" else hf.DEFAULT_VIDEO_MODEL
+                )
+                if model_id not in catalog:
+                    return {"error": f"unknown {act} model '{model_id}' — call action 'models' "
+                                     "to list the valid ids"}
+                supported = catalog[model_id]["params"]
+                args: dict[str, Any] = {"prompt": p} if p else {}
+                if aspect_ratio and "aspect_ratio" in supported:
+                    args["aspect_ratio"] = aspect_ratio.strip()
+                if resolution and "resolution" in supported:
+                    args["resolution"] = resolution.strip()
+                if seed not in (None, "") and "seed" in supported:
+                    args["seed"] = _int(seed, 0)
+                if "duration" in supported and act == "video":
+                    args["duration"] = _int(duration, 5)
+                needs_image = act == "video" or "image_url" in supported
+                if needs_image:
+                    src = (image_url or "").strip()
+                    if not src:
+                        return {"error": f"'{model_id}' needs 'image_url' (a generated "
+                                         "/images/... url or a public image url)"}
+                    resolved = _hf_resolve_reference(src)
+                    if isinstance(resolved, dict):
+                        return resolved
+                    args["image_url"] = resolved
+                sub = hf.submit(hf_conn, model_id, args)
+                if sub.get("error"):
+                    return sub
+                rid = str(sub["request_id"])
+                # imagem sai em segundos; vídeo pode levar minutos — orçamentos
+                # distintos, e no estouro devolvemos o request_id p/ retomar.
+                budget = 240.0 if act == "image" else 540.0
+                st = hf.wait(hf_conn, rid, budget_s=budget)
+                if st.get("error"):
+                    return {**st, "request_id": rid}
+                status_ = st.get("status")
+                if status_ == "completed":
+                    return _hf_finish(user_id, st, model_id, p)
+                if status_ == "nsfw":
+                    return {"error": "generation flagged as NSFW by Higgsfield (credits refunded)"}
+                if status_ in ("failed", "canceled"):
+                    return {"error": f"generation {status_} (credits refunded on failure)"}
+                return {"status": status_, "request_id": rid,
+                        "note": "generation still running — call action 'status' with this "
+                                "request_id to fetch the result"}
+
+            return {"error": f"unknown action '{act}' (use image/video/models/status)"}
+
     if want("github.repo.manage"):
         gh_confirm = True if github_cfg is None else bool(github_cfg.require_confirm)
         gh_accounts = list(github_cfg.accounts) if github_cfg else []  # [{"id","login"}]
@@ -1856,6 +2337,7 @@ def _signature(
     github_cfg: "GithubConfig | None" = None,
     messaging_cfg: "MessagingConfig | None" = None,
     browser_cfg: dict | None = None,
+    higgsfield_cfg: "HiggsfieldConfig | None" = None,
 ) -> tuple:
     rows = tuple(
         sorted(
@@ -1926,6 +2408,10 @@ def _signature(
         # local do próprio usuário, não um segredo de terceiros).
         ((browser_cfg or {}).get("ws_url", ""), (browser_cfg or {}).get("token", ""),
          (browser_cfg or {}).get("enabled", True)),
+        # Higgsfield: a key identifica a conexão; o secret entra só como bool
+        # (trocou key/conectou/desconectou → rebuild).
+        ((higgsfield_cfg.conn.get("api_key", ""), bool(higgsfield_cfg.conn.get("api_secret")))
+         if higgsfield_cfg else ()),
     )
 
 
@@ -1973,6 +2459,7 @@ def build_user_sift(
     github_cfg: "GithubConfig | None" = None,
     messaging_cfg: "MessagingConfig | None" = None,
     browser_cfg: dict | None = None,
+    higgsfield_cfg: "HiggsfieldConfig | None" = None,
 ) -> Sift | None:
     """Constrói a instância SIFT completa do usuário (builtins + tools dele).
 
@@ -1997,7 +2484,7 @@ def build_user_sift(
             on_result=_record_call,
             index_cache=_index_cache_path(user_id),
         )
-        _register_builtins(sift, search_cfg, None, finance_cfg, deep_cfg, user_id, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg)
+        _register_builtins(sift, search_cfg, None, finance_cfg, deep_cfg, user_id, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg)
         for t in tool_rows:
             if not t.enabled:
                 continue
@@ -2033,12 +2520,13 @@ def get_user_sift(
     github_cfg: "GithubConfig | None" = None,
     messaging_cfg: "MessagingConfig | None" = None,
     browser_cfg: dict | None = None,
+    higgsfield_cfg: "HiggsfieldConfig | None" = None,
 ) -> Sift | None:
-    sig = _signature(tool_rows, search_cfg, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg)
+    sig = _signature(tool_rows, search_cfg, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg)
     cached = _cache.get(user_id)
     if cached is not None and cached[0] == sig:
         return cached[1]
-    sift = build_user_sift(tool_rows, search_cfg, user_id, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg)
+    sift = build_user_sift(tool_rows, search_cfg, user_id, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg)
     _cache[user_id] = (sig, sift)
     return sift
 
@@ -2178,6 +2666,14 @@ def tuya_config_from_secrets(
         require_confirm=bool(confirm_actions),
         ops=p.get("ops") if isinstance(p.get("ops"), dict) else {},
     )
+
+
+def higgsfield_config_from_secrets(conn: dict | None) -> "HiggsfieldConfig | None":
+    """Config da tool Higgsfield. `conn` = {api_key, api_secret} decifrado do
+    app_settings; None → a tool existe mas responde 'não conectado'."""
+    if not conn:
+        return None
+    return HiggsfieldConfig(conn=conn)
 
 
 def github_config_from_secrets(

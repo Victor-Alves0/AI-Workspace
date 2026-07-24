@@ -39,7 +39,8 @@ function BenchmarkEditor({ id, onBack, onSaved }: { id: string | null; onBack: (
     Promise.all([
       api.get<Model[]>("/settings/models").catch(() => [] as Model[]),
       api.get<Model[]>("/integrations/ollama/models").catch(() => [] as Model[]),
-    ]).then(([e, l]) => setExt([...e, ...l])).catch(() => {});
+      api.get<Model[]>("/integrations/subscriptions/chatgpt/models").catch(() => [] as Model[]),
+    ]).then(([e, l, s]) => setExt([...e, ...l, ...s])).catch(() => {});
     if (id) {
       api.get<BenchmarkDetail>(`/playground/benchmarks/${id}`).then((b) => {
         setName(b.name); setDescription(b.description);
@@ -244,7 +245,8 @@ function RunPanel({ bench, onBack }: { bench: BenchmarkSummary; onBack: () => vo
     Promise.all([
       api.get<Model[]>("/settings/models").catch(() => [] as Model[]),
       api.get<Model[]>("/integrations/ollama/models").catch(() => [] as Model[]),
-    ]).then(([e, l]) => setExt([...e, ...l])).catch(() => {});
+      api.get<Model[]>("/integrations/subscriptions/chatgpt/models").catch(() => [] as Model[]),
+    ]).then(([e, l, s]) => setExt([...e, ...l, ...s])).catch(() => {});
     loadHistory();
     return () => { if (timer.current) clearTimeout(timer.current); };
   }, [loadHistory]);

@@ -11,9 +11,14 @@ WORKDIR /app
 # git: clona os projetos do Codespace (tool code.graph/code.files) via HTTPS/SSH.
 # openssh-client: `ssh`/`ssh-keygen` — projetos Codespace por SSH (deploy key
 # gerada por-projeto, ver graph_service.generate_ssh_keypair).
+# ripgrep: o "grep" da tool code.files.browse (action=search) — regex de verdade,
+# detecção de binário e velocidade que a varredura em Python não dá. Sem ele o
+# graph_service cai num fallback Python mais fraco (não quebra, só piora).
+# ffmpeg: caminho de FALA da tool media.video.transcribe — recomprime/fatia o áudio
+# baixado (16 kHz mono) p/ caber no teto do STT. Sem ele só o caminho de legendas roda.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential libpq-dev curl ca-certificates git openssh-client \
+        build-essential libpq-dev curl ca-certificates git openssh-client ripgrep ffmpeg \
         tesseract-ocr tesseract-ocr-por tesseract-ocr-eng poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 

@@ -517,6 +517,147 @@ async def tuya_test(
     return {"ok": False, "error": result.get("error") or "Não foi possível conectar ao Tuya."}
 
 
+# --------------------------------------------------------------------------- #
+# Assinaturas — usar planos de IA (ChatGPT Plus/Pro) pelo LOGIN da conta, sem
+# chave de API. Só ChatGPT/Codex: a Anthropic PROIBIU OAuth de assinatura em
+# apps de terceiros (fev/2026, com contas banidas na enforcement) — o card do
+# Claude existe na UI apenas p/ explicar o porquê, sem botão de conectar.
+# --------------------------------------------------------------------------- #
+@router.get("/subscriptions/chatgpt")
+async def chatgpt_status(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    from .integrations import chatgpt_service
+    return await chatgpt_service.public_config(db, str(user.id))
+
+
+@router.get("/subscriptions/chatgpt/models")
+async def chatgpt_models(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Modelos codex/* p/ os seletores (mesmo shape do /integrations/ollama/models);
+    lista vazia quando não conectado — os seletores nem mostram a seção."""
+    from .integrations import chatgpt_service
+    cfg = await chatgpt_service.public_config(db, str(user.id))
+    if not cfg.get("connected"):
+        return []
+    return [
+        {"id": m, "name": f"{m.removeprefix(chatgpt_service.MODEL_PREFIX)} (ChatGPT)"}
+        for m in cfg.get("models") or []
+    ]
+
+
+@router.post("/subscriptions/chatgpt/begin")
+async def chatgpt_begin(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Gera a URL de autorização (PKCE). O usuário loga, o navegador redireciona
+    p/ localhost:1455 (que não responde) e ele cola a URL da barra de volta."""
+    from .integrations import chatgpt_service
+    url = await chatgpt_service.begin_auth(db, str(user.id))
+    return {"url": url}
+
+
+class ChatgptFinishIn(BaseModel):
+    pasted: str
+
+
+@router.post("/subscriptions/chatgpt/finish")
+async def chatgpt_finish(
+    body: ChatgptFinishIn,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    from .integrations import chatgpt_service
+    out = await chatgpt_service.finish_auth(db, str(user.id), body.pasted)
+    if out.get("error"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, out["error"])
+    sift_service.invalidate(str(user.id))
+    return out
+
+
+class ChatgptModelsIn(BaseModel):
+    models: list[str]
+
+
+@router.put("/subscriptions/chatgpt/models")
+async def chatgpt_set_models(
+    body: ChatgptModelsIn,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    from .integrations import chatgpt_service
+    await chatgpt_service.set_models(db, str(user.id), body.models)
+    return await chatgpt_service.public_config(db, str(user.id))
+
+
+@router.delete("/subscriptions/chatgpt")
+async def chatgpt_disconnect(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    from .integrations import chatgpt_service
+    await chatgpt_service.disconnect(db, str(user.id))
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+# Higgsfield — conexão POR-USUÁRIO (API key + secret de cloud.higgsfield.ai).
+# Libera a tool de geração de imagem/vídeo (higgsfield.media.generate).
+# --------------------------------------------------------------------------- #
+@router.get("/higgsfield")
+async def higgsfield_status(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    from .integrations import higgsfield_service
+    return await higgsfield_service.public_config(db, str(user.id))
+
+
+class HiggsfieldConfigIn(BaseModel):
+    api_key: str
+    api_secret: str | None = None  # vazio = mantém o atual
+
+
+@router.put("/higgsfield")
+async def higgsfield_set_config(
+    body: HiggsfieldConfigIn,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    from .integrations import higgsfield_service
+    if not body.api_key.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "API key é obrigatória")
+    existing = await higgsfield_service.get_config(db, str(user.id))
+    if existing is None and not (body.api_secret or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "API secret é obrigatório")
+    await higgsfield_service.set_config(db, str(user.id), body.api_key, body.api_secret or "")
+    sift_service.invalidate(str(user.id))  # creds mudaram → rebuild da SIFT
+    return {"ok": True}
+
+
+@router.delete("/higgsfield")
+async def higgsfield_disconnect(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    from .integrations import higgsfield_service
+    await higgsfield_service.delete_config(db, str(user.id))
+    sift_service.invalidate(str(user.id))
+    return {"ok": True}
+
+
+@router.post("/higgsfield/test")
+async def higgsfield_test(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    from .integrations import higgsfield_service
+    conn = await higgsfield_service.get_config(db, str(user.id))
+    if conn is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Higgsfield não configurada.")
+    result = await run_in_threadpool(higgsfield_service.test_connection, conn)
+    if result.get("ok"):
+        return {"ok": True}
+    return {"ok": False, "error": result.get("error") or "Não foi possível conectar à Higgsfield."}
+
+
 @router.get("/messaging/connections")
 async def messaging_connections(
     user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)

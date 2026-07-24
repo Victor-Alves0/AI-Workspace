@@ -70,7 +70,8 @@ export default function WhatsAppPanel({ onBack }: { onBack: () => void }) {
     Promise.all([
       api.get<Model[]>("/settings/models").catch(() => [] as Model[]),
       api.get<Model[]>("/integrations/ollama/models").catch(() => [] as Model[]),
-    ]).then(([ext, local]) => setExtModels([...ext, ...local])).catch(() => {});
+      api.get<Model[]>("/integrations/subscriptions/chatgpt/models").catch(() => [] as Model[]),
+    ]).then(([ext, local, subs]) => setExtModels([...ext, ...local, ...subs])).catch(() => {});
   }, [load]);
 
   return (

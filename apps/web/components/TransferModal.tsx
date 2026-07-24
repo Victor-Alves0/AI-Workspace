@@ -18,10 +18,12 @@ export interface TransferItem {
   label: string;
   sublabel?: string;
   group?: string;
-  /** item embutido do sistema (mostra ícone de chave + tooltip "AI Workspace") */
+  /** item embutido do sistema (mostra ícone + tooltip da origem) */
   system?: boolean;
-  /** título do ícone de chave (default "AI Workspace"; ex.: "Nativa do modelo") */
+  /** título do ícone (default "AI Workspace"; ex.: "Nativo", "Integração: Google") */
   iconTitle?: string;
+  /** ícone da origem (default: chave inglesa) — ex.: os de toolCategoryIcon() */
+  icon?: React.ReactNode;
 }
 
 /**
@@ -80,7 +82,7 @@ function TransferPane({
                 <span className="flex items-center gap-1.5">
                   {it.system && (
                     <span title={it.iconTitle ?? "AI Workspace"} className="shrink-0 text-muted">
-                      <Wrench size={12} />
+                      {it.icon ?? <Wrench size={12} />}
                     </span>
                   )}
                   {pinned && <Pin size={11} className="shrink-0 fill-accent-hover text-accent-hover" />}

@@ -467,6 +467,10 @@ export interface SystemTool {
   path: string;
   name: string;
   description: string;
+  /** origem da ferramenta: nativa do app, do Codespace ou de uma integração */
+  category?: "native" | "codespace" | "integration";
+  /** nome da integração quando category === "integration" (ex.: "Google") */
+  integration?: string;
 }
 
 export interface Prompt {
@@ -727,6 +731,8 @@ export interface CodespaceStats {
   refined?: boolean;
   refine_promoted?: number;
   by_language?: Record<string, number>;
+  /** só quando a indexação deu ZERO arquivos: extensões achadas que o grafo não lê */
+  unsupported_ext?: string[];
 }
 
 export interface CodespaceProject {

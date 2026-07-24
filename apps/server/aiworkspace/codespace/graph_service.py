@@ -25,6 +25,7 @@ reversível) é uma ação SEPARADA e explícita, sujeita ao mesmo toggle global
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 import re
@@ -33,6 +34,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -223,6 +225,28 @@ async def _mark(Session, project_id: uuid.UUID, **fields: Any) -> None:
         await db.commit()
 
 
+_UNSUPPORTED_SAMPLE = 6
+
+
+def unsupported_extensions(root: Path, limit: int = _UNSUPPORTED_SAMPLE) -> list[str]:
+    """Extensões presentes na working copy que o grafo NÃO reconhece.
+
+    Só é calculado quando a indexação termina com ZERO arquivos: sem isso o
+    painel mostra um "0 arquivos" mudo e um projeto de .html/.css parece um
+    reindex quebrado, quando na verdade essas extensões não têm gramática no
+    GraphCodeMap. Os arquivos continuam legíveis/pesquisáveis pelas tools."""
+    from codegraph.languages import language_for
+
+    counts: Counter[str] = Counter()
+    for p in root.rglob("*"):
+        if ".git" in p.parts or not p.is_file():
+            continue
+        ext = p.suffix.lower()
+        if ext and language_for(p.name) is None:
+            counts[ext] += 1
+    return [ext for ext, _ in counts.most_common(limit)]
+
+
 async def _index_project(project_id: uuid.UUID, reclone: bool = True) -> None:
     eng = create_async_engine(get_settings().database_url, poolclass=NullPool)
     try:
@@ -273,11 +297,21 @@ async def _index_project(project_id: uuid.UUID, reclone: bool = True) -> None:
             # force=True só numa working copy RECÉM-clonada (tudo "novo" p/ o
             # indexador); caso contrário força incremental (content-hash) — mais
             # rápido e é o que faz o reindex pós-escrita da IA ser barato.
-            await run_in_threadpool(cg.index, need_clone)
+            # `exclude`: o deny do escopo vira política de indexação persistida
+            # no índice (API de host do GraphCodeMap) — símbolo de arquivo negado
+            # NUNCA entra no grafo (antes o deny valia p/ arquivos mas find/
+            # references vazavam assinatura+docstring). Lista vazia LIMPA a
+            # política salva (deny removido → arquivo volta ao grafo).
+            async with Session() as db:
+                proj2 = await db.get(CodespaceProject, project_id)
+                deny = [str(p) for p in ((proj2.scope or {}).get("deny") or [])] if proj2 else []
+            await run_in_threadpool(lambda: cg.index(need_clone, exclude=deny))
             elapsed = round(time.time() - t0, 2)
             stats = await run_in_threadpool(cg.stats)
             stats["index_seconds"] = elapsed
             stats["refined"] = False
+            if not stats.get("files"):
+                stats["unsupported_ext"] = await run_in_threadpool(unsupported_extensions, dest)
         except Exception as exc:  # noqa: BLE001
             logger.warning("codespace index falhou (%s): %s", project_id, exc)
             await _mark(Session, project_id, index_status="error", error_message=str(exc)[:1000])
@@ -487,6 +521,208 @@ def visualize(user_id: str, project_id: str, level: str = "file", scope: str = "
 
 
 # --------------------------------------------------------------------------- #
+# Consultas avançadas do grafo — a GraphCodeMap faz bem mais que find/callers/
+# impact/ego; estas são as que faltavam ter porta de entrada. Mesma disciplina
+# das demais: saída COMPACTA (_short), teto de resultados e os avisos de
+# completude/confiança sempre junto (nunca somem).
+# --------------------------------------------------------------------------- #
+_MAX_OVERVIEW_FILES = 60
+
+
+def overview(user_id: str, project_id: str, scope: str = "", token_budget: int = 2000) -> dict:
+    """Mapa do projeto já PODADO por relevância (rank) dentro de um orçamento de
+    tokens — pensado p/ dar contexto inicial sem despejar a árvore inteira."""
+    cg = _get_graph(user_id, project_id)
+    files, env = cg.overview(
+        scope=scope or None, token_budget=max(200, min(int(token_budget), 8000))
+    )
+    out = [
+        {
+            "path": f.get("path"),
+            "symbols": [
+                {
+                    "fqn": s.get("fqn"), "kind": s.get("kind"), "line": s.get("start_line"),
+                    "signature": ((s.get("signature") or "").strip()[:_MAX_SIG] or None),
+                }
+                for s in (f.get("symbols") or [])[:_MAX_RESULTS]
+            ],
+        }
+        for f in (files or [])[:_MAX_OVERVIEW_FILES]
+    ]
+    return {"files": out, "total_files": len(files or []), "warnings": env.warnings}
+
+
+def references(user_id: str, project_id: str, selector: str, kind: str = "") -> dict:
+    """TODAS as referências a um símbolo (não só chamadas: importações etc.) —
+    o "find all references" do editor. `kind` filtra (ex.: "calls", "imports")."""
+    cg = _get_graph(user_id, project_id)
+    target, refs, env = cg.references(selector, kind=kind or None)
+    return {
+        "target": _short(target),
+        "references": [
+            {
+                "kind": r.get("kind"), "from": r.get("src_fqn"),
+                "path": r.get("site_path"), "line": r.get("line"),
+                "confidence": r.get("confidence"),
+            }
+            for r in (refs or [])[:_MAX_RESULTS]
+        ],
+        "total_found": len(refs or []),
+        "warnings": env.warnings,
+    }
+
+
+def callees(user_id: str, project_id: str, selector: str, depth: int = 1) -> dict:
+    """O inverso de `callers`: o que ESTE símbolo chama (transitivo até `depth`)."""
+    cg = _get_graph(user_id, project_id)
+    target, edges, env = cg.callees(selector, depth=max(1, min(depth, 4)))
+    return {
+        "target": _short(target),
+        "callees": [
+            {
+                # não-resolvido: `other_fqn` é None mas `dst_name` tem o nome cru —
+                # devolver o cru é melhor que devolver null (mesmo critério do ego)
+                "fqn": e.get("other_fqn") or e.get("dst_name"),
+                "path": e.get("site_path"), "line": e.get("line"),
+                "confidence": e.get("confidence"), "depth": e.get("depth"),
+            }
+            for e in edges[:_MAX_RESULTS]
+        ],
+        "total_found": len(edges),
+        "warnings": env.warnings,
+    }
+
+
+def symbol_info(user_id: str, project_id: str, selector: str) -> dict:
+    """Ficha do símbolo: definição, filhos e quantos callers/callees/referências."""
+    cg = _get_graph(user_id, project_id)
+    data, env = cg.symbol_info(selector)
+    return {
+        "symbol": _short(data.get("symbol")),
+        "children": [
+            {"name": c.get("name"), "kind": c.get("kind"), "line": c.get("start_line")}
+            for c in (data.get("children") or [])[:_MAX_RESULTS]
+        ],
+        "counts": data.get("counts") or {},
+        "domain": data.get("domain"),
+        "warnings": env.warnings,
+    }
+
+
+def communities(user_id: str, project_id: str, limit: int = 20, min_size: int = 3) -> dict:
+    """Módulos/agrupamentos detectados no grafo — "como este código se organiza"."""
+    cg = _get_graph(user_id, project_id)
+    rows, meta, env = cg.communities(
+        limit=max(1, min(limit, 50)), min_size=max(2, min(min_size, 20))
+    )
+    return {
+        "communities": [
+            {
+                "id": c.get("id"), "size": c.get("size"),
+                "label": c.get("label"), "summary": c.get("summary"),
+                "top_symbols": [s.get("fqn") for s in (c.get("top_symbols") or [])[:10]],
+                "top_files": [f.get("path") for f in (c.get("top_files") or [])[:10]],
+            }
+            for c in (rows or [])
+        ],
+        "meta": meta or {},
+        "warnings": env.warnings,
+    }
+
+
+def doctor(user_id: str, project_id: str, failed_limit: int = 20) -> dict:
+    """Saúde do índice: arquivos que falharam no parse, % de arestas certeiras,
+    idade do último scan. Responde "por que não acho X?" com dado, não achismo."""
+    cg = _get_graph(user_id, project_id)
+    out = dict(cg.doctor(failed_limit=max(1, min(failed_limit, 100))) or {})
+    # `root` é o caminho ABSOLUTO no servidor (/data/codespace/<uid>/<pid>/src):
+    # não interessa ao modelo e expõe o layout do disco — sai.
+    out.pop("root", None)
+    # epoch cru: o modelo não sabe que horas são no servidor; a idade em segundos
+    # (`last_full_scan_age_s`, que a lib já dá ao lado) responde a mesma pergunta.
+    out.pop("last_full_scan", None)
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# Fluxo de dados / taint — análise de SEGURANÇA (para onde um valor vai, o que
+# alcança um sink, quais entradas contaminam o quê). Estática e "may-taint"
+# (over-aproxima), por isso os avisos da lib são repassados sem filtro: são
+# candidatos a verificar, não veredito.
+# --------------------------------------------------------------------------- #
+def data_flow(user_id: str, project_id: str, selector: str, depth: int = 2) -> dict:
+    """Para onde vão os parâmetros desta função (retorno e/ou sinks chamados)."""
+    cg = _get_graph(user_id, project_id)
+    data, env = cg.data_flow(selector, depth=max(1, min(depth, 5)))
+    return {
+        "function": _short(data.get("function")),
+        "supported": data.get("supported"),
+        "params": [
+            {
+                "name": p.get("name"),
+                "reaches_return": p.get("reaches_return"),
+                "sinks": [
+                    {
+                        "callee": s.get("callee_fqn") or s.get("callee_name"),
+                        "path": s.get("site_path"), "line": s.get("line"),
+                        "via": s.get("via"), "depth": s.get("depth"),
+                        "confidence": s.get("confidence"),
+                    }
+                    for s in (p.get("sinks") or [])[:_MAX_RESULTS]
+                ],
+            }
+            for p in (data.get("params") or [])[:_MAX_RESULTS]
+        ],
+        "warnings": env.warnings,
+    }
+
+
+def reaches(user_id: str, project_id: str, selector: str, sink: str = "http",
+            via: str = "", depth: int = 8) -> dict:
+    """Este símbolo alcança um `sink` (http, db, fs…)? Devolve as CADEIAS de
+    chamada que levam até lá — a confiança é a MÍNIMA do caminho."""
+    cg = _get_graph(user_id, project_id)
+    target, data, env = cg.reaches(
+        selector, sink=sink or "http", via=via or None, depth=max(1, min(depth, 12))
+    )
+    paths = data.get("paths") or []
+    return {
+        "target": _short(target),
+        "sink": data.get("sink"),
+        "via": data.get("via"),
+        "paths": [
+            {
+                "chain": p.get("chain"), "sink_call": p.get("sink_call"),
+                "path": p.get("site_path"), "line": p.get("line"),
+                "confidence": p.get("confidence"), "via_present": p.get("via_present"),
+            }
+            for p in paths[:_MAX_RESULTS]
+        ],
+        "total_found": len(paths),
+        "warnings": env.warnings,
+    }
+
+
+def taint(user_id: str, project_id: str, scope: str = "", entry: str = "",
+          depth: int = 4) -> dict:
+    """Varredura de taint: entradas não confiáveis que chegam a sinks perigosos.
+    Sem `entry` varre o projeto; com `entry` parte de uma função específica.
+    Regras customizáveis pelo usuário em `.codegraph/taint.json` do projeto."""
+    cg = _get_graph(user_id, project_id)
+    data, env = cg.taint(
+        scope=scope or None, entry=entry or None, depth=max(1, min(depth, 8))
+    )
+    findings = data.get("findings") or []
+    return {
+        "mode": data.get("mode"),
+        "findings": findings[:_MAX_RESULTS],
+        "scanned": data.get("scanned"),
+        "total_found": len(findings),
+        "warnings": env.warnings,
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Arquivos — path-jail + escopo allow/deny (globs estilo .gitignore via pathspec)
 # --------------------------------------------------------------------------- #
 _DEFAULT_DENY = [".git/", "__pycache__/", "*.pyc", "node_modules/", ".codegraph/"]
@@ -598,17 +834,96 @@ _TEXT_EXTS = (
 )
 
 
-def search_files(user_id: str, project_id: str, scope: dict | None, query: str,
-                  glob: str = "") -> dict:
-    root = working_copy_path(user_id, project_id)
-    if not root.exists():
-        return {"error": "projeto ainda não indexado/clonado"}
-    if not (query or "").strip():
-        return {"error": "`query` é obrigatório"}
+_SEARCH_TIMEOUT_S = 30
+_MAX_LINE_CHARS = 300
+
+
+def _rg_search(root: Path, scope: dict | None, query: str, glob: str, regex: bool,
+               case_sensitive: bool, context: int, files_only: bool, cap: int) -> dict:
+    """Busca via ripgrep (`rg --json`). Regex de verdade, detecção de binário e
+    velocidade — o que a varredura em Python não dava. `FileNotFoundError` sobe
+    p/ o chamador cair no fallback quando o binário não existe."""
+    cmd = [
+        "rg", "--json", "--hidden",   # --hidden: acha .github/workflows, .config…
+        "--max-filesize", str(_MAX_FILE_BYTES),
+        # o .git é grande e inútil aqui; o resto do escopo vira --glob abaixo
+        "--glob", "!.git/",
+    ]
+    if not regex:
+        cmd.append("--fixed-strings")
+    if not case_sensitive:
+        cmd.append("--ignore-case")
+    if files_only:
+        cmd += ["--max-count", "1"]   # 1 hit por arquivo basta p/ listar arquivos
+    elif context > 0:
+        cmd += ["--context", str(min(context, 5))]
+    for pat in (scope or {}).get("deny") or []:
+        cmd += ["--glob", f"!{pat}"]
+    for pat in (scope or {}).get("allow") or []:
+        cmd += ["--glob", pat]
+    if glob:
+        cmd += ["--glob", glob]
+    # `--` ANTES do padrão: sem isso um query começando com "-" é lido como FLAG
+    # pelo rg (mesma classe de injeção de argumento já corrigida no git_diff).
+    cmd += ["--", query, str(root)]
+
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_SEARCH_TIMEOUT_S)
+    # rg: 0 = achou, 1 = nada encontrado, 2 = erro real (regex inválida etc.)
+    if proc.returncode == 2:
+        return {"error": (proc.stderr or "busca falhou").strip()[:300]}
+
+    results: list[dict] = []
+    files: list[str] = []
+    seen: set[str] = set()
+    truncated = False
+    for line in proc.stdout.splitlines():
+        if len(results) >= cap or len(files) >= cap:
+            truncated = True
+            break
+        try:
+            ev = json.loads(line)
+        except ValueError:
+            continue
+        kind = ev.get("type")
+        if kind not in ("match", "context"):
+            continue
+        data = ev.get("data") or {}
+        path_txt = ((data.get("path") or {}).get("text")) or ""
+        if not path_txt:
+            continue
+        target = Path(path_txt)
+        # defesa em profundidade: os --glob acima já filtram, mas o veredito de
+        # escopo continua sendo o MESMO `is_allowed` do resto do serviço
+        if not is_allowed(root, target, scope):
+            continue
+        rel = _rel(root, target)
+        if files_only:
+            if rel not in seen:
+                seen.add(rel)
+                files.append(rel)
+            continue
+        results.append({
+            "path": rel,
+            "line": data.get("line_number"),
+            "text": ((data.get("lines") or {}).get("text") or "").rstrip("\n")[:_MAX_LINE_CHARS],
+            **({"context": True} if kind == "context" else {}),
+        })
+
+    if files_only:
+        return {"files": files, "truncated": truncated}
+    return {"results": results, "truncated": truncated}
+
+
+def _py_search(root: Path, scope: dict | None, query: str, glob: str, regex: bool,
+               case_sensitive: bool, cap: int) -> dict:
+    """Fallback sem ripgrep: varredura em Python. Mais fraca de propósito — só
+    percorre extensões conhecidas (`_TEXT_EXTS`), sem contexto nem files_only —
+    existe para o serviço não quebrar num ambiente sem o binário."""
     try:
-        pattern = re.compile(re.escape(query), re.IGNORECASE)
-    except re.error:
-        return {"error": "query inválida"}
+        pattern = re.compile(query if regex else re.escape(query),
+                             0 if case_sensitive else re.IGNORECASE)
+    except re.error as exc:
+        return {"error": f"expressão inválida: {exc}"}
     glob_spec = _spec([glob]) if glob else None
     results: list[dict] = []
 
@@ -618,7 +933,7 @@ def search_files(user_id: str, project_id: str, scope: dict | None, query: str,
         except OSError:
             return
         for p in children:
-            if len(results) >= _MAX_SEARCH_RESULTS:
+            if len(results) >= cap:
                 return
             # poda diretórios negados (.git, node_modules…) ANTES de descer —
             # evita vasculhar objetos git/binários à toa num repo grande.
@@ -637,14 +952,39 @@ def search_files(user_id: str, project_id: str, scope: dict | None, query: str,
                     continue
                 for i, line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
                     if pattern.search(line):
-                        results.append({"path": rel, "line": i, "text": line.strip()[:300]})
-                        if len(results) >= _MAX_SEARCH_RESULTS:
+                        results.append({"path": rel, "line": i, "text": line.strip()[:_MAX_LINE_CHARS]})
+                        if len(results) >= cap:
                             return
             except OSError:
                 continue
 
     _walk(root)
-    return {"results": results, "truncated": len(results) >= _MAX_SEARCH_RESULTS}
+    return {"results": results, "truncated": len(results) >= cap}
+
+
+def search_files(user_id: str, project_id: str, scope: dict | None, query: str,
+                  glob: str = "", regex: bool = False, case_sensitive: bool = False,
+                  context: int = 0, files_only: bool = False,
+                  limit: int = _MAX_SEARCH_RESULTS) -> dict:
+    """Busca por CONTEÚDO nos arquivos do projeto (o "grep" da IA), via ripgrep.
+
+    `regex=False` (padrão) trata `query` como texto literal; `regex=True` usa a
+    sintaxe do rust/regex. `files_only` devolve só a lista de arquivos que casam
+    (bem mais barato quando a pergunta é "onde isso aparece?")."""
+    root = working_copy_path(user_id, project_id)
+    if not root.exists():
+        return {"error": "projeto ainda não indexado/clonado"}
+    if not (query or "").strip():
+        return {"error": "`query` é obrigatório"}
+    cap = max(1, min(int(limit or _MAX_SEARCH_RESULTS), _MAX_SEARCH_RESULTS))
+    try:
+        return _rg_search(root, scope, query, glob, regex, case_sensitive,
+                          context, files_only, cap)
+    except FileNotFoundError:
+        logger.warning("ripgrep ausente — busca do Codespace em modo degradado (Python)")
+    except subprocess.TimeoutExpired:
+        return {"error": f"a busca passou de {_SEARCH_TIMEOUT_S}s — restrinja com `glob` ou um termo mais específico"}
+    return _py_search(root, scope, query, glob, regex, case_sensitive, cap)
 
 
 # --------------------------------------------------------------------------- #
@@ -673,16 +1013,29 @@ def _git_commit(root: Path, message: str) -> dict | None:
     return {"sha": sha, "message": message}
 
 
-def _reindex_after_write(user_id: str, project_id: str) -> None:
+def _reindex_after_write(user_id: str, project_id: str) -> dict | None:
     """Reindexação SÍNCRONA e INCREMENTAL (content-hash) logo após um write/edit/
     delete — sem isso, uma query de grafo NO MESMO turno veria dados velhos.
     Falha aqui não derruba o resultado da escrita: o arquivo já foi salvo e
-    commitado: o pior caso é o grafo ficar 1 chamada atrasado."""
+    commitado: o pior caso é o grafo ficar 1 chamada atrasado.
+
+    Devolve `changes` do índice (added/removed/signature_changed — API de host
+    do GraphCodeMap): a tool repassa ao modelo, que vê na hora "a assinatura de
+    save_user mudou" e pode chamar `impact` ANTES de dar a tarefa por encerrada
+    — sem diff de git nem adivinhar símbolo. `exclude=None` mantém a política
+    de deny persistida no índice."""
     try:
         cg = _get_graph(user_id, project_id)
-        cg.index()  # force=False: só reparsa o que mudou (rápido)
+        out = cg.index()  # force=False: só reparsa o que mudou (rápido)
+        ch = out.get("changes") if isinstance(out, dict) else None
+        if isinstance(ch, dict) and any(
+            ch.get(k) for k in ("added", "removed", "signature_changed")
+        ):
+            return ch
+        return None
     except Exception:  # noqa: BLE001
         logger.warning("reindex pós-escrita falhou (%s/%s)", user_id, project_id, exc_info=True)
+        return None
 
 
 def write_file(user_id: str, project_id: str, scope: dict | None, path: str,
@@ -700,8 +1053,11 @@ def write_file(user_id: str, project_id: str, scope: dict | None, path: str,
     target.write_text(content, encoding="utf-8")
     rel = _rel(root, target)
     commit = _git_commit(root, message.strip() or f"AI: {'cria' if is_new else 'atualiza'} {rel}")
-    _reindex_after_write(user_id, project_id)
-    return {"ok": True, "path": rel, "created": is_new, "commit": commit}
+    changes = _reindex_after_write(user_id, project_id)
+    out = {"ok": True, "path": rel, "created": is_new, "commit": commit}
+    if changes:
+        out["symbol_changes"] = changes
+    return out
 
 
 def edit_file(user_id: str, project_id: str, scope: dict | None, path: str,
@@ -728,8 +1084,11 @@ def edit_file(user_id: str, project_id: str, scope: dict | None, path: str,
     target.write_text(text.replace(search, replace, 1), encoding="utf-8")
     rel = _rel(root, target)
     commit = _git_commit(root, message.strip() or f"AI: edita {rel}")
-    _reindex_after_write(user_id, project_id)
-    return {"ok": True, "path": rel, "commit": commit}
+    changes = _reindex_after_write(user_id, project_id)
+    out = {"ok": True, "path": rel, "commit": commit}
+    if changes:
+        out["symbol_changes"] = changes
+    return out
 
 
 _MAX_FIND_RESULTS = 200
@@ -792,8 +1151,11 @@ def move_file(user_id: str, project_id: str, scope: dict | None, path: str,
     src.rename(dest)
     rel_dest = _rel(root, dest)
     commit = _git_commit(root, message.strip() or f"Move {rel_src} -> {rel_dest}")
-    _reindex_after_write(user_id, project_id)
-    return {"ok": True, "path": rel_dest, "commit": commit}
+    changes = _reindex_after_write(user_id, project_id)
+    out = {"ok": True, "path": rel_dest, "commit": commit}
+    if changes:
+        out["symbol_changes"] = changes
+    return out
 
 
 def delete_file(user_id: str, project_id: str, scope: dict | None, path: str, message: str = "") -> dict:
@@ -811,8 +1173,11 @@ def delete_file(user_id: str, project_id: str, scope: dict | None, path: str, me
     else:
         target.unlink()
     commit = _git_commit(root, message.strip() or f"AI: remove {rel}")
-    _reindex_after_write(user_id, project_id)
-    return {"ok": True, "path": rel, "commit": commit}
+    changes = _reindex_after_write(user_id, project_id)
+    out = {"ok": True, "path": rel, "commit": commit}
+    if changes:
+        out["symbol_changes"] = changes
+    return out
 
 
 def git_log(user_id: str, project_id: str, limit: int = 20) -> dict:

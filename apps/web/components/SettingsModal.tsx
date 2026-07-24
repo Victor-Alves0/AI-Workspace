@@ -7,6 +7,8 @@ import {
   Cable,
   Check,
   ChevronDown,
+  Clapperboard,
+  Crown,
   ChevronLeft,
   Activity,
   Database,
@@ -55,6 +57,8 @@ import WhatsAppPanel from "./WhatsAppPanel";
 import TelegramPanel from "./TelegramPanel";
 import DiscordPanel from "./DiscordPanel";
 import GitHubPanel from "./GitHubPanel";
+import HiggsfieldPanel from "./HiggsfieldPanel";
+import SubscriptionsPanel from "./SubscriptionsPanel";
 import OllamaPanel from "./OllamaPanel";
 import VoicePanel from "./VoicePanel";
 import { WebSearchPanel, BrowserPanel } from "./toolPanels";
@@ -474,6 +478,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                 <OllamaPanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
               ) : connView === "voice" ? (
                 <VoicePanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
+              ) : connView === "subscriptions" ? (
+                <SubscriptionsPanel onBack={() => setConnView(null)} />
               ) : connView === "web" ? (
                 <DetailView title="Web" onBack={() => setConnView(null)}>
                   <WebSearchPanel
@@ -490,6 +496,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                   <CardGrid
                     cards={[
                       { key: "apis", icon: <KeyRound size={22} />, name: "APIs", desc: "Chaves de serviços" },
+                      { key: "subscriptions", icon: <Crown size={22} />, name: "Assinaturas", desc: "ChatGPT e outros planos, via login" },
                       { key: "web", icon: <Globe size={22} />, name: "Web", desc: "Pesquisa na web / SearXNG / Navegador" },
                       { key: "ollama", icon: <SiOllama size={22} />, name: "Ollama", desc: "Utilize modelos locais" },
                       { key: "voice", icon: <AudioLines size={22} />, name: "Voz Local", desc: "Kokoro / clonagem de voz" },
@@ -512,6 +519,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                 <DiscordPanel onBack={() => setIntegView(null)} />
               ) : integView === "github" ? (
                 <GitHubPanel onBack={() => setIntegView(null)} />
+              ) : integView === "higgsfield" ? (
+                <HiggsfieldPanel onBack={() => setIntegView(null)} />
               ) : (
                 <div>
                   <Heading>Integrações</Heading>
@@ -575,6 +584,16 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       </span>
                       <span className="text-sm font-medium text-ink">GitHub</span>
                       <span className="text-xs leading-4 text-muted">Repos, issues e PRs</span>
+                    </button>
+                    <button
+                      onClick={() => setIntegView("higgsfield")}
+                      className="group flex flex-col items-center gap-2.5 rounded-2xl border border-border bg-surface px-4 py-7 text-center transition-all duration-150 hover:border-accent/40 hover:bg-hover"
+                    >
+                      <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
+                        <Clapperboard size={22} />
+                      </span>
+                      <span className="text-sm font-medium text-ink">Higgsfield</span>
+                      <span className="text-xs leading-4 text-muted">Geração de imagem e vídeo</span>
                     </button>
                     {[
                       { name: "Slack", icon: <Blocks size={22} /> },

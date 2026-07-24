@@ -178,6 +178,41 @@ export default function ChatPage() {
   // barra lateral de arquivos do Codespace (só existe quando o chat está vinculado
   // a um projeto — active.project_id)
   const [csFilesOpen, setCsFilesOpen] = useState(false);
+  // largura da coluna "Arquivos do projeto" (desktop) — arrastável pelo divisor
+  // e lembrada entre sessões. No mobile o painel é tela cheia (largura ignorada).
+  const [csFilesW, setCsFilesW] = useState<number>(() => {
+    if (typeof window === "undefined") return 480;
+    const saved = Number(window.localStorage.getItem("cs_files_w"));
+    return Number.isFinite(saved) && saved >= 300 ? saved : 480;
+  });
+  const csFilesRef = useRef<HTMLDivElement | null>(null);
+  const startCsResize = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    const panel = csFilesRef.current;
+    if (!panel) return;
+    const right = panel.getBoundingClientRect().right;
+    const prevSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none";           // sem seleção fantasma no arrasto
+    document.body.style.cursor = "col-resize";
+    // teto = 70% do CONTÊINER de colunas (verdade de layout — viewport/emulação
+    // mentem em ambiente remoto): nunca engole a conversa inteira
+    const maxW = Math.round(
+      (panel.parentElement?.getBoundingClientRect().width ?? window.innerWidth) * 0.7,
+    );
+    const onMove = (ev: PointerEvent) => {
+      const w = Math.round(right - ev.clientX);
+      setCsFilesW(Math.max(300, Math.min(w, maxW)));
+    };
+    const onUp = () => {
+      document.body.style.userSelect = prevSelect;
+      document.body.style.cursor = "";
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setCsFilesW((w) => { window.localStorage.setItem("cs_files_w", String(w)); return w; });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, []);
   const [csDropOver, setCsDropOver] = useState(false);
   // projeto do chat ativo (pro botão "Definir como padrão do projeto" saber o
   // padrão atual); null = chat sem projeto
@@ -297,11 +332,12 @@ export default function ChatPage() {
   // modelos externos = OpenRouter + locais do Ollama (mesclados no seletor). Cada
   // fetch é independente: sem chave OpenRouter ainda mostra os locais, e vice-versa.
   const refreshExtModels = useCallback(async () => {
-    const [ext, local] = await Promise.all([
+    const [ext, local, subs] = await Promise.all([
       api.get<Model[]>("/settings/models").catch(() => [] as Model[]),
       api.get<Model[]>("/integrations/ollama/models").catch(() => [] as Model[]),
+      api.get<Model[]>("/integrations/subscriptions/chatgpt/models").catch(() => [] as Model[]),
     ]);
-    setExtModels([...ext, ...local]);
+    setExtModels([...ext, ...local, ...subs]);
   }, []);
 
   function applyDefaultModel(u: User, customs: ModelConfig[]) {
@@ -548,17 +584,17 @@ export default function ChatPage() {
   }, [active?.id, active?.knowledge_config, curCustomId]);
 
   // ferramentas que o modelo ATIVO pode usar (embutidas + do usuário), resolvidas
-  // a nome+descrição para o menu da chave inglesa na promptbox.
+  // a nome+descrição+origem para o menu da chave inglesa na promptbox.
   const modelTools = useMemo(() => {
     if (!curCustom?.tools_enabled) return [];
     const sysByPath = new Map(systemTools.map((t) => [t.path, t]));
     const userById = new Map(tools.map((t) => [t.id, t]));
-    const out: { name: string; description?: string }[] = [];
+    const out: { name: string; description?: string; category?: SystemTool["category"]; integration?: string }[] = [];
     for (const id of curCustom.tool_ids ?? []) {
       if (typeof id !== "string") continue;
       if (id.startsWith("builtin:")) {
         const s = sysByPath.get(id.slice(8));
-        if (s) out.push({ name: s.name, description: s.description });
+        if (s) out.push({ name: s.name, description: s.description, category: s.category, integration: s.integration });
       } else {
         const t = userById.get(id);
         if (t?.enabled) out.push({ name: t.name || t.path, description: t.description });
@@ -1804,9 +1840,22 @@ export default function ChatPage() {
               />
             </div>
           )}
-          {/* Arquivos do projeto: mesma coluna do lado, só quando o chat está vinculado */}
+          {/* Arquivos do projeto: mesma coluna do lado, só quando o chat está vinculado.
+              Desktop: largura controlada pelo DIVISOR arrastável (var CSS + estado);
+              mobile: tela cheia, sem divisor. */}
           {csFilesOpen && active?.project_id && (
-            <div className="fixed inset-0 z-50 shrink-0 bg-bg p-3 md:static md:z-auto md:w-[42%] md:min-w-[360px] md:max-w-[640px] md:bg-transparent">
+            <div
+              ref={csFilesRef}
+              style={{ "--csw": `${csFilesW}px` } as React.CSSProperties}
+              className="fixed inset-0 z-50 shrink-0 bg-bg p-3 md:relative md:inset-auto md:z-auto md:w-[var(--csw)] md:min-w-[300px] md:max-w-[70vw] md:bg-transparent"
+            >
+              <div
+                onPointerDown={startCsResize}
+                title="Arraste para redimensionar"
+                className="group absolute inset-y-0 -left-1 z-10 hidden w-2.5 cursor-col-resize items-stretch justify-center md:flex"
+              >
+                <div className="w-[3px] rounded-full bg-transparent transition-colors group-hover:bg-accent/50 group-active:bg-accent" />
+              </div>
               <div className="flex h-full flex-col gap-2">
                 <div className="flex items-center justify-between">
                   <span className="flex items-center gap-1.5 text-sm font-medium text-ink"><Code2 size={15} className="text-accent-hover" /> Arquivos</span>
