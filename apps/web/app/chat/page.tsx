@@ -12,8 +12,8 @@ import { downloadJSON, downloadPDF, downloadTXT } from "@/lib/download";
 import { pickSuggestions, type Suggestion } from "@/lib/suggestions";
 import type { AskSpec, Attachment, Chat, ChatArtifact, CodespaceProject, Folder, KnowledgeRef, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User } from "@/lib/types";
 import ArtifactPanel from "@/components/ArtifactPanel";
-import CodespaceFileBrowser, { CODESPACE_DND_MIME, extLang, stripLineNumbers } from "@/components/CodespaceFileBrowser";
-import type { CodespaceDragPayload } from "@/components/CodespaceFileBrowser";
+import CodespaceFileBrowser, { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME, extLang, stripLineNumbers } from "@/components/CodespaceFileBrowser";
+import type { CodespaceDragPayload, CodespaceSnippetPayload } from "@/components/CodespaceFileBrowser";
 import Roundtable, { nextColor, RT_COLORS } from "@/components/Roundtable";
 import Markdown from "@/components/Markdown";
 import { ReasoningBlock, ToolEventsPanel, fmtTime } from "@/components/MessageItem";
@@ -233,12 +233,31 @@ export default function ChatPage() {
     } catch { /* melhor esforço — o botão continua mostrando o estado antigo */ }
   }
 
-  // arraste um arquivo do explorador do Codespace até aqui pra referenciá-lo
+  // arraste do explorador do Codespace até aqui: um ARQUIVO inteiro ou só um
+  // TRECHO selecionado no visualizador (que já vem com o intervalo de linhas)
   async function handleComposerFileDrop(e: React.DragEvent) {
+    setCsDropOver(false);  // sempre limpa o realce, seja qual for o conteúdo solto
+
+    const rawSnippet = e.dataTransfer.getData(CODESPACE_SNIPPET_MIME);
+    if (rawSnippet) {
+      e.preventDefault();
+      try {
+        const s: CodespaceSnippetPayload = JSON.parse(rawSnippet);
+        const linhas = s.startLine === s.endLine
+          ? `linha ${s.startLine}`
+          : `linhas ${s.startLine}-${s.endLine}`;
+        // o intervalo vai no texto: é o que permite a IA dizer "na linha 42 do X"
+        // e usar code.files.write no lugar certo sem reler o arquivo inteiro
+        const prefill =
+          `Sobre \`${s.path}\` (${linhas}):\n\n\`\`\`${extLang(s.path)}\n${s.text}\n\`\`\`\n\n`;
+        setInput((v) => (v ? `${v}\n\n${prefill}` : prefill));
+      } catch { /* payload inválido — ignora */ }
+      return;
+    }
+
     const raw = e.dataTransfer.getData(CODESPACE_DND_MIME);
     if (!raw) return;
     e.preventDefault();
-    setCsDropOver(false);
     let payload: CodespaceDragPayload;
     try {
       payload = JSON.parse(raw);
@@ -283,10 +302,6 @@ export default function ChatPage() {
   const [atBottom, setAtBottom] = useState(true);
   // id da última mensagem cujo seletor de opções (kind:ask) foi dispensado
   const [dismissedAsk, setDismissedAsk] = useState<string | null>(null);
-  // altura do composer flutuante → padding-bottom da área de rolagem (p/ a última
-  // mensagem não ficar escondida sob a promptbox)
-  const composerRef = useRef<HTMLDivElement>(null);
-  const [composerH, setComposerH] = useState(96);
   const typeTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const onScrollArea = () => {
@@ -473,12 +488,9 @@ export default function ChatPage() {
     const el = scrollRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight });
   }, []);
-  // `composerH` entra nas dependências: quando o composer cresce (anexos, AskOptions,
-  // multilinha) o padding inferior aumenta — se estávamos no fim, re-gruda p/ a última
-  // mensagem não ficar presa atrás do composer.
   useEffect(() => {
     stickToBottom();
-  }, [messages, streaming, streamingReasoning, toolEvents, composerH, stickToBottom]);
+  }, [messages, streaming, streamingReasoning, toolEvents, stickToBottom]);
 
   // Mídia que carrega DEPOIS do layout (imagem da Base de Conhecimento, anexo) muda a
   // altura da mensagem após a rolagem inicial → a última mensagem afundava atrás do
@@ -496,33 +508,12 @@ export default function ChatPage() {
     };
   }, [messages.length, stickToBottom]);
 
-  // mede a altura do composer flutuante (muda com opções/anexos/linhas). O padding
-  // inferior da área de rolagem = essa altura; se ela for medida CEDO demais (antes de
-  // fontes/chips assentarem) e nada mais redimensionar, o padding fica curto e a última
-  // mensagem trava atrás do composer — dava o bug de "não consigo rolar até o fim, só
-  // um F5 corrige". Por isso re-medimos após o layout assentar (rAF + timeout) e no
-  // resize da janela, além do ResizeObserver.
+  // NOTA: aqui existia uma medição da altura do composer (ResizeObserver + rAF +
+  // timeout + resize) que virava o padding-bottom da área de rolagem. Foi REMOVIDA:
+  // o composer voltou a ser item de fluxo, então a altura da área de rolagem é
+  // responsabilidade do navegador. Não reintroduzir — era a origem do bug recorrente
+  // "o scroll morre antes do fim" (qualquer atraso da medição escondia o fim).
   const hasConversation = messages.length > 0 || !!streaming || rtRunning || !!rtStreaming;
-  useEffect(() => {
-    const el = composerRef.current;
-    if (!el) return;
-    const measure = () => setComposerH(el.offsetHeight);
-    measure();
-    const r1 = requestAnimationFrame(measure);
-    const r2 = requestAnimationFrame(() => requestAnimationFrame(measure));
-    const t = setTimeout(measure, 300);
-    let ro: ResizeObserver | undefined;
-    if (typeof ResizeObserver !== "undefined") {
-      ro = new ResizeObserver(measure);
-      ro.observe(el);
-    }
-    window.addEventListener("resize", measure);
-    return () => {
-      cancelAnimationFrame(r1); cancelAnimationFrame(r2); clearTimeout(t);
-      ro?.disconnect(); window.removeEventListener("resize", measure);
-    };
-  }, [hasConversation]);
-
 
   // detecta tela pequena (< md = 768px) p/ virar a barra lateral em drawer
   useEffect(() => {
@@ -1560,7 +1551,12 @@ export default function ChatPage() {
             )}
             {active?.project_id && (
               <span className="flex items-center gap-2.5 pl-2 text-xs">
-                <span className="flex items-center gap-1 text-accent-hover"><Code2 size={11} /> Codespace</span>
+                <span
+                  title={csProject?.name ? `Projeto: ${csProject.name}` : "Chat vinculado a um projeto do Codespace"}
+                  className="flex cursor-default items-center gap-1 text-accent-hover"
+                >
+                  <Code2 size={11} /> Codespace
+                </span>
                 {curModel && (
                   <button onClick={setAsProjectDefault} className="text-left text-muted transition-colors hover:text-ink">
                     {csProject?.default_model === (curCustomId ? `custom:${curCustomId}` : curModel)
@@ -1659,7 +1655,8 @@ export default function ChatPage() {
                 </div>
                 <div
                   className={`w-full max-w-3xl rounded-2xl transition-shadow ${csDropOver ? "ring-2 ring-accent/50" : ""}`}
-                  onDragOver={(e) => { if (e.dataTransfer.types.includes(CODESPACE_DND_MIME)) { e.preventDefault(); setCsDropOver(true); } }}
+                  onDragOver={(e) => { const t = e.dataTransfer.types;
+                    if (t.includes(CODESPACE_DND_MIME) || t.includes(CODESPACE_SNIPPET_MIME)) { e.preventDefault(); setCsDropOver(true); } }}
                   onDragLeave={() => setCsDropOver(false)}
                   onDrop={handleComposerFileDrop}
                 >
@@ -1690,9 +1687,14 @@ export default function ChatPage() {
               </div>
             ) : (
               <>
-                {/* scrollPaddingBottom: o scrollIntoView dos painéis expandidos
-                    (ferramentas/custo) mira ACIMA do composer flutuante */}
-                <div ref={scrollRef} onScroll={onScrollArea} className="flex-1 space-y-5 overflow-y-auto px-4 pt-6" style={{ paddingBottom: composerH + 40, scrollPaddingBottom: composerH + 56 }}>
+                {/* O composer é um item de fluxo (shrink-0) LOGO ABAIXO: a altura
+                    desta área é calculada pelo NAVEGADOR, então o fim do scroll é
+                    sempre alcançável. Antes o composer era `absolute` e o espaço
+                    dele era simulado por um padding medido em JS — qualquer atraso
+                    da medição escondia o fim do conteúdo ("o scroll morre").
+                    O pb-14 só afasta a última linha do gradiente; é constante e não
+                    depende de medição nenhuma. */}
+                <div ref={scrollRef} onScroll={onScrollArea} className="flex-1 space-y-5 overflow-y-auto px-4 pb-14 pt-6 [scroll-padding-bottom:5rem]">
                   {temporary && (
                     <div className="mx-auto w-fit rounded-full border border-border bg-surface px-4 py-1.5 text-center text-xs text-muted">
                       Chat temporário — não será salvo
@@ -1795,14 +1797,18 @@ export default function ChatPage() {
                     sending && <Thinking />
                   ))}
                 </div>
-                {/* composer flutuante: sobrepõe as mensagens; elas somem num fade
-                    ao rolar por baixo (o fundo sólido oculta, o gradiente suaviza) */}
-                <div ref={composerRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-10">
-                  <div className="pointer-events-none h-12 bg-gradient-to-t from-bg to-transparent" />
-                  <div className="pointer-events-auto bg-bg px-4 pb-3">
+                {/* Composer NO FLUXO (shrink-0): ocupa espaço de verdade, então a área
+                    de rolagem acima nunca fica maior que o disponível. Cresce (anexos,
+                    AskOptions, multilinha) encolhendo a área de rolagem automaticamente
+                    — sem medir nada. O gradiente é `absolute` ACIMA dele (-top-12), só
+                    enfeite: não entra no layout e não pode desalinhar a geometria. */}
+                <div className="relative z-10 shrink-0">
+                  <div className="pointer-events-none absolute -top-12 inset-x-0 h-12 bg-gradient-to-t from-bg to-transparent" />
+                  <div className="bg-bg px-4 pb-3">
                     <div
                       className={`relative rounded-2xl transition-shadow ${csDropOver ? "ring-2 ring-accent/50" : ""}`}
-                      onDragOver={(e) => { if (e.dataTransfer.types.includes(CODESPACE_DND_MIME)) { e.preventDefault(); setCsDropOver(true); } }}
+                      onDragOver={(e) => { const t = e.dataTransfer.types;
+                    if (t.includes(CODESPACE_DND_MIME) || t.includes(CODESPACE_SNIPPET_MIME)) { e.preventDefault(); setCsDropOver(true); } }}
                       onDragLeave={() => setCsDropOver(false)}
                       onDrop={handleComposerFileDrop}
                     >

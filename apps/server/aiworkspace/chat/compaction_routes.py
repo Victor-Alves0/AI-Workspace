@@ -32,12 +32,15 @@ logger = logging.getLogger(__name__)
 _COMPACT_SYSTEM = (
     "Você resume conversas preservando o máximo de contexto útil no mínimo de espaço."
 )
+# Instrução lida pelo MODELO => inglês (padrão do projeto). O RESUMO sai no idioma da
+# conversa, porque ele substitui as mensagens no contexto e é lido pelo usuário.
 _COMPACT_INSTRUCTION = (
-    "Resuma a conversa abaixo de forma concisa, porém completa, preservando: fatos e "
-    "dados importantes, decisões tomadas, preferências e informações sobre o usuário, o "
-    "estado atual da tarefa e todo contexto necessário para continuar sem perder nada "
-    "relevante. Escreva em tópicos claros. Não invente informações que não estejam na "
-    "conversa. Responda apenas com o resumo."
+    "Summarize the conversation below concisely but completely, preserving: important "
+    "facts and data, decisions made, the user's preferences and personal details, the "
+    "current state of the task, and every piece of context needed to continue without "
+    "losing anything relevant. Use clear bullet points. Never invent information that is "
+    "not in the conversation. Write the summary in the same language as the conversation. "
+    "Reply with the summary only."
 )
 
 

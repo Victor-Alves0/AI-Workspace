@@ -23,6 +23,7 @@ from .memory_bank import MemoryBank
 from .knowledge import KnowledgeBase, KnowledgeFolder, KnowledgeDoc, KnowledgeChunk
 from .benchmark import Benchmark, BenchmarkRun
 from .codespace_project import CodespaceProject
+from .api_key import ApiKey, ApiRequest
 
 __all__ = [
     "AuditEvent",
@@ -63,4 +64,6 @@ __all__ = [
     "Benchmark",
     "BenchmarkRun",
     "CodespaceProject",
+    "ApiKey",
+    "ApiRequest",
 ]

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
-  Blocks, Brain, Coins, FileText, Hash, Info, Loader2, MessageSquare, X,
+  Blocks, Brain, Code2, Coins, FileText, Hash, Info, Loader2, MessageSquare, X,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ChatInfo as ChatInfoData } from "@/lib/types";
@@ -74,6 +74,15 @@ export default function ChatInfoModal({
 
             <div className="rounded-xl border border-border bg-surface2/40 px-3 py-2 text-xs text-muted">
               <p>Modelo: <span className="text-ink-soft">{info.model || "—"}</span></p>
+              {info.project_id && (
+                <p className="mt-0.5 flex items-center gap-1.5">
+                  <Code2 size={12} className="shrink-0 text-accent-hover" />
+                  Projeto:{" "}
+                  <span className="truncate text-ink-soft">
+                    {info.project_name || "(projeto removido)"}
+                  </span>
+                </p>
+              )}
               <p className="mt-0.5">Criado: {fmtDate(info.created_at)} · Atualizado: {fmtDate(info.updated_at)}</p>
             </div>
 

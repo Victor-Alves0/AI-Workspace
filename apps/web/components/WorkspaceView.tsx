@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft, BarChart3, BookOpen, Box, Brain, Check, Code2, Copy, Download, FileText,
   LayoutGrid, MoreHorizontal, Pencil, Plug, Plus, Search, Settings, Sparkles,
-  Trash2, Upload, Waypoints, Wrench, X,
+  Terminal, Trash2, Upload, Waypoints, Wrench, X,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
@@ -21,10 +21,11 @@ import AnalyticsView from "./AnalyticsView";
 import MemoryView from "./MemoryView";
 import KnowledgeView from "./KnowledgePanel";
 import CodespacePanel from "./CodespacePanel";
+import ApiView from "./ApiView";
 
 export type Section =
   | "Modelos" | "Conhecimento" | "Cerebros" | "Prompts" | "Skills"
-  | "Ferramentas" | "Apps" | "Codespace" | "Memoria" | "Analítica";
+  | "Ferramentas" | "Apps" | "Codespace" | "Memoria" | "Analítica" | "API";
 
 // meta dos cards da grade inicial (a contagem é injetada em runtime)
 const CARD_META: { key: Section; name: string; desc: string; icon: ReactNode; live: boolean }[] = [
@@ -38,6 +39,7 @@ const CARD_META: { key: Section; name: string; desc: string; icon: ReactNode; li
   { key: "Codespace", name: "Codespace", desc: "Programe com IA", icon: <Code2 size={22} />, live: true },
   { key: "Memoria", name: "Memória", desc: "O que a IA lembra de você", icon: <Brain size={22} />, live: true },
   { key: "Analítica", name: "Analítica", desc: "Uso, custos e desempenho", icon: <BarChart3 size={22} />, live: true },
+  { key: "API", name: "API", desc: "Use seus modelos em qualquer app", icon: <Terminal size={22} />, live: true },
 ];
 
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
@@ -720,6 +722,11 @@ export default function WorkspaceView({
       {section === "Analítica" && (
         <SectionShell title="Analítica" onBack={backHome}>
           <AnalyticsView />
+        </SectionShell>
+      )}
+      {section === "API" && (
+        <SectionShell title="API" onBack={backHome}>
+          <ApiView />
         </SectionShell>
       )}
 

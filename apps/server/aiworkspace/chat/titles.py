@@ -16,6 +16,14 @@ logger = logging.getLogger(__name__)
 # limite rígido do título (também comunicado ao modelo no prompt)
 MAX_TITLE_CHARS = 60
 
+# Orçamento de saída da chamada de título. NÃO reduzir: em modelos de RACIOCÍNIO
+# (DeepSeek v4, o1/o3 e afins) os tokens de reasoning saem ANTES do conteúdo e
+# consomem o teto — com 32/64/128 o `content` volta VAZIO e o chat fica com o
+# fallback (a 1ª mensagem crua truncada, ex.: uma URL do YouTube). Medido: 32/64/128
+# → ""; 512 → "Prova matematica de 1=2". O custo extra é irrelevante (1 chamada/chat)
+# porque o título real continua tendo no máximo MAX_TITLE_CHARS.
+TITLE_MAX_TOKENS = 512
+
 # system prompt padrão (usado quando o usuário deixa o campo em branco). O
 # tamanho máximo é injetado via {max}.
 DEFAULT_TITLE_PROMPT = (
@@ -64,7 +72,7 @@ async def generate_title(
                 {"role": "system", "content": system},
                 {"role": "user", "content": convo},
             ],
-            params={"max_tokens": 32, "temperature": 0.3},
+            params={"max_tokens": TITLE_MAX_TOKENS, "temperature": 0.3},
             timeout=30.0,
             base_url=base_url,
         )

@@ -304,11 +304,21 @@ async def chat_info(
     except Exception:  # noqa: BLE001
         memory_count = 0
 
+    # Codespace: nome do projeto vinculado (o painel mostra "Projeto: <nome>"); o id
+    # sozinho não diz nada ao usuário. Melhor-esforço: projeto apagado → só o id.
+    project_name = None
+    if chat.project_id:
+        from ..models import CodespaceProject
+        proj = await db.get(CodespaceProject, chat.project_id)
+        project_name = proj.name if proj is not None else None
+
     return {
         "id": str(chat.id),
         "title": chat.title,
         "model": chat.model,
         "tags": chat.tags or [],
+        "project_id": str(chat.project_id) if chat.project_id else None,
+        "project_name": project_name,
         "message_count": convo_count,
         "tokens_in": tokens_in,
         "tokens_out": tokens_out,

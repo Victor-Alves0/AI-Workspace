@@ -23,6 +23,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 from typing import Any
 
 import httpx
@@ -39,6 +40,17 @@ _MAX_SPEECH_DURATION = 4 * 3600
 _UA = "Mozilla/5.0 (compatible; AIWorkspace/1.0)"
 # preferência de formato de legenda: json3 (YouTube, limpo) → vtt (universal) → resto.
 _SUB_FORMAT_PREF = ("json3", "vtt", "srv3", "srv1", "ttml")
+# teto de faixas de legenda testadas antes de desistir (o YouTube expõe ~157 idiomas
+# auto-traduzidos; sem teto, um vídeo sem legenda real viraria 157 downloads).
+_MAX_SUB_TRIES = 4
+
+# Cache em processo do transcript COMPLETO por (url, lang). O modelo tende a
+# re-chamar a tool aumentando `max_chars` para "pegar o resto" (observado: 4 chamadas
+# num turno, 3000→5000→5800→5822) — sem cache, cada uma re-baixava tudo. Com cache a
+# repetição custa ~0 e o recorte é local.
+_CACHE: dict[tuple[str, str], tuple[float, dict[str, Any]]] = {}
+_CACHE_TTL = 900.0  # 15 min
+_CACHE_MAX = 8
 
 
 # --------------------------------------------------------------------------- #
@@ -183,66 +195,97 @@ def _json3_to_text(data: Any) -> str:
     return re.sub(r"\s+", " ", " ".join(lines)).strip()
 
 
-def _pick_subtitle(info: dict[str, Any], lang: str) -> tuple[str, str, str] | None:
-    """Escolhe a melhor legenda: idioma pedido → inglês → qualquer; manuais antes das
-    automáticas; formato por `_SUB_FORMAT_PREF`. Devolve (lang, ext, url) ou None."""
+def _subtitle_candidates(info: dict[str, Any], lang: str) -> list[tuple[str, str, str]]:
+    """Legendas candidatas EM ORDEM de preferência: (lang, ext, url).
+
+    Ordem de idioma: o pedido → o ORIGINAL do vídeo (`info['language']`) → inglês/
+    português → o resto. O original vem cedo de propósito: num vídeo em pt o YouTube
+    oferece ~157 faixas AUTO-TRADUZIDAS e a de 'en' costuma vir VAZIA — fixar 'en'
+    no topo fazia a transcrição falhar e cair no STT (bug real observado).
+
+    Devolve uma LISTA (não a "melhor") porque uma faixa pode baixar vazia; quem chama
+    tenta a próxima em vez de desistir e ir para o caminho caro de fala.
+    """
     manual = info.get("subtitles") or {}
     auto = info.get("automatic_captions") or {}
+    original = (info.get("language") or "").strip()
 
-    def lang_order() -> list[str]:
-        pref = [lang] if lang else []
-        pref += ["en", "en-US", "en-GB", "pt", "pt-BR", "pt-PT"]
-        # + o que existir, mantendo a ordem de preferência primeiro
-        seen = set(pref)
-        rest = [k for k in (*manual.keys(), *auto.keys()) if k not in seen]
-        return [k for k in pref if k in manual or k in auto] + rest
+    pref: list[str] = []
+    for code in (lang, original, "en", "pt"):
+        if code and code not in pref:
+            pref.append(code)
+    # variantes regionais dos preferidos (pt-BR, en-US…) e depois o resto
+    available = [*manual.keys(), *auto.keys()]
+    for code in list(pref):
+        for k in available:
+            if k.startswith(f"{code}-") and k not in pref:
+                pref.append(k)
+    ordered = [c for c in pref if c in manual or c in auto]
+    ordered += [k for k in available if k not in pref]
 
-    for source in (manual, auto):  # manuais primeiro (mais precisas)
-        for code in lang_order():
+    out: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for source in (manual, auto):  # manuais primeiro (mais precisas que as automáticas)
+        for code in ordered:
             fmts = source.get(code)
             if not fmts:
                 continue
             by_ext = {f.get("ext"): f.get("url") for f in fmts if f.get("url")}
-            for ext in _SUB_FORMAT_PREF:
-                if by_ext.get(ext):
-                    return code, ext, by_ext[ext]
-            # nenhum formato preferido: usa o primeiro que tiver URL
-            for f in fmts:
-                if f.get("url"):
-                    return code, f.get("ext") or "vtt", f["url"]
-    return None
+            exts = [e for e in _SUB_FORMAT_PREF if by_ext.get(e)]
+            exts += [f.get("ext") for f in fmts if f.get("url") and f.get("ext") not in exts]
+            for ext in exts:
+                url = by_ext.get(ext) or next(
+                    (f["url"] for f in fmts if f.get("ext") == ext and f.get("url")), None
+                )
+                if url and (code, ext) not in seen:
+                    seen.add((code, ext))
+                    out.append((code, ext or "vtt", url))
+    return out
 
 
 # --------------------------------------------------------------------------- #
 # Orquestração
 # --------------------------------------------------------------------------- #
 def _clip(text: str, cap: int) -> dict[str, Any]:
+    """Recorta o transcript e descreve o corte SEM convidar a uma re-chamada.
+
+    A nota anterior dizia "call again with a larger max_chars" e o modelo obedecia
+    em cascata (3000→5000→5800→5822 num único turno). Agora ela diz que o trecho já
+    basta para resumir e que só vale re-chamar se o usuário pedir o texto EXATO —
+    e nesse caso já informa o valor único a usar (evita a escadinha)."""
     full = len(text)
     clipped = text[:cap]
     out: dict[str, Any] = {"text": clipped, "chars": len(clipped), "full_chars": full}
     if full > cap:
         out["truncated"] = True
         out["note"] = (
-            f"Transcript truncated to {cap} of {full} chars. Summarize from this, or call "
-            "again with a larger max_chars for the full text."
+            f"Showing the first {cap} of {full} chars. This is normally enough to summarize "
+            "or answer about the video. Do NOT re-call this tool just to get a bit more; only "
+            f"if the user needs the VERBATIM full text, call once with max_chars={full}."
         )
     return out
 
 
 async def _via_captions(info: dict[str, Any], lang: str) -> tuple[str, str] | None:
-    """(texto, lang) da legenda, ou None se não houver/parsing vazio."""
-    pick = _pick_subtitle(info, lang)
-    if not pick:
-        return None
-    code, ext, url = pick
-    try:
-        raw = await _http_get_text(url)
-    except Exception as exc:  # noqa: BLE001
-        logger.info("Falha ao baixar legenda (%s); tentando fala", exc)
-        return None
-    text = _json3_to_text(raw) if ext == "json3" else _vtt_to_text(raw)
-    text = text.strip()
-    return (text, code) if text else None
+    """(texto, lang) da PRIMEIRA legenda candidata que render texto, ou None.
+
+    Tenta várias faixas (até `_MAX_SUB_TRIES`): uma faixa auto-traduzida pode baixar
+    vazia, e desistir na primeira jogava o turno no caminho caro de fala (STT)."""
+    tried = 0
+    for code, ext, url in _subtitle_candidates(info, lang):
+        if tried >= _MAX_SUB_TRIES:
+            break
+        tried += 1
+        try:
+            raw = await _http_get_text(url)
+        except Exception as exc:  # noqa: BLE001
+            logger.info("Legenda %s/%s falhou ao baixar (%s); tentando a próxima", code, ext, exc)
+            continue
+        text = (_json3_to_text(raw) if ext == "json3" else _vtt_to_text(raw)).strip()
+        if text:
+            return text, code
+        logger.info("Legenda %s/%s veio vazia; tentando a próxima", code, ext)
+    return None
 
 
 async def _via_speech(url: str, info: dict[str, Any], stt_candidates: list[dict]) -> dict[str, Any]:
@@ -312,10 +355,61 @@ async def _transcribe_bytes(cands: list[dict], filename: str, data: bytes) -> st
     return None
 
 
+def _metadata(info: dict[str, Any]) -> dict[str, Any]:
+    """Metadados REAIS da plataforma entregues ao modelo.
+
+    `channel` existe porque a ausência dele causou alucinação de verdade: sem o nome
+    do canal no retorno, o modelo inventou um ("Ciência Todo Dia"), foi questionado e
+    inventou outro ("Infinity") alegando tê-lo lido na transcrição. O canal não está
+    no texto falado — ou vem daqui, ou é chute."""
+    out: dict[str, Any] = {}
+    title = (info.get("title") or "").strip()
+    channel = (info.get("channel") or info.get("uploader") or "").strip()
+    if title:
+        out["title"] = title
+    if channel:
+        out["channel"] = channel
+    if info.get("duration"):
+        out["duration"] = int(info["duration"])
+    up = (info.get("upload_date") or "").strip()
+    if len(up) == 8 and up.isdigit():  # YYYYMMDD -> ISO
+        out["upload_date"] = f"{up[:4]}-{up[4:6]}-{up[6:]}"
+    if info.get("webpage_url"):
+        out["webpage_url"] = info["webpage_url"]
+    return out
+
+
+def _cache_get(key: tuple[str, str]) -> dict[str, Any] | None:
+    hit = _CACHE.get(key)
+    if not hit:
+        return None
+    ts, payload = hit
+    if time.time() - ts > _CACHE_TTL:
+        _CACHE.pop(key, None)
+        return None
+    return payload
+
+
+def _cache_put(key: tuple[str, str], payload: dict[str, Any]) -> None:
+    if len(_CACHE) >= _CACHE_MAX:
+        oldest = min(_CACHE, key=lambda k: _CACHE[k][0])
+        _CACHE.pop(oldest, None)
+    _CACHE[key] = (time.time(), payload)
+
+
 async def transcribe_url(
     url: str, lang: str, max_chars: int, stt_candidates: list[dict],
 ) -> dict[str, Any]:
-    """Ponto de entrada: legendas primeiro, fala como fallback."""
+    """Ponto de entrada: legendas primeiro, fala como fallback.
+
+    O transcript COMPLETO é cacheado por (url, lang); só o recorte depende de
+    `max_chars`, então re-chamadas para "ver mais" não re-baixam nada."""
+    key = (url, (lang or "").strip())
+    cached = _cache_get(key)
+    if cached is not None:
+        base = {k: v for k, v in cached.items() if k != "_full_text"}
+        return {**base, **_clip(cached["_full_text"], max_chars)}
+
     try:
         info = _extract_info(url)
     except Exception as exc:  # noqa: BLE001 - yt_dlp.DownloadError e afins
@@ -326,21 +420,17 @@ async def transcribe_url(
     if not info:
         return {"error": "não consegui abrir a mídia nessa URL"}
 
-    title = info.get("title") or ""
-    duration = info.get("duration") or 0
-
+    meta = _metadata(info)
     cap = await _via_captions(info, lang)
     if cap is not None:
         text, code = cap
-        return {
-            "ok": True, "source": "captions", "title": title, "lang": code,
-            "duration": int(duration) or None, **_clip(text, max_chars),
-        }
+        base = {"ok": True, "source": "captions", **meta, "lang": code}
+    else:
+        result = await _via_speech(url, info, stt_candidates)
+        if "error" in result:
+            return result
+        text = result["text"]
+        base = {"ok": True, "source": "speech", **meta, "lang": lang or "auto"}
 
-    result = await _via_speech(url, info, stt_candidates)
-    if "error" in result:
-        return result
-    return {
-        "ok": True, "source": "speech", "title": title, "lang": lang or "auto",
-        "duration": int(duration) or None, **_clip(result["text"], max_chars),
-    }
+    _cache_put(key, {**base, "_full_text": text})
+    return {**base, **_clip(text, max_chars)}

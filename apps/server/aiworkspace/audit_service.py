@@ -33,6 +33,10 @@ ACTION_LABELS: dict[str, str] = {
     "app_secret_rotated": "Chave mestra rotacionada",
     "account_approved": "Conta aprovada",
     "account_rejected": "Conta rejeitada",
+    "api_key_created": "Chave de API criada",
+    "api_key_revoked": "Chave de API revogada",
+    "api_key_regenerated": "Chave de API regenerada",
+    "api_key_deleted": "Chave de API excluída",
 }
 
 

@@ -1,9 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { createContext, useContext, useRef, useState } from "react";
 import {
   Archive,
   ChevronRight,
+  Code2,
   Copy,
   Download,
   FileJson,
@@ -18,6 +19,12 @@ import {
 } from "lucide-react";
 import type { Chat } from "@/lib/types";
 import { AnchoredMenu, MenuDivider, MenuItem } from "./ui";
+
+/** id do projeto do Codespace -> nome, para o hover do ícone no item de chat.
+ *  É contexto (e não prop) porque o ChatItem é renderizado em dois caminhos —
+ *  lista raiz e dentro de pastas (recursivas) — e a prop atravessaria níveis
+ *  intermediários que não têm nada a ver com projeto. O Sidebar provê. */
+export const ProjectNamesContext = createContext<Record<string, string>>({});
 
 export interface ChatActions {
   onSelect: (id: string) => void;
@@ -44,6 +51,8 @@ export default function ChatItem({
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(chat.title);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const projectNames = useContext(ProjectNamesContext);
+  const projectName = chat.project_id ? projectNames[chat.project_id] : undefined;
 
   function submitRename() {
     setRenaming(false);
@@ -81,6 +90,15 @@ export default function ChatItem({
         active ? "bg-surface2 text-ink" : "text-ink-soft hover:bg-hover hover:text-ink"
       }`}
     >
+      {/* chat de projeto: marca no INÍCIO do item; o hover diz de qual projeto é */}
+      {chat.project_id && (
+        <span
+          title={projectName ? `Projeto: ${projectName}` : "Chat de projeto (Codespace)"}
+          className="shrink-0 cursor-default text-accent-hover"
+        >
+          <Code2 size={12} />
+        </span>
+      )}
       {chat.pinned && <Pin size={12} className="shrink-0 text-accent" />}
       <button onClick={() => actions.onSelect(chat.id)} className="flex-1 truncate text-left">
         {chat.title}

@@ -23,7 +23,7 @@ import {
 import type { Chat, Folder, ModelConfig, User } from "@/lib/types";
 import { api } from "@/lib/api";
 import { SHORTCUTS, resolveBinding, prettyCombo, type ShortcutMap } from "@/lib/shortcuts";
-import ChatItem, { ChatActions } from "./ChatItem";
+import ChatItem, { ChatActions, ProjectNamesContext } from "./ChatItem";
 import UserMenu from "./UserMenu";
 
 /** teclas de um atalho renderizadas como <kbd> (ex.: ⌘ ⇧ O) */
@@ -219,6 +219,22 @@ export default function Sidebar({
     return () => clearInterval(t);
   }, []);
 
+  // nomes dos projetos do Codespace (hover do ícone nos chats de projeto). Busca
+  // UMA vez e só se algum chat for de projeto — quem não usa Codespace não paga.
+  const [projectNames, setProjectNames] = useState<Record<string, string>>({});
+  const hasProjectChat = useMemo(() => chats.some((c) => c.project_id), [chats]);
+  useEffect(() => {
+    if (!hasProjectChat) return;
+    let alive = true;
+    api.get<{ id: string; name: string }[]>("/codespace/projects")
+      .then((rows) => {
+        if (!alive) return;
+        setProjectNames(Object.fromEntries(rows.map((p) => [p.id, p.name])));
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [hasProjectChat]);
+
   const rootChats = useMemo(() => chats.filter((c) => !c.folder_id), [chats]);
   const groups = useMemo(() => groupByDate(rootChats), [rootChats]);
   const chatsByFolder = useMemo(() => {
@@ -275,6 +291,7 @@ export default function Sidebar({
   }
 
   return (
+   <ProjectNamesContext.Provider value={projectNames}>
     <aside className="pt-safe pb-safe group/side flex w-64 shrink-0 flex-col overflow-hidden border-r border-transparent bg-sidebar transition-[width] duration-300 ease-in-out hover:border-border">
       {/* header */}
       <div className="flex items-center justify-between px-3 py-3">
@@ -417,6 +434,7 @@ export default function Sidebar({
         <UserMenu user={user} onSettings={onOpenSettings} onArchived={onShowArchived} onOpenWorkspace={onOpenWorkspace} onOpenAnalytics={onOpenAnalytics} onOpenPlayground={onOpenPlayground} onLogout={onLogout} />
       </div>
     </aside>
+   </ProjectNamesContext.Provider>
   );
 }
 

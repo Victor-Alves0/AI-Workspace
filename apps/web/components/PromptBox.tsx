@@ -48,6 +48,7 @@ function flattenRefs(refs: KnowledgeRef[]): RefDoc[] {
 }
 import { fileToBase64, fileToImageDataUrl, fileToText } from "@/lib/image";
 import { MenuItem, useClickOutside } from "./ui";
+import { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME } from "./CodespaceFileBrowser";
 import { toolCategoryIcon, toolCategoryTitle } from "./toolCategory";
 
 // docs binários com extração server-side (integração "Extração de Texto")
@@ -355,9 +356,24 @@ export default function PromptBox({
   }
   // arrastar-e-soltar arquivos sobre o campo
   const [dragOver, setDragOver] = useState(false);
+  // o que está sendo arrastado, só p/ o rótulo do overlay
+  const [dropKind, setDropKind] = useState<"file" | "snippet" | "upload">("upload");
+  // Rede de segurança: o realce SEMPRE some quando o arraste termina, aconteça o
+  // que acontecer com o drop. Sem isto, soltar algo que não é anexo (uma seleção de
+  // texto, p.ex.) deixava o "Solte para anexar" preso na tela até recarregar.
+  useEffect(() => {
+    const clear = () => setDragOver(false);
+    window.addEventListener("dragend", clear);
+    window.addEventListener("drop", clear);
+    return () => {
+      window.removeEventListener("dragend", clear);
+      window.removeEventListener("drop", clear);
+    };
+  }, []);
   async function onDrop(e: React.DragEvent) {
+    setDragOver(false);  // antes de qualquer coisa: nunca deixar o realce preso
     const files = Array.from(e.dataTransfer?.files ?? []);
-    if (files.length) { e.preventDefault(); setDragOver(false); await addFiles(files); }
+    if (files.length) { e.preventDefault(); await addFiles(files); }
   }
   function removeAttachment(i: number) {
     onAttachmentsChange?.(attachments.filter((_, idx) => idx !== i));
@@ -513,14 +529,29 @@ export default function PromptBox({
   return (
     <div className="px-4 pb-5 pt-2">
       <div
-        onDragOver={(e) => { if (canAttach) { e.preventDefault(); setDragOver(true); } }}
+        /* só realça o que REALMENTE dá pra soltar aqui: arquivos do sistema, um
+           arquivo do Codespace ou um trecho de código — arrastar uma seleção de
+           texto qualquer não deve prometer um anexo que não existe */
+        onDragOver={(e) => {
+          const t = e.dataTransfer.types;
+          const snippet = t.includes(CODESPACE_SNIPPET_MIME);
+          const csFile = t.includes(CODESPACE_DND_MIME);
+          const dropavel = (canAttach && t.includes("Files")) || csFile || snippet;
+          if (dropavel) {
+            e.preventDefault();
+            setDropKind(snippet ? "snippet" : csFile ? "file" : "upload");
+            setDragOver(true);
+          }
+        }}
         onDragLeave={() => setDragOver(false)}
-        onDrop={canAttach ? onDrop : undefined}
+        onDrop={onDrop}
         className={`relative mx-auto max-w-3xl rounded-3xl border bg-surface px-3 py-2.5 shadow-prompt transition-colors duration-200 focus-within:border-accent/50 hover:border-accent/30 ${dragOver ? "border-accent border-dashed" : temporary ? "border-dashed border-ink-soft/60" : "border-border"}`}
       >
         {dragOver && (
           <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-3xl bg-accent/5 text-sm font-medium text-accent-hover">
-            Solte para anexar
+            {dropKind === "snippet" ? "Solte para anexar o trecho"
+              : dropKind === "file" ? "Solte para anexar o arquivo"
+              : "Solte para anexar"}
           </div>
         )}
         {promptMenuOpen && (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, BookOpen, Box, Brain, Camera, Check, ChevronDown, ChevronRight, FileText, Gauge, Info, Pin, Plus, Search, Settings, ShieldAlert, Sliders, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { fileToAvatarDataUrl } from "@/lib/image";
@@ -339,7 +339,7 @@ function slugify(s: string) {
  *  busca (quando >4) e lista rolável de linhas (badge/engrenagem/remover opcionais). */
 function ActiveListField({
   label, icon, hint, items, labelOf, badgeOf, leadingOf, hasConfig, onConfig, onRemove,
-  onManage, manageIcon, searchPlaceholder, empty,
+  onManage, manageIcon, searchPlaceholder, empty, searchFrom = 5,
 }: {
   label: string;
   icon?: React.ReactNode;
@@ -355,6 +355,9 @@ function ActiveListField({
   manageIcon?: React.ReactNode;
   searchPlaceholder: string;
   empty: string;
+  /** a partir de quantos itens a busca aparece (seções com poucos itens possíveis,
+   *  como Conhecimento, usam um limiar menor — com 4 a barra nunca surgiria). */
+  searchFrom?: number;
 }) {
   const [q, setQ] = useState("");
   const f = q.trim().toLowerCase();
@@ -378,7 +381,7 @@ function ActiveListField({
         <p className="text-xs text-muted">{empty}</p>
       ) : (
         <div className="space-y-1.5">
-          {items.length > 4 && (
+          {items.length >= searchFrom && (
             <div className="relative">
               <Search size={13} className="pointer-events-none absolute left-2.5 top-2 text-muted" />
               <input
@@ -514,6 +517,16 @@ export default function ModelEditor({
   const [filterConfig, setFilterConfig] = useState<Record<string, any>>(model?.filter_config ?? {});
   // qual filtro está com o painel de config (engrenagem) aberto
   const [openFilterCfg, setOpenFilterCfg] = useState<string | null>(null);
+  // busca da lista de filtros ativos (mesmo padrão do ActiveListField)
+  const [filterQ, setFilterQ] = useState("");
+  const filterLabelOf = useCallback(
+    (f: string) => FILTERS.find((x) => x.key === f)?.label ?? f,
+    [],
+  );
+  const filtersShown = useMemo(() => {
+    const q = filterQ.trim().toLowerCase();
+    return q ? filters.filter((f) => filterLabelOf(f).toLowerCase().includes(q)) : filters;
+  }, [filters, filterQ, filterLabelOf]);
   // qual ferramenta interna está com o painel de config aberto + status dos segredos
   const [openToolCfg, setOpenToolCfg] = useState<string | null>(null);
   const [openExtraction, setOpenExtraction] = useState(false);
@@ -1258,6 +1271,7 @@ export default function ModelEditor({
                   onRemove={(id) => setKbBasesSel(kbAttached.filter((x) => x !== id))}
                   onManage={() => setKbModal(true)}
                   searchPlaceholder="Buscar bases acopladas…"
+                  searchFrom={2}
                   empty="Nenhuma base acoplada. Clique em Gerenciar para acoplar."
                   hint="Bases acopladas a este modelo (consultadas nas conversas). A engrenagem de cada base define o MODO dela — Automático (injeta + cita) ou Ferramenta (a IA busca com search_knowledge). Crie bases em Espaço → Conhecimento."
                 />
@@ -1456,7 +1470,26 @@ export default function ModelEditor({
               <p className="text-xs text-muted">Nenhum filtro ativo.</p>
             ) : (
               <div className="space-y-1.5">
-                {filters.map((f) => {
+                {/* só existem 4 filtros no total, então a barra aparece a partir de 2
+                    (com o limiar de 5 das outras seções ela nunca surgiria aqui) */}
+                {filters.length >= 2 && (
+                  <div className="relative">
+                    <Search size={13} className="pointer-events-none absolute left-2.5 top-2 text-muted" />
+                    <input
+                      value={filterQ}
+                      onChange={(e) => setFilterQ(e.target.value)}
+                      placeholder="Buscar filtros ativos…"
+                      className="w-full rounded-lg border border-border bg-surface py-1.5 pl-8 pr-3 text-xs text-ink outline-none focus:border-accent placeholder:text-muted"
+                    />
+                  </div>
+                )}
+                {/* scroll próprio: com a config aberta cada linha cresce muito, e sem
+                    teto a seção empurrava o resto do editor para fora da tela */}
+                <div className="max-h-[420px] space-y-1.5 overflow-y-auto pr-1">
+                {filtersShown.length === 0 && (
+                  <p className="px-1 py-2 text-xs text-muted">Nada corresponde à busca.</p>
+                )}
+                {filtersShown.map((f) => {
                   const cfgOpen = openFilterCfg === f;
                   const isVisionRouter = f === "vision_router";
                   const isAudioRouter = f === "audio_router";
@@ -1593,6 +1626,7 @@ export default function ModelEditor({
                     </div>
                   );
                 })}
+                </div>
               </div>
             )}
           </div>

@@ -138,6 +138,22 @@ SEARCH_LANG_HINT = (
 )
 
 
+# Ponte entre os DOIS mundos de ferramentas do turno: as do índice SIFT (descobertas
+# via search_tools) e as NATIVAS, injetadas direto no array de tools. Sem esta ponte o
+# modelo trata search_tools como o único caminho e nega capacidades que TEM em mãos.
+_NATIVE_TOOLS_NOTE = (
+    "Besides the SIFT meta-tools, these tools are ALREADY in your tool list and are called "
+    "DIRECTLY by name: {names}. `search_tools` does NOT index them, so a search that returns "
+    "nothing says NOTHING about them — never conclude you lack a capability they cover. In "
+    "particular, if the user asks for a document, photo, image or video THEY own, call "
+    "`search_knowledge` (when listed) before saying you don't have it."
+)
+
+
+def _native_tools_note(names: list[str]) -> str:
+    return _NATIVE_TOOLS_NOTE.format(names=", ".join(f"`{n}`" for n in names))
+
+
 def _compose_tool_prompt(base: str, catalog: list[str], mode: str, custom: str, meta: str) -> str:
     """Monta a seção de ferramentas do system prompt.
 
@@ -179,11 +195,15 @@ def _build_static_system(chat_system_prompt: str | None, sift_prompt: str) -> st
     return "\n\n".join(p for p in parts if p)
 
 
+# Prompt lido pelo MODELO => inglês (padrão do projeto: a UI fica no idioma do app,
+# o que a IA lê fica em inglês). A DESCRIÇÃO sai no idioma da conversa porque ela é
+# repassada a um assistente que responde ao usuário.
 _VISION_DESCRIBE_PROMPT = (
-    "Descreva em detalhe o conteúdo das imagens a seguir para que outro assistente, "
-    "que NÃO pode vê-las, entenda tudo que é relevante: textos (transcreva-os), "
-    "objetos, pessoas, gráficos, números, cores e qualquer detalhe importante. "
-    "Seja objetivo e completo."
+    "Describe the following images in detail so that another assistant, which CANNOT see "
+    "them, understands everything relevant: text (transcribe it verbatim), objects, people, "
+    "charts, numbers, colors and any important detail. Be objective and complete. Describe "
+    "only what is actually visible — never guess or infer what is not there. Write the "
+    "description in the same language as the conversation."
 )
 
 
@@ -373,12 +393,21 @@ def _search_knowledge_tool() -> dict[str, Any]:
                 "for items relevant to a question. Use whenever the answer may depend on the "
                 "user's own files — including when they ask you to show/send a photo, image or video "
                 "stored there. Returns numbered passages (cite the source used with [n]); image and "
-                "video results include ready-to-paste markdown that DISPLAYS/PLAYS the media in the chat."
+                "video results include ready-to-paste markdown that DISPLAYS/PLAYS the media in the chat. "
+                "Call it again with different words (or a bigger `limit`) if the first search misses — "
+                "do not conclude the user has no such file after a single query."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "what to look up, in the document's language"},
+                    "limit": {
+                        "type": "integer",
+                        "description": (
+                            "how many passages/files to retrieve (1-20). Raise it to browse "
+                            "what exists (e.g. listing the user's photos); lower it to save context."
+                        ),
+                    },
                 },
                 "required": ["query"],
             },
@@ -968,10 +997,18 @@ def _assemble_tools_and_prompt(
         custom = (sift_meta.get("sift_prompt") or "").strip() or DEFAULT_TOOL_PROMPT
         a.sift_prompt = _compose_tool_prompt(a.sift_prompt, catalog, mode, custom, meta)
 
+    # Tools NATIVAS (fora do índice SIFT) anunciadas ao modelo no fim da montagem:
+    # elas já estão no array de tools, mas o prompt do SIFT ensina que o caminho para
+    # achar ferramentas é `search_tools` — que NÃO as indexa. Sem este aviso o modelo
+    # busca, não acha e responde "não tenho ferramenta pra isso" (bug real: pediram uma
+    # foto da base de conhecimento e ele negou tendo `search_knowledge` na mão).
+    native_names: list[str] = []
+
     # Skills (independentes do SIFT): o modelo vê só nome+descrição e carrega o
     # conteúdo completo sob demanda via view_skill.
     if skills:
         a.tools = list(a.tools) + [_view_skill_tool()]
+        native_names.append("view_skill")
         for s in skills:
             a.skills_by_slug[str(s.get("slug"))] = s
             nm = str(s.get("name") or "").strip().lower()
@@ -983,12 +1020,14 @@ def _assemble_tools_and_prompt(
     a.genimage_on = bool(genimage and genimage.get("model"))
     if a.genimage_on:
         a.tools = list(a.tools) + [_generate_image_tool()]
+        native_names.append("generate_image")
 
     # Base de Conhecimento no modo "ferramenta": o modelo ganha `search_knowledge`
     # (independe da SIFT), buscando os documentos sob demanda.
     a.kb_tool_on = kb_tool_on
     if a.kb_tool_on:
         a.tools = list(a.tools) + [_search_knowledge_tool()]
+        native_names.append("search_knowledge")
 
     # Second brain: com cérebros acoplados, o modelo ganha a tool `brain`
     # (list/search/read e, com escrita liberada, write) — independe da SIFT.
@@ -996,6 +1035,7 @@ def _assemble_tools_and_prompt(
     a.brain_write = a.brain_on and bool(brain.get("write"))
     if a.brain_on:
         a.tools = list(a.tools) + [_brain_tool(a.brain_write)]
+        native_names.append("brain")
 
     # /learn: proposta de skill destilada do trabalho do chat (proposal-only —
     # o usuário aprova num card; o modelo NUNCA salva). Tri-state: True força,
@@ -1011,6 +1051,14 @@ def _assemble_tools_and_prompt(
     a.subagents_on = bool(subagents and run_subagent is not None)
     if a.subagents_on:
         a.tools = list(a.tools) + [_delegate_tool(subagents)]
+        native_names.append("delegate")
+
+    # aviso das tools nativas: só faz sentido com a SIFT ligada (é o prompt dela que
+    # ensina o `search_tools` como caminho único de descoberta).
+    if a.has_tools and native_names:
+        a.sift_prompt = "\n\n".join(
+            p for p in (a.sift_prompt, _native_tools_note(native_names)) if p
+        )
     return a
 
 
@@ -1311,16 +1359,29 @@ class _ToolDispatcher:
         if not self.kb_tool_on:
             self.result = {"error": "base de conhecimento não está ativa neste modelo"}
             return
+        # o MODELO decide quanto quer ver (o k do modelo é só o padrão); teto de 20
+        # para um `limit` alucinado não estourar o contexto do turno.
+        try:
+            k = int(args.get("limit") or self.kb_k)
+        except (TypeError, ValueError):
+            k = self.kb_k
+        k = max(1, min(k, 20))
         yield {"type": "knowledge", "status": "start", "query": query[:120]}
         try:
-            kres = await kb_retrieval.search(self.user_id, self.kb_bases, query, self.kb_k)
+            kres = await kb_retrieval.search(self.user_id, self.kb_bases, query, k)
         except Exception as exc:  # noqa: BLE001
             logger.warning("search_knowledge falhou: %s", exc)
             kres = []
         _blk, ksrc = _knowledge_block_and_sources(kres)
+        # texto lido pelo MODELO => inglês (padrão do projeto). No caso VAZIO ele
+        # instrui a re-tentar em vez de declarar ausência: um único miss de busca
+        # semântica virava "você não tem esse arquivo" (bug observado).
         model_txt = (
-            "Trechos da base de conhecimento (cite a fonte usada com [n]):\n\n" + _blk
-            if kres else "Nenhum trecho relevante encontrado na base de conhecimento."
+            "Passages from the user's knowledge base (cite the one you use with [n]):\n\n" + _blk
+            if kres else
+            "No passage matched THIS query. That does not mean the file is absent — "
+            "retry with different wording (synonyms, the file's own language, a broader "
+            "term) or a larger `limit` before telling the user it doesn't exist."
         )
         self.result = {
             "kind": "knowledge", "query": query[:200],

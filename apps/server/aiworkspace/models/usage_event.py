@@ -27,6 +27,8 @@ class UsageEvent(Base):
     chat_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     message_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     model_config_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    # chave da API pública que originou o gasto (None = veio do app/canais)
+    api_key_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
 
     model: Mapped[str] = mapped_column(String(255), default="")
     model_name: Mapped[str] = mapped_column(String(255), default="")

@@ -218,6 +218,9 @@ export interface ChatInfo {
   cost: number;
   artifacts: { id: string; identifier: string; title: string; kind: string; version: number }[];
   memory_count: number;
+  /** Codespace: projeto vinculado ao chat (nome resolvido no servidor) */
+  project_id?: string | null;
+  project_name?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 }
@@ -843,4 +846,59 @@ export interface CodespaceViz {
   links: CodespaceVizLink[];
   domains: { id: number; size: number; label: string | null }[];
   warnings: string[];
+}
+
+// ---- API pública (chaves, uso) -------------------------------------------- #
+export interface ApiKey {
+  id: string;
+  name: string;
+  masked: string;
+  state: "active" | "disabled" | "revoked" | "expired";
+  scopes: string[];
+  model_policy: { mode?: "all" | "allow"; ids?: string[]; default?: string };
+  limits: Record<string, number>;
+  memory: { mode?: string; ttl_days?: number; max_items?: number };
+  ip_allowlist: string[];
+  webhook: { url: string; events: string[]; has_secret: boolean };
+  enabled: boolean;
+  expires_at: string | null;
+  last_used_at: string | null;
+  last_used_ip: string;
+  created_at: string | null;
+  cost_month: number;
+  requests_month: number;
+}
+
+export interface ApiKeyMeta {
+  scopes: string[];
+  default_scopes: string[];
+  memory_modes: string[];
+  webhook_events: string[];
+  models: { id: string; name: string; base_model: string }[];
+}
+
+export interface ApiKeyRequest {
+  id: string;
+  endpoint: string;
+  model: string;
+  status: number;
+  error: string;
+  latency_ms: number;
+  total_tokens: number;
+  cost: number;
+  ip: string;
+  created_at: string | null;
+}
+
+export interface ApiKeyUsage {
+  totals: {
+    requests: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+    cost: number;
+    avg_latency_ms: number;
+    errors: number;
+  };
+  daily: { date: string; requests: number; cost: number; tokens: number }[];
+  by_model: { model: string; requests: number; tokens: number; cost: number }[];
 }

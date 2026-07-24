@@ -13,6 +13,15 @@ import pytest
 from aiworkspace.integrations import transcribe_service as ts
 
 
+@pytest.fixture(autouse=True)
+def _clear_cache():
+    """O transcript completo é cacheado por (url, lang) — sem limpar, um teste
+    herdaria o resultado do anterior (mesma URL fake) e não exercitaria nada."""
+    ts._CACHE.clear()
+    yield
+    ts._CACHE.clear()
+
+
 # --------------------------------------------------------------------------- #
 # Parsing de legendas
 # --------------------------------------------------------------------------- #
@@ -40,28 +49,63 @@ def test_json3_to_text_concats_segs():
     assert ts._json3_to_text(data) == "Hello world again"
 
 
-def test_pick_subtitle_prefers_requested_lang_manual_and_format():
+def test_subtitle_candidates_prefers_requested_lang_manual_and_format():
     info = {
         "subtitles": {"pt": [{"ext": "vtt", "url": "pt.vtt"}]},
         "automatic_captions": {
             "en": [{"ext": "vtt", "url": "en-auto.vtt"}, {"ext": "json3", "url": "en-auto.json3"}],
         },
     }
-    # pediu pt: pega a manual pt
-    assert ts._pick_subtitle(info, "pt") == ("pt", "vtt", "pt.vtt")
-    # sem pedir: manual (pt) vem antes das automáticas
-    assert ts._pick_subtitle(info, "")[0] == "pt"
+    # pediu pt: a manual pt vem primeiro
+    assert ts._subtitle_candidates(info, "pt")[0] == ("pt", "vtt", "pt.vtt")
+    # sem pedir: manuais antes das automáticas
+    assert ts._subtitle_candidates(info, "")[0][0] == "pt"
 
 
-def test_pick_subtitle_none_when_absent():
-    assert ts._pick_subtitle({"subtitles": {}, "automatic_captions": {}}, "en") is None
+def test_subtitle_candidates_empty_when_absent():
+    assert ts._subtitle_candidates({"subtitles": {}, "automatic_captions": {}}, "en") == []
 
 
-def test_pick_subtitle_prefers_json3_over_vtt_within_lang():
+def test_subtitle_candidates_prefers_json3_over_vtt_within_lang():
     info = {"subtitles": {}, "automatic_captions": {
         "en": [{"ext": "vtt", "url": "v"}, {"ext": "json3", "url": "j"}],
     }}
-    assert ts._pick_subtitle(info, "en") == ("en", "json3", "j")
+    assert ts._subtitle_candidates(info, "en")[0] == ("en", "json3", "j")
+
+
+def test_subtitle_candidates_puts_original_language_before_english():
+    """Regressão: num vídeo em pt o YouTube expõe ~157 faixas auto-traduzidas e a de
+    'en' costuma vir vazia; fixar 'en' no topo derrubava a transcrição para o STT."""
+    info = {
+        "subtitles": {},
+        "automatic_captions": {
+            "en": [{"ext": "json3", "url": "en.json3"}],
+            "pt": [{"ext": "json3", "url": "pt.json3"}],
+        },
+        "language": "pt",
+    }
+    assert ts._subtitle_candidates(info, "")[0][0] == "pt"
+
+
+async def test_via_captions_falls_through_empty_track(monkeypatch):
+    """Uma faixa que baixa VAZIA não pode abortar: tenta a próxima candidata."""
+    info = {
+        "subtitles": {},
+        "automatic_captions": {
+            "en": [{"ext": "vtt", "url": "empty"}],
+            "pt": [{"ext": "vtt", "url": "good"}],
+        },
+    }
+
+    async def fake_get(url):
+        if url == "empty":
+            return "WEBVTT\n\n"  # sem cues -> texto vazio
+        return "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nconteudo real\n"
+
+    monkeypatch.setattr(ts, "_http_get_text", fake_get)
+    out = await ts._via_captions(info, "en")
+    assert out is not None
+    assert out[0] == "conteudo real" and out[1] == "pt"
 
 
 def test_clip_truncates_and_flags():
@@ -70,7 +114,10 @@ def test_clip_truncates_and_flags():
     assert out["chars"] == 3
     assert out["full_chars"] == 6
     assert out["truncated"] is True
-    assert "truncated" in out["note"].lower()
+    # a nota NÃO pode convidar a re-chamar em escadinha (o modelo fez 3000→5000→
+    # 5800→5822 num turno); ela desencoraja e já dá o valor único do texto completo
+    note = out["note"]
+    assert "Do NOT re-call" in note and "max_chars=6" in note
 
 
 def test_clip_no_truncate_when_short():
@@ -166,6 +213,68 @@ async def test_transcribe_url_captions_truncated(monkeypatch):
     monkeypatch.setattr(ts, "_http_get_text", fake_get)
     out = await ts.transcribe_url("https://x/y", "", 1000, [])
     assert out["ok"] and out["truncated"] is True and out["chars"] == 1000
+
+
+async def test_returns_real_channel_metadata(monkeypatch):
+    """O canal PRECISA vir da plataforma: sem ele o modelo inventou o nome do canal
+    duas vezes ('Ciência Todo Dia', depois 'Infinity') — não está na transcrição."""
+    monkeypatch.setattr(ts, "_extract_info", lambda url: {
+        "title": "Provando que 1 = 2",
+        "channel": "Universo Narrado",
+        "uploader": "Universo Narrado",
+        "duration": 345,
+        "upload_date": "20240115",
+        "webpage_url": "https://www.youtube.com/watch?v=abc",
+        "automatic_captions": {"pt": [{"ext": "vtt", "url": "c.vtt"}]},
+        "language": "pt",
+    })
+
+    async def fake_get(url):
+        return "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nfala do video\n"
+
+    monkeypatch.setattr(ts, "_http_get_text", fake_get)
+    out = await ts.transcribe_url("https://x/y", "", 12000, [])
+    assert out["channel"] == "Universo Narrado"
+    assert out["title"] == "Provando que 1 = 2"
+    assert out["upload_date"] == "2024-01-15"
+    assert out["webpage_url"].endswith("abc")
+    assert out["duration"] == 345
+
+
+async def test_uploader_used_when_channel_absent(monkeypatch):
+    monkeypatch.setattr(ts, "_extract_info", lambda url: {
+        "title": "T", "uploader": "Canal do Fulano",
+        "automatic_captions": {"pt": [{"ext": "vtt", "url": "c.vtt"}]},
+    })
+
+    async def fake_get(url):
+        return "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nx\n"
+
+    monkeypatch.setattr(ts, "_http_get_text", fake_get)
+    out = await ts.transcribe_url("https://x/y", "", 12000, [])
+    assert out["channel"] == "Canal do Fulano"
+
+
+async def test_second_call_hits_cache_without_refetching(monkeypatch):
+    """Re-chamar com max_chars maior NÃO pode re-baixar (o modelo faz isso em
+    cascata); só o recorte muda."""
+    calls = {"n": 0}
+
+    def counting_info(url):
+        calls["n"] += 1
+        return {"title": "T", "automatic_captions": {"pt": [{"ext": "vtt", "url": "c.vtt"}]}}
+
+    async def fake_get(url):
+        return "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n" + ("palavra " * 400) + "\n"
+
+    monkeypatch.setattr(ts, "_extract_info", counting_info)
+    monkeypatch.setattr(ts, "_http_get_text", fake_get)
+
+    a = await ts.transcribe_url("https://x/y", "", 100, [])
+    b = await ts.transcribe_url("https://x/y", "", 3000, [])
+    assert calls["n"] == 1, "a segunda chamada re-baixou em vez de usar o cache"
+    assert a["truncated"] is True and a["chars"] == 100
+    assert b["chars"] > a["chars"] and b["full_chars"] == a["full_chars"]
 
 
 # --------------------------------------------------------------------------- #

@@ -13,6 +13,10 @@ from fastapi.responses import JSONResponse
 
 from .admin_routes import router as admin_router
 from .analytics_routes import router as analytics_router
+from .api.deps import ApiError
+from .api.keys_routes import router as api_keys_router
+from .api.mgmt_routes import router as api_mgmt_router
+from .api.v1_routes import router as api_v1_router
 from .artifacts_routes import router as artifacts_router
 from .learning_routes import router as learning_router
 from .memory_routes import router as memory_router
@@ -136,9 +140,22 @@ def create_app() -> FastAPI:
         allow_headers=["Content-Type", "Authorization", "X-Timezone"],
     )
 
+    # CORS da API pública: ela autentica por Bearer, nunca por cookie, então liberar
+    # qualquer origem NÃO expõe a sessão do navegador — e com "*" o próprio browser
+    # proíbe credenciais na resposta. Sem isto, uma aplicação web que chamasse /v1
+    # direto do cliente esbarraria no CORS.
+    _API_CORS = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Authorization, Content-Type, X-API-Key",
+        "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
+        "Access-Control-Max-Age": "600",
+    }
+
     @app.middleware("http")
     async def observe_and_harden(request: Request, call_next):
         start = time.perf_counter()
+        if request.method == "OPTIONS" and request.url.path.startswith("/v1"):
+            return JSONResponse(status_code=204, content=None, headers=_API_CORS)
         # allowlist de IP (quando configurado pelo admin). /health fica isento p/
         # health checks locais/orquestradores não quebrarem.
         if request.url.path != "/health":
@@ -156,6 +173,8 @@ def create_app() -> FastAPI:
             return JSONResponse(status_code=500, content={"detail": "Erro interno"})
         ms = (time.perf_counter() - start) * 1000
         metrics.record(request.method, request.url.path, response.status_code, ms)
+        if request.url.path.startswith("/v1"):
+            response.headers.update(_API_CORS)
         # cabeçalhos de segurança
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
@@ -166,6 +185,13 @@ def create_app() -> FastAPI:
             response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
         response.headers["X-Server-Time-Ms"] = f"{ms:.1f}"
         return response
+
+    @app.exception_handler(ApiError)
+    async def api_error_handler(_request: Request, exc: ApiError):
+        """Erros da API pública saem no formato da OpenAI — é o que os SDKs
+        existentes sabem interpretar (`error.message` / `error.code`)."""
+        return JSONResponse(status_code=exc.status, content=exc.payload(),
+                            headers=exc.headers or None)
 
     @app.get("/health", tags=["meta"])
     async def health():
@@ -200,6 +226,10 @@ def create_app() -> FastAPI:
     app.include_router(push_router)
     app.include_router(playground_router)
     app.include_router(security_router)
+    # API pública: /v1/* (Bearer token) + /api-keys (painel, cookie)
+    app.include_router(api_v1_router)
+    app.include_router(api_mgmt_router)
+    app.include_router(api_keys_router)
     return app
 
 

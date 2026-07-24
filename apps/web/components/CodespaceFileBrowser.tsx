@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronRight, File as FileIcon, Folder, Home, Loader2, MoreVertical, Pencil, Save, Search,
   Share2, X,
@@ -22,6 +22,52 @@ export function extLang(path: string): string {
 
 const DND_MIME = "application/x-codespace-file";
 type DragPayload = { projectId: string; path: string; kind: "dir" | "file" };
+
+/** Trecho de código arrastado do visualizador: leva o ARQUIVO e o INTERVALO de
+ *  linhas junto do texto, para a IA saber exatamente onde aquilo mora. */
+const SNIPPET_MIME = "application/x-codespace-snippet";
+type SnippetPayload = {
+  projectId: string; path: string; startLine: number; endLine: number; text: string;
+};
+
+/** Intervalo de linhas da seleção atual dentro do visualizador (pelo `data-line`
+ *  de cada linha renderizada). null = nada selecionado ali dentro.
+ *
+ *  O texto é remontado a partir do DOM (linhas INTEIRAS do intervalo), não de
+ *  `Selection.toString()`: com a calha `select-none` no meio, o toString() pode vir
+ *  vazio (medido) — e linhas inteiras são o que a IA precisa de qualquer forma,
+ *  porque um recorte no meio da linha não é código válido. */
+function selectionLines(root: HTMLElement | null): { start: number; end: number; text: string } | null {
+  if (!root || typeof window === "undefined") return null;
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  const range = sel.getRangeAt(0);
+  if (range.collapsed || !root.contains(range.commonAncestorContainer)) return null;
+  const lineOf = (node: Node | null): number | null => {
+    let el: HTMLElement | null =
+      node instanceof HTMLElement ? node : (node?.parentElement ?? null);
+    while (el && !el.dataset.line) el = el.parentElement;
+    return el ? Number(el.dataset.line) : null;
+  };
+  const a = lineOf(range.startContainer);
+  const b = lineOf(range.endContainer);
+  if (a == null || b == null) return null;
+  const start = Math.min(a, b);
+  const end = Math.max(a, b);
+  const linhas: string[] = [];
+  for (let n = start; n <= end; n++) {
+    const row = root.querySelector<HTMLElement>(`[data-line="${n}"]`);
+    // último filho da linha = o código (o primeiro é a calha do número)
+    linhas.push(row?.lastElementChild?.textContent ?? "");
+  }
+  const text = linhas.join("\n");
+  if (!text.trim()) return null;
+  return { start, end, text };
+}
+
+// acima disto o visualizador volta ao <pre> simples: numerar linha a linha custa
+// um nó de DOM por linha e trava a rolagem em arquivos enormes.
+const MAX_NUMBERED_LINES = 4000;
 
 function basename(p: string): string {
   return p.split("/").pop() || p;
@@ -133,6 +179,8 @@ export default function CodespaceFileBrowser({
   const [searchResults, setSearchResults] = useState<CodespaceFileEntry[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  // raiz do visualizador: o arraste de trecho lê a seleção de dentro dela
+  const viewRef = useRef<HTMLDivElement>(null);
   const [content, setContent] = useState<string>("");
   const [contentMeta, setContentMeta] = useState<{ total_lines?: number; truncated?: boolean } | null>(null);
   const [loadingContent, setLoadingContent] = useState(false);
@@ -376,7 +424,21 @@ export default function CodespaceFileBrowser({
                   className="h-full min-h-[160px] w-full resize-none bg-transparent p-3 font-mono text-[11px] leading-5 text-ink outline-none"
                 />
               ) : (
-                <pre className="whitespace-pre p-3 font-mono text-[11px] leading-5 text-ink-soft"><code>{content}</code></pre>
+                <CodeView
+                  ref={viewRef}
+                  content={content}
+                  onDragStartSnippet={(e) => {
+                    const sel = selectionLines(viewRef.current);
+                    if (!sel || !selected) return;
+                    const payload: SnippetPayload = {
+                      projectId, path: selected,
+                      startLine: sel.start, endLine: sel.end, text: sel.text,
+                    };
+                    e.dataTransfer.setData(SNIPPET_MIME, JSON.stringify(payload));
+                    e.dataTransfer.setData("text/plain", sel.text);
+                    e.dataTransfer.effectAllowed = "copy";
+                  }}
+                />
               )}
             </div>
             {!editing && contentMeta?.truncated && (
@@ -391,7 +453,50 @@ export default function CodespaceFileBrowser({
   );
 }
 
-/** mime type usado no arraste-e-solte de arquivos do Codespace — exportado pra
- *  quem quiser aceitar o drop (ex.: o campo de mensagem do chat). */
-export { DND_MIME as CODESPACE_DND_MIME };
+/** Visualizador com CALHA DE NÚMEROS de linha.
+ *
+ *  A calha é `select-none`: ela não entra na cópia nem na seleção, então arrastar
+ *  um trecho leva só o código. Cada linha carrega `data-line`, que é como o
+ *  `selectionLines` descobre o intervalo selecionado sem precisar contar caracteres.
+ *  Arquivos gigantes caem no <pre> simples (ver MAX_NUMBERED_LINES). */
+const CodeView = forwardRef<HTMLDivElement, {
+  content: string;
+  onDragStartSnippet: (e: React.DragEvent) => void;
+}>(function CodeView({ content, onDragStartSnippet }, ref) {
+  const lines = useMemo(() => content.split("\n"), [content]);
+  if (lines.length > MAX_NUMBERED_LINES) {
+    return (
+      <pre className="whitespace-pre p-3 font-mono text-[11px] leading-5 text-ink-soft">
+        <code>{content}</code>
+      </pre>
+    );
+  }
+  const gutter = `${String(lines.length).length}ch`;
+  return (
+    <div
+      ref={ref}
+      draggable
+      onDragStart={onDragStartSnippet}
+      title="Selecione um trecho e arraste até o chat para enviá-lo com arquivo e linhas"
+      className="w-max min-w-full py-3 font-mono text-[11px] leading-5"
+    >
+      {lines.map((l, i) => (
+        <div key={i} data-line={i + 1} className="flex">
+          <span
+            style={{ width: gutter }}
+            className="shrink-0 select-none pl-3 pr-3 text-right tabular-nums text-muted/60"
+          >
+            {i + 1}
+          </span>
+          <span className="whitespace-pre pr-3 text-ink-soft">{l}</span>
+        </div>
+      ))}
+    </div>
+  );
+});
+
+/** mime types do arraste-e-solte do Codespace — exportados pra quem aceita o drop
+ *  (o campo de mensagem do chat). */
+export { DND_MIME as CODESPACE_DND_MIME, SNIPPET_MIME as CODESPACE_SNIPPET_MIME };
+export type { SnippetPayload as CodespaceSnippetPayload };
 export type { DragPayload as CodespaceDragPayload };

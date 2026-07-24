@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Mail, Pencil, Play, RotateCcw, Send, ShieldAlert, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench } from "lucide-react";
+import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Mail, MessageSquarePlus, Pencil, Play, RotateCcw, Send, ShieldAlert, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench } from "lucide-react";
 import type { BrainNoteEvent, ChartSpec, ChatArtifact, DeepResearch, Message, SkillProposal, StockQuote, ToolEvent } from "@/lib/types";
 import { api, ApiError, API_URL } from "@/lib/api";
 import { fmtHM, fmtDayShort } from "@/lib/format";
@@ -26,7 +26,13 @@ type Artifact =
   | { kind: "video"; data: { url: string; prompt?: string } }
   | { kind: "email_draft"; data: EmailDraft }
   | { kind: "skill_proposal"; data: SkillProposal }
+  | { kind: "prompt_proposal"; data: PromptProposal }
   | { kind: "brain_note"; data: BrainNoteEvent };
+
+type PromptProposal = {
+  proposal_id: string; command: string; title: string;
+  content: string; source_url?: string;
+};
 
 type EmailDraft = {
   draft_id: string; to: string; cc?: string; subject?: string;
@@ -72,6 +78,10 @@ function collect(node: unknown, out: Artifact[], seen: Set<string>, depth = 0): 
   }
   if (kind === "skill_proposal" && typeof o.proposal_id === "string") {
     if (!seen.has("sp:" + o.proposal_id)) { seen.add("sp:" + o.proposal_id); out.push({ kind, data: o as unknown as SkillProposal }); }
+    return;
+  }
+  if (kind === "prompt_proposal" && typeof o.proposal_id === "string") {
+    if (!seen.has("pp:" + o.proposal_id)) { seen.add("pp:" + o.proposal_id); out.push({ kind, data: o as unknown as PromptProposal }); }
     return;
   }
   if (kind === "brain_note" && typeof o.doc_id === "string") {
@@ -217,6 +227,8 @@ function renderArtifact(a: Artifact, key: React.Key) {
     <EmailComposer key={key} draft={a.data} />
   ) : a.kind === "skill_proposal" ? (
     <SkillProposalCard key={key} proposal={a.data} />
+  ) : a.kind === "prompt_proposal" ? (
+    <PromptProposalCard key={key} proposal={a.data} />
   ) : a.kind === "brain_note" ? (
     <BrainNoteCard key={key} note={a.data} />
   ) : (
@@ -477,6 +489,115 @@ function SkillProposalCard({ proposal }: { proposal: SkillProposal }) {
           className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
         >
           <Check size={14} /> {status === "saving" ? "Salvando…" : "Aprovar skill"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Proposta de PROMPT reutilizável (/comando) vinda da tool prompts.library.manage.
+ *  Mesmo contrato do card de skill: a IA só PROPÕE; quem grava é este card. */
+function PromptProposalCard({ proposal }: { proposal: PromptProposal }) {
+  const savedKey = "prompt_saved:" + proposal.proposal_id;
+  const dismissKey = "prompt_dismissed:" + proposal.proposal_id;
+  const [command, setCommand] = useState(proposal.command || "");
+  const [title, setTitle] = useState(proposal.title || "");
+  const [content, setContent] = useState(proposal.content || "");
+  const [open, setOpen] = useState(false);
+  const [err, setErr] = useState("");
+  const [status, setStatus] = useState<"idle" | "saving" | "saved" | "dismissed">(() => {
+    if (typeof window === "undefined") return "idle";
+    if (localStorage.getItem(savedKey)) return "saved";
+    if (localStorage.getItem(dismissKey)) return "dismissed";
+    return "idle";
+  });
+
+  async function approve() {
+    if (status === "saving" || !command.trim() || !content.trim()) return;
+    setStatus("saving");
+    setErr("");
+    try {
+      await api.post("/prompts", {
+        // comando aceita HÍFEN (o slug de skill é que usa underscore) — ver _COMMAND no backend
+        command: command.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "prompt",
+        title: title.trim() || command.trim(),
+        content,
+        enabled: true,
+      });
+      try { localStorage.setItem(savedKey, "1"); } catch { /* ignore */ }
+      setStatus("saved");
+    } catch (e) {
+      setErr(
+        e instanceof ApiError && e.status === 409
+          ? "Já existe um prompt com este comando — troque o /comando."
+          : e instanceof ApiError ? e.message : "Falha ao salvar o prompt",
+      );
+      setStatus("idle");
+    }
+  }
+
+  function dismiss() {
+    try { localStorage.setItem(dismissKey, "1"); } catch { /* ignore */ }
+    setStatus("dismissed");
+  }
+
+  if (status === "saved" || status === "dismissed") {
+    return (
+      <div className="my-2 max-w-xl rounded-xl border border-border bg-surface px-4 py-3">
+        <p className={`flex items-center gap-2 text-sm ${status === "saved" ? "text-green-400" : "text-muted"}`}>
+          {status === "saved" ? <Check size={16} /> : <Ban size={16} />}
+          {status === "saved" ? "Prompt aprovado" : "Proposta descartada"}
+          <span className="truncate text-muted">· /{command || proposal.command}</span>
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="my-2 max-w-xl overflow-hidden rounded-xl border border-border bg-surface">
+      <div className="flex items-center gap-2 border-b border-border px-4 py-2">
+        <MessageSquarePlus size={15} className="text-accent-hover" />
+        <span className="text-sm font-medium text-ink">Proposta de prompt</span>
+        <span className="ml-auto text-xs text-muted">revise e aprove</span>
+      </div>
+      <div className="divide-y divide-border">
+        <label className="flex items-center gap-2 px-4 py-2 text-sm">
+          <span className="w-24 shrink-0 text-muted">Título</span>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} className="flex-1 bg-transparent font-medium text-ink outline-none" />
+        </label>
+        <label className="flex items-center gap-2 px-4 py-2 text-sm">
+          <span className="w-24 shrink-0 text-muted">Comando</span>
+          <span className="text-muted">/</span>
+          <input value={command} onChange={(e) => setCommand(e.target.value)} className="flex-1 bg-transparent font-mono text-xs text-ink outline-none" />
+        </label>
+        {proposal.source_url && (
+          <p className="truncate px-4 py-2 text-xs text-muted">Origem: {proposal.source_url}</p>
+        )}
+        <div className="px-4 py-2">
+          <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1 text-xs text-muted transition-colors hover:text-ink">
+            {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Conteúdo ({content.length} chars)
+          </button>
+          {open && (
+            <textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              rows={12}
+              className="mt-2 w-full resize-y rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs leading-relaxed text-ink outline-none"
+            />
+          )}
+        </div>
+      </div>
+      <div className="flex items-center gap-3 border-t border-border px-4 py-2">
+        {err && <span className="truncate text-xs text-red-400">{err}</span>}
+        <button onClick={dismiss} className="ml-auto rounded-full px-3 py-1.5 text-sm text-muted transition-colors hover:text-ink">
+          Descartar
+        </button>
+        <button
+          onClick={approve}
+          disabled={!command.trim() || !content.trim() || status === "saving"}
+          className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
+        >
+          <Check size={14} /> {status === "saving" ? "Salvando…" : "Aprovar prompt"}
         </button>
       </div>
     </div>
