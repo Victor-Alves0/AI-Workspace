@@ -248,6 +248,9 @@ export default function PromptBox({
   knowledgeRefs = [],
   refDocs = [],
   onRefDocsChange,
+  chats = [],
+  refChats = [],
+  onRefChatsChange,
   capabilities = {},
   attachments = [],
   onAttachmentsChange,
@@ -287,6 +290,11 @@ export default function PromptBox({
   /** docs referenciados no próximo turno (chips) */
   refDocs?: RefDoc[];
   onRefDocsChange?: (r: RefDoc[]) => void;
+  /** chats do usuário selecionáveis em "Chats de Referência" (sem o chat atual) */
+  chats?: { id: string; title: string }[];
+  /** chats anexados como contexto do próximo turno (chips) */
+  refChats?: { id: string; title: string }[];
+  onRefChatsChange?: (r: { id: string; title: string }[]) => void;
   /** capacidades do modelo ativo (gate de upload: vision / file_upload) */
   capabilities?: Record<string, boolean>;
   /** anexos (imagens/arquivos) do próximo envio */
@@ -306,6 +314,10 @@ export default function PromptBox({
 }) {
   const [plusOpen, setPlusOpen] = useState(false);
   const plusRef = useClickOutside<HTMLDivElement>(() => setPlusOpen(false));
+  // "Chats de Referência": menu próprio com busca + lista (multi-seleção)
+  const [chatPickOpen, setChatPickOpen] = useState(false);
+  const [chatQuery, setChatQuery] = useState("");
+  const chatPickRef = useClickOutside<HTMLDivElement>(() => setChatPickOpen(false));
   const taRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [attachErr, setAttachErr] = useState<string | null>(null);
@@ -447,6 +459,12 @@ export default function PromptBox({
     return agents.filter((a) => a.name.toLowerCase().includes(atQuery));
   }, [agents, atQuery]);
   const agentMenuOpen = !dismissed && !promptMenuOpen && !skillMenuOpen && agentMatches.length > 0;
+
+  // lista do seletor de "Chats de Referência", filtrada pela busca
+  const chatRows = useMemo(() => {
+    const q = chatQuery.trim().toLowerCase();
+    return q ? chats.filter((c) => (c.title || "").toLowerCase().includes(q)) : chats;
+  }, [chats, chatQuery]);
 
   // "#arquivo" (menção): referencia um doc da Base de Conhecimento p/ ESTE turno.
   // Mesma mecânica do "@"/"$". Só aparece o que o modelo/chat pode acessar.
@@ -661,6 +679,21 @@ export default function PromptBox({
             ))}
           </div>
         )}
+        {refChats.length > 0 && (
+          <div className="mb-1.5 flex flex-wrap gap-1.5 px-1">
+            {refChats.map((c) => (
+              <span key={c.id} className="flex items-center gap-1 rounded-full bg-accent/15 px-2.5 py-0.5 text-xs text-accent-hover" title={c.title}>
+                <MessagesSquare size={11} /> <span className="max-w-[160px] truncate">{c.title || "Sem título"}</span>
+                <button
+                  onClick={() => onRefChatsChange?.(refChats.filter((x) => x.id !== c.id))}
+                  className="text-accent-hover/70 transition-colors hover:text-accent-hover"
+                >
+                  <X size={11} />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         {attachedAgent && (
           <div className="mb-1.5 flex flex-wrap gap-1.5 px-1">
             <span className="flex items-center gap-1 rounded-full bg-accent/15 px-2.5 py-0.5 text-xs text-accent-hover">
@@ -828,9 +861,63 @@ export default function PromptBox({
                     >
                       Anexar Base de Conhecimento
                     </MenuItem>
-                    <MenuItem icon={<MessagesSquare size={16} />} onClick={() => setPlusOpen(false)}>
+                    <MenuItem
+                      icon={<MessagesSquare size={16} />}
+                      onClick={() => { setPlusOpen(false); setChatQuery(""); setChatPickOpen(true); }}
+                    >
                       Chats de Referência
                     </MenuItem>
+                </div>
+              )}
+              {/* seletor de chats de referência: busca + lista, multi-seleção */}
+              {chatPickOpen && (
+                <div
+                  ref={chatPickRef}
+                  className={`animate-pop absolute left-0 z-50 w-80 overflow-hidden rounded-xl border border-border bg-surface shadow-menu ${menuUp ? "bottom-11" : "top-11"}`}
+                >
+                  <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+                    <Search size={14} className="text-muted" />
+                    <input
+                      autoFocus
+                      value={chatQuery}
+                      onChange={(e) => setChatQuery(e.target.value)}
+                      placeholder="Buscar chat…"
+                      className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
+                    />
+                    <button onClick={() => setChatPickOpen(false)} className="text-muted transition-colors hover:text-ink">
+                      <X size={14} />
+                    </button>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto p-1">
+                    {chatRows.map((c) => {
+                      const on = refChats.some((r) => r.id === c.id);
+                      return (
+                        <button
+                          key={c.id}
+                          onClick={() =>
+                            onRefChatsChange?.(
+                              on ? refChats.filter((r) => r.id !== c.id)
+                                 : [...refChats, { id: c.id, title: c.title }].slice(0, 5)
+                            )
+                          }
+                          className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-ink transition-colors hover:bg-hover"
+                        >
+                          <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-accent bg-accent text-white" : "border-border"}`}>
+                            {on && <Check size={11} />}
+                          </span>
+                          <span className="truncate">{c.title || "Sem título"}</span>
+                        </button>
+                      );
+                    })}
+                    {chatRows.length === 0 && (
+                      <p className="px-3 py-5 text-center text-sm text-muted">
+                        {chats.length === 0 ? "Nenhum outro chat." : "Nada encontrado."}
+                      </p>
+                    )}
+                  </div>
+                  <p className="border-t border-border px-3 py-1.5 text-[10px] text-muted">
+                    Anexa a conversa como contexto desta mensagem · máx. 5
+                  </p>
                 </div>
               )}
             </div>

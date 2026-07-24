@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft, BarChart3, BookOpen, Box, Brain, Check, Code2, Copy, Download, FileText,
   LayoutGrid, MoreHorizontal, Pencil, Plug, Plus, Search, Settings, Sparkles,
-  Terminal, Trash2, Upload, Waypoints, Wrench, X,
+  Gauge, Terminal, Trash2, Upload, Waypoints, Wrench, X,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
@@ -22,13 +22,16 @@ import MemoryView from "./MemoryView";
 import KnowledgeView from "./KnowledgePanel";
 import CodespacePanel from "./CodespacePanel";
 import ApiView from "./ApiView";
+import ObservabilityView from "./ObservabilityView";
 
 export type Section =
   | "Modelos" | "Conhecimento" | "Cerebros" | "Prompts" | "Skills"
-  | "Ferramentas" | "Apps" | "Codespace" | "Memoria" | "Analítica" | "API";
+  | "Ferramentas" | "Apps" | "Codespace" | "Memoria" | "Analítica" | "API"
+  | "Observabilidade";
 
-// meta dos cards da grade inicial (a contagem é injetada em runtime)
-const CARD_META: { key: Section; name: string; desc: string; icon: ReactNode; live: boolean }[] = [
+// meta dos cards da grade inicial (a contagem é injetada em runtime).
+// `admin: true` só aparece para administradores (filtrado em runtime).
+const CARD_META: { key: Section; name: string; desc: string; icon: ReactNode; live: boolean; admin?: boolean }[] = [
   { key: "Modelos", name: "Modelos", desc: "Seus modelos e presets de IA", icon: <Box size={22} />, live: true },
   { key: "Ferramentas", name: "Ferramentas", desc: "Tools e integrações MCP", icon: <Wrench size={22} />, live: true },
   { key: "Prompts", name: "Prompts", desc: "Atalhos de comando reutilizáveis", icon: <FileText size={22} />, live: true },
@@ -40,6 +43,7 @@ const CARD_META: { key: Section; name: string; desc: string; icon: ReactNode; li
   { key: "Memoria", name: "Memória", desc: "O que a IA lembra de você", icon: <Brain size={22} />, live: true },
   { key: "Analítica", name: "Analítica", desc: "Uso, custos e desempenho", icon: <BarChart3 size={22} />, live: true },
   { key: "API", name: "API", desc: "Use seus modelos em qualquer app", icon: <Terminal size={22} />, live: true },
+  { key: "Observabilidade", name: "Observabilidade", desc: "Cada chamada, latência e query", icon: <Gauge size={22} />, live: true, admin: true },
 ];
 
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
@@ -416,7 +420,7 @@ export default function WorkspaceView({
             </button>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {CARD_META.map((c) => (
+            {CARD_META.filter((c) => !c.admin || user?.role === "admin").map((c) => (
               <WsCard
                 key={c.key}
                 icon={c.icon}
@@ -727,6 +731,11 @@ export default function WorkspaceView({
       {section === "API" && (
         <SectionShell title="API" onBack={backHome}>
           <ApiView />
+        </SectionShell>
+      )}
+      {section === "Observabilidade" && (
+        <SectionShell title="Observabilidade" onBack={backHome}>
+          <ObservabilityView />
         </SectionShell>
       )}
 

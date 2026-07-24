@@ -30,6 +30,7 @@ import httpx
 from fastapi.concurrency import run_in_threadpool
 
 from .. import extraction
+from .. import tracing
 from ..config import get_settings
 from ..db import SessionLocal
 from ..knowledge import brain as brain_service
@@ -807,6 +808,7 @@ class _GatheredContext:
     memories: list[str] = field(default_factory=list)
     knowledge_block: str = ""
     ref_block: str = ""
+    ref_chat_block: str = ""
     auto_knowledge_event: dict[str, Any] | None = None
     ref_knowledge_event: dict[str, Any] | None = None
     kb_bases: list[str] = field(default_factory=list)
@@ -827,6 +829,7 @@ async def _gather_context(
     memory: MemoryOpts,
     knowledge: dict[str, Any] | None,
     ref_docs: list[dict[str, Any]] | None,
+    ref_chats: list[dict[str, Any]] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     """Fase 1 — memória (mem0), Base de Conhecimento (modo auto) e arquivos "#".
 
@@ -837,14 +840,16 @@ async def _gather_context(
     # Leak-safe: só global (compartilhado) + as do modelo atual + as deste chat —
     # nunca de outros chats/modelos. Ver memory/mem0_service.search_for_turn.
     if (memory.read and any(memory.read.values())) or memory.banks:
-        g.mem_items = await run_in_threadpool(
-            lambda: mem0_service.search_for_turn(
-                api_key, user_text, user_id,
-                chat_id=chat_id, agent_id=agent_id,
-                read=memory.read or {}, banks=memory.banks,
-                project_id=memory.project, limit=6,
+        with tracing.span("memory:search", kind="memory"):
+            g.mem_items = await run_in_threadpool(
+                lambda: mem0_service.search_for_turn(
+                    api_key, user_text, user_id,
+                    chat_id=chat_id, agent_id=agent_id,
+                    read=memory.read or {}, banks=memory.banks,
+                    project_id=memory.project, limit=6,
+                )
             )
-        )
+            tracing.annotate(hits=len(g.mem_items))
     g.memories = [m["text"] for m in g.mem_items]
     if g.mem_items:
         yield {"type": "memory", "count": len(g.mem_items), "items": g.mem_items}
@@ -864,7 +869,8 @@ async def _gather_context(
     if g.kb_bases_auto:
         yield {"type": "knowledge", "status": "start", "query": user_text[:120]}
         try:
-            auto_kres = await kb_retrieval.search(user_id, g.kb_bases_auto, user_text, g.kb_k)
+            with tracing.span("knowledge:auto", kind="rag", bases=len(g.kb_bases_auto), k=g.kb_k):
+                auto_kres = await kb_retrieval.search(user_id, g.kb_bases_auto, user_text, g.kb_k)
         except Exception as exc:  # noqa: BLE001
             logger.warning("busca na base de conhecimento falhou: %s", exc)
             auto_kres = []
@@ -921,6 +927,28 @@ async def _gather_context(
                 "sources": ref_sources, "count": len(ref_results),
             }
             yield {"type": "tool_result", "name": "knowledge", "result": g.ref_knowledge_event}
+
+    # 1d. Chats de Referência: transcrições resumidas de OUTROS chats do usuário,
+    # anexados no compositor p/ dar contexto a este turno.
+    rc_list = ref_chats or []
+    if rc_list:
+        parts: list[str] = []
+        for rc in rc_list:
+            transcript = (rc.get("transcript") or "").strip()
+            if not transcript:
+                continue
+            parts.append(f"### Conversa: {rc.get('title') or 'Chat'}\n{transcript}")
+        if parts:
+            g.ref_chat_block = (
+                "## Conversas de referência\n"
+                "O usuário anexou trechos de outras conversas dele como contexto. Use-os "
+                "para entender o histórico/assunto quando pertinente; não os repita "
+                "literalmente a menos que solicitado.\n\n" + "\n\n".join(parts)
+            )
+            yield {"type": "tool_result", "name": "reference_chats", "result": {
+                "kind": "reference_chats", "count": len(parts),
+                "titles": [rc.get("title") for rc in rc_list],
+            }}
 
 
 @dataclass
@@ -1295,6 +1323,16 @@ class _ToolDispatcher:
     result: Any = None
 
     async def run(self, name: str, args: dict, tc: dict) -> AsyncGenerator[dict[str, Any], None]:
+        # cada execução de tool vira um span (kind=tool): duração, erro e — como o
+        # dispatch da SIFT também roda queries — as leituras/escritas de banco DELA
+        with tracing.span(f"tool:{name}", kind="tool", tool=name,
+                          arg_keys=sorted(args.keys())[:12]):
+            async for ev in self._run(name, args, tc):
+                yield ev
+            if isinstance(self.result, dict) and self.result.get("error"):
+                tracing.annotate(tool_error=str(self.result["error"])[:200])
+
+    async def _run(self, name: str, args: dict, tc: dict) -> AsyncGenerator[dict[str, Any], None]:
         if name == "view_skill":
             self.result = self._view_skill(args)
         elif name == "generate_image":
@@ -1641,6 +1679,9 @@ async def run_turn(
     # docs referenciados com "#" no compositor: [{id, filename, base_id, text}].
     # Injetados neste turno (híbrido: texto inteiro se pequeno, senão trechos).
     ref_docs: list[dict[str, Any]] | None = None,
+    # Chats de Referência: outros chats do usuário anexados como contexto neste turno
+    # ([{id, title, transcript}]). Injetados como transcrição resumida no system.
+    ref_chats: list[dict[str, Any]] | None = None,
     extra_system: str | None = None,
     # detalhamento (em chars) das origens do extra_system, p/ o painel de uso:
     # {"artifacts": n, "channel": n, "guards": n} — só rotula, não muda o prompt
@@ -1665,6 +1706,11 @@ async def run_turn(
     subagents, run_subagent = _sa.agents, _sa.run
     subagent_mode, subagent_max_calls = _sa.mode, _sa.max_calls
     subagent_pass_context, subagent_worker_memory = _sa.pass_context, _sa.worker_memory
+
+    # marca o trace corrente (aberto pelo middleware, ou pelo chamador de background)
+    # com o contexto do turno. Sem trace ativo, annotate é no-op.
+    tracing.annotate(model=model, chat_id=chat_id, agent_id=agent_id,
+                     user_chars=len(user_text or ""), background=session.background)
 
     # Raciocínio: "Desligado" na UI apaga a chave => sem isto, modelos híbridos
     # (DeepSeek V4 etc.) raciocinam POR PADRÃO e o usuário vê "Pensando…" com o
@@ -1691,11 +1737,12 @@ async def run_turn(
     g = _GatheredContext()
     async for ev in _gather_context(
         g, api_key=api_key, user_text=user_text, session=session,
-        memory=_mem, knowledge=knowledge, ref_docs=ref_docs,
+        memory=_mem, knowledge=knowledge, ref_docs=ref_docs, ref_chats=ref_chats,
     ):
         yield ev
     mem_items, memories = g.mem_items, g.memories
     knowledge_block, ref_block = g.knowledge_block, g.ref_block
+    ref_chat_block = g.ref_chat_block
     auto_knowledge_event, ref_knowledge_event = g.auto_knowledge_event, g.ref_knowledge_event
     # o search_knowledge (modo "tool") busca SÓ nas bases marcadas como ferramenta
     kb_bases, kb_k = g.kb_bases_tool, g.kb_k
@@ -1749,7 +1796,7 @@ async def run_turn(
     mem_block = _memory_block(memories)
     # bloco de contexto por-turno (fora do prefixo cacheado): memória + conhecimento
     # recuperado (modo auto). Ambos variam a cada turno conforme a pergunta.
-    context_block = "\n\n".join(b for b in (mem_block, knowledge_block, ref_block) if b)
+    context_block = "\n\n".join(b for b in (mem_block, knowledge_block, ref_block, ref_chat_block) if b)
     time_note = _temporal_note(user_tz, user_tz_offset) if realtime_datetime else ""
     # `extra_system` = instruções de ALTA PRIORIDADE: reforço de um Guarda de saída
     # (retry) OU instruções do canal (ex.: WhatsApp). Vão para o FIM do system, DEPOIS
@@ -1794,7 +1841,7 @@ async def run_turn(
         "system": len(chat_system_prompt or "") + len(time_note),
         "extra": len(extra_system or ""),
         "memory": len(mem_block),
-        "knowledge": len(knowledge_block) + len(ref_block),
+        "knowledge": len(knowledge_block) + len(ref_block) + len(ref_chat_block),
         "tools": len(sift_prompt) + (len(json.dumps(tools)) if tools else 0) + len(brain_block),
         "skills": len(skills_block),
         "tool_results": 0,  # preenchido conforme as tools respondem no loop (inclui view_skill)
@@ -1872,6 +1919,14 @@ async def run_turn(
         usage: dict | None = None
         got_chunk = False
 
+        # span da chamada ao provedor (kind=llm): tempo de parede da geração, nº de
+        # tokens (preenchido ao fim) e a iteração do loop agêntico. Enter/exit manual
+        # porque o corpo abaixo já usa try/except (retry sem knobs) e um `with` extra
+        # exigiria reindentar o bloco inteiro.
+        _llm_span_cm = tracing.span(f"llm:{model}", kind="llm", model=model,
+                                    iteration=_iter, has_tools=bool(tools))
+        _llm_span = _llm_span_cm.__enter__()
+        _llm_exc: BaseException | None = None
         try:
             async for chunk in openrouter.stream_chat(
                 api_key, model, messages, tools=tools, params=params,
@@ -1914,6 +1969,7 @@ async def run_turn(
                     if choice.get("finish_reason"):
                         finish_reason = choice["finish_reason"]
         except Exception as exc:  # noqa: BLE001
+            _llm_exc = exc
             optional_knobs = bool(stream_modalities) or auto_reasoning_off
             if not got_chunk and not retried_plain and optional_knobs:
                 logger.warning(
@@ -1930,6 +1986,18 @@ async def run_turn(
             logger.exception("Erro no streaming do OpenRouter")
             yield {"type": "error", "message": str(exc)}
             return
+        finally:
+            if usage:
+                _llm_span.set(total_tokens=usage.get("total_tokens"),
+                              completion_tokens=usage.get("completion_tokens"),
+                              prompt_tokens=usage.get("prompt_tokens"))
+            _llm_span.set(finish_reason=finish_reason, streamed=got_chunk)
+            # marca o erro no span à mão e sai LIMPO: passar a exceção ao __exit__ a
+            # relançaria aqui dentro do finally (o @contextmanager a joga no yield)
+            if _llm_exc is not None:
+                _llm_span.status = "error"
+                _llm_span.error = f"{type(_llm_exc).__name__}: {_llm_exc}"[:2000]
+            _llm_span_cm.__exit__(None, None, None)
 
         if usage:
             _merge_usage(total_usage, usage)

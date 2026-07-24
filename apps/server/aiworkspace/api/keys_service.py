@@ -1,8 +1,9 @@
 """Geração, verificação e políticas das chaves de API.
 
-Formato da chave: ``aw-<prefixo>-<segredo>``. O prefixo (12 chars) é público e
-único: identifica a linha em uma única query indexada. O segredo (43 chars, 32
-bytes de entropia) só existe na resposta da criação; o banco guarda o SHA-256.
+Formato da chave: ``aw-<prefixo>-<segredo>``. O prefixo (12 chars hex) é público e
+único: identifica a linha em uma única query indexada. O segredo (64 chars hex, 32
+bytes = 256 bits de entropia) só existe na resposta da criação; o banco guarda o
+SHA-256.
 
 SHA-256 puro (sem bcrypt/argon2) é a escolha certa AQUI e errada para senhas: o
 segredo é aleatório de 256 bits, então não há dicionário a atacar — e o hash roda

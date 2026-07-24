@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>AI Workspace</title>
+<!--
+  Página local de reserva. A janela real navega para a interface web
+  (server_url das preferências, por padrão http://localhost:3000); este arquivo
+  só existe porque o `tauri build` exige um `frontendDist` válido, e serve de
+  tela de recuperação caso a janela caia aqui.
+-->
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #0b0d12; color: #e8eaf0;
+  }
+  @media (prefers-color-scheme: light) { body { background: #f6f7f9; color: #1b1e26; } }
+  main { max-width: 30rem; padding: 2rem; text-align: center; }
+  h1 { font-size: 1.15rem; margin: 0 0 .5rem; }
+  p { margin: .35rem 0; opacity: .75; }
+  code { font-family: ui-monospace, Consolas, monospace; opacity: .9; }
+</style>
+<main>
+  <h1>AI Workspace</h1>
+  <p>Não consegui carregar a interface.</p>
+  <p>Verifique se o servidor está no ar e se o endereço em
+     <code>desktop-settings.json</code> está correto.</p>
+</main>

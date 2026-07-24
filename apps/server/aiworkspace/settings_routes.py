@@ -77,6 +77,9 @@ async def set_secret_route(
     # chaves de busca/finanças afetam a instância SIFT do usuário
     if name in _SIFT_AFFECTING:
         sift_service.invalidate(str(user.id))
+    # trocou a chave do OpenRouter: o catálogo cacheado pode não valer mais
+    if name == "openrouter":
+        openrouter.invalidate_catalog()
     # auditoria: registra QUE segredo mudou (nunca o valor)
     await audit_service.record("secret_set", user_id=user.id, request=request, detail={"name": name})
     return {"ok": True}

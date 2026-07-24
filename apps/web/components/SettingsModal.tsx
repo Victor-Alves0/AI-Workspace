@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Blocks,
+  AppWindow,
   Cable,
   Check,
   ChevronDown,
@@ -63,9 +64,17 @@ import OllamaPanel from "./OllamaPanel";
 import VoicePanel from "./VoicePanel";
 import { WebSearchPanel, BrowserPanel } from "./toolPanels";
 import { useConfirm, usePrompt } from "./ConfirmDialog";
+import {
+  getDesktopSettings,
+  isDesktop,
+  setDesktopSettings,
+  type DesktopPatch,
+  type DesktopSettings,
+} from "@/lib/desktop";
 
-type Cat = "general" | "status" | "interface" | "connections" | "integrations" | "personalization" | "shortcuts" | "security" | "data" | "account" | "about";
+type Cat = "general" | "status" | "interface" | "connections" | "integrations" | "personalization" | "shortcuts" | "security" | "data" | "account" | "desktop" | "about";
 
+// "desktop" só aparece quando a UI roda dentro do app instalado (ver isDesktop()).
 const CATS: { key: Cat; label: string; icon: React.ReactNode }[] = [
   { key: "general", label: "Geral", icon: <Settings size={16} /> },
   { key: "status", label: "Status", icon: <Activity size={16} /> },
@@ -77,6 +86,7 @@ const CATS: { key: Cat; label: string; icon: React.ReactNode }[] = [
   { key: "security", label: "Segurança", icon: <ShieldCheck size={16} /> },
   { key: "data", label: "Controle de Dados", icon: <Database size={16} /> },
   { key: "account", label: "Conta", icon: <CircleUserRound size={16} /> },
+  { key: "desktop", label: "Aplicativo", icon: <AppWindow size={16} /> },
   { key: "about", label: "Sobre", icon: <Info size={16} /> },
 ];
 
@@ -119,6 +129,10 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Logs de segurança", cat: "security" },
   { label: "Auditoria", cat: "security" },
   { label: "Status do sistema", cat: "status" },
+  { label: "Rodar em segundo plano", cat: "desktop" },
+  { label: "Iniciar com o Windows", cat: "desktop" },
+  { label: "Bandeja", cat: "desktop" },
+  { label: "Endereço do servidor", cat: "desktop" },
   { label: "Orçamento mensal", cat: "account" },
   { label: "Nome", cat: "account" },
   { label: "Sobre você", cat: "account" },
@@ -165,11 +179,30 @@ interface SecretStatus {
 }
 
 /* ------------------------------- helpers UI ------------------------------- */
-function Row({ label, sub, children }: { label: string; sub?: string; children?: React.ReactNode }) {
+/* "i" ao lado do rótulo: a explicação aparece no HOVER em vez de ocupar uma linha
+   de texto embaixo de cada opção — mantém a lista limpa. Usa `title` nativo (idioma
+   do resto do app) p/ não brigar com o scroll/overflow do modal. */
+function InfoDot({ text }: { text: string }) {
+  return (
+    <span
+      title={text}
+      aria-label={text}
+      tabIndex={0}
+      className="inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full border border-border text-[10px] font-semibold leading-none text-muted transition-colors hover:border-accent hover:text-ink"
+    >
+      i
+    </span>
+  );
+}
+
+function Row({ label, sub, info, children }: { label: string; sub?: string; info?: string; children?: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4 py-2.5 text-sm">
       <div className="min-w-0">
-        <p className="font-medium text-ink">{label}</p>
+        <p className="flex items-center gap-1.5 font-medium text-ink">
+          {label}
+          {info && <InfoDot text={info} />}
+        </p>
         {sub && <p className="text-xs text-muted">{sub}</p>}
       </div>
       {children}
@@ -199,12 +232,15 @@ function Heading({ children }: { children: React.ReactNode }) {
 
 /* card com título + descrição opcional + toggle à direita (reutilizado nas abas
    de Interface). Mantém o visual consistente sem repetir a marcação. */
-function ToggleCard({ label, sub, on, onToggle }: { label: string; sub?: string; on: boolean; onToggle: () => void }) {
+function ToggleCard({ label, sub, info, on, onToggle }: { label: string; sub?: string; info?: string; on: boolean; onToggle: () => void }) {
   return (
     <div className="rounded-xl border border-border bg-surface px-4 py-3">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <span className="text-sm text-ink">{label}</span>
+          <span className="flex items-center gap-1.5 text-sm text-ink">
+            {label}
+            {info && <InfoDot text={info} />}
+          </span>
           {sub && <p className="text-xs text-muted">{sub}</p>}
         </div>
         <Toggle on={on} onClick={onToggle} />
@@ -319,6 +355,10 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
   const [integView, setIntegView] = useState<string | null>(null);
   // mobile: abre direto no conteúdo quando veio de um deep-link (paleta de comandos)
   const [mobilePane, setMobilePane] = useState<"nav" | "content">(initialCat ? "content" : "nav");
+  // rodando dentro do app instalado? só então a categoria "Aplicativo" existe.
+  // Resolvido no efeito (não no render inicial) p/ não divergir do HTML do servidor.
+  const [onDesktop, setOnDesktop] = useState(false);
+  useEffect(() => setOnDesktop(isDesktop()), []);
   const [showArchived, setShowArchived] = useState(false);
   const [showShared, setShowShared] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
@@ -405,7 +445,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
               />
             </div>
             <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
-              {CATS.map((c) => (
+              {CATS.filter((c) => c.key !== "desktop" || onDesktop).map((c) => (
                 <button
                   key={c.key}
                   onClick={() => { setCat(c.key); setConnView(null); setIntegView(null); setMobilePane("content"); }}
@@ -496,8 +536,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                   <CardGrid
                     cards={[
                       { key: "apis", icon: <KeyRound size={22} />, name: "APIs", desc: "Chaves de serviços" },
-                      { key: "subscriptions", icon: <Crown size={22} />, name: "Assinaturas", desc: "ChatGPT e outros planos, via login" },
-                      { key: "web", icon: <Globe size={22} />, name: "Web", desc: "Pesquisa na web / SearXNG / Navegador" },
+                      { key: "subscriptions", icon: <Crown size={22} />, name: "Assinaturas", desc: "Suas assinaturas" },
+                      { key: "web", icon: <Globe size={22} />, name: "Web", desc: "Acesso a internet" },
                       { key: "ollama", icon: <SiOllama size={22} />, name: "Ollama", desc: "Utilize modelos locais" },
                       { key: "voice", icon: <AudioLines size={22} />, name: "Voz Local", desc: "Kokoro / clonagem de voz" },
                     ]}
@@ -611,6 +651,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                 </div>
               )
             )}
+            {cat === "desktop" && <DesktopTab />}
             {cat === "about" && <AboutTab />}
             {cat === "interface" && <InterfaceTab profile={profile} set={set} view={connView} setView={setConnView} />}
             {cat === "personalization" && <PersonalizationTab profile={profile} set={set} />}
@@ -704,31 +745,31 @@ function ChatSettings({ profile, set, onBack }: { profile: Record<string, any>; 
       <div className="space-y-2.5">
         <ToggleCard
           label="Mostrar ferramentas do modelo"
-          sub="A chave inglesa com a lista de ferramentas equipadas, no topo do chat"
+          info="A chave inglesa com a lista de ferramentas equipadas, no topo do chat"
           on={chatTools}
           onToggle={() => setIface("chat_tools", !chatTools)}
         />
         <ToggleCard
           label="Mostrar compartilhar conversa"
-          sub="O botão de compartilhar (gera um link público), no canto superior direito"
+          info="O botão de compartilhar (gera um link público), no canto superior direito"
           on={chatShare}
           onToggle={() => setIface("chat_share", !chatShare)}
         />
         <ToggleCard
           label="Mostrar imagem do modelo no chat"
-          sub="O avatar do modelo ao lado do nome dele, dentro de cada resposta"
+          info="O avatar do modelo ao lado do nome dele, dentro de cada resposta"
           on={chatModelImg}
           onToggle={() => setIface("chat_model_image", !chatModelImg)}
         />
         <ToggleCard
           label="Foto do modelo no seletor"
-          sub="Mostra o avatar do modelo ao lado do nome, no topo do chat"
+          info="Mostra o avatar do modelo ao lado do nome, no topo do chat"
           on={modelAvatar}
           onToggle={() => setIface("model_avatar", !modelAvatar)}
         />
         <ToggleCard
           label="Artefatos"
-          sub="Conteúdos extensos (código, documentos, HTML…) abrem numa janela dedicada ao lado do chat, com edição e versões"
+          info="Conteúdos extensos (código, documentos, HTML…) abrem numa janela dedicada ao lado do chat, com edição e versões"
           on={artifacts}
           onToggle={() => setIface("artifacts", !artifacts)}
         />
@@ -822,6 +863,82 @@ const SIDEBAR_ITEMS: { key: string; label: string }[] = [
 
 /* ---------------------------------- Sobre --------------------------------- */
 interface AboutInfo { version: string; latest_version: string | null; update_available: boolean; repo_url: string | null }
+
+/* Preferências DA MÁQUINA (bandeja, iniciar com o Windows). Só existe dentro do
+   app instalado; ficam num arquivo local do shell, não no perfil do usuário —
+   senão o celular exibiria opções de Windows e dois PCs com a mesma conta
+   brigariam pelo mesmo valor. */
+function DesktopTab() {
+  const [s, setS] = useState<DesktopSettings | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => { getDesktopSettings().then(setS); }, []);
+
+  async function patch(p: DesktopPatch) {
+    setBusy(true);
+    const next = await setDesktopSettings(p);
+    if (next) setS(next);
+    setBusy(false);
+  }
+
+  if (!s) {
+    return (
+      <div>
+        <Heading>Aplicativo</Heading>
+        <p className="py-2 text-sm text-muted">Carregando as preferências do aplicativo…</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <Heading>Aplicativo</Heading>
+      <Row
+        label="Rodar em segundo plano"
+        info="Fechar a janela esconde o app na bandeja do Windows em vez de encerrá-lo. Para sair de verdade, use o menu do ícone na bandeja."
+      >
+        <Toggle
+          on={s.minimize_to_tray}
+          onClick={() => !busy && patch({ minimizeToTray: !s.minimize_to_tray })}
+        />
+      </Row>
+      <Row
+        label="Iniciar com o Windows"
+        info="Abre o AI Workspace automaticamente quando você liga o computador."
+      >
+        <Toggle
+          on={s.autostart}
+          onClick={() => !busy && patch({ autostart: !s.autostart })}
+        />
+      </Row>
+      {s.autostart && (
+        <Row
+          label="Abrir minimizado na bandeja"
+          info="Ao iniciar com o Windows, sobe direto para a bandeja sem abrir a janela — não rouba o foco de quem acabou de ligar o PC."
+        >
+          <Toggle
+            on={s.start_minimized}
+            onClick={() => !busy && patch({ startMinimized: !s.start_minimized })}
+          />
+        </Row>
+      )}
+      <Row
+        label="Endereço do servidor"
+        info="De onde o aplicativo carrega a interface. Mude para apontar para outra máquina (ex.: sua VPS). Vale após reabrir o app."
+      >
+        <input
+          defaultValue={s.server_url}
+          onBlur={(e) => {
+            const v = e.target.value.trim();
+            if (v && v !== s.server_url) patch({ serverUrl: v });
+          }}
+          spellCheck={false}
+          className="w-56 rounded-lg border border-border bg-surface2 px-2.5 py-1.5 text-sm text-ink outline-none focus:border-accent"
+        />
+      </Row>
+    </div>
+  );
+}
 
 function AboutTab() {
   const [info, setInfo] = useState<AboutInfo | null>(null);
@@ -991,7 +1108,7 @@ function SecurityTab({ profile, set }: { profile: Record<string, any>; set: (k: 
       <Heading>Segurança</Heading>
       <Row
         label="Pedir confirmação antes de ações sensíveis"
-        sub="A IA pede sua aprovação antes de enviar/arquivar e-mails, criar ou alterar eventos na agenda e acionar dispositivos da casa. Desligado (padrão), ela executa direto."
+        info="A IA pede sua aprovação antes de enviar/arquivar e-mails, criar ou alterar eventos na agenda e acionar dispositivos da casa. Desligado (padrão), ela executa direto."
       >
         <Toggle on={confirmOn} onClick={() => set("security", { ...sec, confirm_actions: !confirmOn })} />
       </Row>
@@ -1159,7 +1276,7 @@ function PersonalizationTab({ profile, set }: { profile: Record<string, any>; se
       </Row>
 
       <Heading>Aviso de uso alto</Heading>
-      <Row label="Avisar quando uma resposta passar de (tokens)" sub="0 = desligado. Marca a mensagem com um alerta; não bloqueia.">
+      <Row label="Avisar quando uma resposta passar de (tokens)" info="0 = desligado. Marca a mensagem com um alerta; não bloqueia.">
         <input
           type="number"
           min={0}
@@ -1346,8 +1463,10 @@ function BudgetSettings({ profile, set }: { profile: Record<string, any>; set: (
     <div className="mt-4 border-t border-border pt-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm font-medium text-ink">Orçamento mensal</p>
-          <p className="text-xs text-muted">Você usa a sua própria chave de API — isto só te avisa (ou pausa) para não tomar susto na fatura.</p>
+          <p className="flex items-center gap-1.5 text-sm font-medium text-ink">
+            Orçamento mensal
+            <InfoDot text="Você usa a sua própria chave de API — isto só te avisa (ou pausa) para não tomar susto na fatura." />
+          </p>
         </div>
         <Toggle on={on} onClick={() => setB({ enabled: !on })} />
       </div>
@@ -1705,10 +1824,10 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
       </Row>
 
       <Heading>Memória da IA</Heading>
-      <Row label="Memória" sub="Permita a IA lembrar de fatos entre as conversas">
+      <Row label="Memória" info="Permita a IA lembrar de fatos entre as conversas">
         <Toggle on={memOn} onClick={toggleMem} />
       </Row>
-      <Row label="Aprendizado proativo" sub="A IA revisa as conversas de vez em quando e sugere skills e memórias — sempre com a sua aprovação">
+      <Row label="Aprendizado proativo" info="A IA revisa as conversas de vez em quando e sugere skills e memórias — sempre com a sua aprovação">
         <Toggle on={learnOn} onClick={toggleLearn} />
       </Row>
 

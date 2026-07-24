@@ -34,6 +34,12 @@ async def current_user(
     # revogação: tokens emitidos antes de um bump de token_version não valem mais
     if token_version != user.token_version:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sessão revogada; faça login novamente")
+    # amarra o trace corrente ao usuário (o middleware abriu sem saber quem era)
+    try:
+        from .. import tracing
+        tracing.set_trace_user(str(user.id))
+    except Exception:  # noqa: BLE001
+        pass
     return user
 
 

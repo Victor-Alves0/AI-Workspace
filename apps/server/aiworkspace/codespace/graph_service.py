@@ -501,6 +501,57 @@ def status(user_id: str, project_id: str) -> dict:
 _MAX_VIZ_NODES = 400
 
 
+def _file_graph_fallback(conn, top: int) -> tuple[list[dict], list[dict]]:
+    """Grafo por ARQUIVO que não depende de `edges.src`.
+
+    A lib monta o nível de arquivo exigindo `edges.src` (símbolo de ORIGEM) e só
+    vira nó quem tem aresta CRUZADA. Resolvers de nível 0 (ex.: HTML→CSS) gravam
+    apenas `edges.file_id` (arquivo de origem) + `edges.dst` (símbolo alvo), com
+    `src` NULL — então o grafo saía VAZIO ("Sem dados suficientes") mesmo com
+    arquivos/símbolos/relações no índice. Aqui a origem vem de `e.file_id` e TODO
+    arquivo entra como nó, então um projeto sem relação cruzada ainda se enxerga."""
+    frows = conn.execute(
+        "SELECT f.id, f.path, "
+        "(SELECT community FROM symbols s WHERE s.file_id=f.id AND community IS NOT NULL "
+        "   GROUP BY community ORDER BY COUNT(*) DESC LIMIT 1) AS domain, "
+        "(SELECT COALESCE(SUM(rank),0) FROM symbols s WHERE s.file_id=f.id) AS weight, "
+        "(SELECT COUNT(*) FROM symbols s WHERE s.file_id=f.id) AS nsyms "
+        "FROM files f"
+    ).fetchall()
+    fmap = {r["id"]: dict(r) for r in frows}
+    if not fmap:
+        return [], []
+    erows = conn.execute(
+        "SELECT e.file_id AS a, s.file_id AS b, COUNT(*) AS w FROM edges e "
+        "JOIN symbols s ON e.dst = s.id "
+        "WHERE e.dst IS NOT NULL AND e.file_id != s.file_id "
+        "GROUP BY e.file_id, s.file_id"
+    ).fetchall()
+    pair: dict[tuple[int, int], int] = {}
+    degree: dict[int, int] = {}
+    for r in erows:
+        a, b = r["a"], r["b"]
+        if a not in fmap or b not in fmap:
+            continue
+        key = (a, b) if a < b else (b, a)
+        pair[key] = pair.get(key, 0) + r["w"]
+        degree[a] = degree.get(a, 0) + r["w"]
+        degree[b] = degree.get(b, 0) + r["w"]
+    # mais conectados primeiro; os isolados entram depois (mas ENTRAM)
+    keep = sorted(fmap, key=lambda i: (-degree.get(i, 0), fmap[i]["path"]))[:top]
+    keep_set = set(keep)
+    nodes = [
+        {"id": i, "label": fmap[i]["path"], "domain": fmap[i]["domain"],
+         "weight": fmap[i]["weight"], "n": fmap[i]["nsyms"]}
+        for i in keep
+    ]
+    links = [
+        {"source": a, "target": b, "w": w}
+        for (a, b), w in pair.items() if a in keep_set and b in keep_set
+    ]
+    return nodes, links
+
+
 def visualize(user_id: str, project_id: str, level: str = "file", scope: str = "", top: int = 200) -> dict:
     """Grafo do projeto inteiro (nós/arestas/comunidades) pra visualização estilo
     Obsidian — diferente de `ego`/`find` (vizinhança de UM símbolo), aqui é a visão
@@ -510,12 +561,28 @@ def visualize(user_id: str, project_id: str, level: str = "file", scope: str = "
     conectados; aqui só reforçamos o teto de contexto/render)."""
     cg = _get_graph(user_id, project_id)
     lvl = level if level in ("file", "symbol") else "file"
-    data, env = cg.visualize(level=lvl, scope=scope or None, top=min(max(top, 10), _MAX_VIZ_NODES))
+    cap = min(max(top, 10), _MAX_VIZ_NODES)
+    data, env = cg.visualize(level=lvl, scope=scope or None, top=cap)
+    nodes = data.get("nodes", [])
+    links = data.get("links", [])
+    domains = data.get("domains", [])
+    # A lib zera o nível de arquivo quando as arestas não têm símbolo de ORIGEM
+    # (`edges.src` NULL — resolvers de nível 0 como HTML→CSS) ou quando nenhum
+    # arquivo tem aresta cruzada. Sem isto o usuário via "Sem dados suficientes"
+    # com o painel dizendo "2 arquivos, 22 símbolos, 23 relações".
+    if lvl == "file" and not nodes and not scope:
+        try:
+            nodes, links = _file_graph_fallback(cg.query.conn, cap)
+            if nodes:
+                from codegraph import viz as _viz
+                domains = _viz._domain_legend(cg.query.conn, nodes)
+        except Exception as exc:  # noqa: BLE001 - fallback é best-effort
+            logger.warning("fallback do grafo por arquivo falhou: %s", exc)
     return {
         "level": data.get("level", lvl),
-        "nodes": data.get("nodes", []),
-        "links": data.get("links", []),
-        "domains": data.get("domains", []),
+        "nodes": nodes,
+        "links": links,
+        "domains": domains,
         "warnings": env.warnings,
     }
 

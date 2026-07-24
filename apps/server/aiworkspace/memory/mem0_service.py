@@ -180,7 +180,11 @@ def _build_config(api_key: str) -> dict[str, Any]:
 
 @lru_cache(maxsize=8)
 def _memory_for_key(api_key: str):
-    """Instância mem0 cacheada por chave de API. Retorna None se indisponível."""
+    """Instância mem0 cacheada por chave de API. Retorna None se indisponível.
+
+    A construção é CARA (carrega o modelo de embedding + conecta no pgvector +
+    garante a coleção): ~1-3s na primeira vez por chave. O lru_cache paga isso uma
+    vez; `warm()` (no boot) tira esse custo da primeira operação real do usuário."""
     try:
         from mem0 import Memory
 
@@ -188,6 +192,12 @@ def _memory_for_key(api_key: str):
     except Exception as exc:  # noqa: BLE001
         logger.warning("mem0 indisponível (degradando para no-op): %s", exc)
         return None
+
+
+def warm(api_key: str) -> bool:
+    """Constrói e cacheia o cliente mem0 desta chave — bloqueante (chamar em
+    threadpool/boot). Tira o cold-start (~1-3s) da primeira operação real do turno."""
+    return _memory_for_key(api_key) is not None
 
 
 def _scope(run_id: str | None, agent_id: str | None) -> dict[str, str]:

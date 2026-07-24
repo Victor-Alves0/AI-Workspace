@@ -294,3 +294,91 @@ def test_internal_urls_blocked_by_guard(bad):
     from aiworkspace.tools import sift_service
 
     assert sift_service._public_web_url(bad) is False
+
+
+# --------------------------------------------------------------------------- #
+# Runner rotativo do yt-dlp (anti-bloqueio): usa yt-dlp e o pool FALSOS
+# --------------------------------------------------------------------------- #
+def test_run_ytdlp_rotates_identity_on_block(tmp_path, monkeypatch):
+    """Com ≥2 cookies, um bloqueio (bot-check) rotaciona p/ outra identidade e
+    re-tenta; um erro terminal propaga sem re-tentar."""
+    import sys
+    import types
+
+    from aiworkspace.integrations import ytdlp_pool
+
+    for i in range(2):
+        (tmp_path / f"id{i}.txt").write_text("# Netscape\n")
+    ytdlp_pool.reset()
+    monkeypatch.setattr(
+        ytdlp_pool, "get_settings",
+        lambda: types.SimpleNamespace(
+            transcribe_cookies_dir=str(tmp_path), transcribe_cookie_cooldown_seconds=300
+        ),
+    )
+
+    seen: list[str | None] = []
+
+    class FakeYDL:
+        def __init__(self, opts):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def extract_info(self, url, download=False):
+            seen.append(self.opts.get("cookiefile"))
+            if len(seen) == 1:
+                raise RuntimeError("ERROR: Sign in to confirm you're not a bot")
+            return {"ok": True}
+
+    monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=FakeYDL))
+
+    out = ts._run_ytdlp({"quiet": True}, lambda ydl: ydl.extract_info("u", download=False))
+    assert out == {"ok": True}
+    assert len(seen) == 2            # bloqueou na 1ª, rotacionou e conseguiu na 2ª
+    assert seen[0] != seen[1]        # identidades diferentes
+    ytdlp_pool.reset()
+
+
+def test_run_ytdlp_propagates_terminal_error_without_retry(tmp_path, monkeypatch):
+    import sys
+    import types
+
+    from aiworkspace.integrations import ytdlp_pool
+
+    for i in range(2):
+        (tmp_path / f"id{i}.txt").write_text("# Netscape\n")
+    ytdlp_pool.reset()
+    monkeypatch.setattr(
+        ytdlp_pool, "get_settings",
+        lambda: types.SimpleNamespace(
+            transcribe_cookies_dir=str(tmp_path), transcribe_cookie_cooldown_seconds=300
+        ),
+    )
+
+    calls = {"n": 0}
+
+    class FakeYDL:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def extract_info(self, url, download=False):
+            calls["n"] += 1
+            raise RuntimeError("ERROR: Video unavailable: private video")
+
+    monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=FakeYDL))
+
+    with pytest.raises(RuntimeError):
+        ts._run_ytdlp({"quiet": True}, lambda ydl: ydl.extract_info("u", download=False))
+    assert calls["n"] == 1           # erro terminal não re-tenta
+    ytdlp_pool.reset()

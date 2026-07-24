@@ -128,6 +128,9 @@ class SendMessageIn(BaseModel):
     # "#" no promptbox: docs da Base de Conhecimento referenciados p/ ESTE turno
     # (o modelo recebe o conteúdo). Gated às bases acopladas ao modelo/chat.
     ref_doc_ids: list[uuid.UUID] = Field(default_factory=list)
+    # "Chats de Referência": outros chats do usuário anexados como contexto p/ ESTE
+    # turno (o modelo recebe uma transcrição resumida deles). Máx. 5.
+    ref_chat_ids: list[uuid.UUID] = Field(default_factory=list, max_length=5)
 
 
 class FolderCreate(BaseModel):

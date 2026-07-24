@@ -105,12 +105,38 @@ class Settings(BaseSettings):
     browser_ws_url: str = ""
     browser_token: str = ""
 
+    # Transcrição de vídeo (tool "media.video.transcribe" / yt-dlp): anti-bloqueio.
+    # YouTube & afins barram scraping repetido do mesmo cliente ("Sign in to confirm
+    # you're not a bot", HTTP 429). `transcribe_cookies_dir` aponta p/ uma pasta de
+    # arquivos cookies.txt (formato Netscape) — CADA arquivo é uma identidade e o pool
+    # rotaciona a menos-recente-usada, colocando em cooldown a que tomar bloqueio (não
+    # bate sempre na mesma). Vazio = só headers realistas (User-Agent de navegador),
+    # sem cookies. `transcribe_cookie_cooldown_seconds` é o tempo de banco após bloqueio
+    # (com backoff por falhas consecutivas).
+    transcribe_cookies_dir: str = ""
+    transcribe_cookie_cooldown_seconds: int = 1800
+
     # Limite de iterações de tool-calling por turno
     max_tool_iterations: int = 8
 
     # Cache do índice SIFT (.npz por usuário) — string vazia desabilita.
     # A SIFT valida por hash de conteúdo+modelo, então cache velho é ignorado.
     sift_index_cache_dir: str = "/home/app/.cache/sift-index"
+
+    # Observabilidade (traces/spans fim-a-fim persistidos no Postgres).
+    # `obs_enabled` desliga tudo (nenhum trace é gravado). `obs_sample_rate` é a
+    # fração amostrada [0..1] — 1.0 = toda chamada (erros e lentas são sempre
+    # mantidos, independente da amostra). Retenção poda por dias e por teto de
+    # linhas. `obs_capture_content` (padrão OFF) libera texto de mensagens/prompts
+    # nos spans — só ligue para depurar, é o dado sensível.
+    obs_enabled: bool = True
+    obs_sample_rate: float = 1.0
+    obs_retention_days: int = 14
+    obs_max_traces: int = 500_000
+    obs_capture_content: bool = False
+    # limiar (ms) acima do qual um trace é considerado "lento" e sempre mantido,
+    # mesmo quando a amostragem descartaria
+    obs_slow_ms: int = 1500
 
     @property
     def is_production(self) -> bool:

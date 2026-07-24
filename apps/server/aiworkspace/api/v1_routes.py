@@ -175,67 +175,96 @@ async def _stream_platform(ctx: ApiContext, rm, parsed, body, cid: str, started:
     async with SessionLocal() as db:
         ctx.db = db
         try:
-            async for ev in runner.run_platform_turn(ctx, rm, parsed, body):
-                kind = ev.get("type")
-                if kind == "token":
-                    text = ev.get("text") or ""
-                    collected["content"] += text
-                    yield _chunk(cid, model, {"content": text})
-                elif kind == "reasoning" and body.get("include_reasoning"):
-                    yield _chunk(cid, model, {"reasoning": ev.get("text") or ""})
-                elif kind in ("tool_call", "tool_result"):
-                    name = ev.get("name") or ""
-                    if kind == "tool_call" and name:
-                        collected["tools"].append(name)
-                    payload = {
+            try:
+                async for ev in runner.run_platform_turn(ctx, rm, parsed, body):
+                    kind = ev.get("type")
+                    if kind == "token":
+                        text = ev.get("text") or ""
+                        collected["content"] += text
+                        yield _chunk(cid, model, {"content": text})
+                    elif kind == "reasoning" and body.get("include_reasoning"):
+                        yield _chunk(cid, model, {"reasoning": ev.get("text") or ""})
+                    elif kind in ("tool_call", "tool_result"):
+                        name = ev.get("name") or ""
+                        if kind == "tool_call" and name:
+                            collected["tools"].append(name)
+                        payload = {
+                            "id": cid, "object": "chat.completion.chunk", "created": _now(),
+                            "model": model,
+                            "choices": [{"index": 0, "delta": {}, "finish_reason": None}],
+                            "aiworkspace": {"event": kind, "name": name},
+                        }
+                        yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+                    elif kind == "done":
+                        collected["content"] = ev.get("content") or collected["content"]
+                        collected["usage"] = ev.get("usage")
+                        collected["reasoning"] = ev.get("reasoning")
+                    elif kind == "error":
+                        status, error = 502, str(ev.get("message") or "")[:255]
+                        yield f"data: {json.dumps({'error': {'message': error, 'type': 'api_error'}})}\n\n"
+            except Exception as exc:  # noqa: BLE001 - o stream já começou; erro vai no corpo
+                status, error = 500, str(exc)[:255]
+                logger.exception("erro no stream da API")
+                yield f"data: {json.dumps({'error': {'message': error, 'type': 'api_error'}})}\n\n"
+            else:
+                yield _chunk(cid, model, {}, finish="stop")
+                usage = collected.get("usage") or {}
+                yield (
+                    "data: "
+                    + json.dumps({
                         "id": cid, "object": "chat.completion.chunk", "created": _now(),
-                        "model": model,
-                        "choices": [{"index": 0, "delta": {}, "finish_reason": None}],
-                        "aiworkspace": {"event": kind, "name": name},
-                    }
-                    yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                elif kind == "done":
-                    collected["content"] = ev.get("content") or collected["content"]
-                    collected["usage"] = ev.get("usage")
-                    collected["reasoning"] = ev.get("reasoning")
-                elif kind == "error":
-                    status, error = 502, str(ev.get("message") or "")[:255]
-                    yield f"data: {json.dumps({'error': {'message': error, 'type': 'api_error'}})}\n\n"
-        except Exception as exc:  # noqa: BLE001 - o stream já começou; erro vai no corpo
-            status, error = 500, str(exc)[:255]
-            logger.exception("erro no stream da API")
-            yield f"data: {json.dumps({'error': {'message': error, 'type': 'api_error'}})}\n\n"
-        else:
-            yield _chunk(cid, model, {}, finish="stop")
-            usage = collected.get("usage") or {}
-            yield (
-                "data: "
-                + json.dumps({
-                    "id": cid, "object": "chat.completion.chunk", "created": _now(),
-                    "model": model, "choices": [],
-                    "usage": {
-                        "prompt_tokens": int(usage.get("prompt_tokens") or 0),
-                        "completion_tokens": int(usage.get("completion_tokens") or 0),
-                        "total_tokens": int(usage.get("total_tokens") or 0),
-                    },
-                    "aiworkspace": {
-                        "mode": "platform",
-                        "cost": round(float(usage.get("cost") or 0.0), 6),
-                        "tools": collected["tools"],
-                    },
-                }, ensure_ascii=False)
-                + "\n\n"
-            )
-        finally:
+                        "model": model, "choices": [],
+                        "usage": {
+                            "prompt_tokens": int(usage.get("prompt_tokens") or 0),
+                            "completion_tokens": int(usage.get("completion_tokens") or 0),
+                            "total_tokens": int(usage.get("total_tokens") or 0),
+                        },
+                        "aiworkspace": {
+                            "mode": "platform",
+                            "cost": round(float(usage.get("cost") or 0.0), 6),
+                            "tools": collected["tools"],
+                        },
+                    }, ensure_ascii=False)
+                    + "\n\n"
+                )
+            # sentinela do protocolo: só faz sentido com o cliente ainda lendo, e
+            # fica FORA do finally de propósito (ver _finish_stream).
             yield "data: [DONE]\n\n"
-            limits.release_slot(ctx.key)
+        finally:
             rec = (runner.usage_record_for(rm, collected["usage"])
                    if collected.get("usage") else None)
-            await runner.record(db, ctx, endpoint="chat.completions", model=model,
-                                status=status, error=error, started=started,
-                                usage=collected.get("usage"), rec=rec)
-            if status >= 400:
-                webhooks.emit(ctx.key, "request.error", {"status": status, "message": error})
+            await _finish_stream(
+                db, ctx, endpoint="chat.completions", model=model, started=started,
+                status=status, error=error, usage=collected.get("usage"), rec=rec,
+            )
+
+
+async def _finish_stream(
+    db, ctx: ApiContext, *, endpoint: str, model: str, started: float,
+    status: int, error: str, usage: dict[str, Any] | None, rec: Any = None,
+) -> None:
+    """Encerramento de um stream: devolve a vaga de concorrência e registra a
+    chamada. Roda no `finally` do gerador, que TAMBÉM executa quando o cliente
+    desconecta no meio (o Starlette faz `aclose()`, lançando GeneratorExit).
+
+    Por isso este caminho NUNCA pode dar `yield`: um `yield` durante o
+    GeneratorExit vira `RuntimeError: async generator ignored GeneratorExit` e
+    aborta o resto do bloco — era o bug que deixava a vaga presa (a chave travava
+    em 429 até reiniciar) e, pior, pulava o `record`, então a chamada não entrava
+    em `api_requests` e não contava para RPD/mensal/tokens/orçamento: quem
+    desconectasse no meio do stream usava o modelo de graça, fora das cotas.
+
+    Também não deixa exceção escapar: falhar ao registrar não pode mascarar o
+    erro original nem impedir a liberação da vaga (que vem primeiro).
+    """
+    limits.release_slot(ctx.key)
+    try:
+        await runner.record(db, ctx, endpoint=endpoint, model=model, status=status,
+                            error=error, started=started, usage=usage, rec=rec)
+        if status >= 400:
+            webhooks.emit(ctx.key, "request.error", {"status": status, "message": error})
+    except Exception:  # noqa: BLE001 - contabilidade não derruba o encerramento
+        logger.exception("falha ao registrar a chamada da API ao encerrar o stream")
 
 
 async def _stream_passthrough(ctx: ApiContext, rm, messages, body, started: float):
@@ -244,21 +273,23 @@ async def _stream_passthrough(ctx: ApiContext, rm, messages, body, started: floa
     usage: dict[str, Any] = {}
     status, error = 200, ""
     try:
-        async for chunk in runner.run_passthrough(rm, messages, body):
-            if chunk.get("usage"):
-                usage = chunk["usage"]
-            chunk["model"] = rm.public_id
-            yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-    except Exception as exc:  # noqa: BLE001
-        status, error = 502, str(exc)[:255]
-        yield f"data: {json.dumps({'error': {'message': error, 'type': 'api_error'}})}\n\n"
-    finally:
+        try:
+            async for chunk in runner.run_passthrough(rm, messages, body):
+                if chunk.get("usage"):
+                    usage = chunk["usage"]
+                chunk["model"] = rm.public_id
+                yield f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+        except Exception as exc:  # noqa: BLE001
+            status, error = 502, str(exc)[:255]
+            yield f"data: {json.dumps({'error': {'message': error, 'type': 'api_error'}})}\n\n"
+        # fora do finally de propósito (ver _finish_stream)
         yield "data: [DONE]\n\n"
-        limits.release_slot(ctx.key)
+    finally:
         async with SessionLocal() as db:
             ctx.db = db
-            await runner.record(db, ctx, endpoint="chat.completions", model=rm.public_id,
-                                status=status, error=error, started=started, usage=usage)
+            await _finish_stream(db, ctx, endpoint="chat.completions",
+                                 model=rm.public_id, started=started, status=status,
+                                 error=error, usage=usage)
 
 
 @router.post("/chat/completions")
@@ -282,6 +313,12 @@ async def chat_completions(request: Request, ctx: ApiContext = Depends(scoped("c
             headers={"Retry-After": "1"},
         )
 
+    # Posse da vaga de concorrência: os caminhos que continuam DEPOIS desta função
+    # (geradores de streaming, job de background) assumem a posse e liberam no
+    # próprio `finally`; nos caminhos síncronos a posse fica com a rota, que libera
+    # uma única vez no `finally` abaixo. Sem essa distinção, liberar aqui E lá
+    # decrementava a vaga de OUTRA requisição em voo (a chave passava do limite).
+    slot_handed_off = False
     try:
         client_tools = body.get("tools")
         cid = _completion_id()
@@ -292,43 +329,49 @@ async def chat_completions(request: Request, ctx: ApiContext = Depends(scoped("c
             if not isinstance(messages, list) or not messages:
                 raise ApiError("O campo 'messages' é obrigatório.", code="messages_required")
             if body.get("stream"):
-                return StreamingResponse(
+                resp = StreamingResponse(
                     _stream_passthrough(ctx, rm, messages, body, started),
                     media_type="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
                 )
+                slot_handed_off = True
+                return resp
             return await _passthrough_sync(ctx, rm, messages, body, cid, started)
 
         parsed = runner.parse_messages(body.get("messages"))
 
         if body.get("background"):
-            return await _start_background(ctx, rm, parsed, body, started)
+            resp = await _start_background(ctx, rm, parsed, body, started)
+            slot_handed_off = True  # só depois de o job existir de fato
+            return resp
 
         if body.get("stream"):
-            return StreamingResponse(
+            resp = StreamingResponse(
                 _stream_platform(ctx, rm, parsed, body, cid, started),
                 media_type="text/event-stream",
                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
             )
+            slot_handed_off = True
+            return resp
 
         collected = await _collect_platform(ctx, rm, parsed, body)
     except ApiError as exc:
-        limits.release_slot(ctx.key)
         await runner.record(ctx.db, ctx, endpoint="chat.completions",
                             model=rm.public_id, status=exc.status,
                             error=exc.message, started=started)
         webhooks.emit(ctx.key, "request.error", {"status": exc.status, "message": exc.message})
         raise
     except Exception as exc:  # noqa: BLE001
-        limits.release_slot(ctx.key)
         logger.exception("erro na completion da API")
         await runner.record(ctx.db, ctx, endpoint="chat.completions",
                             model=rm.public_id, status=500, error=str(exc),
                             started=started)
         raise ApiError("Erro interno ao gerar a resposta.", status=500,
                        type_="api_error", code="internal_error") from None
+    finally:
+        if not slot_handed_off:
+            limits.release_slot(ctx.key)
 
-    limits.release_slot(ctx.key)
     rec = runner.usage_record_for(rm, collected.get("usage")) if collected.get("usage") else None
     await runner.record(ctx.db, ctx, endpoint="chat.completions", model=rm.public_id,
                         started=started, usage=collected.get("usage"), rec=rec)
@@ -363,7 +406,8 @@ async def _passthrough_sync(ctx: ApiContext, rm, messages, body, cid: str, start
             if choice.get("finish_reason"):
                 finish = choice["finish_reason"]
 
-    limits.release_slot(ctx.key)
+    # a vaga NÃO é liberada aqui: a posse é da rota (chat_completions), que libera
+    # no `finally` dela. Liberar nos dois lugares derrubava a vaga de outra requisição.
     await runner.record(ctx.db, ctx, endpoint="chat.completions", model=rm.public_id,
                         started=started, usage=usage)
     message: dict[str, Any] = {"role": "assistant", "content": content or None}

@@ -1,4 +1,5 @@
 import { API_URL, refreshSession } from "./api";
+import { beacon } from "./trace";
 import type { ChatEvent } from "./types";
 
 // fuso IANA do navegador (ex.: "America/Sao_Paulo") — o backend usa p/ dar ao
@@ -77,7 +78,9 @@ export async function streamMessage(
   attachments?: unknown[],
   agentModelConfigId?: string | null,
   refDocIds?: string[],
+  refChatIds?: string[],
 ): Promise<void> {
+  const t0 = performance.now();
   const res = await authedFetch(`/chats/${chatId}/messages`, {
     method: "POST",
     credentials: "include",
@@ -86,10 +89,21 @@ export async function streamMessage(
       content, skill_ids: skillIds ?? [], attachments: attachments ?? [],
       ...(agentModelConfigId ? { agent_model_config_id: agentModelConfigId } : {}),
       ...(refDocIds && refDocIds.length ? { ref_doc_ids: refDocIds } : {}),
+      ...(refChatIds && refChatIds.length ? { ref_chat_ids: refChatIds } : {}),
     }),
     signal,
   });
-  await readSSE(res, onEvent);
+  // "do clique ao 'oi'": mede o tempo até o PRIMEIRO token e o correlaciona ao
+  // trace do servidor (X-Trace-Id do próprio POST). Emite uma vez, no 1º token.
+  const traceId = res.headers.get("X-Trace-Id");
+  let firstTokenSent = false;
+  await readSSE(res, (e) => {
+    if (!firstTokenSent && e.type === "token") {
+      firstTokenSent = true;
+      beacon("chat-first-token", performance.now() - t0, { traceId, ttfbMs: performance.now() - t0 });
+    }
+    onEvent(e);
+  });
 }
 
 // Mesa-redonda (multi-modelo): roda uma ou várias rodadas em que os participantes

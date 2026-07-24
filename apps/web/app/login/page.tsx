@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
+import { measure } from "@/lib/trace";
 import type { User } from "@/lib/types";
 
 export default function LoginPage() {
@@ -32,7 +33,9 @@ export default function LoginPage() {
       const path = mode === "login" ? "/auth/login" : "/auth/register";
       const payload: Record<string, string> = { email, password };
       if (mode === "login" && need2fa) payload.totp_code = totp;
-      const u = await api.post<User>(path, payload);
+      // rastreia o clique no login (do clique ao redirect) — o ponto de partida
+      // do rastro fim-a-fim que o painel de Observabilidade correlaciona
+      const u = await measure(`${mode}-click`, () => api.post<User>(path, payload));
       router.replace(u.status === "active" ? "/chat" : "/pending");
     } catch (err) {
       // 2FA: o servidor responde 401 com detail "2fa_required" (pedir código) ou

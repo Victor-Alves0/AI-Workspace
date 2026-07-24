@@ -132,9 +132,20 @@ async def require_api_key(
     except limits.LimitError as exc:
         raise _limit_error(exc) from None
 
-    key.last_used_at = datetime.now(timezone.utc)
-    key.last_used_ip = ip[:64]
-    await db.commit()
+    # "último uso" é informativo: grava no máx. 1x/min por chave em vez de a cada
+    # requisição (era um UPDATE+COMMIT na mesma linha, serializando as chamadas
+    # concorrentes daquela chave por contenção de lock).
+    if limits.should_touch(key):
+        key.last_used_at = datetime.now(timezone.utc)
+        key.last_used_ip = ip[:64]
+        await db.commit()
+
+    try:
+        from .. import tracing
+        tracing.set_trace_user(str(user.id))
+        tracing.annotate(api_key=str(key.id), api_key_name=key.name)
+    except Exception:  # noqa: BLE001
+        pass
 
     return ApiContext(user=user, key=key, db=db, ip=ip)
 

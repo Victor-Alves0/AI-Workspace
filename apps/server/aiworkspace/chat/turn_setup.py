@@ -586,6 +586,41 @@ async def _ref_docs(
     return out
 
 
+async def _ref_chats(
+    db: AsyncSession, user: User, ids: list[uuid.UUID],
+) -> list[dict]:
+    """Chats de Referência anexados no compositor p/ ESTE turno. Devolve
+    [{id, title, transcript}] com uma transcrição RESUMIDA (últimas mensagens, sem
+    as compactadas/resumos) de cada chat DO PRÓPRIO usuário. Bounded p/ não estourar
+    o contexto: teto de mensagens por chat e de chars por transcrição."""
+    if not ids:
+        return []
+    per_chat_msgs = 40      # últimas N mensagens de cada chat
+    per_chat_chars = 6000   # teto de chars da transcrição de cada chat
+    out: list[dict] = []
+    for cid in ids[:5]:
+        chat = await db.get(Chat, cid)
+        if chat is None or chat.user_id != user.id:
+            continue
+        msgs = await _ordered_messages(db, cid)
+        # ignora resumos de compactação e mensagens fora de contexto
+        live = [m for m in msgs if not getattr(m, "is_summary", False) and not getattr(m, "compacted", False)]
+        lines: list[str] = []
+        for m in live[-per_chat_msgs:]:
+            text = (m.content or "").strip()
+            if not text:
+                continue
+            who = "Usuário" if m.role == "user" else "Assistente"
+            lines.append(f"{who}: {text}")
+        transcript = "\n".join(lines).strip()
+        if not transcript:
+            continue
+        if len(transcript) > per_chat_chars:  # mantém o FIM (mais recente/relevante)
+            transcript = "…\n" + transcript[-per_chat_chars:]
+        out.append({"id": str(chat.id), "title": chat.title or "Chat", "transcript": transcript})
+    return out
+
+
 def _image_output(model_config: ModelConfig | None) -> bool:
     """Capacidade "Geração de Imagens": o modelo gera imagens NATIVAMENTE (inline,
     ex.: nano banana / gemini-2.5-flash-image) — via modalities=["image","text"].

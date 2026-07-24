@@ -46,12 +46,23 @@ async function tryRefresh(): Promise<boolean> {
   return refreshInFlight;
 }
 
+// Último X-Trace-Id visto numa resposta — o tracer do cliente (lib/trace.ts) usa
+// para correlacionar os tempos medidos no navegador com o trace do servidor.
+let lastTraceId: string | null = null;
+
+export function getLastTraceId(): string | null {
+  return lastTraceId;
+}
+
 async function rawFetch(path: string, init: RequestInit): Promise<Response> {
-  return fetch(`${API_URL}${path}`, {
+  const res = await fetch(`${API_URL}${path}`, {
     ...init,
     credentials: "include",
     headers: { "Content-Type": "application/json", ...(init.headers ?? {}) },
   });
+  const tid = res.headers.get("X-Trace-Id");
+  if (tid) lastTraceId = tid;
+  return res;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {

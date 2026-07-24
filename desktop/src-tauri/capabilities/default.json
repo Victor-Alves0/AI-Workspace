@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permite que a interface web (carregada de uma origem remota) leia e grave as preferências desta máquina. A lista de origens é fechada de propósito: só o próprio app, em localhost.",
+  "windows": ["main"],
+  "remote": {
+    "urls": [
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+      "http://localhost:8000",
+      "http://127.0.0.1:8000"
+    ]
+  },
+  "permissions": ["core:default"]
+}

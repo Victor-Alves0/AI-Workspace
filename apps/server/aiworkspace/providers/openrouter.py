@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -22,14 +24,40 @@ def _headers(api_key: str) -> dict[str, str]:
     }
 
 
-async def list_models(api_key: str) -> list[dict[str, Any]]:
-    settings = get_settings()
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(
-            f"{settings.openrouter_base_url}/models", headers=_headers(api_key)
-        )
-        resp.raise_for_status()
-        return resp.json().get("data", [])
+# Cache do catálogo de modelos. O /models do OpenRouter é o MESMO para todo mundo
+# (é o catálogo público; a chave só autentica) e muda raramente — mas o seletor de
+# modelo o buscava a CADA abertura, pagando ~300ms de rede sempre. TTL de 10min:
+# um modelo novo aparece em minutos, e as aberturas seguintes são instantâneas.
+_CATALOG_TTL = 600.0
+_catalog_cache: tuple[float, list[dict[str, Any]]] | None = None
+_catalog_lock = asyncio.Lock()
+
+
+async def list_models(api_key: str, *, force: bool = False) -> list[dict[str, Any]]:
+    global _catalog_cache
+    now = time.monotonic()
+    if not force and _catalog_cache is not None and now - _catalog_cache[0] < _CATALOG_TTL:
+        return _catalog_cache[1]
+    # lock evita "stampede": N aberturas simultâneas do seletor fariam N fetches;
+    # o 1º busca, os outros reusam o resultado recém-cacheado.
+    async with _catalog_lock:
+        if not force and _catalog_cache is not None and time.monotonic() - _catalog_cache[0] < _CATALOG_TTL:
+            return _catalog_cache[1]
+        settings = get_settings()
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{settings.openrouter_base_url}/models", headers=_headers(api_key)
+            )
+            resp.raise_for_status()
+            data = resp.json().get("data", [])
+        _catalog_cache = (time.monotonic(), data)
+        return data
+
+
+def invalidate_catalog() -> None:
+    """Descarta o catálogo cacheado (ex.: após trocar a chave do OpenRouter)."""
+    global _catalog_cache
+    _catalog_cache = None
 
 
 def _compat_model(model: str, base_url: str | None) -> str:

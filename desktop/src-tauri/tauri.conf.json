@@ -4,16 +4,19 @@
   "version": "0.1.0",
   "identifier": "com.aiworkspace.app",
   "build": {
-    "frontendDist": "../../apps/web/out",
-    "devUrl": "http://localhost:3000"
+    "frontendDist": "../ui"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "AI Workspace",
         "width": 1280,
         "height": 800,
-        "resizable": true
+        "minWidth": 380,
+        "minHeight": 480,
+        "resizable": true,
+        "center": true
       }
     ],
     "security": {
@@ -22,12 +25,12 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
-    "icon": [
-      "icons/icon.png"
-    ],
-    "externalBin": [
-      "binaries/aiworkspace-server"
-    ]
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico", "icons/icon.png"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }

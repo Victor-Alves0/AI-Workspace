@@ -42,6 +42,7 @@ from .integration_routes import router as integration_router
 from .image_routes import router as image_router
 from .models_routes import router as models_router
 from .observability import install_logging, metrics
+from .observability_routes import router as observability_router
 from .prompts_routes import router as prompts_router
 from .settings_routes import router as settings_router
 from .skills_routes import router as skills_router
@@ -57,6 +58,16 @@ logger = logging.getLogger("aiworkspace")
 async def lifespan(app: FastAPI):
     install_logging()
     settings = get_settings()
+    # observabilidade: instrumenta o engine (conta/cronometra cada query) e sobe o
+    # escritor em lote dos traces. Envolto em try: nunca impede o app de subir.
+    try:
+        from . import tracing
+        from .db import engine as _db_engine
+        from .tracing import instrument as _obs_instrument
+        _obs_instrument.install(_db_engine.sync_engine)
+        await tracing.sink.start()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Não foi possível iniciar a observabilidade (%s)", exc)
     if settings.secret_is_insecure:
         msg = (
             "APP_SECRET inseguro/curto. Gere um valor forte: "
@@ -94,6 +105,14 @@ async def lifespan(app: FastAPI):
         await knowledge_ingest.resume_pending()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível retomar indexações pendentes (%s)", exc)
+    # pré-aquece o mem0 dos usuários ativos em background: a construção do cliente
+    # (embedder + pgvector) leva ~1-3s na 1ª vez e, sem isto, esse custo caía no
+    # PRIMEIRO turno de chat de cada usuário após um restart. Não bloqueia o boot.
+    try:
+        import asyncio as _asyncio
+        _asyncio.create_task(_prewarm_memory())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Não foi possível agendar o pré-aquecimento da memória (%s)", exc)
     try:
         yield
     finally:
@@ -113,6 +132,42 @@ async def lifespan(app: FastAPI):
             await run_in_threadpool(browser_driver.shutdown)
         except Exception:  # noqa: BLE001
             pass
+        try:
+            from . import tracing
+            await tracing.sink.stop()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+async def _prewarm_memory() -> None:
+    """Aquece o cliente mem0 de cada usuário ativo que tem chave do OpenRouter.
+    Best-effort e em background: falhas viram log, nunca afetam o boot."""
+    try:
+        from sqlalchemy import select
+        from fastapi.concurrency import run_in_threadpool
+
+        from .db import SessionLocal
+        from .memory import mem0_service
+        from .models import User
+        from .secrets_service import OPENROUTER_KEY, get_secret
+
+        async with SessionLocal() as db:
+            users = list(await db.scalars(
+                select(User).where(User.is_active.is_(True), User.status == "active")
+            ))
+            keys: set[str] = set()
+            for u in users:
+                k = await get_secret(db, u.id, OPENROUTER_KEY)
+                if k:
+                    keys.add(k)
+        warmed = 0
+        for k in keys:
+            if await run_in_threadpool(mem0_service.warm, k):
+                warmed += 1
+        if warmed:
+            logger.info("mem0 pré-aquecido para %d usuário(s)", warmed)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("pré-aquecimento da memória falhou (%s)", exc)
 
 
 def _client_ip(request: Request, trust_proxy: bool) -> str | None:
@@ -123,6 +178,67 @@ def _client_ip(request: Request, trust_proxy: bool) -> str | None:
         if xff:
             return xff.split(",")[0].strip()
     return request.client.host if request.client else None
+
+
+# rotas que NÃO viram trace: health (ruído dos health checks) e a leitura da
+# própria observabilidade (evita rastrear quem lê o rastro).
+_NO_TRACE_PREFIXES = ("/health", "/observability", "/debug")
+
+
+def _should_trace(path: str) -> bool:
+    return not path.startswith(_NO_TRACE_PREFIXES)
+
+
+def _route_template(request: Request, fallback: str) -> str:
+    """Padrão da rota casada (ex.: /chats/{id}) em vez do path com o UUID — mantém a
+    cardinalidade baixa para agregar por rota. Só existe DEPOIS do roteamento."""
+    route = request.scope.get("route")
+    tmpl = getattr(route, "path", None)
+    return tmpl or fallback
+
+
+def _trace_kind(path: str) -> str:
+    if path.startswith("/v1"):
+        return "api"
+    if path.startswith(("/chats", "/roundtable")):
+        return "chat"
+    return "http"
+
+
+async def _run_traced(request: Request, call_next, start: float, traced: bool):
+    """Roda o call_next dentro (ou fora) de um trace. Devolve (response, ms,
+    trace_id). response=None sinaliza exceção não tratada (o middleware responde
+    500). O trace nunca altera o resultado — só observa."""
+    from . import tracing
+
+    path = request.url.path
+    if not traced:
+        try:
+            resp = await call_next(request)
+        except Exception:  # noqa: BLE001
+            ms = (time.perf_counter() - start) * 1000
+            metrics.record(request.method, path, 500, ms)
+            logger.exception("Erro não tratado em %s %s", request.method, path)
+            return None, ms, None
+        return resp, (time.perf_counter() - start) * 1000, None
+
+    try:
+        with tracing.start_trace(
+            f"{request.method} {path}", kind=_trace_kind(path),
+            method=request.method, path=path,
+        ) as tr:
+            resp = await call_next(request)
+            tr.status_code = resp.status_code
+            # reescreve para o TEMPLATE agora que o roteamento aconteceu
+            tmpl = _route_template(request, path)
+            tr.path = tmpl
+            tr.name = f"{request.method} {tmpl}"
+            return resp, (time.perf_counter() - start) * 1000, tr.id
+    except Exception:  # noqa: BLE001 - start_trace já marcou o erro e fez flush
+        ms = (time.perf_counter() - start) * 1000
+        metrics.record(request.method, path, 500, ms)
+        logger.exception("Erro não tratado em %s %s", request.method, path)
+        return None, ms, None
 
 
 def create_app() -> FastAPI:
@@ -154,25 +270,31 @@ def create_app() -> FastAPI:
     @app.middleware("http")
     async def observe_and_harden(request: Request, call_next):
         start = time.perf_counter()
-        if request.method == "OPTIONS" and request.url.path.startswith("/v1"):
-            return JSONResponse(status_code=204, content=None, headers=_API_CORS)
         # allowlist de IP (quando configurado pelo admin). /health fica isento p/
-        # health checks locais/orquestradores não quebrarem.
+        # health checks locais/orquestradores não quebrarem. Vem ANTES do preflight
+        # de CORS: com o atalho do OPTIONS na frente, um IP bloqueado ainda recebia
+        # 204 e confirmava que o servidor existe.
         if request.url.path != "/health":
             ip = _client_ip(request, settings.trust_proxy)
             if not network_config.is_allowed(ip):
                 metrics.record(request.method, request.url.path, 403, 0.0)
                 return JSONResponse(status_code=403, content={"detail": "IP não autorizado"})
-        try:
-            response = await call_next(request)
-        except Exception:  # noqa: BLE001
-            # garante que exceções não tratadas virem 500 limpo + métrica
-            ms = (time.perf_counter() - start) * 1000
-            metrics.record(request.method, request.url.path, 500, ms)
-            logger.exception("Erro não tratado em %s %s", request.method, request.url.path)
+        if request.method == "OPTIONS" and request.url.path.startswith("/v1"):
+            return JSONResponse(status_code=204, content=None, headers=_API_CORS)
+
+        # cada requisição vira um TRACE raiz. /health e a própria API de leitura de
+        # traces ficam de fora (ruído / recursão). O trace envolve o call_next
+        # inteiro, então todo span aberto nas rotas/serviços aninha por baixo dele.
+        traced = _should_trace(request.url.path)
+        response, ms, trace_id = await _run_traced(
+            request, call_next, start, traced
+        )
+        if response is None:  # exceção não tratada
             return JSONResponse(status_code=500, content={"detail": "Erro interno"})
-        ms = (time.perf_counter() - start) * 1000
+
         metrics.record(request.method, request.url.path, response.status_code, ms)
+        if trace_id:
+            response.headers["X-Trace-Id"] = trace_id
         if request.url.path.startswith("/v1"):
             response.headers.update(_API_CORS)
         # cabeçalhos de segurança
@@ -226,6 +348,7 @@ def create_app() -> FastAPI:
     app.include_router(push_router)
     app.include_router(playground_router)
     app.include_router(security_router)
+    app.include_router(observability_router)
     # API pública: /v1/* (Bearer token) + /api-keys (painel, cookie)
     app.include_router(api_v1_router)
     app.include_router(api_mgmt_router)

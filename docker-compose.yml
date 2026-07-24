@@ -56,6 +56,11 @@ services:
       # (browserless). Vazio = tool desativada. O token protege o endpoint CDP.
       BROWSER_WS_URL: ${BROWSER_WS_URL:-ws://browser:3000}
       BROWSER_TOKEN: ${BROWSER_TOKEN:-}
+      # Transcrição de vídeo (yt-dlp) anti-bloqueio: pasta com arquivos cookies.txt
+      # (Netscape) — cada arquivo é uma identidade rotacionada. Vazio = só headers.
+      # Monte a pasta do host no volume abaixo e aponte TRANSCRIBE_COOKIES_DIR p/ ela.
+      TRANSCRIBE_COOKIES_DIR: ${TRANSCRIBE_COOKIES_DIR:-}
+      TRANSCRIBE_COOKIE_COOLDOWN_SECONDS: ${TRANSCRIBE_COOKIE_COOLDOWN_SECONDS:-1800}
     volumes:
       # persiste modelos de embedding (fastembed/HF) e índices SIFT (.npz)
       # entre recriações do container — cold start rápido
@@ -63,6 +68,9 @@ services:
       # Codespace: working copies dos projetos + índices do GraphCodeMap
       # (.codegraph/graph.db por projeto) — precisa sobreviver a rebuilds
       - codespace_data:/data/codespace
+      # Cookies do yt-dlp (anti-bloqueio da transcrição). Descomente e ajuste o
+      # caminho do host; depois no .env: TRANSCRIBE_COOKIES_DIR=/data/yt-cookies
+      # - ./secrets/yt-cookies:/data/yt-cookies:ro
     ports:
       # host bind + porta configuráveis (o painel do admin diz quais valores pôr
       # no .env). Ex.: SERVER_BIND=127.0.0.1 SERVER_PORT=8000

@@ -120,11 +120,38 @@ def inflight(key: Any) -> int:
     return _inflight.get(str(key.id), 0)
 
 
+# chave -> instante da última gravação de `last_used_at`
+_touched: dict[str, float] = {}
+_TOUCH_EVERY = 60.0
+
+
+def should_touch(key: Any, *, every: float = _TOUCH_EVERY) -> bool:
+    """True no máximo uma vez por minuto por chave.
+
+    `last_used_at`/`last_used_ip` são informativos (o painel mostra "último uso"),
+    mas gravá-los a CADA requisição custava um UPDATE+COMMIT na MESMA linha da
+    chave: sob concorrência, todas as chamadas daquela chave disputavam o mesmo
+    lock de linha e serializavam. Uma amostra por minuto mantém o painel útil sem
+    pôr uma escrita no caminho quente.
+    """
+    kid = str(key.id)
+    now = time.time()
+    with _lock:
+        if now - _touched.get(kid, 0.0) < every:
+            return False
+        _touched[kid] = now
+        if len(_touched) > _MAX_KEYS:  # poda o que já passou da janela
+            for k in [k for k, t in _touched.items() if now - t >= every]:
+                _touched.pop(k, None)
+        return True
+
+
 def reset() -> None:
     """Zera o estado em memória — usado pelos testes."""
     with _lock:
         _hits.clear()
         _inflight.clear()
+        _touched.clear()
 
 
 def _day_start() -> datetime:

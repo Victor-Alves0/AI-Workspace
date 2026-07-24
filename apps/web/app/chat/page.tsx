@@ -107,6 +107,8 @@ export default function ChatPage() {
   const [attachedSkillIds, setAttachedSkillIds] = useState<string[]>([]);
   // docs da Base de Conhecimento referenciados via "#" no próximo envio
   const [refDocs, setRefDocs] = useState<RefDoc[]>([]);
+  // outros chats anexados como contexto ("Chats de Referência") do próximo envio
+  const [refChats, setRefChats] = useState<{ id: string; title: string }[]>([]);
   // árvore de refs acessíveis (bases acopladas ao modelo/chat) p/ o menu "#"
   const [knowledgeRefs, setKnowledgeRefs] = useState<KnowledgeRef[]>([]);
   // anexos (imagens/arquivos) do próximo envio
@@ -702,6 +704,20 @@ export default function ChatPage() {
     patchRt({ config: { ...rtConfig, ...patch } });
   }
 
+  // Avatar do FALANTE (mesa-redonda): resolve pelo participante correspondente ao
+  // speaker.id → avatar fresco do modelo custom (custom[].avatar_url) ou o avatar
+  // salvo no participante. Antes usava sempre `curCustom` (o modelo do composer), por
+  // isso todas as bolhas mostravam a imagem do 1º modelo.
+  function speakerAvatar(sp?: Speaker | null): string | null {
+    if (!sp) return null;
+    const part = participants.find((p) => p.id === sp.id);
+    if (part?.model_config_id) {
+      const mc = customModels.find((c) => c.id === part.model_config_id);
+      if (mc) return mc.avatar_url ?? null;
+    }
+    return part?.avatar ?? null;
+  }
+
   function makeRtHandler() {
     return (ev: any) => {
       if (ev.type === "speaker_start") {
@@ -1039,6 +1055,8 @@ export default function ChatPage() {
     if (!override) setAgentId(null);
     const turnRefDocIds = override ? [] : refDocs.map((r) => r.id);
     if (!override) setRefDocs([]);
+    const turnRefChatIds = override ? [] : refChats.map((r) => r.id);
+    if (!override) setRefChats([]);
     setMessages((m) => [...m, { id: `tmp-${Date.now()}`, role: "user", content: text, attachments: turnAttachments, created_at: new Date().toISOString() }]);
     setAtBottom(true); // enviar re-engata o auto-scroll (acompanhar a resposta)
     setStreaming("");
@@ -1091,7 +1109,7 @@ export default function ChatPage() {
         // persistente: o servidor cancela a geração e salva o parcial
         const cid = chat.id;
         stopRef.current = () => { api.post(`/chats/${cid}/stop`).catch(() => {}); };
-        await streamMessage(chat.id, text, onEvent, undefined, turnSkillIds, turnAttachments, turnAgentId, turnRefDocIds);
+        await streamMessage(chat.id, text, onEvent, undefined, turnSkillIds, turnAttachments, turnAgentId, turnRefDocIds, turnRefChatIds);
         refreshChats();
         // só recarrega/limpa a tela se o usuário AINDA está neste chat — senão
         // sobrescreveria o chat para onde ele navegou (a resposta já ficou salva
@@ -1660,7 +1678,7 @@ export default function ChatPage() {
                   onDragLeave={() => setCsDropOver(false)}
                   onDrop={handleComposerFileDrop}
                 >
-                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} temporary={temporary} />
+                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} temporary={temporary} />
                 </div>
                 {/* menu do "+" abre para baixo aqui (há espaço); na conversa abre para cima */}
                 {temporary && <p className="mt-2 text-xs text-muted">Chat temporário — esta conversa não será salva.</p>}
@@ -1705,53 +1723,81 @@ export default function ChatPage() {
                       Visualização única — será apagado ao sair
                     </div>
                   )}
-                  {messages.map((m) => (
-                    <div key={m.id} id={`msg-${m.id}`} className="msg-row">
-                      {m.speaker && !m.is_summary && (
-                        <div className="mx-auto mb-1 flex max-w-3xl items-center gap-1.5 px-1 text-xs font-semibold">
-                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: m.speaker.color || "#888" }} />
-                          <span style={{ color: m.speaker.color || undefined }}>{m.speaker.name}</span>
-                        </div>
-                      )}
-                      {m.is_summary ? (
-                        <CompactionDivider onOpen={() => setShowCompactions(true)} />
-                      ) : temporary ? (
-                        <MessageBubble
-                          role={m.role}
-                          content={m.content}
-                          time={m.created_at}
-                          name={m.role === "assistant" ? modelLabel : undefined}
-                          reasoning={m.reasoning}
-                          toolEvents={m.tool_events ?? undefined}
-                          onSpeak={m.role === "assistant" ? () => speak(m.content, voiceFor(m)) : undefined}
-                          onDelete={() => deleteMessage(m.id)}
-                        />
-                      ) : (
-                        <MessageItem
-                          message={m}
-                          busy={sending}
-                          modelName={m.speaker?.name ?? modelLabel}
-                          toolsEnabled={iface.chat_tools !== false}
-                          modelAvatar={iface.chat_model_image !== false ? (curCustom?.avatar_url ?? null) : null}
-                          chatArtifacts={chatArtifacts}
-                          onOpenArtifact={(ident) => setArtifactOpen(ident)}
-                          onSpeak={(c) => speak(c, voiceFor(m))}
-                          onEdit={editMessage}
-                          onRegenerate={regenerateMessage}
-                          onContinue={continueMessage}
-                          onDelete={deleteMessage}
-                          onRemember={active ? async (text, scope) => {
-                            const agentId = active.model_config_id ?? `base:${active.model}`;
-                            await api.post("/memory", {
-                              text, scope,
-                              model_id: scope === "model" ? agentId : undefined,
-                              chat_id: scope === "chat" ? active.id : undefined,
-                            });
-                          } : undefined}
-                        />
-                      )}
-                    </div>
-                  ))}
+                  {messages.map((m) => {
+                    // mesa-redonda: cada fala tem um `speaker`; o avatar é o do
+                    // MODELO daquele falante (não o do composer) e vai À ESQUERDA do texto.
+                    const isRt = !!m.speaker && !m.is_summary && !temporary;
+                    const showAv = iface.chat_model_image !== false;
+                    const av = isRt && showAv ? speakerAvatar(m.speaker) : null;
+                    const item = !m.is_summary && !temporary ? (
+                      <MessageItem
+                        message={m}
+                        busy={sending}
+                        bare={isRt}
+                        modelName={m.speaker?.name ?? modelLabel}
+                        nameColor={isRt ? (m.speaker?.color ?? null) : null}
+                        toolsEnabled={iface.chat_tools !== false}
+                        modelAvatar={isRt ? null : (showAv ? (curCustom?.avatar_url ?? null) : null)}
+                        chatArtifacts={chatArtifacts}
+                        onOpenArtifact={(ident) => setArtifactOpen(ident)}
+                        onSpeak={(c) => speak(c, voiceFor(m))}
+                        onEdit={editMessage}
+                        onRegenerate={regenerateMessage}
+                        onContinue={continueMessage}
+                        onDelete={deleteMessage}
+                        onRemember={active ? async (text, scope) => {
+                          const agentId = active.model_config_id ?? `base:${active.model}`;
+                          await api.post("/memory", {
+                            text, scope,
+                            model_id: scope === "model" ? agentId : undefined,
+                            chat_id: scope === "chat" ? active.id : undefined,
+                          });
+                        } : undefined}
+                      />
+                    ) : null;
+                    return (
+                      <div key={m.id} id={`msg-${m.id}`} className="msg-row">
+                        {m.is_summary ? (
+                          <CompactionDivider onOpen={() => setShowCompactions(true)} />
+                        ) : temporary ? (
+                          <>
+                            {m.speaker && (
+                              <div className="mx-auto mb-1 flex max-w-3xl items-center gap-1.5 px-1 text-xs font-semibold">
+                                <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: m.speaker.color || "#888" }} />
+                                <span style={{ color: m.speaker.color || undefined }}>{m.speaker.name}</span>
+                              </div>
+                            )}
+                            <MessageBubble
+                              role={m.role}
+                              content={m.content}
+                              time={m.created_at}
+                              name={m.role === "assistant" ? modelLabel : undefined}
+                              reasoning={m.reasoning}
+                              toolEvents={m.tool_events ?? undefined}
+                              onSpeak={m.role === "assistant" ? () => speak(m.content, voiceFor(m)) : undefined}
+                              onDelete={() => deleteMessage(m.id)}
+                            />
+                          </>
+                        ) : isRt ? (
+                          <div className="mx-auto flex max-w-3xl gap-3">
+                            {showAv && (
+                              av ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img src={av} alt="" className="mt-1 h-9 w-9 shrink-0 rounded-full object-cover" style={{ boxShadow: `0 0 0 2px ${m.speaker!.color || "#888"}` }} />
+                              ) : (
+                                <span className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white" style={{ background: m.speaker!.color || "#888" }}>
+                                  {m.speaker!.name[0]?.toUpperCase()}
+                                </span>
+                              )
+                            )}
+                            <div className="min-w-0 flex-1">{item}</div>
+                          </div>
+                        ) : (
+                          item
+                        )}
+                      </div>
+                    );
+                  })}
                   {sending && subagents.length > 0 && (
                     <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-1.5">
                       {subagents.map((a) => (
@@ -1767,18 +1813,32 @@ export default function ChatPage() {
                   {/* mesa-redonda: fala do participante da vez, em streaming */}
                   {isRoundtable && rtStreaming && (
                     <div className="msg-row">
-                      <div className="mx-auto mb-1 flex max-w-3xl items-center gap-1.5 px-1 text-xs font-semibold">
-                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: rtStreaming.speaker.color || "#888" }} />
-                        <span style={{ color: rtStreaming.speaker.color || undefined }}>{rtStreaming.speaker.name}</span>
+                      <div className="mx-auto flex max-w-3xl gap-3">
+                        {iface.chat_model_image !== false && (() => {
+                          const av = speakerAvatar(rtStreaming.speaker);
+                          const col = rtStreaming.speaker.color || "#888";
+                          return av ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={av} alt="" className="mt-1 h-9 w-9 shrink-0 rounded-full object-cover" style={{ boxShadow: `0 0 0 2px ${col}` }} />
+                          ) : (
+                            <span className="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white" style={{ background: col }}>
+                              {rtStreaming.speaker.name[0]?.toUpperCase()}
+                            </span>
+                          );
+                        })()}
+                        <div className="min-w-0 flex-1">
+                          <MessageBubble
+                            role="assistant"
+                            content={rtStreaming.content}
+                            streaming={!!rtStreaming.content}
+                            bare
+                            name={rtStreaming.speaker.name}
+                            nameColor={rtStreaming.speaker.color ?? null}
+                            reasoning={rtStreaming.reasoning ? { text: rtStreaming.reasoning } : null}
+                            reasoningLive={!rtStreaming.content}
+                          />
+                        </div>
                       </div>
-                      <MessageBubble
-                        role="assistant"
-                        content={rtStreaming.content}
-                        streaming={!!rtStreaming.content}
-                        name={rtStreaming.speaker.name}
-                        reasoning={rtStreaming.reasoning ? { text: rtStreaming.reasoning } : null}
-                        reasoningLive={!rtStreaming.content}
-                      />
                     </div>
                   )}
                   {isRoundtable && rtRunning && !rtStreaming && <Thinking />}
@@ -1825,7 +1885,7 @@ export default function ChatPage() {
                       {showAsk && askSpec && (
                         <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                       )}
-                      <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
+                      <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
                     </div>
                   </div>
                 </div>
@@ -1998,6 +2058,8 @@ function MessageBubble({
   time,
   streaming = false,
   name,
+  nameColor = null,
+  bare = false,
   reasoning,
   reasoningLive = false,
   toolEvents,
@@ -2010,6 +2072,8 @@ function MessageBubble({
   time?: string;
   streaming?: boolean;
   name?: string;
+  nameColor?: string | null;
+  bare?: boolean;
   reasoning?: { text: string; seconds?: number } | null;
   reasoningLive?: boolean;
   toolEvents?: ToolEvent[];
@@ -2040,10 +2104,10 @@ function MessageBubble({
     );
   }
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className={bare ? "w-full" : "mx-auto max-w-3xl"}>
       <div className="group relative">
         {name && (
-          <p className="mb-1.5 flex items-center gap-1.5 text-lg font-semibold tracking-tight text-ink">
+          <p className="mb-1.5 flex items-center gap-1.5 text-lg font-semibold tracking-tight text-ink" style={nameColor ? { color: nameColor } : undefined}>
             {name}
             {usedTools && (
               <button

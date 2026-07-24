@@ -902,3 +902,64 @@ export interface ApiKeyUsage {
   daily: { date: string; requests: number; cost: number; tokens: number }[];
   by_model: { model: string; requests: number; tokens: number; cost: number }[];
 }
+
+// ---- Observabilidade (traces/spans) --------------------------------------- #
+export interface ObsTrace {
+  id: string;
+  name: string;
+  kind: string;
+  method: string;
+  path: string;
+  status: "ok" | "error";
+  status_code: number;
+  error: string;
+  started_at: string | null;
+  duration_ms: number;
+  span_count: number;
+  db_ms: number;
+  db_queries: number;
+  http_ms: number;
+  llm_ms: number;
+  user_id: string | null;
+  attrs: Record<string, unknown>;
+}
+
+export interface ObsSpan {
+  id: string;
+  parent_id: string | null;
+  name: string;
+  kind: string;
+  offset_ms: number;
+  duration_ms: number;
+  status: "ok" | "error";
+  error: string;
+  db_reads: number;
+  db_writes: number;
+  db_ms: number;
+  http_ms: number;
+  attrs: Record<string, unknown>;
+}
+
+export interface ObsSummary {
+  period_hours: number;
+  totals: {
+    traces: number; errors: number; avg_ms: number;
+    p50_ms: number; p95_ms: number; p99_ms: number;
+    db_queries: number; avg_db_ms: number; llm_ms: number;
+  };
+  routes: {
+    kind: string; method: string; path: string; count: number; errors: number;
+    p95_ms: number; avg_ms: number; avg_db_ms: number; avg_queries: number;
+  }[];
+  series: { hour: string; count: number; errors: number; avg_ms: number }[];
+}
+
+export interface ObsConfig {
+  enabled: boolean;
+  sample_rate: number;
+  retention_days: number;
+  max_traces: number;
+  capture_content: boolean;
+  slow_ms: number;
+  sink: { queued: number; dropped: number; written: number; running: boolean };
+}

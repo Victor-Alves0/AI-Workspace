@@ -20,6 +20,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from .. import tracing
 from ..chat.turn_setup import _code_mode, _load_skills, _usage_record
 from ..chat.orchestrator import TurnSession, run_turn
 from ..db import SessionLocal
@@ -447,6 +448,18 @@ async def run_automation(automation_id: uuid.UUID, *, trigger: str = "scheduled"
     if automation_id in _running:
         return {"skipped": "already_running"}
     _running.add(automation_id)
+    # o `discard` mora AQUI, no mesmo escopo do `add`: se qualquer coisa entre a
+    # marcação e o corpo falhasse, a automação ficaria marcada como "rodando" para
+    # sempre e seria silenciosamente pulada em todos os disparos seguintes.
+    try:
+        with tracing.start_trace(f"automation:{automation_id}", kind="automation",
+                                 path=f"automation/{trigger}"):
+            return await _run_automation_body(automation_id, trigger)
+    finally:
+        _running.discard(automation_id)
+
+
+async def _run_automation_body(automation_id: uuid.UUID, trigger: str) -> dict[str, Any]:
     user_id: uuid.UUID | None = None
     try:
         async with SessionLocal() as db:
@@ -497,4 +510,7 @@ async def run_automation(automation_id: uuid.UUID, *, trigger: str = "scheduled"
                     asyncio.create_task(send_to_user(user.id, automation.title, result["text"], "/"))
             return result
     finally:
+        # libera assim que o corpo termina; `run_automation` repete o discard como
+        # rede de segurança (é idempotente num set — ao contrário do contador de
+        # vagas da API, onde liberar duas vezes seria bug).
         _running.discard(automation_id)

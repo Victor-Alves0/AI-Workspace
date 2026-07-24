@@ -28,6 +28,8 @@ from typing import Any
 
 import httpx
 
+from . import ytdlp_pool
+
 logger = logging.getLogger(__name__)
 
 # teto do Whisper é 25 MB; fatiamos bem abaixo p/ folga (headers multipart etc.)
@@ -37,7 +39,6 @@ _STT_LIMIT = 24 * 1024 * 1024
 _SEGMENT_SECONDS = 600
 # limite de duração p/ conter custo/tempo do caminho de FALA (legendas não têm limite).
 _MAX_SPEECH_DURATION = 4 * 3600
-_UA = "Mozilla/5.0 (compatible; AIWorkspace/1.0)"
 # preferência de formato de legenda: json3 (YouTube, limpo) → vtt (universal) → resto.
 _SUB_FORMAT_PREF = ("json3", "vtt", "srv3", "srv1", "ttml")
 # teto de faixas de legenda testadas antes de desistir (o YouTube expõe ~157 idiomas
@@ -56,11 +57,46 @@ _CACHE_MAX = 8
 # --------------------------------------------------------------------------- #
 # Costuras de I/O externo (substituíveis nos testes)
 # --------------------------------------------------------------------------- #
-def _extract_info(url: str) -> dict[str, Any]:
-    """Metadados do yt-dlp (título, duração, legendas) SEM baixar o vídeo."""
+def _ytdlp_attempts() -> int:
+    """Quantas tentativas rotacionando identidade. 0/1 cookie → 1 (rotacionar não muda
+    nada); ≥2 → até 4 (cada tentativa pega uma identidade diferente ao tomar bloqueio)."""
+    n = ytdlp_pool.cookie_count()
+    return 1 if n <= 1 else min(n, 4)
+
+
+def _run_ytdlp(base_opts: dict[str, Any], run: Any) -> Any:
+    """Roda `run(ydl)` sob yt-dlp com headers realistas + cookie rotativo, re-tentando
+    com OUTRA identidade quando a mensagem indica bloqueio (bot-check/429). Erros
+    terminais (URL inválida, vídeo privado…) propagam na hora — rotação não os resolve."""
     import yt_dlp
 
-    opts = {
+    attempts = _ytdlp_attempts()
+    last_exc: Exception | None = None
+    for i in range(attempts):
+        cookie = ytdlp_pool.acquire_cookie()
+        opts = ytdlp_pool.apply_evasion(base_opts, cookie)
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                result = run(ydl)
+            ytdlp_pool.report_cookie(cookie, blocked=False)
+            return result
+        except Exception as exc:  # noqa: BLE001 - DownloadError/ExtractorError e afins
+            last_exc = exc
+            blocked = ytdlp_pool.looks_blocked(exc)
+            ytdlp_pool.report_cookie(cookie, blocked=blocked)
+            if not blocked or i == attempts - 1:
+                raise
+            logger.info(
+                "yt-dlp bloqueado (tentativa %d/%d); rotacionando identidade", i + 1, attempts
+            )
+    if last_exc is not None:  # defensivo: attempts>=1 sempre retorna ou levanta acima
+        raise last_exc
+    return None
+
+
+def _extract_info(url: str) -> dict[str, Any]:
+    """Metadados do yt-dlp (título, duração, legendas) SEM baixar o vídeo."""
+    base = {
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
@@ -68,15 +104,12 @@ def _extract_info(url: str) -> dict[str, Any]:
         "socket_timeout": 20,
         "extract_flat": False,
     }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        return ydl.extract_info(url, download=False) or {}
+    return _run_ytdlp(base, lambda ydl: ydl.extract_info(url, download=False) or {})
 
 
 def _download_audio(url: str, tmpdir: str) -> str | None:
     """Baixa a melhor faixa de áudio p/ `tmpdir`; devolve o caminho do arquivo."""
-    import yt_dlp
-
-    opts = {
+    base = {
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
@@ -84,8 +117,7 @@ def _download_audio(url: str, tmpdir: str) -> str | None:
         "format": "bestaudio/best",
         "outtmpl": os.path.join(tmpdir, "audio.%(ext)s"),
     }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        ydl.download([url])
+    _run_ytdlp(base, lambda ydl: ydl.download([url]))
     files = [p for p in glob.glob(os.path.join(tmpdir, "audio.*")) if os.path.isfile(p)]
     return files[0] if files else None
 
@@ -109,9 +141,9 @@ def _segment_audio(path: str, tmpdir: str) -> list[str]:
 
 
 async def _http_get_text(url: str) -> str:
-    """Baixa uma legenda (vtt/json3) como texto."""
+    """Baixa uma legenda (vtt/json3) como texto, com headers de navegador realistas."""
     async with httpx.AsyncClient(follow_redirects=True, timeout=20) as client:
-        r = await client.get(url, headers={"User-Agent": _UA})
+        r = await client.get(url, headers=ytdlp_pool.base_headers())
     r.raise_for_status()
     return r.text
 

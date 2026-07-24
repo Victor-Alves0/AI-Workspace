@@ -24,6 +24,7 @@ from .knowledge import KnowledgeBase, KnowledgeFolder, KnowledgeDoc, KnowledgeCh
 from .benchmark import Benchmark, BenchmarkRun
 from .codespace_project import CodespaceProject
 from .api_key import ApiKey, ApiRequest
+from .trace import ObsTrace, ObsSpan
 
 __all__ = [
     "AuditEvent",
@@ -66,4 +67,6 @@ __all__ = [
     "CodespaceProject",
     "ApiKey",
     "ApiRequest",
+    "ObsTrace",
+    "ObsSpan",
 ]

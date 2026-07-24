@@ -1179,6 +1179,8 @@ export default function MessageItem({
   modelName,
   toolsEnabled = true,
   modelAvatar = null,
+  nameColor = null,
+  bare = false,
   chatArtifacts,
   onOpenArtifact,
 }: {
@@ -1197,6 +1199,11 @@ export default function MessageItem({
   toolsEnabled?: boolean;
   /** avatar do modelo ao lado do nome na resposta (null = oculto) */
   modelAvatar?: string | null;
+  /** cor do nome do modelo (mesa-redonda: cor do participante). null = cor padrão. */
+  nameColor?: string | null;
+  /** sem o container centralizado (mx-auto max-w-3xl) — p/ aninhar em outro layout,
+   *  ex.: coluna à direita do avatar na mesa-redonda. */
+  bare?: boolean;
   /** artefatos de chat (janela dedicada) — p/ os cartões [[artifact:slug]] */
   chatArtifacts?: ChatArtifact[];
   onOpenArtifact?: (identifier: string) => void;
@@ -1345,10 +1352,10 @@ export default function MessageItem({
   // mensagem do assistente: texto corrido (markdown), largura total da coluna
   const name = message.usage?.model_name || modelName;
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className={bare ? "w-full" : "mx-auto max-w-3xl"}>
       <div className="group relative">
         {name && (
-          <p className="mb-1.5 flex items-center gap-1.5 text-lg font-semibold tracking-tight text-ink">
+          <p className="mb-1.5 flex items-center gap-1.5 text-lg font-semibold tracking-tight text-ink" style={nameColor ? { color: nameColor } : undefined}>
             {modelAvatar && (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={modelAvatar} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
