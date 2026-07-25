@@ -9,9 +9,8 @@ COMO RODAR
 1. Clique com o botao direito em "Start-AIWorkspace.ps1" > "Executar com o PowerShell".
    (ou, num terminal PowerShell nesta pasta:  ./Start-AIWorkspace.ps1)
 2. Na primeira vez ele inicializa o banco e aplica as migracoes (demora um pouco).
-3. Quando aparecer "API em http://127.0.0.1:8000", esta no ar.
-   Abra http://127.0.0.1:8000/docs no navegador para conferir.
-4. Ctrl+C encerra (o Postgres e' desligado junto).
+3. Quando a interface subir, o navegador abre sozinho em http://localhost:3000.
+4. Feche a janela do PowerShell para encerrar tudo (banco, API e interface).
 
 Se o Windows bloquear o script, rode uma vez:
    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
@@ -21,10 +20,10 @@ O QUE FICA ONDE
 Tudo em .\data\ :  banco (pgdata), caches de modelo e o segredo do app.
 Apagar .\data\ zera tudo. Backup = copiar .\data\.
 
-OBSERVACOES DESTA ETAPA (1)
----------------------------
-- Este e' o "motor" (API). A interface web e o app de bandeja entram nas etapas
-  seguintes.
+OBSERVACOES
+-----------
+- Traz o app completo (banco + API + interface). O app de bandeja (instalador
+  unico, sem PowerShell) e' a etapa seguinte.
 - Na primeira execucao o backend baixa uma vez o modelo de embeddings (precisa de
   internet nesse momento); depois roda offline.
 - Recursos que dependem de binarios externos (OCR de imagem, transcricao por FALA

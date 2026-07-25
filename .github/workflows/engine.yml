@@ -22,6 +22,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      # Node do runner: constroi o frontend (next build). O node.exe de RUNTIME
+      # que vai no bundle e' baixado a parte pelo build-engine.ps1.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Montar o bundle
         shell: pwsh
         env:

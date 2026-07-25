@@ -9,6 +9,7 @@
 
 param(
     [string]$PythonVersion = "3.12.7",
+    [string]$NodeVersion   = "20.18.0",
     # binarios do Postgres (EDB). pgvector abaixo e' compilado p/ 16.14; como a ABI
     # de extensao e' estavel dentro do major 16, um minor proximo tambem carrega.
     [string]$PostgresUrl = "https://get.enterprisedb.com/postgresql/postgresql-16.14-1-windows-x64-binaries.zip",
@@ -21,6 +22,7 @@ param(
 $ErrorActionPreference = "Stop"
 $RepoRoot  = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $ServerDir = Join-Path $RepoRoot "apps\server"
+$WebDir    = Join-Path $RepoRoot "apps\web"
 $Work      = Join-Path $PSScriptRoot "out"
 $Out       = Join-Path $Work "aiworkspace-engine"
 $Dl        = Join-Path $Work "_dl"
@@ -105,7 +107,39 @@ foreach ($sub in @("lib", "share")) {
 }
 
 # ----------------------------------------------------------------------------- #
-# 4) app dir (alembic) + launcher
+# 4) Frontend (Next.js "standalone") + node.exe de runtime
+#
+# Mesmo layout do Dockerfile de producao: standalone/ na raiz, .next/static e
+# public/ ao lado. Roda com `node server.js`. NEXT_PUBLIC_API_URL vazio => o front
+# deriva a API de host:8000 em runtime (lib/api.ts), igual ao deploy normal.
+# ----------------------------------------------------------------------------- #
+Write-Host "==> build do frontend (npm ci + next build)"
+Push-Location $WebDir
+$env:NEXT_PUBLIC_API_URL = ""
+npm ci
+if ($LASTEXITCODE -ne 0) { throw "npm ci falhou" }
+npm run build
+if ($LASTEXITCODE -ne 0) { throw "next build falhou" }
+Pop-Location
+
+$WebOut = Join-Path $Out "web"
+New-Item -ItemType Directory -Force (Join-Path $WebOut ".next") | Out-Null
+Copy-Item (Join-Path $WebDir ".next\standalone\*") $WebOut -Recurse -Force
+Copy-Item (Join-Path $WebDir ".next\static") (Join-Path $WebOut ".next\static") -Recurse -Force
+if (Test-Path (Join-Path $WebDir "public")) {
+    Copy-Item (Join-Path $WebDir "public") (Join-Path $WebOut "public") -Recurse -Force
+}
+
+$NodeZip = Join-Path $Dl "node.zip"
+Get-File "https://nodejs.org/dist/v$NodeVersion/node-v$NodeVersion-win-x64.zip" $NodeZip
+$NodeTmp = Join-Path $Work "_node"
+Unzip $NodeZip $NodeTmp
+$NodeExe = Get-ChildItem $NodeTmp -Recurse -Filter node.exe | Select-Object -First 1
+New-Item -ItemType Directory -Force (Join-Path $Out "node") | Out-Null
+Copy-Item $NodeExe.FullName (Join-Path $Out "node\node.exe")
+
+# ----------------------------------------------------------------------------- #
+# 5) app dir (alembic) + launcher
 # ----------------------------------------------------------------------------- #
 $AppOut = Join-Path $Out "app"
 New-Item -ItemType Directory -Force $AppOut | Out-Null
@@ -117,7 +151,7 @@ Copy-Item (Join-Path $PSScriptRoot "README.txt") $Out -ErrorAction SilentlyConti
 Write-Host "==> bundle montado em $Out"
 
 # ----------------------------------------------------------------------------- #
-# 5) zip final (opcional)
+# 6) zip final (opcional)
 # ----------------------------------------------------------------------------- #
 if ($Zip) {
     $ZipPath = Join-Path $Work "aiworkspace-engine-windows.zip"
