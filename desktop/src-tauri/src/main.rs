@@ -106,9 +106,21 @@ fn engine_paths(app: &AppHandle) -> Option<(PathBuf, PathBuf)> {
     Some((engine, data))
 }
 
+/// Uma porta local esta' aceitando conexao? (usado como sinal de "no ar").
+fn port_open(port: u16) -> bool {
+    let addr: std::net::SocketAddr = ([127, 0, 0, 1], port).into();
+    std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(1)).is_ok()
+}
+
 /// Sobe o motor via o launcher PowerShell (mesma sequencia validada a mao):
 /// initdb -> Postgres -> migracoes -> API -> interface. Devolve o PID do launcher.
 fn spawn_engine(app: &AppHandle) -> Option<u32> {
+    // Ja' ha' um motor no ar (outra instancia, ou uma sobra)? Nao sobe outro nem
+    // toma posse — assim uma 2a abertura NAO derruba o motor da 1a ao sair (o
+    // stop_engine so' age quando este processo e' o dono, i.e. pid = Some).
+    if port_open(3000) {
+        return None;
+    }
     let (engine, data) = engine_paths(app)?;
     let _ = std::fs::create_dir_all(&data);
     // `-File` com caminho ABSOLUTO quebra quando ha espaco no caminho de instalacao
@@ -139,11 +151,15 @@ fn spawn_engine(app: &AppHandle) -> Option<u32> {
 /// index.html dos assets) enquanto isso.
 fn wait_and_show(app: AppHandle) {
     std::thread::spawn(move || {
-        let addr: std::net::SocketAddr = "127.0.0.1:3000".parse().unwrap();
-        // ate ~10 min no primeiro boot (initdb + 55 migracoes)
-        for _ in 0..600 {
-            if std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(1)).is_ok() {
-                std::thread::sleep(Duration::from_millis(1500));
+        // Espera AS DUAS pontas: interface (3000) E API (8000). So' navegar quando
+        // a interface sobe deixa a pagina carregar antes da API responder — no 1o
+        // boot a API demora (baixa o modelo de embeddings), e chamadas como
+        // /auth/config falham, escondendo ate' o "criar conta". A porta 8000 so'
+        // abre depois do "startup complete" do uvicorn, entao e' um bom sinal de
+        // "API pronta". Ate' ~15 min no primeiro boot.
+        for _ in 0..900 {
+            if port_open(3000) && port_open(8000) {
+                std::thread::sleep(Duration::from_millis(800));
                 if let Some(win) = app.get_webview_window("main") {
                     let _ = win.eval(&format!("window.location.replace('{WEB_URL}')"));
                 }
@@ -158,12 +174,16 @@ fn wait_and_show(app: AppHandle) {
 /// e para o Postgres explicitamente (o pg_ctl o desanexa, entao taskkill /T nao o
 /// alcanca).
 fn stop_engine(app: &AppHandle) {
-    if let Some(pid) = app.state::<EngineState>().0.lock().ok().and_then(|g| *g) {
-        let _ = Command::new("taskkill")
-            .args(["/F", "/T", "/PID", &pid.to_string()])
-            .creation_flags(NO_WINDOW)
-            .status();
-    }
+    // So' encerra o motor se ESTE processo e' o dono (spawn_engine devolveu um pid).
+    // Se nao somos donos (ex.: uma 2a instancia que reusou o motor da 1a), sair NAO
+    // pode derrubar o Postgres compartilhado.
+    let Some(pid) = app.state::<EngineState>().0.lock().ok().and_then(|g| *g) else {
+        return;
+    };
+    let _ = Command::new("taskkill")
+        .args(["/F", "/T", "/PID", &pid.to_string()])
+        .creation_flags(NO_WINDOW)
+        .status();
     if let Some((engine, data)) = engine_paths(app) {
         let pgctl = engine.join("pgsql").join("bin").join("pg_ctl.exe");
         if pgctl.exists() {
@@ -251,7 +271,7 @@ fn main() {
                 .center()
                 .visible(!start_hidden)
                 .initialization_script(
-                    "window.__AIW_DESKTOP__ = { platform: 'windows', version: '0.2.1' };",
+                    "window.__AIW_DESKTOP__ = { platform: 'windows', version: '0.2.2' };",
                 )
                 .build()?;
 
