@@ -1,26 +1,27 @@
-# Documentação — AI Workspace
+# Documentation — AI Workspace
 
-Guia de referência do AI Workspace. Se você só quer subir e usar, comece pelo
-[README principal](../README.md); as páginas abaixo aprofundam cada área.
+Reference guide for AI Workspace. If you just want to get it running, start with the
+[main README](../README.md); the pages below go deeper into each area.
 
-## Índice
+## Index
 
-| Documento | Para quê |
-|-----------|----------|
-| [features.md](features.md)           | Catálogo completo de recursos, agrupado por área |
-| [architecture.md](architecture.md)   | Visão de sistema, componentes e o ciclo de vida de um turno de chat |
-| [configuration.md](configuration.md) | Referência de todas as variáveis de ambiente (`.env`) |
-| [deployment.md](deployment.md)       | LAN/VPS, domínio + HTTPS, backup/restore, atualização, rotação de `APP_SECRET` |
-| [public-api.md](public-api.md)       | API compatível com OpenAI (`/v1`) e gestão de chaves |
-| [security.md](security.md)           | Modelo de segurança, superfície de ataque e recomendações |
-| [desktop.md](desktop.md)             | App desktop (Tauri): bandeja, autostart, build |
-| [development.md](development.md)     | Rodar sem Docker, testes, layout do monorepo |
+| Document | What for |
+|----------|----------|
+| [features.md](features.md)           | Full feature catalog, grouped by area |
+| [architecture.md](architecture.md)   | System view, components and the lifecycle of a chat turn |
+| [configuration.md](configuration.md) | Reference for every environment variable (`.env`) |
+| [deployment.md](deployment.md)       | LAN/VPS, domain + HTTPS, backup/restore, updates, `APP_SECRET` rotation |
+| [public-api.md](public-api.md)       | OpenAI-compatible API (`/v1`) and key management |
+| [security.md](security.md)           | Security model, attack surface and recommendations |
+| [desktop.md](desktop.md)             | Desktop app (Tauri): tray, autostart, build |
+| [development.md](development.md)     | Running without Docker, tests, monorepo layout |
 
-## Convenções
+## Conventions
 
-- **Local-first:** salvo indicação em contrário, tudo roda na sua máquina/servidor via Docker
-  Compose. A única saída externa obrigatória é o provedor de modelos (OpenRouter).
-- **Segredos por usuário** (chaves de OpenRouter, Tavily/Brave, voz, tokens de bot/OAuth) são
-  salvos **na interface**, cifrados em repouso — **não** vão no `.env`.
-- **Segredos de infraestrutura** (`APP_SECRET`, senha do Postgres, chave do Evolution) vão no
-  `.env`, que **nunca** deve ser versionado.
+- **Local-first:** unless stated otherwise, everything runs on your machine/server via Docker
+  Compose. The only required external egress is the model provider (OpenRouter).
+- **Per-user secrets** (OpenRouter, Tavily/Brave, voice, bot/OAuth tokens) are saved **in the
+  interface**, encrypted at rest — they do **not** go in `.env`.
+- **Infrastructure secrets** (`APP_SECRET`, the Postgres password, the Evolution key) go in
+  `.env`, which must **never** be committed.
+</content>

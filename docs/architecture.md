@@ -1,33 +1,33 @@
-# Arquitetura
+# Architecture
 
-O AI Workspace é um monorepo com um **backend FastAPI** (assíncrono), um **frontend Next.js** e
-um **shell desktop Tauri**, orquestrados por **Docker Compose** e apoiados em **Postgres 16 com
-pgvector** para dados relacionais e vetoriais.
+AI Workspace is a monorepo with a **FastAPI backend** (async), a **Next.js frontend** and a
+**Tauri desktop shell**, orchestrated by **Docker Compose** and backed by **Postgres 16 with
+pgvector** for both relational and vector data.
 
-## Visão geral
+## Overview
 
 ```mermaid
 flowchart TB
-    subgraph Clientes
+    subgraph Clients
         W["Web · Next.js"]
         D["Desktop · Tauri"]
-        CH["Canais<br/>WhatsApp · Telegram · Discord"]
-        API["Apps externos<br/>API /v1"]
+        CH["Channels<br/>WhatsApp · Telegram · Discord"]
+        API["External apps<br/>/v1 API"]
     end
 
     subgraph Server["apps/server — FastAPI (async)"]
         AUTH["Auth<br/>JWT httpOnly · 2FA"]
-        ORQ["Orquestrador de turno<br/>tool-calling · guardas · streaming"]
-        SIFT["SIFT<br/>descoberta e execução de ferramentas"]
-        MEM["mem0<br/>memória de longo prazo"]
-        RAG["Base de Conhecimento<br/>RAG (pgvector)"]
-        AUTO["Automações<br/>agendadas · monitores"]
-        OBS["Observabilidade<br/>traces/spans"]
+        ORQ["Turn orchestrator<br/>tool-calling · guards · streaming"]
+        SIFT["SIFT<br/>tool discovery and execution"]
+        MEM["mem0<br/>long-term memory"]
+        RAG["Knowledge Base<br/>RAG (pgvector)"]
+        AUTO["Automations<br/>schedules · monitors"]
+        OBS["Observability<br/>traces/spans"]
     end
 
     DB[("Postgres 16 + pgvector")]
     OR["OpenRouter / Ollama"]
-    EXT["Serviços opt-in<br/>SearXNG · Kokoro · Evolution · browserless"]
+    EXT["Opt-in services<br/>SearXNG · Kokoro · Evolution · browserless"]
 
     W & D & CH & API --> AUTH --> ORQ
     ORQ --> SIFT & MEM & RAG & OBS
@@ -37,98 +37,97 @@ flowchart TB
     ORQ & MEM & RAG & AUTO & OBS --> DB
 ```
 
-## Componentes
+## Components
 
 ### Backend (`apps/server`)
 
-FastAPI assíncrono, servido por Uvicorn. Responsabilidades:
+Async FastAPI, served by Uvicorn. Responsibilities:
 
-- **Autenticação e sessão** — Argon2 para senhas, JWT em cookie httpOnly (access + refresh
-  rotativo), 2FA TOTP opcional, RBAC admin/user.
-- **Orquestrador de turno** (`chat/orchestrator.py`) — monta o contexto (memória + RAG + chats
-  de referência), anuncia as ferramentas, roda o loop agêntico de tool-calling, aplica os
-  **guardas de saída** e emite os eventos de streaming. Roda desacoplado da request: F5 ou
-  fechar o navegador não cancela a geração.
-- **SIFT** — biblioteca de tool-calling (3 meta-ferramentas: buscar, executar, rodar código).
-  As ferramentas nativas são injetadas direto; o catálogo é descoberto sob demanda para
-  economizar tokens.
-- **mem0** — memória de longo prazo com escopos (global/modelo/chat) e bancos compartilháveis,
-  usando o mesmo Postgres + pgvector como vector store.
-- **Base de Conhecimento (RAG)** — documentos indexados com FastEmbed (384 dim) em pgvector;
-  modo automático (injeta trechos + cita) ou ferramenta (`search_knowledge`).
-- **Integrações** — Google (Gmail/Agenda), Tuya/Smart Life, GitHub, e os canais
+- **Authentication and session** — Argon2 for passwords, JWT in an httpOnly cookie (access +
+  rotating refresh), optional TOTP 2FA, admin/user RBAC.
+- **Turn orchestrator** (`chat/orchestrator.py`) — assembles the context (memory + RAG +
+  reference chats), announces the tools, runs the agentic tool-calling loop, applies the
+  **output guards** and emits the streaming events. It runs decoupled from the request: F5 or
+  closing the browser does not cancel generation.
+- **SIFT** — tool-calling library (3 meta-tools: search, execute, run code). Native tools are
+  injected directly; the catalog is discovered on demand to save tokens.
+- **mem0** — long-term memory with scopes (global/model/chat) and shareable stores, using the
+  same Postgres + pgvector as the vector store.
+- **Knowledge Base (RAG)** — documents indexed with FastEmbed (384 dim) in pgvector; automatic
+  mode (injects snippets + cites) or tool mode (`search_knowledge`).
+- **Integrations** — Google (Gmail/Calendar), Tuya/Smart Life, GitHub, and the channels
   (WhatsApp/Telegram/Discord).
-- **API pública** (`/v1`) — endpoints compatíveis com OpenAI + gestão de chaves.
-- **Observabilidade** — cada requisição vira um trace; spans medem tempo de banco, LLM e
-  ferramentas.
+- **Public API** (`/v1`) — OpenAI-compatible endpoints + key management.
+- **Observability** — every request becomes a trace; spans measure database, LLM and tool time.
 
-O código das rotas é dividido em ~34 routers (`main.py` os registra). A configuração central
-vem de variáveis de ambiente via `pydantic-settings` (ver [configuration.md](configuration.md)).
+The route code is split into ~34 routers (`main.py` registers them). Central configuration
+comes from environment variables via `pydantic-settings` (see [configuration.md](configuration.md)).
 
 ### Frontend (`apps/web`)
 
-Next.js 14 (App Router) + React 18 + Tailwind. É uma **imagem buildada** (`next start`), não
-dev server — mudanças na UI exigem `docker compose build web`. A URL da API é derivada do host
-da página por padrão (`window.location:8000`), então o mesmo build funciona por localhost, IP
-da LAN e VPS sem rebuild. É também um **PWA** com layout responsivo para mobile.
+Next.js 14 (App Router) + React 18 + Tailwind. It's a **built image** (`next start`), not a dev
+server — UI changes require `docker compose build web`. The API URL is derived from the page
+host by default (`window.location:8000`), so the same build works over localhost, LAN IP and
+VPS without a rebuild. It's also a **PWA** with a responsive mobile layout.
 
 ### Desktop (`desktop`)
 
-Shell Tauri (Rust) que carrega a **mesma interface web** numa janela nativa, acrescentando
-bandeja, "rodar em segundo plano" e "iniciar com o Windows". Ver [desktop.md](desktop.md).
+A Tauri (Rust) shell that loads the **same web interface** in a native window, adding a tray
+icon, "run in the background" and "start with Windows". See [desktop.md](desktop.md).
 
-### Banco de dados
+### Database
 
-Um único **Postgres 16 + pgvector** guarda tudo: dados relacionais (usuários, chats,
-mensagens, modelos, automações…), os **vetores do mem0** e os **embeddings do RAG**. O schema
-evolui por **55 migrações Alembic**, aplicadas automaticamente no startup do servidor.
+A single **Postgres 16 + pgvector** holds everything: relational data (users, chats, messages,
+models, automations…), the **mem0 vectors** and the **RAG embeddings**. The schema evolves
+through **55 Alembic migrations**, applied automatically on server startup.
 
-## Ciclo de vida de um turno de chat
+## Lifecycle of a chat turn
 
 ```mermaid
 sequenceDiagram
-    participant U as Usuário
-    participant S as Server (orquestrador)
+    participant U as User
+    participant S as Server (orchestrator)
     participant M as mem0 / RAG
     participant L as LLM (OpenRouter)
-    participant T as Ferramentas (SIFT)
+    participant T as Tools (SIFT)
 
-    U->>S: mensagem
-    S->>M: recupera memória + trechos de conhecimento
-    S->>S: monta system prompt + anuncia ferramentas
-    loop até resposta final (máx. N iterações)
-        S->>L: histórico + contexto + ferramentas (stream)
-        L-->>S: tokens / chamada de ferramenta
-        alt chamou uma ferramenta
-            S->>T: executa (sandbox / integração)
-            T-->>S: resultado
+    U->>S: message
+    S->>M: retrieve memory + knowledge snippets
+    S->>S: build system prompt + announce tools
+    loop until final answer (max N iterations)
+        S->>L: history + context + tools (stream)
+        L-->>S: tokens / tool call
+        alt called a tool
+            S->>T: execute (sandbox / integration)
+            T-->>S: result
         end
     end
-    S->>S: guardas de saída inspecionam a resposta
-    S-->>U: stream de tokens + artefatos
-    S->>M: grava novas memórias (em background)
+    S->>S: output guards inspect the answer
+    S-->>U: token stream + artifacts
+    S->>M: write new memories (in the background)
 ```
 
-Detalhes de custo/uso (tokens, origem de cada parte do prompt) são registrados por resposta no
-ledger de uso e visíveis na **Analítica**; a latência de cada etapa aparece na
-**Observabilidade**.
+Cost/usage details (tokens, the origin of each part of the prompt) are recorded per response in
+the usage ledger and visible in **Analytics**; the latency of each step appears in
+**Observability**.
 
-## Serviços opcionais (profiles)
+## Optional services (profiles)
 
-Recursos pesados ficam em serviços separados que só sobem sob demanda:
+Heavy features live in separate services that only come up on demand:
 
-| Profile    | Serviço      | Papel                                                   |
+| Profile    | Service      | Role                                                    |
 |------------|--------------|---------------------------------------------------------|
-| `search`   | SearXNG      | Metabuscador self-hosted para a pesquisa na web         |
-| `voice`    | Kokoro       | TTS/STT local compatível com OpenAI                     |
-| `whatsapp` | Evolution    | WhatsApp não oficial (QR Code)                          |
-| `browser`  | browserless  | Chromium headless controlado pela IA (tool de navegação)|
+| `search`   | SearXNG      | Self-hosted metasearch for web search                   |
+| `voice`    | Kokoro       | Local OpenAI-compatible TTS/STT                         |
+| `whatsapp` | Evolution    | Unofficial WhatsApp (QR Code)                           |
+| `browser`  | browserless  | AI-controlled headless Chromium (browsing tool)         |
 
-## Volumes persistidos
+## Persisted volumes
 
-| Volume                 | Conteúdo                                              |
+| Volume                 | Contents                                             |
 |------------------------|------------------------------------------------------|
-| `pgdata`               | Dados do Postgres (inclui vetores e embeddings)      |
-| `mlcache`              | Modelos de embedding (FastEmbed/HF) + índices SIFT   |
-| `codespace_data`       | Cópias de trabalho dos projetos do Codespace + grafo |
-| `evolution_instances`  | Sessões do Evolution (WhatsApp)                       |
+| `pgdata`               | Postgres data (includes vectors and embeddings)     |
+| `mlcache`              | Embedding models (FastEmbed/HF) + SIFT indexes       |
+| `codespace_data`       | Working copies of Codespace projects + graph         |
+| `evolution_instances`  | Evolution sessions (WhatsApp)                         |
+</content>

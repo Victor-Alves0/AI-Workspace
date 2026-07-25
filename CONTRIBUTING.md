@@ -1,52 +1,53 @@
-# Contribuindo com o AI Workspace
+# Contributing to AI Workspace
 
-Obrigado pelo interesse! Este guia cobre o básico para propor mudanças.
+Thanks for your interest! This guide covers the basics for proposing changes.
 
-> **Nota de licença:** este repositório ainda **não** define uma licença (ver
-> [README](README.md#licença)). Enquanto isso não for resolvido, o uso e a redistribuição por
-> terceiros não estão formalmente autorizados. Se você pretende contribuir de fora, abra uma
-> issue antes para alinhar.
+> **License note:** this repository does **not** yet define a license (see
+> [README](README.md#license)). Until that is resolved, use and redistribution by third parties
+> are not formally authorized. If you plan to contribute from outside, open an issue first to
+> align.
 
-## Antes de começar
+## Before you start
 
-1. Leia o [docs/development.md](docs/development.md) para subir o projeto localmente.
-2. Para mudanças não triviais, **abra uma issue** descrevendo o problema/proposta antes de
-   escrever muito código.
+1. Read [docs/development.md](docs/development.md) to bring the project up locally.
+2. For non-trivial changes, **open an issue** describing the problem/proposal before writing a
+   lot of code.
 
-## Fluxo de trabalho
+## Workflow
 
-1. Crie uma branch a partir da `main`.
-2. Faça a mudança com testes quando fizer sentido.
-3. Rode a suíte e o type-check:
+1. Create a branch off `main`.
+2. Make the change with tests when it makes sense.
+3. Run the suite and the type-check:
    ```bash
    cd apps/server && pytest -q
-   cd ../web && npm run build     # type-check do frontend
+   cd ../web && npm run build     # frontend type-check
    ```
-4. Abra um Pull Request descrevendo **o quê** e **por quê**.
+4. Open a Pull Request describing **what** and **why**.
 
-## Padrões de código
+## Code standards
 
-- **Backend:** Python ≥ 3.11, FastAPI assíncrono, SQLAlchemy 2. Mudou um modelo? Gere a
-  migração Alembic (`alembic revision --autogenerate -m "..."`).
-- **Frontend:** Next.js (App Router) + TypeScript + Tailwind. O `next build` valida os tipos.
-- **Descrições de ferramentas** (texto que o modelo lê): em **inglês**, direto — o que faz +
-  quando usar, sem detalhe de implementação.
-- **UI limpa:** evite parágrafos explicativos sob headings; use um ícone "i" com tooltip.
-- Escreva código que **combina com o redor** — mesma densidade de comentários, nomes e idioma.
+- **Backend:** Python ≥ 3.11, async FastAPI, SQLAlchemy 2. Changed a model? Generate the Alembic
+  migration (`alembic revision --autogenerate -m "..."`).
+- **Frontend:** Next.js (App Router) + TypeScript + Tailwind. `next build` validates the types.
+- **Tool descriptions** (text the model reads): in **English**, direct — what it does + when to
+  use it, no implementation detail.
+- **Clean UI:** avoid explanatory paragraphs under headings; use an "i" icon with a tooltip.
+- Write code that **matches its surroundings** — same comment density, naming and idiom.
 
-## Não faça
+## Don't
 
-- **Não** commite o `.env` nem qualquer segredo (já está no `.gitignore`).
-- **Não** edite fontes com ferramentas que corrompem UTF-8 (ex.: `Set-Content` do PowerShell).
-- **Não** rode migrações destrutivas sem backup.
+- **Don't** commit `.env` or any secret (it's already in `.gitignore`).
+- **Don't** edit sources with tools that corrupt UTF-8 (e.g. PowerShell's `Set-Content`).
+- **Don't** run destructive migrations without a backup.
 
 ## Commits
 
-- Mensagens claras, no imperativo, explicando a intenção.
-- Commit só depois de testado.
+- Clear messages, in the imperative, explaining the intent.
+- Commit only after it's tested.
 
-## Reportar bugs e vulnerabilidades
+## Reporting bugs and vulnerabilities
 
-- **Bugs:** abra uma issue com passos de reprodução, comportamento esperado vs. obtido e
-  ambiente (SO, versão).
-- **Vulnerabilidades de segurança:** **não** abra issue pública — siga o [SECURITY.md](SECURITY.md).
+- **Bugs:** open an issue with reproduction steps, expected vs. actual behavior and the
+  environment (OS, version).
+- **Security vulnerabilities:** do **not** open a public issue — follow [SECURITY.md](SECURITY.md).
+</content>

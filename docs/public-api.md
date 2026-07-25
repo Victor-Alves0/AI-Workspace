@@ -1,42 +1,41 @@
-# API pública
+# Public API
 
-O AI Workspace expõe uma API **compatível com OpenAI** em `/v1`. Um cliente ou SDK da OpenAI
-funciona trocando apenas o `base_url` e a chave — sem adaptador.
+AI Workspace exposes an **OpenAI-compatible** API at `/v1`. An OpenAI client or SDK works by
+changing only the `base_url` and the key — no adapter.
 
-## Autenticação
+## Authentication
 
-Toda chamada usa um **Bearer token** no formato `aw-<prefixo>-<segredo>`:
+Every call uses a **Bearer token** in the form `aw-<prefix>-<secret>`:
 
 ```
 Authorization: Bearer aw-xxxxxxxxxxxx-xxxxxxxx...
 ```
 
-Clientes que não deixam customizar o header aceitam também `X-API-Key`. O segredo tem 256 bits
-de entropia e é mostrado **uma única vez** na criação; o banco guarda apenas o SHA-256.
+Clients that don't allow customizing the header also accept `X-API-Key`. The secret has 256 bits
+of entropy and is shown **only once** at creation; the database stores only the SHA-256.
 
-Crie e gerencie chaves em **Espaço de Trabalho → API** (ou nas Configurações). Cada chave tem:
+Create and manage keys under **Workspace → API** (or in Settings). Each key has:
 
-- **Nome** e estado (ativa / desativada / revogada / expirada), com **revogação instantânea** e
-  **regeneração**.
-- **Permissões (scopes):** `chat`, `models:read`, `memory:read`, `memory:write`, `files:read`,
+- **Name** and state (active / disabled / revoked / expired), with **instant revocation** and
+  **regeneration**.
+- **Permissions (scopes):** `chat`, `models:read`, `memory:read`, `memory:write`, `files:read`,
   `files:write`, `usage:read`.
-- **Limites:** requisições por minuto (RPM), por dia (RPD), mensais, tokens de entrada/saída,
-  **concorrência** e **orçamento (US$)** com bloqueio automático.
-- **Política de modelos:** liberar todos ou só uma lista (impede acesso a versões futuras).
-- **Modo de memória** por chave (ver abaixo), **allowlist de IP** (CIDR) e **webhooks** de
-  eventos.
+- **Limits:** requests per minute (RPM), per day (RPD), monthly, input/output tokens,
+  **concurrency** and **budget (US$)** with automatic blocking.
+- **Model policy:** allow all or only a list (prevents access to future versions).
+- **Memory mode** per key (see below), **IP allowlist** (CIDR) and event **webhooks**.
 
 ## Endpoints
 
 ### Chat Completions
 
-`POST /v1/chat/completions` — compatível com OpenAI. Suporta:
+`POST /v1/chat/completions` — OpenAI-compatible. Supports:
 
-- **Streaming** (`"stream": true`), **síncrono** e **assíncrono** (`"background": true`).
-- **Modo plataforma** (padrão): reutiliza o orquestrador do app — ferramentas do servidor,
-  memória, conhecimento e o preset do modelo. Metadados extras vão num campo `aiworkspace`.
-- **Modo passthrough**: se o cliente enviar `tools` (function calling clássico), a chamada é
-  encaminhada ao provedor sem interferência.
+- **Streaming** (`"stream": true`), **synchronous** and **asynchronous** (`"background": true`).
+- **Platform mode** (default): reuses the app's orchestrator — server tools, memory, knowledge
+  and the model's preset. Extra metadata goes in an `aiworkspace` field.
+- **Passthrough mode**: if the client sends `tools` (classic function calling), the call is
+  forwarded to the provider untouched.
 
 ```bash
 curl http://localhost:8000/v1/chat/completions \
@@ -44,12 +43,12 @@ curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "openai/gpt-4o-mini",
-    "messages": [{"role": "user", "content": "Olá!"}],
+    "messages": [{"role": "user", "content": "Hello!"}],
     "stream": true
   }'
 ```
 
-Com o SDK da OpenAI:
+With the OpenAI SDK:
 
 ```python
 from openai import OpenAI
@@ -57,41 +56,41 @@ from openai import OpenAI
 client = OpenAI(base_url="http://localhost:8000/v1", api_key="aw-...")
 resp = client.chat.completions.create(
     model="openai/gpt-4o-mini",
-    messages=[{"role": "user", "content": "Olá!"}],
+    messages=[{"role": "user", "content": "Hello!"}],
 )
 print(resp.choices[0].message.content)
 ```
 
-### Modelos
+### Models
 
-- `GET /v1/models` — lista os modelos disponíveis para a chave.
-- `GET /v1/models/{id}` — detalhes de um modelo.
+- `GET /v1/models` — lists the models available to the key.
+- `GET /v1/models/{id}` — details of a model.
 
-### Memória, arquivos, uso e conta
+### Memory, files, usage and account
 
-- `GET/POST/DELETE /v1/memories` — CRUD + limpar/exportar/importar (respeitando o isolamento do
-  modo de memória da chave). Requer scope `memory:*`.
-- `GET/POST /v1/files` — documentos da Base de Conhecimento. Requer scope `files:*`.
-- `GET /v1/usage` — consumo da chave (requisições, tokens, custo). Requer `usage:read`.
-- `GET /v1/account` — informações da conta/limites.
+- `GET/POST/DELETE /v1/memories` — CRUD + clear/export/import (respecting the key's memory-mode
+  isolation). Requires the `memory:*` scope.
+- `GET/POST /v1/files` — Knowledge Base documents. Requires the `files:*` scope.
+- `GET /v1/usage` — key consumption (requests, tokens, cost). Requires `usage:read`.
+- `GET /v1/account` — account/limit information.
 
-## Modos de memória (por chave)
+## Memory modes (per key)
 
-O comportamento de memória é definido **na chave**, o que é essencial para quem revende a API:
+Memory behavior is set **on the key**, which is essential for anyone reselling the API:
 
-| Modo        | Comportamento |
-|-------------|---------------|
-| `none`      | Sem memória. |
-| `request`   | Só o contexto da própria requisição. |
-| `persistent`| Compartilha a memória do app (do usuário dono da chave). |
-| `shared`    | Igual a `persistent`, explicitando que várias chaves veem o mesmo. |
-| `key`       | Isolada por chave (`apikey:<id>`). |
-| `end_user`  | Isolada por **usuário final** (`enduser:<key>:<id>`) — o modo certo para revenda. |
+| Mode        | Behavior |
+|-------------|----------|
+| `none`      | No memory. |
+| `request`   | Only the request's own context. |
+| `persistent`| Shares the app's memory (of the key owner). |
+| `shared`    | Same as `persistent`, making explicit that several keys see the same. |
+| `key`       | Isolated per key (`apikey:<id>`). |
+| `end_user`  | Isolated per **end user** (`enduser:<key>:<id>`) — the right mode for reselling. |
 
-## Limites e erros
+## Limits and errors
 
-Erros seguem o formato da OpenAI (`{"error": {message, type, code}}`). Quando um limite é
-atingido, a resposta traz o código apropriado e, quando aplicável, o header `Retry-After`:
+Errors follow the OpenAI format (`{"error": {message, type, code}}`). When a limit is hit, the
+response carries the appropriate code and, where applicable, the `Retry-After` header:
 
 - `rate_limit_exceeded` / `concurrency_limit` → HTTP 429
 - `daily_quota_exceeded` / `monthly_quota_exceeded` / `*_token_quota_exceeded` → HTTP 429
@@ -101,11 +100,12 @@ atingido, a resposta traz o código apropriado e, quando aplicável, o header `R
 
 ## Webhooks
 
-Uma chave pode declarar uma URL de webhook (assinada com HMAC-SHA256) para receber eventos como
-`limit.reached` e `request.error`, úteis para observar consumo do lado do integrador.
+A key can declare a webhook URL (signed with HMAC-SHA256) to receive events such as
+`limit.reached` and `request.error`, useful for observing consumption on the integrator's side.
 
 ## Dashboard
 
-O painel em **Espaço de Trabalho → API** lista as chaves, permite criar/revogar, mostra
-monitoramento em tempo real, uso e custo por modelo, erros recentes, e traz a documentação e um
-playground integrados.
+The panel under **Workspace → API** lists the keys, allows create/revoke, shows real-time
+monitoring, usage and cost per model, recent errors, and includes the documentation and an
+integrated playground.
+</content>

@@ -1,119 +1,119 @@
-# Recursos
+# Features
 
-Catálogo completo do AI Workspace, agrupado por área. A maioria dos recursos é configurável
-**por modelo** e/ou **por usuário** na interface.
+Full catalog of AI Workspace, grouped by area. Most features are configurable **per model**
+and/or **per user** in the interface.
 
-## Chat e modelos
+## Chat and models
 
-- **Chat multi-modelo** via OpenRouter (qualquer modelo compatível com OpenAI) e **modelos
-  locais via Ollama** (configuráveis em Conexões).
-- **Streaming retomável**: a geração roda desacoplada da request — F5, trocar de chat ou fechar
-  o navegador não cancela; o stream é retomável. Botão de **parar** salva o parcial.
-- **Modelos personalizados**: crie "GPTs" próprios com system prompt, parâmetros, ferramentas,
-  capacidades, filtros, voz, memória e sub-agentes — tudo por modelo. Slug editável.
-- **Mesa-redonda**: vários modelos conversando entre si, com você guiando/pausando. Políticas
-  round-robin, manual ou moderador (LLM); persona por participante.
-- **Sub-agentes**: um orquestrador delega a modelos-operário (sequencial ou paralelo), com
-  limites de profundidade/loop/chamadas e permissão por modelo. Menção `@` roteia o turno.
-- **Chats de referência**: anexe outras conversas como contexto de um turno.
-- **Compactação não-destrutiva**: mensagens saem do contexto mas continuam visíveis (com
-  resumo); apagar o nó ativo "descompacta".
-- **Chat temporário** (não salvo) e **compartilhamento** por link público (com senha/validade
-  opcionais).
+- **Multi-model chat** via OpenRouter (any OpenAI-compatible model) and **local models via
+  Ollama** (configurable under Connections).
+- **Resumable streaming**: generation runs decoupled from the request — F5, switching chats or
+  closing the browser doesn't cancel it; the stream is resumable. The **stop** button saves the
+  partial.
+- **Custom models**: build your own "GPTs" with a system prompt, parameters, tools,
+  capabilities, filters, voice, memory and sub-agents — all per model. Editable slug.
+- **Round table**: several models talking to each other, with you steering/pausing.
+  Round-robin, manual or moderator (LLM) policies; a persona per participant.
+- **Sub-agents**: an orchestrator delegates to worker models (sequential or parallel), with
+  depth/loop/call limits and per-model permission. An `@` mention routes the turn.
+- **Reference chats**: attach other conversations as context for a turn.
+- **Non-destructive compaction**: messages leave the context but stay visible (with a summary);
+  deleting the active node "uncompacts".
+- **Temporary chat** (not saved) and **sharing** via public link (with optional
+  password/expiry).
 
-## Ferramentas (SIFT)
+## Tools (SIFT)
 
-A IA descobre e executa ferramentas sob demanda. Categorias: **nativas**, do **Codespace** e de
-**integrações**.
+The AI discovers and executes tools on demand. Categories: **native**, **Codespace** and
+**integration**.
 
-- **Pesquisa na web** (DuckDuckGo, SearXNG, Tavily ou Brave) e **pesquisa profunda**
-  (multi-passo, com síntese).
-- **Leitura de página** e **navegador headless**: a IA controla um Chromium real (navegar,
-  clicar, digitar, screenshot) numa aba que persiste por conversa. Com guarda anti-SSRF.
-- **Gráficos** (renderizados como imagem para os canais), **diagramas** (Mermaid/Excalidraw),
-  **cotações financeiras**, **data/hora em tempo real**.
-- **Transcrição de vídeo/áudio**: pega o conteúdo falado de um link (YouTube + ~1800 sites) via
-  legendas ou STT, com cookies rotativos anti-bloqueio.
-- **Geração de imagens**: nativa (modelo com modalidade de imagem) ou via **roteador** que
-  delega a um modelo de imagem; também **vídeo** (Higgsfield).
-- **Código Python**: a IA escreve e executa código num **sandbox isolado** (subprocesso com
-  limites de CPU/memória/tempo).
-- **Agência de mensagens**: a IA age nas suas conexões de WhatsApp/Telegram/Discord
-  (listar/ler/enviar).
+- **Web search** (DuckDuckGo, SearXNG, Tavily or Brave) and **deep search** (multi-step, with
+  synthesis).
+- **Page reading** and **headless browser**: the AI controls a real Chromium (navigate, click,
+  type, screenshot) in a tab that persists per conversation. With an anti-SSRF guard.
+- **Charts** (rendered as images for the channels), **diagrams** (Mermaid/Excalidraw),
+  **financial quotes**, **real-time date/time**.
+- **Video/audio transcription**: pulls the spoken content of a link (YouTube + ~1800 sites) via
+  captions or STT, with rotating anti-blocking cookies.
+- **Image generation**: native (a model with an image modality) or via a **router** that
+  delegates to an image model; also **video** (Higgsfield).
+- **Python code**: the AI writes and executes code in an **isolated sandbox** (a subprocess with
+  CPU/memory/time limits).
+- **Messaging agency**: the AI acts on your WhatsApp/Telegram/Discord connections
+  (list/read/send).
 
-Ferramentas ficam em **Espaço de Trabalho → Ferramentas** e são acopláveis por modelo.
+Tools live under **Workspace → Tools** and are attachable per model.
 
-## Memória e conhecimento
+## Memory and knowledge
 
-- **Memória (mem0)** com escopos **global / por modelo / por chat** e **bancos de memória
-  compartilháveis** entre modelos. Leitura por união dos escopos; escrita por escopo; revisão
-  opcional antes de salvar. Controlável em Espaço → Memória, por chat e por modelo.
-- **Base de Conhecimento (RAG)**: suba documentos → indexados em pgvector (FastEmbed, 384 dim) →
-  acoplados por modelo/chat. Modo **automático** (injeta trechos + cita) ou **ferramenta**
-  (`search_knowledge`). Imagens indexadas por nome/tags e exibidas no chat.
-- **Second brain**: cérebros de notas **interligadas** (`[[wikilinks]]`) com grafo estilo
-  Obsidian; a IA pode ler/escrever e **propor skills** (com aprovação).
-- **Aprendizado proativo (Curator)**: em background, a IA revisa conversas e sugere skills e
-  memórias — sempre com sua aprovação. Opt-in.
-- **Biblioteca de skills e prompts**: importe uma skill de um link (`SKILL.md` do GitHub) ou
-  crie prompts reutilizáveis, sempre via card de aprovação.
+- **Memory (mem0)** with **global / per model / per chat** scopes and **shareable memory
+  stores** across models. Reads union the scopes; writes go per scope; optional review before
+  saving. Controllable under Workspace → Memory, per chat and per model.
+- **Knowledge Base (RAG)**: upload documents → indexed in pgvector (FastEmbed, 384 dim) →
+  attached per model/chat. **Automatic** mode (injects snippets + cites) or **tool** mode
+  (`search_knowledge`). Images indexed by name/tags and shown in the chat.
+- **Second brain**: brains of **interlinked** notes (`[[wikilinks]]`) with an Obsidian-style
+  graph; the AI can read/write and **propose skills** (with approval).
+- **Proactive learning (Curator)**: in the background, the AI reviews conversations and suggests
+  skills and memories — always with your approval. Opt-in.
+- **Skill and prompt library**: import a skill from a link (`SKILL.md` from GitHub) or create
+  reusable prompts, always through an approval card.
 
-## Automação e canais
+## Automation and channels
 
-- **Automações agendadas** e **monitores** (preço, página, busca, RSS) que disparam a IA e te
-  avisam. Histórico de execuções. Ferramenta `Monitor` disponível no chat.
-- **Notificações**: in-app, **Web Push** no navegador (VAPID) e entrega nos canais.
-- **Canais de mensagem** — converse com seus modelos por fora do app; cada conversa vira um chat
-  na barra lateral:
-  - **WhatsApp**: não oficial via **Evolution API** (QR Code) ou **Cloud API oficial** da Meta.
-  - **Telegram**: bot por long-polling.
-  - **Discord**: canal via Gateway (WebSocket).
-  - Filtros, memória e **janela de contexto** por conexão; agregação de mensagens fragmentadas
-    (debounce); saída visual (gráfico vira PNG, markdown sanitizado).
+- **Scheduled automations** and **monitors** (price, page, search, RSS) that trigger the AI and
+  notify you. Run history. A `Monitor` tool is available in the chat.
+- **Notifications**: in-app, **Web Push** in the browser (VAPID) and delivery through the channels.
+- **Messaging channels** — talk to your models outside the app; each conversation becomes a chat
+  in the sidebar:
+  - **WhatsApp**: unofficial via **Evolution API** (QR Code) or Meta's **official Cloud API**.
+  - **Telegram**: a long-polling bot.
+  - **Discord**: a channel via the Gateway (WebSocket).
+  - Per-connection filters, memory and **context window**; batching of fragmented messages
+    (debounce); visual output (a chart becomes a PNG, markdown sanitized).
 
-## Plataforma
+## Platform
 
-- **API pública** compatível com OpenAI (`/v1/chat/completions`, `/v1/models`) com streaming,
-  modo síncrono e assíncrono. Ver [public-api.md](public-api.md).
-- **Gestão de chaves de API**: crie várias, nomeie, revogue/regenere, expiração, permissões,
-  **limites** (RPM/RPD/mensal/tokens/concorrência), **orçamento** com bloqueio, **política de
-  modelos**, **modos de memória** por chave, allowlist de IP e webhooks.
-- **Observabilidade**: cada requisição vira um _trace_ com spans (tempo de banco,
-  leituras/escritas, chamadas de LLM, ferramentas). Painel admin com waterfall, percentis
-  (p50/p95/p99) e séries por rota.
-- **Analítica de uso**: tokens, custo e requisições por modelo e por origem; ledger que
-  sobrevive à exclusão de chats.
-- **Codespace**: clone um repositório (git/SSH/local), navegue no **grafo de código**
-  (estilo Obsidian), edite arquivos, mantenha chats e um banco de memória **por projeto**, e
-  arraste arquivos/trechos para o chat.
-- **Playground**: **benchmarks** (com juiz + regra), **comparações** lado a lado e **debug de
-  ferramentas**.
+- **OpenAI-compatible public API** (`/v1/chat/completions`, `/v1/models`) with streaming,
+  synchronous and asynchronous modes. See [public-api.md](public-api.md).
+- **API key management**: create several, name them, revoke/regenerate, expiry, permissions,
+  **limits** (RPM/RPD/monthly/tokens/concurrency), **budget** with blocking, **model policy**,
+  per-key **memory modes**, IP allowlist and webhooks.
+- **Observability**: each request becomes a _trace_ with spans (database time, reads/writes, LLM
+  calls, tools). Admin panel with waterfall, percentiles (p50/p95/p99) and per-route series.
+- **Usage analytics**: tokens, cost and requests per model and per origin; a ledger that
+  survives chat deletion.
+- **Codespace**: clone a repository (git/SSH/local), browse the **code graph**
+  (Obsidian-style), edit files, keep chats and a **per-project** memory store, and drag
+  files/snippets into the chat.
+- **Playground**: **benchmarks** (with judge + rubric), side-by-side **comparisons** and **tool
+  debugging**.
 
-## Voz e mídia
+## Voice and media
 
-- **Voz (TTS/STT)** por endpoint compatível com OpenAI, incluindo **Kokoro** local (opt-in) e
-  **clonagem de voz**. Voz por modelo (com mistura). Entrada por voz nos canais (áudio → texto).
-- **Artefatos** (estilo Claude): código, documentos, HTML, SVG, Mermaid, CSV numa **janela
-  dedicada**, com preview/código, **histórico de versões** e edição.
+- **Voice (TTS/STT)** via an OpenAI-compatible endpoint, including local **Kokoro** (opt-in) and
+  **voice cloning**. Per-model voice (with blending). Voice input on the channels (audio → text).
+- **Artifacts** (Claude-style): code, documents, HTML, SVG, Mermaid, CSV in a **dedicated
+  window**, with preview/code, **version history** and editing.
 
-## Integrações
+## Integrations
 
-- **Google Workspace**: Gmail + Agenda via OAuth (2 ferramentas, multi-conta, ativação por
-  operação).
-- **Tuya / Smart Life**: casa inteligente via HMAC (descoberta automática de dispositivos,
-  gating por modelo).
-- **GitHub**: leitura e escrita (com confirmação), via PAT ou OAuth.
-- **Assinaturas**: use ChatGPT/Codex por login (OAuth), quando aplicável.
+- **Google Workspace**: Gmail + Calendar via OAuth (2 tools, multi-account, per-operation
+  activation).
+- **Tuya / Smart Life**: smart home via HMAC (automatic device discovery, per-model gating).
+- **GitHub**: read and write (with confirmation), via PAT or OAuth.
+- **Subscriptions**: use ChatGPT/Codex by login (OAuth), where applicable.
 
-## Interface e experiência
+## Interface and experience
 
-- **PWA / mobile**: layout responsivo, instalável, com safe-areas e navegação drill-down.
-- **App desktop (Windows)**: janela nativa, bandeja, "rodar em segundo plano" e "iniciar com o
-  Windows". Ver [desktop.md](desktop.md).
-- **Paleta de comandos** (Ctrl/⌘+K): lançador único de ações, configurações, modelos e chats,
-  com busca difusa.
-- **Atalhos de teclado** personalizáveis; **onboarding** de primeiro uso; painel de **Status**;
-  **orçamento pessoal** (aviso/pausa) opt-in.
-- **Composer**: colar/arrastar imagens, anexar documentos (`#`), skills (`$`), agentes (`@`).
-- **Segurança do usuário**: 2FA (TOTP), logs de auditoria, pedir confirmação antes de ações
-  sensíveis (opt-in).
+- **PWA / mobile**: responsive layout, installable, with safe-areas and drill-down navigation.
+- **Desktop app (Windows)**: native window, tray, "run in the background" and "start with
+  Windows". See [desktop.md](desktop.md).
+- **Command palette** (Ctrl/⌘+K): a single launcher for actions, settings, models and chats,
+  with fuzzy search.
+- **Customizable keyboard shortcuts**; first-run **onboarding**; a **Status** panel; opt-in
+  **personal budget** (warn/pause).
+- **Composer**: paste/drag images, attach documents (`#`), skills (`$`), agents (`@`).
+- **User security**: 2FA (TOTP), audit logs, ask for confirmation before sensitive actions
+  (opt-in).
+</content>

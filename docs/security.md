@@ -1,69 +1,70 @@
-# Segurança
+# Security
 
-O AI Workspace guarda segredos sensíveis (chaves de API, tokens de OAuth/bot) e pode executar
-código gerado por modelos. Esta página descreve o modelo de segurança e as recomendações de
-operação.
+AI Workspace stores sensitive secrets (API keys, OAuth/bot tokens) and can execute
+model-generated code. This page describes the security model and the operational recommendations.
 
-## Autenticação e sessão
+## Authentication and session
 
-- **Senhas** com **Argon2** (não SHA/bcrypt simples).
-- **Sessão** via **JWT em cookie httpOnly** — access token curto (~30 min) + refresh token
-  rotativo (dias). O front renova sozinho no `401`.
-- **Revogação global** por `token_version`: um bump invalida todas as sessões do usuário.
-- **2FA (TOTP)** opcional, com QR e desafio no login.
-- **RBAC** admin/user. O primeiro usuário cadastrado vira admin; feche o cadastro com
+- **Passwords** with **Argon2** (not plain SHA/bcrypt).
+- **Session** via **JWT in an httpOnly cookie** — a short access token (~30 min) + a rotating
+  refresh token (days). The frontend renews on its own on a `401`.
+- **Global revocation** via `token_version`: a bump invalidates all of a user's sessions.
+- Optional **2FA (TOTP)**, with a QR and a login challenge.
+- **RBAC** admin/user. The first user to register becomes admin; close registration with
   `ENABLE_SIGNUP=false`.
 
-## Segredos em repouso
+## Secrets at rest
 
-- Segredos **por usuário** são cifrados com **Fernet**, com a chave **derivada do `APP_SECRET`**
-  — nunca são gravados em claro no banco.
-- `APP_SECRET` **não** dá acesso ao banco (isso é a senha do Postgres); ele cifra os **valores**.
-- Há uma ferramenta de **rotação** que re-cifra o banco inteiro ao trocar o `APP_SECRET`, sem
-  perder os segredos (ver [deployment.md](deployment.md#rota%C3%A7%C3%A3o-do-app_secret)).
-- O `.env` (que tem `APP_SECRET` e a senha do Postgres) **nunca** deve ser versionado — já está
-  no `.gitignore`.
+- **Per-user** secrets are encrypted with **Fernet**, with a key **derived from `APP_SECRET`** —
+  they are never written in plaintext to the database.
+- `APP_SECRET` does **not** grant database access (that's the Postgres password); it encrypts the
+  **values**.
+- There's a **rotation** tool that re-encrypts the entire database when you change `APP_SECRET`,
+  without losing the secrets (see [deployment.md](deployment.md#rotating-the-app_secret)).
+- `.env` (which holds `APP_SECRET` and the Postgres password) must **never** be committed — it's
+  already in `.gitignore`.
 
-## Rede e transporte
+## Network and transport
 
-- **CORS** restrito às origens de `WEB_ORIGIN`. Em `APP_ENV=production`, **só** as origens
-  exatas são aceitas (sem liberar a LAN automaticamente).
-- **Cabeçalhos de segurança** em todas as respostas (`X-Content-Type-Options`,
-  `X-Frame-Options`, `Referrer-Policy`) e **HSTS** sob HTTPS.
-- **Allowlist de IP** opcional no nível do servidor.
-- Atrás de proxy reverso confiável, ligue `TRUST_PROXY=true` para o rate-limit usar o IP real.
-- O Postgres **não** é publicado no host por padrão — a app o acessa pela rede interna do Compose.
+- **CORS** restricted to the origins in `WEB_ORIGIN`. Under `APP_ENV=production`, **only** the
+  exact origins are accepted (the LAN is not opened automatically).
+- **Security headers** on every response (`X-Content-Type-Options`, `X-Frame-Options`,
+  `Referrer-Policy`) and **HSTS** under HTTPS.
+- Optional **IP allowlist** at the server level.
+- Behind a trusted reverse proxy, enable `TRUST_PROXY=true` so rate-limiting uses the real IP.
+- Postgres is **not** published on the host by default — the app reaches it over the internal
+  Compose network.
 
 ## Rate limiting
 
-- **Login/registro**: `LOGIN_MAX_ATTEMPTS` por `LOGIN_WINDOW_SECONDS`.
-- **API pública**: por chave — RPM, RPD, mensal, tokens, concorrência e orçamento (ver
+- **Login/registration**: `LOGIN_MAX_ATTEMPTS` per `LOGIN_WINDOW_SECONDS`.
+- **Public API**: per key — RPM, RPD, monthly, tokens, concurrency and budget (see
   [public-api.md](public-api.md)).
 
-## Execução de ferramentas (sandbox)
+## Tool execution (sandbox)
 
-A IA pode escrever e executar **código Python** (o vetor de maior risco — RCE por design).
-Mitigações:
+The AI can write and execute **Python code** (the highest-risk vector — RCE by design).
+Mitigations:
 
-- O código roda num **subprocesso isolado** (`python -I`), **não** no processo do servidor.
-- Limites de **CPU**, **memória** e **tempo de parede** (`TOOL_*`, `SIFT_CODE_TIMEOUT_SECONDS`).
-- **Guarda anti-SSRF** nas ferramentas de navegação/leitura de página (bloqueia IPs internos,
-  sem `file://`).
+- Code runs in an **isolated subprocess** (`python -I`), **not** in the server process.
+- **CPU**, **memory** and **wall-clock** limits (`TOOL_*`, `SIFT_CODE_TIMEOUT_SECONDS`).
+- **Anti-SSRF guard** on the browsing/page-reading tools (blocks internal IPs, no `file://`).
 
-> ⚠️ O sandbox limita CPU/memória/tempo, mas **não** isola a rede nem o `/proc`. Em um deploy
-> **multiusuário não confiável**, avalie desligar `ALLOW_CODE_MODE`, ou endurecer o sandbox
-> (rede desligada, `hidepid`, nsjail/gVisor) e entregar segredos por arquivo. Numa instalação
-> **single-user self-hosted** (o caso comum), o risco é o seu próprio código.
+> ⚠️ The sandbox limits CPU/memory/time, but does **not** isolate the network or `/proc`. In an
+> **untrusted multi-user** deployment, consider turning off `ALLOW_CODE_MODE`, or hardening the
+> sandbox (network off, `hidepid`, nsjail/gVisor) and delivering secrets by file. In a
+> **single-user self-hosted** install (the common case), the risk is your own code.
 
-## Endurecimento em produção
+## Production hardening
 
-- `APP_ENV=production` faz o servidor **recusar iniciar** com `APP_SECRET` fraco/curto.
-- HTTPS com proxy reverso + `TRUST_PROXY=true`.
-- `ENABLE_SIGNUP=false` após criar sua conta.
-- Backups regulares (ver [deployment.md](deployment.md#backup-e-restore)).
-- Observabilidade: `OBS_CAPTURE_CONTENT` fica **desligado** por padrão (não grava texto de
-  mensagens/prompts) — só ligue para depurar.
+- `APP_ENV=production` makes the server **refuse to start** with a weak/short `APP_SECRET`.
+- HTTPS with a reverse proxy + `TRUST_PROXY=true`.
+- `ENABLE_SIGNUP=false` after creating your account.
+- Regular backups (see [deployment.md](deployment.md#backup-and-restore)).
+- Observability: `OBS_CAPTURE_CONTENT` is **off** by default (it does not record message/prompt
+  text) — only enable it to debug.
 
-## Reportar uma vulnerabilidade
+## Reporting a vulnerability
 
-Veja [SECURITY.md](../SECURITY.md).
+See [SECURITY.md](../SECURITY.md).
+</content>

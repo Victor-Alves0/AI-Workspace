@@ -1,32 +1,33 @@
-# Política de Segurança
+# Security Policy
 
-## Reportar uma vulnerabilidade
+## Reporting a vulnerability
 
-Se você encontrou uma vulnerabilidade de segurança no AI Workspace, **não abra uma issue
-pública**. Em vez disso:
+If you've found a security vulnerability in AI Workspace, **do not open a public issue**.
+Instead:
 
-- Use o **[Report a vulnerability](https://github.com/Victor-Alves0/AI-Workspace/security/advisories/new)**
-  do GitHub (aba **Security → Advisories**) para um relato privado, **ou**
-- Entre em contato de forma privada com o mantenteor do repositório.
+- Use GitHub's **[Report a vulnerability](https://github.com/Victor-Alves0/AI-Workspace/security/advisories/new)**
+  (the **Security → Advisories** tab) for a private report, **or**
+- Contact the repository maintainer privately.
 
-Inclua, se possível:
+Include, if possible:
 
-- Uma descrição do problema e do impacto.
-- Passos para reproduzir (ou uma prova de conceito).
-- Versão/commit afetado e o ambiente.
+- A description of the issue and its impact.
+- Steps to reproduce (or a proof of concept).
+- The affected version/commit and the environment.
 
-Você receberá um retorno assim que o relato for avaliado. Por favor, dê um tempo razoável para
-correção antes de qualquer divulgação pública.
+You'll get a response once the report is triaged. Please allow a reasonable time for a fix before
+any public disclosure.
 
-## Escopo
+## Scope
 
-Este é um projeto **self-hosted**: quem o instala é responsável por proteger a própria
-infraestrutura (rede, backups, `APP_SECRET`, senha do Postgres, HTTPS). Recomendações de
-endurecimento estão em [docs/security.md](docs/security.md).
+This is a **self-hosted** project: whoever installs it is responsible for protecting their own
+infrastructure (network, backups, `APP_SECRET`, the Postgres password, HTTPS). Hardening
+recommendations are in [docs/security.md](docs/security.md).
 
-Pontos especialmente sensíveis a ter em mente:
+Points especially worth keeping in mind:
 
-- **`ALLOW_CODE_MODE`** executa código gerado pelo modelo num sandbox — leia as ressalvas em
-  [docs/security.md](docs/security.md#execução-de-ferramentas-sandbox) antes de expor a
-  usuários não confiáveis.
-- **Segredos** dependem do `APP_SECRET`; trate-o como material criptográfico.
+- **`ALLOW_CODE_MODE`** executes model-generated code in a sandbox — read the caveats in
+  [docs/security.md](docs/security.md#tool-execution-sandbox) before exposing it to untrusted
+  users.
+- **Secrets** depend on `APP_SECRET`; treat it as cryptographic material.
+</content>

@@ -1,66 +1,68 @@
-# App desktop (Windows)
+# Desktop app (Windows)
 
-Um aplicativo nativo que abre o AI Workspace numa janela própria, com **ícone na bandeja**,
-**"rodar em segundo plano"** e **"iniciar com o Windows"**. Construído com [Tauri](https://tauri.app/).
+A native app that opens AI Workspace in its own window, with a **tray icon**, **"run in the
+background"** and **"start with Windows"**. Built with [Tauri](https://tauri.app/).
 
-## O que ele acrescenta
+## What it adds
 
-A janela carrega a **mesma interface web** que você usa no navegador (por padrão
-`http://localhost:3000`), então o comportamento é idêntico — o que o shell adiciona é o que um
-navegador não dá:
+The window loads the **same web interface** you use in the browser (by default
+`http://localhost:3000`), so behavior is identical — what the shell adds is what a browser
+doesn't give you:
 
-| Recurso | Onde configurar |
+| Feature | Where to configure |
 |---|---|
-| Fechar esconde na bandeja (em vez de sair) | Configurações → Aplicativo, ou o menu da bandeja |
-| Iniciar com o Windows | idem |
-| Abrir minimizado ao iniciar com o Windows | idem |
-| Endereço do servidor (apontar para outra máquina) | idem |
+| Closing hides to the tray (instead of quitting) | Settings → App, or the tray menu |
+| Start with Windows | same |
+| Start minimized when launched with Windows | same |
+| Server address (point at another machine) | same |
 
-> **Por que carrega a UI web e não assets locais?** A sessão é um cookie `httpOnly` emitido pela
-> API; servir a interface de uma origem `tauri://` tornaria toda chamada cross-origin e o login
-> não colaria. Apontando para a origem real, o CORS e os cookies que já funcionam continuam
-> valendo.
+> **Why load the web UI and not local assets?** The session is an `httpOnly` cookie issued by
+> the API; serving the interface from a `tauri://` origin would make every call cross-origin and
+> login wouldn't stick. By pointing at the real origin, the CORS and cookies that already work
+> keep working.
 
-## Preferências são da máquina
+## Preferences are per-machine
 
-As opções ficam em `%APPDATA%\com.aiworkspace.app\desktop-settings.json` — **não** no perfil do
-usuário no banco. Guardá-las no servidor faria o celular exibir "iniciar com o Windows", e dois
-PCs com a mesma conta brigariam pelo valor. Por isso a categoria **Aplicativo** só aparece nas
-Configurações quando a UI roda dentro do app instalado.
+The options live in `%APPDATA%\com.aiworkspace.app\desktop-settings.json` — **not** in the
+user's profile in the database. Storing them on the server would make the phone show "start with
+Windows", and two PCs on the same account would fight over the value. That's why the **App**
+category only appears in Settings when the UI runs inside the installed app.
 
-## Instalar
+## Install
 
-O instalador é publicado em **[Releases](../../releases)** (compilado pelo CI, não versionado no
-repositório). Nesta versão o app **não embarca o servidor** — deixe o stack no ar
-(`docker compose up -d`) e abra o app.
+The installer is published on **[Releases](../../releases)** (built by CI, not versioned in the
+repository). In this version the app does **not** embed the server — keep the stack running
+(`docker compose up -d`) and open the app.
 
-## Compilar
+## Build
 
-O CI (`windows-latest`, workflow `.github/workflows/desktop.yml`) já tem tudo. Para compilar
-localmente você precisa de:
+CI (`windows-latest`, workflow `.github/workflows/desktop.yml`) already has everything. To build
+locally you need:
 
-- **Rust** (https://rustup.rs) e **Node 20+**
-- **Visual Studio Build Tools** com "Desktop development with C++" — o toolchain
-  `x86_64-pc-windows-msvc` precisa do `link.exe` e do Windows SDK (por isso o build oficial roda
-  no CI).
-- **WebView2 Runtime** — já vem no Windows 10/11 atualizado.
+- **Rust** (https://rustup.rs) and **Node 20+**
+- **Visual Studio Build Tools** with "Desktop development with C++" — the
+  `x86_64-pc-windows-msvc` toolchain needs `link.exe` and the Windows SDK (which is why the
+  official build runs on CI).
+- **WebView2 Runtime** — already included on an up-to-date Windows 10/11.
 
 ```bash
 cd desktop
 npm install
-npm run build     # instalador em src-tauri/target/release/bundle/nsis/
+npm run build     # installer in src-tauri/target/release/bundle/nsis/
 ```
 
-Publicar uma versão dispara o CI:
+Publishing a release triggers CI:
 
 ```bash
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-## Roadmap: backend embarcado
+## Roadmap: embedded backend
 
-Hoje o app precisa do stack no ar. O caminho para um instalador **autocontido** (sem Docker) já
-foi validado num spike: Postgres 16 binário + pgvector rodam embarcados no Windows e as 55
-migrações passam. Falta empacotar o backend Python e supervisioná-lo pelo shell.
+Today the app needs the stack running. The path to a **self-contained** installer (no Docker)
+has already been validated in a spike: a Postgres 16 binary + pgvector run embedded on Windows
+and the 55 migrations pass. What's left is packaging the Python backend and supervising it from
+the shell.
 
-Detalhes técnicos do shell estão em [`desktop/README.md`](../desktop/README.md).
+Technical details of the shell are in [`desktop/README.md`](../desktop/README.md).
+</content>

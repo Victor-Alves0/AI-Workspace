@@ -1,56 +1,56 @@
-# Deployment e operação
+# Deployment and operations
 
-Como colocar o AI Workspace no ar além do `localhost`: rede local, VPS, domínio com HTTPS,
-além de atualização, backup/restore e rotação de segredo.
+How to get AI Workspace running beyond `localhost`: local network, VPS, domain with HTTPS, plus
+updates, backup/restore and secret rotation.
 
-## Sumário
+## Table of contents
 
-- [Rede local / VPS](#rede-local--vps)
-- [Domínio + HTTPS](#domínio--https)
-- [Atualizar](#atualizar)
-- [Backup e restore](#backup-e-restore)
-- [Rotação do APP_SECRET](#rotação-do-app_secret)
+- [Local network / VPS](#local-network--vps)
+- [Domain + HTTPS](#domain--https)
+- [Updating](#updating)
+- [Backup and restore](#backup-and-restore)
+- [Rotating the APP_SECRET](#rotating-the-app_secret)
 
-## Rede local / VPS
+## Local network / VPS
 
-O app já é feito para isso: o frontend **descobre o backend a partir do host da página**, então
-o mesmo build funciona por `localhost`, pelo IP da LAN e pela VPS — **sem rebuild**. O que muda
-é **CORS** e **firewall**.
+The app is built for this: the frontend **discovers the backend from the page host**, so the
+same build works over `localhost`, the LAN IP and the VPS — **without a rebuild**. What changes
+is **CORS** and the **firewall**.
 
-### 1. Prepare o `.env`
+### 1. Prepare `.env`
 
 ```bash
 cp .env.example .env
-python -c "import secrets; print(secrets.token_urlsafe(48))"   # cole em APP_SECRET
+python -c "import secrets; print(secrets.token_urlsafe(48))"   # paste into APP_SECRET
 ```
 
-Ajuste:
+Adjust:
 
 ```dotenv
 APP_ENV=production
-APP_SECRET=<o valor gerado>
-POSTGRES_PASSWORD=<uma senha forte>
+APP_SECRET=<the generated value>
+POSTGRES_PASSWORD=<a strong password>
 
-# Origem que você vai abrir no navegador. Em produção o CORS aceita SÓ o que estiver
-# aqui. Use o IP da VPS ou seu domínio, com a porta 3000:
-WEB_ORIGIN=http://SEU_IP_OU_DOMINIO:3000
+# The origin you'll open in the browser. In production CORS accepts ONLY what's
+# here. Use the VPS IP or your domain, with port 3000:
+WEB_ORIGIN=http://YOUR_IP_OR_DOMAIN:3000
 
-# Deixe VAZIO: o navegador chama o backend no mesmo host, porta 8000.
+# Leave EMPTY: the browser calls the backend on the same host, port 8000.
 NEXT_PUBLIC_API_URL=
 ```
 
-> Vai usar por vários endereços (ex.: localhost **e** o IP)? Liste separando por vírgula:
-> `WEB_ORIGIN=http://localhost:3000,http://SEU_IP:3000`
+> Going to use it from several addresses (e.g. localhost **and** the IP)? List them
+> comma-separated: `WEB_ORIGIN=http://localhost:3000,http://YOUR_IP:3000`
 
-### 2. Suba
+### 2. Bring it up
 
 ```bash
 docker compose up -d --build
 ```
 
-### 3. Abra as portas no firewall
+### 3. Open the firewall ports
 
-O app publica **3000** (web) e **8000** (server):
+The app publishes **3000** (web) and **8000** (server):
 
 ```bash
 # ufw (Ubuntu/Debian)
@@ -58,56 +58,56 @@ sudo ufw allow 3000/tcp
 sudo ufw allow 8000/tcp
 ```
 
-> Em AWS/GCP/Oracle, libere 3000 e 8000 também no **Security Group** do painel.
+> On AWS/GCP/Oracle, also open 3000 and 8000 in the **Security Group** in the console.
 
-Acesse **http://SEU_IP:3000**, cadastre-se (vira admin) e cole a chave do OpenRouter.
+Visit **http://YOUR_IP:3000**, register (you become admin) and paste the OpenRouter key.
 
-## Domínio + HTTPS
+## Domain + HTTPS
 
-Para produção real, coloque um **proxy reverso** (Caddy/nginx/Traefik) na frente, terminando
-TLS, apontando `/` para `web:3000` e (se preferir separar) uma URL própria para `server:8000`.
-Nesse caso:
+For real production, put a **reverse proxy** (Caddy/nginx/Traefik) in front, terminating TLS,
+pointing `/` to `web:3000` and (if you prefer to split it) a dedicated URL to `server:8000`. In
+that case:
 
-- `WEB_ORIGIN=https://seu-dominio.com`
-- Se o backend tiver domínio próprio, defina `NEXT_PUBLIC_API_URL=https://api.seu-dominio.com`
-  **e rebuild o web** (`docker compose up -d --build web`) — essa URL é embutida no build.
-- Ligue `TRUST_PROXY=true` para o rate-limit enxergar o IP real via `X-Forwarded-For`.
-- Você pode nem publicar a porta do server: deixe só o proxy alcançá-lo com
+- `WEB_ORIGIN=https://your-domain.com`
+- If the backend has its own domain, set `NEXT_PUBLIC_API_URL=https://api.your-domain.com`
+  **and rebuild the web** (`docker compose up -d --build web`) — that URL is baked into the build.
+- Enable `TRUST_PROXY=true` so rate-limiting sees the real IP via `X-Forwarded-For`.
+- You can even skip publishing the server port: let only the proxy reach it with
   `SERVER_BIND=127.0.0.1`.
 
-Exemplo mínimo com **Caddy** (TLS automático):
+Minimal example with **Caddy** (automatic TLS):
 
 ```caddy
-seu-dominio.com {
+your-domain.com {
     reverse_proxy localhost:3000
 }
-api.seu-dominio.com {
+api.your-domain.com {
     reverse_proxy localhost:8000
 }
 ```
 
-## Atualizar
+## Updating
 
-O jeito recomendado é o script na raiz, que valida, reconstrói e migra:
+The recommended way is the script at the root, which validates, rebuilds and migrates:
 
 ```bash
 ./update.sh
 ```
 
-Ele: confere que não há alterações locais, faz `git pull --ff-only`, reconstrói as imagens,
-sobe os containers e roda `alembic upgrade head`. Manualmente seria:
+It: checks there are no local changes, does `git pull --ff-only`, rebuilds the images, brings
+the containers up and runs `alembic upgrade head`. Manually that would be:
 
 ```bash
 git pull
 docker compose up -d --build
 ```
 
-> As **migrações do banco rodam sozinhas** no startup do server; o passo explícito no
-> `update.sh` é só uma garantia. O painel do admin avisa quando há uma versão nova.
+> **Database migrations run automatically** on server startup; the explicit step in `update.sh`
+> is just a safeguard. The admin panel warns when a new version is available.
 
-## Backup e restore
+## Backup and restore
 
-Todo o estado mora no Postgres (dados + vetores + embeddings). Um `pg_dump` cobre tudo.
+All state lives in Postgres (data + vectors + embeddings). A single `pg_dump` covers everything.
 
 **Backup:**
 
@@ -115,7 +115,7 @@ Todo o estado mora no Postgres (dados + vetores + embeddings). Um `pg_dump` cobr
 docker compose exec -T db pg_dump -U aiworkspace -Fc aiworkspace > backup.dump
 ```
 
-**Restore** (num ambiente novo/limpo):
+**Restore** (into a fresh/clean environment):
 
 ```bash
 docker compose up -d db
@@ -123,37 +123,38 @@ docker compose exec -T db pg_restore -U aiworkspace -d aiworkspace --clean --if-
 docker compose up -d
 ```
 
-> **Para migrar de máquina, leve o mesmo `APP_SECRET`.** Os segredos por usuário estão cifrados
-> com uma chave derivada dele; com um `APP_SECRET` diferente, o banco restaura mas os segredos
-> ficam ilegíveis (a app os trata como "não configurados"). O painel do admin também oferece
-> exportar/restaurar por lá.
+> **To migrate to another machine, carry the same `APP_SECRET`.** Per-user secrets are encrypted
+> with a key derived from it; with a different `APP_SECRET` the database restores but the secrets
+> are unreadable (the app treats them as "not configured"). The admin panel also offers
+> export/restore from there.
 
-## Rotação do `APP_SECRET`
+## Rotating the `APP_SECRET`
 
-Precisa trocar o `APP_SECRET` (vazou, política, etc.) **sem** perder os segredos guardados? Há
-uma ferramenta que re-cifra tudo da chave antiga para a nova. Rode primeiro em modo simulação:
+Need to change `APP_SECRET` (leaked, policy, etc.) **without** losing the stored secrets? There's
+a tool that re-encrypts everything from the old key to the new one. Run it in dry-run mode first:
 
 ```bash
-docker compose exec -e NEW_APP_SECRET=<nova> server \
+docker compose exec -e NEW_APP_SECRET=<new> server \
   python -m aiworkspace.secret_rotation --dry-run
 
-docker compose exec -e NEW_APP_SECRET=<nova> server \
+docker compose exec -e NEW_APP_SECRET=<new> server \
   python -m aiworkspace.secret_rotation
 ```
 
-Depois troque `APP_SECRET=<nova>` no `.env` e reinicie:
+Then set `APP_SECRET=<new>` in `.env` and restart:
 
 ```bash
 docker compose up -d server
 ```
 
-## Checklist de produção
+## Production checklist
 
-- [ ] `APP_ENV=production` e `APP_SECRET` forte (gerado, não o padrão).
-- [ ] `POSTGRES_PASSWORD` trocada.
-- [ ] `WEB_ORIGIN` com a(s) origem(ns) reais; `NEXT_PUBLIC_API_URL` vazio (ou o domínio da API).
-- [ ] `ENABLE_SIGNUP=false` depois de criar sua conta.
-- [ ] Proxy reverso com HTTPS e `TRUST_PROXY=true`.
-- [ ] Firewall/Security Group liberando só o necessário.
-- [ ] Rotina de backup (`pg_dump`) agendada.
-- [ ] Avaliar `ALLOW_CODE_MODE=false` se houver usuários não confiáveis.
+- [ ] `APP_ENV=production` and a strong `APP_SECRET` (generated, not the default).
+- [ ] `POSTGRES_PASSWORD` changed.
+- [ ] `WEB_ORIGIN` with the real origin(s); `NEXT_PUBLIC_API_URL` empty (or the API domain).
+- [ ] `ENABLE_SIGNUP=false` after creating your account.
+- [ ] Reverse proxy with HTTPS and `TRUST_PROXY=true`.
+- [ ] Firewall/Security Group opening only what's needed.
+- [ ] A scheduled backup routine (`pg_dump`).
+- [ ] Consider `ALLOW_CODE_MODE=false` if there are untrusted users.
+</content>
