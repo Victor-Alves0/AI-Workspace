@@ -171,6 +171,10 @@ fn main() {
                 .parse()
                 .unwrap_or_else(|_| DEFAULT_SERVER_URL.parse().unwrap());
 
+            // A janela "main" nasce AQUI, não no tauri.conf.json: a URL vem das
+            // preferências da máquina e o app decide visível/oculto. Se uma janela
+            // for declarada no config, o Tauri cria uma segunda "main", este build
+            // colide no label e o app abre e fecha. Por isso `app.windows` é `[]`.
             WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
                 .title("AI Workspace")
                 .inner_size(1280.0, 800.0)
