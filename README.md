@@ -1,65 +1,172 @@
+<div align="center">
+
 # AI Workspace
 
-Workspace de IA **self-hosted, local-first** no estilo OpenWebUI — chat multi-modelo com
-ferramentas, memória de longo prazo, automações, artefatos e integrações, tudo rodando na
-**sua** máquina/servidor. A única saída externa é o provedor de modelos (OpenRouter) e o que
-as suas ferramentas fizerem. Segredos ficam **criptografados em repouso** no banco.
+**Um workspace de IA self-hosted e local-first — chat multi-modelo com ferramentas, memória de longo prazo, automações, integrações e um app desktop, tudo rodando na _sua_ infraestrutura.**
 
-> Stack: **FastAPI** (async) + **SQLAlchemy 2** + **Postgres 16 / pgvector** ·
-> **Next.js 14** (App Router) + Tailwind · **[SIFT](https://github.com/Victor-Alves0/SIFT)**
-> (tool calling) · **mem0** (memória) · **OpenRouter** · tudo em **Docker Compose**.
+[![Stack](https://img.shields.io/badge/backend-FastAPI%20%C2%B7%20Postgres%2016%20%2B%20pgvector-009688)](#arquitetura)
+[![Frontend](https://img.shields.io/badge/frontend-Next.js%2014%20%C2%B7%20Tailwind-000000)](#arquitetura)
+[![Deploy](https://img.shields.io/badge/deploy-Docker%20Compose-2496ED)](#in%C3%ADcio-r%C3%A1pido)
+[![Desktop](https://img.shields.io/badge/desktop-Windows%20(Tauri)-6f42c1)](docs/desktop.md)
+
+</div>
 
 ---
+
+O **AI Workspace** é uma plataforma de IA no estilo OpenWebUI, pensada para ser **dona dos
+próprios dados**: você conversa com qualquer modelo, dá a ele ferramentas e memória, cria
+automações e integra com seus serviços — e nada disso sai da sua máquina, exceto a chamada ao
+provedor de modelos e o que **você** mandar as ferramentas fazerem. Segredos ficam
+**criptografados em repouso** no banco.
+
+Não é um wrapper de chat. É uma stack completa: orquestrador de turno com tool-calling,
+memória vetorial, base de conhecimento (RAG), automações agendadas, canais de mensagem
+(WhatsApp/Telegram/Discord), API pública compatível com OpenAI, observabilidade fim-a-fim e
+um app desktop com bandeja.
+
+> **Stack:** [FastAPI](https://fastapi.tiangolo.com/) (async) · [SQLAlchemy 2](https://www.sqlalchemy.org/) ·
+> **Postgres 16 + [pgvector](https://github.com/pgvector/pgvector)** · [Next.js 14](https://nextjs.org/) (App Router) + Tailwind ·
+> [SIFT](https://github.com/Victor-Alves0/SIFT) (tool calling) · [mem0](https://github.com/mem0ai/mem0) (memória) ·
+> [OpenRouter](https://openrouter.ai/) · tudo em **Docker Compose**.
+
+## Sumário
+
+- [Destaques](#destaques)
+- [Recursos](#recursos)
+- [Arquitetura](#arquitetura)
+- [Início rápido](#início-rápido)
+- [Serviços opcionais](#serviços-opcionais)
+- [App desktop](#app-desktop-windows)
+- [Documentação](#documentação)
+- [Segurança](#segurança)
+- [Desenvolvimento](#desenvolvimento)
+- [Licença](#licença)
+
+## Destaques
+
+- 🔒 **Self-hosted e local-first.** Roda inteiro em Docker Compose. A única saída externa é o
+  provedor de modelos e o que suas ferramentas acessarem. Chaves ficam cifradas no banco.
+- 🧠 **Modelos personalizados.** Prompt, parâmetros, ferramentas, capacidades, filtros, voz,
+  memória e sub-agentes — configuráveis **por modelo**, como um "GPT" próprio.
+- 🛠️ **Ferramentas de verdade.** Pesquisa na web, leitura de página, navegador headless,
+  gráficos, cotações, Gmail/Agenda, casa inteligente, GitHub, e **código Python que você
+  escreve**, rodando num sandbox isolado.
+- ♾️ **Memória de longo prazo** com escopos (global / por modelo / por chat) e bancos
+  compartilháveis, mais uma **base de conhecimento (RAG)** com pgvector.
+- ⚡ **Automações** agendadas e monitores (preço, página, busca, RSS) que te avisam no
+  app, no navegador (push) ou nos canais.
+- 💬 **Canais de mensagem.** Converse com seus modelos por **WhatsApp, Telegram e Discord** —
+  cada conversa vira um chat na barra lateral.
+- 🔌 **API pública compatível com OpenAI** (`/v1/chat/completions`), com chaves por usuário,
+  limites, cotas, controle de custo e memória por chave.
+- 📊 **Observabilidade fim-a-fim** — cada requisição vira um _trace_ com latência, tempo de
+  banco, leituras/escritas e chamadas de LLM, num painel com waterfall.
+- 🖥️ **App desktop (Windows)** com ícone na bandeja, "rodar em segundo plano" e "iniciar com
+  o Windows".
 
 ## Recursos
 
-- **Chat multi-modelo** via OpenRouter (qualquer modelo compatível com OpenAI) e **modelos
-  locais** via Ollama. Respostas em streaming, retomáveis após F5, com botão de **parar**.
-- **Modelos personalizados** (estilo "Models"): prompt, parâmetros, ferramentas, capacidades,
-  filtros, voz, memória e sub-agentes por modelo.
-- **Ferramentas (SIFT)**: pesquisa na web, ler página, calculadora, data/hora, gráficos,
-  diagramas (Excalidraw/Mermaid), cotações, **pesquisa profunda**, lembretes e monitores,
-  perfil do usuário, e ferramentas que você mesmo escreve em Python (sandbox isolado).
-- **Memória (mem0)** com escopos **global / por modelo / por chat** e **bancos de memória
-  compartilháveis entre modelos**; revisão opcional antes de salvar.
-- **Automações**: tarefas agendadas e monitores (preço, página, busca, RSS) que avisam você.
-- **Artefatos** (estilo Claude): código/documentos/HTML/SVG/Mermaid/CSV numa janela dedicada,
-  com edição, histórico de versões e compartilhamento.
-- **Mesa-redonda**: vários modelos conversando entre si, com você guiando.
-- **Geração de imagens** (nativa ou via roteador para um modelo de imagem).
-- **Voz** (TTS/STT) por endpoint compatível com OpenAI, incluindo **Kokoro** local (opt-in).
-- **Integrações**: **Google** (Gmail + Agenda), **Tuya/Smart Life** (casa inteligente) e
-  **WhatsApp** (QR não oficial via Evolution API, ou Cloud API oficial da Meta).
-- **Analítica** de uso (tokens/custo/requisições, por modelo e fonte), memória, atalhos de
-  teclado, painel de **Debug** para admin.
+<table>
+<tr><td valign="top" width="50%">
 
----
+**Chat & modelos**
+- Chat multi-modelo via OpenRouter (qualquer modelo compatível com OpenAI) e **modelos
+  locais via Ollama**
+- Streaming retomável (F5/fechar não cancela) com botão de **parar**
+- **Modelos personalizados** com prompt, parâmetros, tools, voz e memória próprios
+- **Mesa-redonda**: vários modelos conversando entre si, com você guiando
+- **Sub-agentes**: um orquestrador delega a modelos-operário (sequencial/paralelo)
+- **Chat temporário**, **compactação** de contexto não-destrutiva e **chats de referência**
+
+**Ferramentas (SIFT)**
+- Pesquisa na web (DuckDuckGo/SearXNG/Tavily/Brave) e **pesquisa profunda**
+- Leitura de página e **navegador headless** (Chromium controlado pela IA)
+- Gráficos, diagramas (Mermaid/Excalidraw), cotações financeiras, data/hora
+- **Transcrição de vídeo/áudio** (YouTube + ~1800 sites)
+- **Código Python** escrito pela IA, executado em **sandbox isolado**
+
+**Conteúdo & mídia**
+- **Artefatos** (código/docs/HTML/SVG/Mermaid/CSV) em janela dedicada, com versões
+- **Geração de imagens** (nativa ou via roteador) e vídeo (Higgsfield)
+- **Voz** TTS/STT compatível com OpenAI, incl. **Kokoro** local e clonagem
+
+</td><td valign="top" width="50%">
+
+**Memória & conhecimento**
+- **Memória (mem0)** com escopos global/modelo/chat e bancos compartilháveis
+- **Base de Conhecimento (RAG)** — suba documentos, busca por pgvector, citações
+- **Second brain**: notas interligadas com grafo; a IA propõe skills e memórias
+- **Aprendizado proativo**: revisão em background sugere skills/memórias (com aprovação)
+
+**Automação & canais**
+- **Automações** agendadas + **monitores** (preço/página/busca/RSS)
+- Notificação in-app, **Web Push** e entrega nos canais
+- **WhatsApp** (Evolution/QR ou Cloud API), **Telegram** e **Discord**
+
+**Plataforma & operação**
+- **API pública** compatível com OpenAI + gestão de chaves, limites e custos
+- **Observabilidade** (traces/spans) e **Analítica** de uso (tokens/custo)
+- **Codespace**: clone de repositório + grafo de código + editor
+- **Playground**: benchmarks, comparações e debug de ferramentas
+- **Segurança**: 2FA (TOTP), logs de auditoria, rotação de `APP_SECRET`
+- **App desktop**, **PWA/mobile**, paleta de comandos, atalhos de teclado
+
+</td></tr>
+</table>
+
+> A lista completa e detalhada está em **[docs/features.md](docs/features.md)**.
 
 ## Arquitetura
 
+```mermaid
+flowchart LR
+    subgraph Cliente
+        W["Web (Next.js)"]
+        D["Desktop (Tauri)"]
+        C["Canais<br/>WhatsApp · Telegram · Discord"]
+        X["Apps externos<br/>(API /v1)"]
+    end
+    subgraph Servidor["Servidor — FastAPI"]
+        O["Orquestrador de turno<br/>tool-calling · guardas"]
+        SIFT["SIFT<br/>ferramentas"]
+        MEM["mem0<br/>memória"]
+        RAG["Base de Conhecimento<br/>(RAG)"]
+    end
+    DB[("Postgres 16<br/>+ pgvector")]
+    OR["OpenRouter<br/>(modelos)"]
+
+    W & D & C & X --> O
+    O --> SIFT & MEM & RAG
+    O --> OR
+    O & MEM & RAG --> DB
 ```
-apps/server   FastAPI — auth, orquestrador de chat, SIFT, mem0, integrações
-apps/web      Next.js — UI de chat
-db            Postgres 16 + pgvector (dados + vetores do mem0)
-infra/        configs dos serviços opcionais (searxng, db-init)
+
+O código está organizado como um monorepo:
+
+```
+apps/server    FastAPI — auth, orquestrador de chat, SIFT, mem0, RAG, integrações, API /v1
+apps/web       Next.js (App Router) — interface de chat, workspace, configurações
+desktop        Shell desktop (Tauri) — janela nativa, bandeja, autostart
+infra/         Configs de serviços opcionais (SearXNG etc.)
 ```
 
 Serviços do Docker Compose:
 
-| Serviço    | Sempre sobe? | Como ligar                                   |
-|------------|:------------:|----------------------------------------------|
-| `db`       | ✅           | (padrão)                                     |
-| `server`   | ✅           | (padrão)                                     |
-| `web`      | ✅           | (padrão)                                     |
-| `searxng`  | opt-in       | `docker compose --profile search up -d`      |
-| `kokoro`   | opt-in       | `docker compose --profile voice up -d`       |
-| `evolution`| opt-in       | `docker compose --profile whatsapp up -d`    |
+| Serviço     | Padrão | Porta (host) | Como ligar                                       |
+|-------------|:------:|:------------:|--------------------------------------------------|
+| `db`        | ✅     | interna      | Postgres 16 + pgvector (dados + vetores)         |
+| `server`    | ✅     | `8000`       | API FastAPI                                       |
+| `web`       | ✅     | `3000`       | Interface Next.js                                 |
+| `searxng`   | opt-in | `8080`       | `docker compose --profile search up -d`          |
+| `kokoro`    | opt-in | `8880`       | `docker compose --profile voice up -d`           |
+| `evolution` | opt-in | `8081`       | `docker compose --profile whatsapp up -d`        |
+| `browser`   | opt-in | `3009`       | `docker compose --profile browser up -d`         |
 
----
+Detalhes em **[docs/architecture.md](docs/architecture.md)**.
 
-## Início rápido (na sua máquina)
+## Início rápido
 
-Pré-requisitos: **Docker** + **Docker Compose**.
+**Pré-requisitos:** [Docker](https://docs.docker.com/get-docker/) + Docker Compose.
 
 ```bash
 git clone https://github.com/Victor-Alves0/AI-Workspace.git
@@ -73,171 +180,82 @@ docker compose up -d --build
 ```
 
 Abra **http://localhost:3000**. O **primeiro usuário cadastrado vira admin**. Depois, em
-**⚙ Configurações → Conexões → APIs**, cole sua **chave do OpenRouter** (fica cifrada),
-escolha um modelo e converse.
+**⚙ Configurações → Conexões → APIs**, cole sua **chave do [OpenRouter](https://openrouter.ai/keys)**
+(fica cifrada), escolha um modelo e converse.
 
----
+> As migrações do banco (Alembic) **rodam sozinhas** no startup do servidor. Para atualizar
+> depois, rode `./update.sh` (ou `git pull && docker compose up -d --build`).
 
-## Subir numa VPS / acessar pela rede (LAN)
+Vai acessar pela **rede local ou por uma VPS**, com **domínio + HTTPS**, ou precisa de
+**backup/restore**? Está tudo em **[docs/deployment.md](docs/deployment.md)**.
 
-O app já é feito para isso: o frontend **descobre o backend a partir do host da página**, então
-o mesmo build funciona por `localhost`, pelo IP da LAN e pela VPS — sem rebuild. O que muda é
-**CORS** e **firewall**.
+## Serviços opcionais
 
-### 1. Prepare o `.env`
-
-```bash
-cp .env.example .env
-python -c "import secrets; print(secrets.token_urlsafe(48))"   # cole em APP_SECRET
-```
-
-No `.env`, ajuste:
-
-```dotenv
-APP_ENV=production
-APP_SECRET=<o valor gerado acima>
-POSTGRES_PASSWORD=<uma senha forte>
-
-# Origem que você vai abrir no navegador (IMPORTANTE: em produção o CORS aceita
-# SÓ o que estiver aqui). Use o IP da VPS ou seu domínio, com a porta 3000:
-WEB_ORIGIN=http://SEU_IP_OU_DOMINIO:3000
-
-# Deixe VAZIO: o navegador chama o backend no mesmo host, porta 8000.
-NEXT_PUBLIC_API_URL=
-```
-
-> Vai usar por vários endereços (ex.: localhost E o IP)? Liste separando por vírgula:
-> `WEB_ORIGIN=http://localhost:3000,http://SEU_IP:3000`
-
-### 2. Suba
-
-```bash
-docker compose up -d --build
-```
-
-### 3. Abra as portas no firewall da VPS
-
-O app publica **3000** (web) e **8000** (server). Abra as duas:
-
-```bash
-# ufw (Ubuntu/Debian)
-sudo ufw allow 3000/tcp
-sudo ufw allow 8000/tcp
-```
-
-> Em provedores como AWS/GCP/Oracle, libere 3000 e 8000 também no **Security Group** do painel.
-
-Acesse **http://SEU_IP:3000**. Pronto — cadastre-se (vira admin) e cole a chave do OpenRouter.
-
-### Domínio + HTTPS (recomendado para produção real)
-
-Coloque um proxy reverso (Caddy/nginx/Traefik) na frente, terminando TLS, apontando `/` para
-`web:3000` e (se preferir separar) uma URL própria para `server:8000`. Nesse caso:
-
-- `WEB_ORIGIN=https://seu-dominio.com`
-- Se o backend tiver domínio próprio, defina `NEXT_PUBLIC_API_URL=https://api.seu-dominio.com`
-  **e rebuild o web** (`docker compose up -d --build web`), pois essa URL é embutida no build.
-- Ligue `TRUST_PROXY=true` para o rate-limit enxergar o IP real via `X-Forwarded-For`.
-- Você pode nem publicar a porta do server (deixe só o proxy alcançá-lo): use `SERVER_BIND=127.0.0.1`.
-
----
-
-## Serviços opcionais (profiles)
+Recursos pesados sobem sob demanda via _profiles_ do Compose:
 
 ```bash
 # Pesquisa na web self-hosted (SearXNG, sem chave de API)
 docker compose --profile search up -d searxng
-#   depois no .env: WEB_SEARCH_PROVIDER=searxng   (o server já aponta p/ searxng:8080)
 
-# Voz local (Kokoro-FastAPI, TTS compatível com OpenAI em :8880)
+# Voz local (Kokoro-FastAPI, TTS compatível com OpenAI)
 docker compose --profile voice up -d kokoro
-#   configure a conexão de voz na UI apontando para http://kokoro:8880/v1
 
 # WhatsApp não oficial (Evolution API, QR Code)
 docker compose --profile whatsapp up -d
-#   requer EVOLUTION_API_KEY no .env; conecte números em Integrações → WhatsApp
+
+# Navegador headless (Chromium via browserless) para a tool de navegação
+docker compose --profile browser up -d
 ```
 
-Para subir tudo: `docker compose --profile search --profile voice --profile whatsapp up -d --build`.
+## App desktop (Windows)
 
----
+Um app nativo que abre a interface numa janela própria, com **ícone na bandeja**, **"rodar em
+segundo plano"** e **"iniciar com o Windows"**.
 
-## Configuração (`.env`)
+**⬇️ Baixe o instalador na página de [Releases](https://github.com/Victor-Alves0/AI-Workspace/releases/latest)**
+(arquivo `AI.Workspace_x64-setup.exe`, compilado pelo CI a cada versão).
 
-Todas as chaves estão documentadas em **[.env.example](.env.example)**. As principais:
+Nesta versão o app **não** embarca o servidor — deixe o stack no ar (`docker compose up -d`) e
+abra o app. Guia completo em **[docs/desktop.md](docs/desktop.md)**.
 
-| Variável              | Para quê                                                                  |
-|-----------------------|---------------------------------------------------------------------------|
-| `APP_SECRET`          | **Obrigatório.** Assina JWT + deriva a chave de criptografia dos segredos.|
-| `APP_ENV`             | `production` endurece o CORS e recusa segredo fraco.                      |
-| `ENABLE_SIGNUP`       | Feche o cadastro (`false`) depois de criar sua conta.                     |
-| `WEB_ORIGIN`          | Origem(ns) do frontend aceitas pelo CORS (crucial em produção).          |
-| `NEXT_PUBLIC_API_URL` | URL do backend p/ o navegador; **vazio** = deriva do host (LAN/VPS).     |
-| `POSTGRES_PASSWORD`   | Troque numa instalação real.                                             |
-| `WEB_SEARCH_PROVIDER` | `duckduckgo` (padrão) · `searxng` · `tavily` · `brave`.                  |
+## Documentação
 
-> As chaves de provedores (OpenRouter, Tavily/Brave, voz) **não** vão no `.env`: cada usuário
-> salva as suas na UI, cifradas em repouso.
-
----
-
-## Atualizar
-
-```bash
-git pull
-docker compose up -d --build
-```
-
-As **migrações do banco (Alembic) rodam sozinhas** no startup do server.
-
----
-
-## Desenvolvimento (sem Docker)
-
-Backend:
-
-```bash
-cd apps/server
-python -m venv .venv && . .venv/Scripts/activate   # Linux/Mac: source .venv/bin/activate
-pip install -e ".[dev]"
-# suba um Postgres com pgvector, ex.:
-#   docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=aiworkspace -e POSTGRES_USER=aiworkspace -e POSTGRES_DB=aiworkspace pgvector/pgvector:pg16
-alembic upgrade head
-uvicorn aiworkspace.main:app --reload
-```
-
-Frontend:
-
-```bash
-cd apps/web
-npm install
-npm run dev
-```
-
-> As imagens Docker **embutem** o código no build — ao mexer no código, rode
-> `docker compose up -d --build` para aplicar. `next build` também serve de type-check do web.
-
----
+| Documento | Conteúdo |
+|-----------|----------|
+| [docs/features.md](docs/features.md)         | Catálogo completo de recursos |
+| [docs/architecture.md](docs/architecture.md) | Visão de sistema, componentes e o fluxo de um turno |
+| [docs/configuration.md](docs/configuration.md) | Referência de todas as variáveis de ambiente |
+| [docs/deployment.md](docs/deployment.md)     | VPS, LAN, HTTPS, backup/restore, atualização, rotação de segredo |
+| [docs/public-api.md](docs/public-api.md)     | API compatível com OpenAI + gestão de chaves |
+| [docs/security.md](docs/security.md)         | Modelo de segurança e recomendações |
+| [docs/desktop.md](docs/desktop.md)           | App desktop (Tauri) |
+| [docs/development.md](docs/development.md)    | Rodar sem Docker, testes, layout do projeto |
+| [CONTRIBUTING.md](CONTRIBUTING.md)           | Como contribuir |
 
 ## Segurança
 
-- Senhas com **Argon2**; sessão via **JWT em cookie httpOnly** (access + refresh rotativo);
-  `token_version` para revogar todas as sessões.
-- Segredos por usuário cifrados com **Fernet** (chave derivada do `APP_SECRET`).
-- RBAC **admin/user**; cadastro desabilitável (`ENABLE_SIGNUP=false`).
+- Senhas com **Argon2**; sessão via **JWT em cookie httpOnly** (access + refresh rotativo) com
+  `token_version` para revogar todas as sessões; **2FA (TOTP)** opcional.
+- Segredos por usuário cifrados com **Fernet** (chave derivada do `APP_SECRET`), com
+  ferramenta de **rotação** que re-cifra o banco.
 - **CORS** restrito às origens de `WEB_ORIGIN`; cabeçalhos de segurança em todas as respostas;
-  **HSTS** sob HTTPS.
-- **Rate limiting** em login/registro (`LOGIN_MAX_ATTEMPTS`, `LOGIN_WINDOW_SECONDS`).
-- Em `APP_ENV=production`, o servidor **recusa iniciar** com `APP_SECRET` fraco/curto.
-- **Sandbox de ferramentas**: o código das tools roda em **subprocesso isolado** (`python -I`)
-  com timeout e limites de CPU/memória — não no processo do servidor.
-- Postgres publicado só em `127.0.0.1`; opção de allowlist de IP e `TRUST_PROXY` atrás de proxy.
+  **HSTS** sob HTTPS; **rate limiting** em login/registro e na API pública.
+- **Sandbox de ferramentas**: o código roda em subprocesso isolado com limites de CPU/memória.
+- Em `APP_ENV=production`, o servidor **recusa iniciar** com `APP_SECRET` fraco.
 
-> `allow_code_mode` executa código gerado pelo modelo (RCE por design, mitigado pelo sandbox).
-> Em deploy multiusuário **não confiável**, avalie desligá-lo ou isolar ainda mais o sandbox.
+Detalhes e o modelo de ameaça em **[docs/security.md](docs/security.md)**. Encontrou uma
+vulnerabilidade? Veja [SECURITY.md](SECURITY.md).
 
----
+## Desenvolvimento
+
+Guia de setup local (sem Docker), testes e organização do código em
+**[docs/development.md](docs/development.md)**. Para contribuir, comece pelo
+**[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
 ## Licença
 
-Uso pessoal / self-hosted. Sinta-se livre para adaptar à sua infraestrutura.
+> ⚠️ **Este repositório ainda não define uma licença.** Sem um arquivo `LICENSE`, o padrão
+> legal é "todos os direitos reservados": terceiros não têm permissão de uso, cópia ou
+> modificação. Se a intenção é abrir o projeto, adicione uma licença
+> ([escolha aqui](https://choosealicense.com/)) — MIT/Apache-2.0 para permissivo, AGPL-3.0
+> para copyleft forte (comum em apps self-hosted).
