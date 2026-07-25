@@ -512,7 +512,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
             )}
             {cat === "connections" && (
               connView === "apis" ? (
-                <ApisPanel status={status} reloadSecrets={reloadSecrets} onBack={() => setConnView(null)} />
+                <ApisPanel status={status} reloadSecrets={reloadSecrets} onConnectionsChanged={onConnectionsChanged} onBack={() => setConnView(null)} />
               ) : connView === "ollama" ? (
                 <OllamaPanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
               ) : connView === "voice" ? (
@@ -1823,11 +1823,14 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
 }
 
 /* ------------------------------- Conexões --------------------------------- */
-function ApisPanel({ status, reloadSecrets, onBack }: { status: SecretStatus | null; reloadSecrets: () => void; onBack: () => void }) {
+function ApisPanel({ status, reloadSecrets, onConnectionsChanged, onBack }: { status: SecretStatus | null; reloadSecrets: () => void; onConnectionsChanged?: () => void; onBack: () => void }) {
+  // salvar a chave do OpenRouter precisa recarregar a LISTA DE MODELOS (não só o
+  // status do segredo), senão os modelos só aparecem após um F5.
+  const savedOpenrouter = () => { reloadSecrets(); onConnectionsChanged?.(); };
   return (
     <DetailView title="APIs" onBack={onBack}>
       <Heading>Modelos e voz</Heading>
-      <SecretField label="Chave do OpenRouter" name="openrouter" configured={status?.openrouter ?? false} hint="Provedor de modelos (obrigatória para conversar)." onSaved={reloadSecrets} />
+      <SecretField label="Chave do OpenRouter" name="openrouter" configured={status?.openrouter ?? false} hint="Provedor de modelos (obrigatória para conversar)." onSaved={savedOpenrouter} />
       <SecretField label="Chave do provedor de voz" name="voice" configured={status?.voice ?? false} hint="TTS/STT — endpoint compatível com OpenAI (VOICE_BASE_URL). Use OpenAI ou um servidor local." onSaved={reloadSecrets} />
       <Heading>Pesquisa na web</Heading>
       <SecretField label="Chave Tavily" name="tavily" configured={status?.tavily ?? false} hint="tavily.com — ferramenta Pesquisa na Web / Deep Search." onSaved={reloadSecrets} />
