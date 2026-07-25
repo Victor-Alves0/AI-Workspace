@@ -22,6 +22,8 @@ dist/
 
 # Tauri
 desktop/src-tauri/target/
+# motor embarcado montado pelo CI (Postgres + backend + frontend); nunca versionar
+desktop/src-tauri/engine/
 
 # OS
 .DS_Store

@@ -6,7 +6,6 @@
  * pelo mesmo valor. */
 
 export interface DesktopSettings {
-  server_url: string;
   minimize_to_tray: boolean;
   autostart: boolean;
   start_minimized: boolean;
@@ -18,7 +17,6 @@ export interface DesktopPatch {
   minimizeToTray?: boolean;
   autostart?: boolean;
   startMinimized?: boolean;
-  serverUrl?: string;
 }
 
 interface TauriBridge {

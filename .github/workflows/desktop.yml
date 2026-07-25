@@ -26,6 +26,11 @@ jobs:
         with:
           node-version: "20"
 
+      # Python do runner: instala o backend no Python embarcado do motor (--target).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - uses: dtolnay/rust-toolchain@stable
 
       # cache do target/ do Cargo: sem ele cada build recompila todo o Tauri (~10 min)
@@ -36,6 +41,15 @@ jobs:
       - name: Instalar dependências do desktop
         working-directory: desktop
         run: npm install
+
+      # Monta o motor (Postgres + backend + frontend) DENTRO de src-tauri/engine,
+      # que o tauri.conf.json empacota como recurso ("resources": ["engine/**/*"]).
+      # Sem -Zip: queremos a pasta, nao o zip.
+      - name: Montar o motor embarcado
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: desktop/engine/build-engine.ps1 -OutDir "$env:GITHUB_WORKSPACE/desktop/src-tauri/engine"
 
       # --- disparo por TAG: compila e publica a Release com o instalador ---
       - name: Compilar e publicar Release

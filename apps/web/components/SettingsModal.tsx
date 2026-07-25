@@ -132,7 +132,6 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Rodar em segundo plano", cat: "desktop" },
   { label: "Iniciar com o Windows", cat: "desktop" },
   { label: "Bandeja", cat: "desktop" },
-  { label: "Endereço do servidor", cat: "desktop" },
   { label: "Orçamento mensal", cat: "account" },
   { label: "Nome", cat: "account" },
   { label: "Sobre você", cat: "account" },
@@ -922,20 +921,6 @@ function DesktopTab() {
           />
         </Row>
       )}
-      <Row
-        label="Endereço do servidor"
-        info="De onde o aplicativo carrega a interface. Mude para apontar para outra máquina (ex.: sua VPS). Vale após reabrir o app."
-      >
-        <input
-          defaultValue={s.server_url}
-          onBlur={(e) => {
-            const v = e.target.value.trim();
-            if (v && v !== s.server_url) patch({ serverUrl: v });
-          }}
-          spellCheck={false}
-          className="w-56 rounded-lg border border-border bg-surface2 px-2.5 py-1.5 text-sm text-ink outline-none focus:border-accent"
-        />
-      </Row>
     </div>
   );
 }

@@ -1,11 +1,20 @@
 # Inicia o AI Workspace COMPLETO sem Docker: Postgres embarcado + backend (API) +
 # frontend (interface web). Abre o navegador em http://localhost:3000.
 #
-# Tudo e relativo a esta pasta e nada e instalado no sistema: o banco, os caches de
-# modelo e o segredo do app ficam em .\data\. Apagar a pasta = zerar tudo.
+# Nada e instalado no sistema: o banco, os caches de modelo e o segredo do app
+# ficam em -DataDir (padrao: .\data\ ao lado do script). Apagar essa pasta = zerar.
 #
-# Este e o "motor" do app embarcado. O shell desktop (Tauri) vai supervisionar
-# exatamente esta mesma sequencia numa etapa seguinte; por ora da pra rodar a mao.
+# Este e o "motor" do app embarcado. O shell desktop (Tauri) chama este mesmo
+# script com -DataDir (pasta gravavel do usuario) e -NoBrowser (o Tauri abre a
+# janela). Rodado a mao (duplo-clique), abre o navegador sozinho.
+
+param(
+    # onde guardar banco/caches/segredo. O Tauri passa a pasta de dados do app;
+    # a mao, o padrao e' .\data\ ao lado do script.
+    [string]$DataDir = "",
+    # nao abrir o navegador (o Tauri exibe a propria janela)
+    [switch]$NoBrowser
+)
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -15,7 +24,7 @@ $Node   = Join-Path $Root "node\node.exe"
 $PgBin  = Join-Path $Root "pgsql\bin"
 $AppDir = Join-Path $Root "app"
 $WebDir = Join-Path $Root "web"
-$Data   = Join-Path $Root "data"
+$Data   = if ($DataDir) { $DataDir } else { Join-Path $Root "data" }
 $PgData = Join-Path $Data "pgdata"
 
 $PgPort  = 55432
@@ -84,12 +93,12 @@ try {
         -RedirectStandardOutput (Join-Path $Data "web.out.log") `
         -RedirectStandardError  (Join-Path $Data "web.err.log")
 
-    # espera a interface responder e abre o navegador
+    # espera a interface responder e (se rodado a mao) abre o navegador
     for ($i = 0; $i -lt 40; $i++) {
         Start-Sleep -Milliseconds 500
         try { if ((Invoke-WebRequest "http://localhost:$WebPort" -UseBasicParsing -TimeoutSec 2).StatusCode -ge 200) { break } } catch {}
     }
-    Start-Process "http://localhost:$WebPort"
+    if (-not $NoBrowser) { Start-Process "http://localhost:$WebPort" }
 
     Write-Host ""
     Write-Host "==> AI Workspace no ar: http://localhost:$WebPort   (feche esta janela para encerrar)"

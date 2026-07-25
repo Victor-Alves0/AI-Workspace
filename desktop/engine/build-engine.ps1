@@ -16,6 +16,9 @@ param(
     # build comunitario do pgvector p/ Windows (vector.dll + share/extension)
     [string]$PgvectorRepo = "andreiramani/pgvector_pgsql_windows",
     [string]$PgvectorTag  = "0.8.3_16.14",
+    # pasta final do bundle. Padrao: desktop/engine/out/aiworkspace-engine.
+    # O build do app desktop passa desktop/src-tauri/engine (vira recurso do Tauri).
+    [string]$OutDir = "",
     [switch]$Zip
 )
 
@@ -24,10 +27,11 @@ $RepoRoot  = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 $ServerDir = Join-Path $RepoRoot "apps\server"
 $WebDir    = Join-Path $RepoRoot "apps\web"
 $Work      = Join-Path $PSScriptRoot "out"
-$Out       = Join-Path $Work "aiworkspace-engine"
+$Out       = if ($OutDir) { $OutDir } else { Join-Path $Work "aiworkspace-engine" }
 $Dl        = Join-Path $Work "_dl"
 
 Remove-Item -Recurse -Force $Work -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force $Out  -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force $Out, $Dl | Out-Null
 
 function Get-File($url, $dest) {
