@@ -62,9 +62,14 @@ if (-not (Test-Path (Join-Path $PgData "PG_VERSION"))) {
 }
 
 # --- 2) sobe o Postgres so no loopback, numa porta propria ---
+# ATENCAO: NAO canalizar a saida do pg_ctl start (`| Out-Null` / `> arquivo`).
+# No Windows o Postgres herda o handle de saida do pg_ctl, e o pipe do PowerShell
+# fica ESPERANDO esse handle fechar — ou seja, so' quando o Postgres morrer. Isso
+# congela o launcher aqui, com o Postgres no ar mas sem nunca seguir. O `-l` ja'
+# manda o log do servidor para o arquivo; a saida propria do pg_ctl e' inofensiva.
 Write-Host "==> Iniciando Postgres em $($Loop):$PgPort"
-& (Pg "pg_ctl.exe") -D $PgData -w -l (Join-Path $Data "pg.log") `
-    -o "-p $PgPort -c listen_addresses=127.0.0.1" start | Out-Null
+& (Pg "pg_ctl.exe") -D $PgData -w -s -l (Join-Path $Data "pg.log") `
+    -o "-p $PgPort -c listen_addresses=127.0.0.1" start
 
 try {
     # --- 3) banco + extensao pgvector (idempotente) ---
@@ -108,5 +113,5 @@ try {
 finally {
     Write-Host "==> Encerrando..."
     foreach ($p in $procs) { if ($p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } }
-    & (Pg "pg_ctl.exe") -D $PgData -w stop | Out-Null
+    & (Pg "pg_ctl.exe") -D $PgData -w -s stop
 }

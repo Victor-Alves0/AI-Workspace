@@ -110,12 +110,22 @@ fn engine_paths(app: &AppHandle) -> Option<(PathBuf, PathBuf)> {
 /// initdb -> Postgres -> migracoes -> API -> interface. Devolve o PID do launcher.
 fn spawn_engine(app: &AppHandle) -> Option<u32> {
     let (engine, data) = engine_paths(app)?;
-    let script = engine.join("Start-AIWorkspace.ps1");
     let _ = std::fs::create_dir_all(&data);
+    // `-File` com caminho ABSOLUTO quebra quando ha espaco no caminho de instalacao
+    // ("AI Workspace"): o powershell le so' ate o espaco e reclama que "AI" nao tem
+    // extensao .ps1. Rodamos com o diretorio de trabalho na pasta do motor e
+    // passamos o script pelo nome relativo (sem espaco). O -DataDir fica em
+    // %APPDATA%\com.aiworkspace.app (sem espaco), entao e' seguro.
     let child = Command::new("powershell.exe")
-        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
-        .arg(&script)
-        .arg("-DataDir")
+        .current_dir(&engine)
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            "Start-AIWorkspace.ps1",
+            "-DataDir",
+        ])
         .arg(&data)
         .arg("-NoBrowser")
         .creation_flags(NO_WINDOW)
@@ -241,7 +251,7 @@ fn main() {
                 .center()
                 .visible(!start_hidden)
                 .initialization_script(
-                    "window.__AIW_DESKTOP__ = { platform: 'windows', version: '0.2.0' };",
+                    "window.__AIW_DESKTOP__ = { platform: 'windows', version: '0.2.1' };",
                 )
                 .build()?;
 
