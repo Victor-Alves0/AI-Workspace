@@ -1,24 +1,15 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "AI Workspace",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "com.aiworkspace.app",
   "build": {
     "frontendDist": "../ui"
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [
-      {
-        "title": "AI Workspace",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 380,
-        "minHeight": 480,
-        "resizable": true,
-        "center": true
-      }
-    ],
+    "//windows": "A janela 'main' é criada no setup() do Rust (src/main.rs): a URL vem das preferências da máquina e o app decide visível/oculto. Definir uma janela aqui criaria uma segunda 'main' e o build colidiria no label — o app abriria e fecharia.",
+    "windows": [],
     "security": {
       "csp": null
     }

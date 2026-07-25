@@ -180,7 +180,7 @@ fn main() {
                 // Marca a página para a UI web saber que está no desktop e poder
                 // exibir a seção de preferências da máquina.
                 .initialization_script(
-                    "window.__AIW_DESKTOP__ = { platform: 'windows', version: '0.1.0' };",
+                    "window.__AIW_DESKTOP__ = { platform: 'windows', version: '0.1.1' };",
                 )
                 .build()?;
 
