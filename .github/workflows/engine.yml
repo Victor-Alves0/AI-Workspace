@@ -1,0 +1,36 @@
+# Monta o "engine bundle" do AI Workspace para Windows (Etapa 1 do app SEM Docker):
+# Postgres + pgvector + Python embarcado + backend, num zip autocontido que sobe a
+# API sem nada instalado no SO.
+#
+# Dispare em Actions -> "Engine bundle (Windows)" -> Run workflow. O zip sai como
+# artefato do run (nao publica Release nesta etapa - e' para testar).
+
+name: Engine bundle (Windows)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Python do runner: usado so' para INSTALAR as deps (com os wheels cp312) num
+      # --target dentro do Python embarcado. Mesma minor (3.12) do embeddable.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Montar o bundle
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: desktop/engine/build-engine.ps1 -Zip
+
+      - name: Publicar artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: aiworkspace-engine-windows
+          path: desktop/engine/out/aiworkspace-engine-windows.zip
+          if-no-files-found: error
