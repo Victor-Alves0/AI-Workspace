@@ -77,6 +77,32 @@ Publishing a release triggers CI:
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
+## Code signing (self-signed)
+
+The installer is signed in CI with a **self-signed** code-signing certificate so the
+binary carries a publisher identity instead of "Unknown publisher". CI imports the cert
+(from the `WINDOWS_CERT_PFX_BASE64` / `WINDOWS_CERT_PASSWORD` repo secrets) and Tauri
+signs the binary + NSIS installer using the `certificateThumbprint` in
+[`tauri.conf.json`](../desktop/src-tauri/tauri.conf.json).
+
+A self-signed signature is **not** trusted by other machines out of the box — SmartScreen
+still warns until each machine trusts the certificate once. To establish trust, install the
+public certificate ([`desktop/aiworkspace-codesign.cer`](../desktop/aiworkspace-codesign.cer))
+into **Trusted Root Certification Authorities** (and optionally **Trusted Publishers**):
+
+```powershell
+# per-machine (needs admin) — makes the signature trusted for all users
+Import-Certificate -FilePath aiworkspace-codesign.cer `
+  -CertStoreLocation Cert:\LocalMachine\Root
+```
+
+Or double-click the `.cer` → **Install Certificate** → *Local Machine* → *Place all
+certificates in the following store* → **Trusted Root Certification Authorities**.
+
+For public distribution to strangers (no manual trust step), move to a CA-issued OV/EV
+certificate — e.g. **Azure Trusted Signing** — and swap the thumbprint/import step; the rest
+of the pipeline stays the same.
+
 ## Roadmap: embedded backend
 
 Today the app needs the stack running. The path to a **self-contained** installer (no Docker)
@@ -85,4 +111,3 @@ and the 55 migrations pass. What's left is packaging the Python backend and supe
 the shell.
 
 Technical details of the shell are in [`desktop/README.md`](../desktop/README.md).
-</content>

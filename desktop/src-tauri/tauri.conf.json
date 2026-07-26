@@ -19,6 +19,9 @@
     "icon": ["icons/icon.ico", "icons/icon.png"],
     "resources": ["engine/**/*"],
     "windows": {
+      "certificateThumbprint": "48E29E674FDC244A96B18EE7C36E74FDE1BC2A09",
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
       "nsis": {
         "installMode": "currentUser"
       }
