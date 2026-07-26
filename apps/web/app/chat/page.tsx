@@ -127,6 +127,7 @@ export default function ChatPage() {
   const gen = useGeneration(() => ({
     artifactsEnabled, temporary, setArtifactOpen, setActive,
     reloadMessages, reloadArtifacts, refreshChats, isActiveChat,
+    onReasoningEffort: (e: string) => setReasoningEffort(e as ReasoningEffort),
   }));
   const {
     streaming, setStreaming, streamingReasoning, setStreamingReasoning,
@@ -1496,6 +1497,15 @@ export default function ChatPage() {
         }`}
       >
         <Sidebar
+          activeView={
+            automationsOpen ? "automations"
+              : playgroundOpen ? "playground"
+              : workspaceOpen
+                ? (workspaceSection === "Codespace" ? "codespace"
+                  : workspaceSection === "Analítica" ? "analytics"
+                  : "workspace")
+                : "chat"
+          }
           user={user}
           chats={chats}
           folders={folders}
@@ -1851,6 +1861,7 @@ export default function ChatPage() {
                       reasoning={streamingReasoning ? { text: streamingReasoning } : null}
                       reasoningLive={!streaming}
                       toolEvents={toolEvents.length ? toolEvents : undefined}
+                      toolsLive={sending}
                       footer={generatingImage ? <GeneratingImage /> : consultingKnowledge ? <ConsultingKnowledge /> : transcribingAudio ? <TranscribingAudio /> : undefined}
                     />
                   ) : (
@@ -1885,7 +1896,7 @@ export default function ChatPage() {
                       {showAsk && askSpec && (
                         <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                       )}
-                      <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
+                      <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
                     </div>
                   </div>
                 </div>
@@ -2063,6 +2074,7 @@ function MessageBubble({
   reasoning,
   reasoningLive = false,
   toolEvents,
+  toolsLive = false,
   footer,
 }: {
   role: string;
@@ -2077,11 +2089,19 @@ function MessageBubble({
   reasoning?: { text: string; seconds?: number } | null;
   reasoningLive?: boolean;
   toolEvents?: ToolEvent[];
+  /** geração em andamento: mostra o painel de tools já aberto + spinner na tool ativa */
+  toolsLive?: boolean;
   footer?: React.ReactNode;
 }) {
   const [showTools, setShowTools] = useState(false);
   const isUser = role === "user";
   const usedTools = !!toolEvents?.length;
+  // Uma tool está executando AGORA quando, ao vivo, o último evento é uma "chamada"
+  // sem resultado ainda. Nesse momento (ou antes de qualquer texto) o painel abre
+  // sozinho — senão o balão fica quase vazio e parece travado. Quando a resposta
+  // volta a fluir em texto, ele recolhe de novo p/ trás do ícone da chave.
+  const toolRunning = toolsLive && usedTools && toolEvents![toolEvents!.length - 1].kind === "call";
+  const toolsOpen = toolRunning || (toolsLive && !content) || showTools;
   if (isUser) {
     return (
       <div className="mx-auto flex max-w-3xl justify-end">
@@ -2126,7 +2146,7 @@ function MessageBubble({
         {(content || !reasoning) && (
           <Markdown content={content} fast={streaming} clamp={streaming} className={streaming ? "stream-caret" : ""} />
         )}
-        {showTools && usedTools && <ToolEventsPanel events={toolEvents!} />}
+        {toolsOpen && usedTools && <ToolEventsPanel events={toolEvents!} live={toolsLive} />}
         {footer}
         {onSpeak && (
           <button onClick={() => onSpeak()} title="Ler em voz alta" className="mt-1 flex items-center gap-1 text-xs text-muted opacity-0 transition-opacity hover:text-ink group-hover:opacity-100">

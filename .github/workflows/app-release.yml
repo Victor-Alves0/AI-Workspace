@@ -1,0 +1,53 @@
+# Publica a CAMADA LEVE (codigo do app) da auto-atualizacao em 2 camadas.
+#
+# O motor pesado (Python/Postgres/Node/deps/modelo) vem no instalador .exe e muda
+# raramente. Este workflow embrulha so' o que muda a cada commit — backend
+# (aiworkspace) + frontend (web standalone) + migracoes — e publica no release
+# ROLANTE `app-latest` (app-<sha>.zip + app-update.json). O launcher na maquina
+# do usuario le' esse manifesto no boot e troca so' essas pastas, sem reinstalar.
+#
+# Dispare em Actions -> "App code update (Windows)" -> Run workflow, depois de
+# mexer em codigo do app. Para mudancas de DEPENDENCIA (nova lib), rode antes o
+# instalador completo e suba o ENGINE_VERSION.
+
+name: App code update (Windows)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Montar o pacote de codigo (zip + manifesto)
+        shell: pwsh
+        run: desktop/engine/build-app-package.ps1 -OutDir "${{ github.workspace }}/dist"
+
+      - name: Publicar no release rolante app-latest
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # cria o release rolante na 1a vez; nas seguintes so' reaproveita. Fica
+          # como pre-release (--latest=false) p/ NAO roubar o "Latest" do instalador.
+          gh release view app-latest 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create app-latest --title "App code (rolling)" `
+              --notes "Atualizacao automatica do codigo do app (camada leve)." `
+              --prerelease --latest=false
+          }
+          # limpa zips antigos p/ o release nao crescer sem fim (o manifesto sempre
+          # aponta p/ o mais novo; zips antigos ficam orfaos).
+          $old = (gh release view app-latest --json assets --jq '.assets[].name' 2>$null) |
+                 Where-Object { $_ -like 'app-*.zip' }
+          foreach ($a in $old) { gh release delete-asset app-latest $a --yes 2>$null }
+          gh release upload app-latest (Get-ChildItem dist/app-*.zip).FullName dist/app-update.json --clobber

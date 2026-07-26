@@ -26,6 +26,7 @@ from .codespace_routes import router as codespace_router
 from .share_routes import router as share_router
 from .telegram_routes import router as telegram_router
 from .discord_routes import router as discord_router
+from .slack_channel_routes import router as slack_channel_router
 from .push_routes import router as push_router
 from .security_routes import router as security_router
 from .playground_routes import router as playground_router
@@ -99,6 +100,12 @@ async def lifespan(app: FastAPI):
         await discord_gateway.start()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível iniciar os gateways do Discord (%s)", exc)
+    # sockets (Socket Mode / WebSocket) dos apps do Slack conectados (canal)
+    try:
+        from .integrations import slack_socket
+        await slack_socket.start()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Não foi possível iniciar os sockets do Slack (%s)", exc)
     # indexações da Base de Conhecimento interrompidas por restart (task em memória)
     try:
         from .knowledge import ingest as knowledge_ingest
@@ -125,6 +132,11 @@ async def lifespan(app: FastAPI):
         try:
             from .integrations import discord_gateway
             await discord_gateway.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from .integrations import slack_socket
+            await slack_socket.stop()
         except Exception:  # noqa: BLE001
             pass
         try:
@@ -345,6 +357,7 @@ def create_app() -> FastAPI:
     app.include_router(share_router)
     app.include_router(telegram_router)
     app.include_router(discord_router)
+    app.include_router(slack_channel_router)
     app.include_router(push_router)
     app.include_router(playground_router)
     app.include_router(security_router)

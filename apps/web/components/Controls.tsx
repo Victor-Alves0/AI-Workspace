@@ -43,7 +43,7 @@ const PARAMS: ParamSpec[] = [
   { key: "presence_penalty", label: "Penalidade de presença", kind: "slider", min: -2, max: 2, step: 0.1, def: 0 },
   { key: "reasoning_effort", label: "Esforço de raciocínio", kind: "select", options: [
     { value: "minimal", label: "Mínimo" }, { value: "low", label: "Baixo" },
-    { value: "medium", label: "Médio" }, { value: "high", label: "Alto" },
+    { value: "medium", label: "Médio" }, { value: "high", label: "Alto" }, { value: "xhigh", label: "Máximo" },
   ] },
   { key: "max_tokens", label: "max_tokens", kind: "text" },
   { key: "seed", label: "Seed", kind: "text" },

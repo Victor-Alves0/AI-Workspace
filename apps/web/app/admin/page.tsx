@@ -1,13 +1,66 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft, Bug, Check, DatabaseBackup, Download, Loader2, Network,
+  ArrowLeft, Bug, Check, DatabaseBackup, Download, Gauge, Loader2, Network,
   RefreshCw, Shield, Trash2, Upload, Users, X,
 } from "lucide-react";
 import { api, API_URL, ApiError } from "@/lib/api";
 import type { AdminUser } from "@/lib/types";
+import ObservabilityView from "@/components/ObservabilityView";
+
+/* ------------------------------- navegação por cards ------------------------ */
+type AdminSection = "users" | "network" | "update" | "backup" | "observability";
+
+const ADMIN_CARDS: { key: AdminSection; name: string; desc: string; icon: ReactNode }[] = [
+  { key: "users", name: "Usuários", desc: "Aprovar, remover e cadastros", icon: <Users size={22} /> },
+  { key: "observability", name: "Observabilidade", desc: "Inspecione cada chamada", icon: <Gauge size={22} /> },
+  { key: "network", name: "Rede", desc: "IPs permitidos, host e porta", icon: <Network size={22} /> },
+  { key: "update", name: "Atualização", desc: "Verificar novas versões", icon: <RefreshCw size={22} /> },
+  { key: "backup", name: "Backup e migração", desc: "Exportar/importar o sistema", icon: <DatabaseBackup size={22} /> },
+];
+
+/* card quadrado da grade (mesmo visual do Espaço de Trabalho) */
+function AdminCard({ icon, name, desc, badge, onClick }: {
+  icon: ReactNode; name: string; desc: string; badge?: number; onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="group relative flex h-[168px] flex-col items-center justify-center gap-3 rounded-2xl border border-border bg-surface p-5 text-center transition-all duration-150 hover:-translate-y-0.5 hover:border-accent/40 hover:bg-hover hover:shadow-sm"
+    >
+      <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
+        {icon}
+      </span>
+      <div className="flex flex-col items-center">
+        <p className="text-sm font-semibold text-ink">{name}</p>
+        <p className="mt-0.5 line-clamp-2 text-xs leading-4 text-muted">{desc}</p>
+      </div>
+      {!!badge && (
+        <span className="absolute right-3 top-3 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-amber-500/90 px-1.5 text-[11px] font-semibold text-white">
+          {badge}
+        </span>
+      )}
+    </button>
+  );
+}
+
+/* casca de uma seção: breadcrumb de volta + título */
+function AdminShell({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) {
+  return (
+    <div>
+      <nav className="mb-4 flex items-center gap-1.5 text-sm">
+        <button onClick={onBack} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-muted transition-colors hover:bg-hover hover:text-ink">
+          <ArrowLeft size={16} /> Painel do Admin
+        </button>
+        <span className="text-muted">/</span>
+        <span className="font-medium text-ink">{title}</span>
+      </nav>
+      {children}
+    </div>
+  );
+}
 
 interface NetworkCfg { host: string; port: number; allowed_ips: string[]; repo: string; branch: string; trust_proxy?: boolean; web_origin?: string }
 interface UpdateInfo { current_version: string; repo: string; branch: string; latest_release: string | null; latest_commit: string | null; update_available: boolean; error: string | null }
@@ -28,6 +81,7 @@ export default function AdminPage() {
   const [netSaved, setNetSaved] = useState(false);
   const [upd, setUpd] = useState<UpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
+  const [section, setSection] = useState<AdminSection | null>(null);
 
   const loadUsers = () =>
     api
@@ -84,31 +138,71 @@ export default function AdminPage() {
   }
 
   const pending = users.filter((u) => u.status === "pending");
+  const curCard = ADMIN_CARDS.find((c) => c.key === section);
 
   return (
     <div className="h-full overflow-y-auto bg-bg px-4 py-5 md:p-6">
       <div className="mx-auto max-w-4xl space-y-5">
-        {/* cabeçalho: breadcrumb de volta + título + ações em pílulas */}
+        {/* cabeçalho: no home volta ao chat; numa seção, o breadcrumb volta ao painel */}
         <div>
-          <button onClick={() => router.push("/chat")} className="mb-3 flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm text-muted transition-colors hover:bg-hover hover:text-ink">
-            <ArrowLeft size={16} /> Voltar ao chat
-          </button>
+          {section ? (
+            <button onClick={() => setSection(null)} className="mb-3 flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm text-muted transition-colors hover:bg-hover hover:text-ink">
+              <ArrowLeft size={16} /> Painel do Admin
+            </button>
+          ) : (
+            <button onClick={() => router.push("/chat")} className="mb-3 flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm text-muted transition-colors hover:bg-hover hover:text-ink">
+              <ArrowLeft size={16} /> Voltar ao chat
+            </button>
+          )}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/15 text-accent-hover">
                 <Shield size={20} />
               </span>
               <div>
-                <h1 className="text-xl font-bold tracking-tight text-ink">Painel do Admin</h1>
-                <p className="text-xs text-muted">Usuários, rede, atualização e backup do sistema</p>
+                <h1 className="text-xl font-bold tracking-tight text-ink">
+                  {section ? curCard?.name ?? "Painel do Admin" : "Painel do Admin"}
+                </h1>
+                <p className="text-xs text-muted">
+                  {section ? curCard?.desc : "Usuários, observabilidade, rede, atualização e backup"}
+                </p>
               </div>
             </div>
-            <button onClick={() => router.push("/debug")} className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">
-              <Bug size={15} /> Debug
-            </button>
+            {!section && (
+              <button onClick={() => router.push("/debug")} className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">
+                <Bug size={15} /> Debug
+              </button>
+            )}
           </div>
         </div>
 
+        {/* HOME: grade de cards (igual ao Espaço de Trabalho) */}
+        {!section && (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {ADMIN_CARDS.map((c) => (
+              <AdminCard
+                key={c.key}
+                icon={c.icon}
+                name={c.name}
+                desc={c.desc}
+                badge={c.key === "users" ? pending.length : 0}
+                onClick={() => setSection(c.key)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* SEÇÃO: Observabilidade */}
+        {section === "observability" && (
+          <AdminShell title="Observabilidade" onBack={() => setSection(null)}>
+            <ObservabilityView />
+          </AdminShell>
+        )}
+
+        {/* SEÇÃO: Usuários (cadastros + pendências + tabela) */}
+        {section === "users" && (
+        <AdminShell title="Usuários" onBack={() => setSection(null)}>
+        <div className="space-y-5">
         {/* config de cadastro */}
         <div className="flex items-center justify-between rounded-xl border border-border bg-surface p-4">
           <div>
@@ -125,8 +219,63 @@ export default function AdminPage() {
           </button>
         </div>
 
-        {/* Rede: allowlist de IP (runtime) + host/porta (deploy) */}
-        {net && (
+        {pending.length > 0 && (
+          <p className="text-sm text-amber-400">{pending.length} usuário(s) aguardando aprovação.</p>
+        )}
+
+        {/* tabela de usuários */}
+        <div className="overflow-x-auto rounded-xl border border-border">
+          <table className="w-full min-w-[480px] text-left text-sm">
+            <thead className="bg-surface text-muted">
+              <tr>
+                <th className="px-4 py-3 font-medium">Email</th>
+                <th className="px-4 py-3 font-medium">Papel</th>
+                <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 text-right font-medium">Ações</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u) => (
+                <tr key={u.id} className="border-t border-border">
+                  <td className="px-4 py-3 text-ink">{u.email}</td>
+                  <td className="px-4 py-3 text-muted">{u.role}</td>
+                  <td className="px-4 py-3">
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${STATUS_STYLE[u.status] ?? "text-muted"}`}>
+                      {u.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex justify-end gap-1">
+                      {u.status !== "active" && (
+                        <button onClick={() => approve(u.id)} title="Aprovar" className="rounded-md p-1.5 text-green-400 hover:bg-surface2">
+                          <Check size={16} />
+                        </button>
+                      )}
+                      {u.status !== "rejected" && u.role !== "admin" && (
+                        <button onClick={() => reject(u.id)} title="Rejeitar" className="rounded-md p-1.5 text-amber-400 hover:bg-surface2">
+                          <X size={16} />
+                        </button>
+                      )}
+                      {u.role !== "admin" && (
+                        <button onClick={() => remove(u.id)} title="Excluir" className="rounded-md p-1.5 text-red-400 hover:bg-surface2">
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        </div>
+        </AdminShell>
+        )}
+
+        {/* SEÇÃO: Rede */}
+        {section === "network" && (
+        <AdminShell title="Rede" onBack={() => setSection(null)}>
+        {net ? (
           <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
             <p className="flex items-center gap-2 text-sm font-semibold text-ink"><Network size={16} /> Rede</p>
 
@@ -168,10 +317,14 @@ export default function AdminPage() {
               {netSaved && <span className="text-xs text-green-400">Salvo ✓</span>}
             </div>
           </div>
+        ) : <p className="text-sm text-muted">Carregando…</p>}
+        </AdminShell>
         )}
 
-        {/* Atualização (checa o GitHub; aplica pelo update.sh no host) */}
-        {net && (
+        {/* SEÇÃO: Atualização (checa o GitHub; aplica pelo update.sh no host) */}
+        {section === "update" && (
+        <AdminShell title="Atualização" onBack={() => setSection(null)}>
+        {net ? (
           <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
             <p className="flex items-center gap-2 text-sm font-semibold text-ink"><RefreshCw size={16} /> Atualização</p>
             <div className="grid grid-cols-2 gap-3">
@@ -217,61 +370,16 @@ export default function AdminPage() {
               execute <span className="font-mono text-ink-soft">./update.sh</span> na pasta do projeto — ele puxa do git, reconstrói, sobe e migra.
             </p>
           </div>
+        ) : <p className="text-sm text-muted">Carregando…</p>}
+        </AdminShell>
         )}
 
-        {/* Backup completo / migração de sistema */}
-        <BackupCard />
-
-        {pending.length > 0 && (
-          <p className="text-sm text-amber-400">{pending.length} usuário(s) aguardando aprovação.</p>
+        {/* SEÇÃO: Backup e migração */}
+        {section === "backup" && (
+          <AdminShell title="Backup e migração" onBack={() => setSection(null)}>
+            <BackupCard />
+          </AdminShell>
         )}
-
-        {/* tabela de usuários */}
-        <p className="flex items-center gap-2 pt-1 text-sm font-semibold text-ink"><Users size={16} /> Usuários</p>
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full min-w-[480px] text-left text-sm">
-            <thead className="bg-surface text-muted">
-              <tr>
-                <th className="px-4 py-3 font-medium">Email</th>
-                <th className="px-4 py-3 font-medium">Papel</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 text-right font-medium">Ações</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => (
-                <tr key={u.id} className="border-t border-border">
-                  <td className="px-4 py-3 text-ink">{u.email}</td>
-                  <td className="px-4 py-3 text-muted">{u.role}</td>
-                  <td className="px-4 py-3">
-                    <span className={`rounded-full px-2 py-0.5 text-xs ${STATUS_STYLE[u.status] ?? "text-muted"}`}>
-                      {u.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex justify-end gap-1">
-                      {u.status !== "active" && (
-                        <button onClick={() => approve(u.id)} title="Aprovar" className="rounded-md p-1.5 text-green-400 hover:bg-surface2">
-                          <Check size={16} />
-                        </button>
-                      )}
-                      {u.status !== "rejected" && u.role !== "admin" && (
-                        <button onClick={() => reject(u.id)} title="Rejeitar" className="rounded-md p-1.5 text-amber-400 hover:bg-surface2">
-                          <X size={16} />
-                        </button>
-                      )}
-                      {u.role !== "admin" && (
-                        <button onClick={() => remove(u.id)} title="Excluir" className="rounded-md p-1.5 text-red-400 hover:bg-surface2">
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
       </div>
     </div>
   );

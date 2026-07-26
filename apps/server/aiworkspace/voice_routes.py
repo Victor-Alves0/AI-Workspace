@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth.deps import require_approved
 from .config import get_settings
 from .db import get_db
-from .integrations import voice_service
+from .integrations import elevenlabs_service, voice_service
 from .models import User
 from .secrets_service import VOICE_KEY, get_secret
 
@@ -64,6 +65,23 @@ async def _resolve_tts(db: AsyncSession, user: User) -> tuple[str, str, str]:
 async def tts(
     body: TTSIn, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
 ):
+    # Voz ElevenLabs (voz por-modelo prefixada "el:"): sintetiza pela API nativa da
+    # ElevenLabs (não é OpenAI-compat), antes do caminho Voz Local/global.
+    if (body.voice or "").startswith(elevenlabs_service.EL_VOICE_PREFIX):
+        conn = await elevenlabs_service.get_provider(db, str(user.id))
+        if conn is None:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Voz ElevenLabs selecionada, mas a conexão ElevenLabs está desligada ou não configurada.",
+            )
+        try:
+            data, mime = await run_in_threadpool(
+                elevenlabs_service.tts, conn["api_key"], body.text, body.voice, conn["model"]
+            )
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Falha no TTS ElevenLabs: {exc}") from None
+        return Response(content=data, media_type=mime)
+
     base_url, key, model = await _resolve_tts(db, user)
     voice = body.voice or get_settings().tts_voice
     try:
@@ -150,13 +168,25 @@ async def stt(
 # --------------------------------------------------------------------------- #
 # Conexão de Voz Local (Kokoro / servidor de clonagem OpenAI-compatível)
 # --------------------------------------------------------------------------- #
+async def _elevenlabs_voice_names(db: AsyncSession, user: User) -> list[str]:
+    """Vozes ElevenLabs do usuário como strings 'el:<nome>' p/ o seletor por-modelo
+    (que hoje lista vozes como strings). Vazio se desligada/não configurada."""
+    conn = await elevenlabs_service.get_provider(db, str(user.id))
+    if conn is None:
+        return []
+    voices = await run_in_threadpool(elevenlabs_service.list_voices, conn["api_key"])
+    return [f"{elevenlabs_service.EL_VOICE_PREFIX}{v['name']}" for v in voices]
+
+
 @router.get("/config")
 async def voice_config(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
     cfg = await voice_service.public_config(db, user.id)
     voices: list[str] = []
     if cfg["configured"] and cfg["enabled"]:
         voices = await voice_service.list_user_voices(db, user.id)
-    return {**cfg, "voices": voices}
+    # ElevenLabs (se ligada) entra no MESMO seletor, prefixada "el:".
+    voices = [*voices, *await _elevenlabs_voice_names(db, user)]
+    return {**cfg, "voices": voices, "configured": cfg["configured"] or bool(voices)}
 
 
 @router.put("/config")
@@ -175,8 +205,9 @@ async def voice_config_save(
 
 @router.get("/voices")
 async def voice_list(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
-    """Vozes disponíveis na conexão local do usuário (para o seletor por-modelo)."""
-    return {"voices": await voice_service.list_user_voices(db, user.id)}
+    """Vozes disponíveis (conexão de Voz Local + ElevenLabs) p/ o seletor por-modelo."""
+    local = await voice_service.list_user_voices(db, user.id)
+    return {"voices": [*local, *await _elevenlabs_voice_names(db, user)]}
 
 
 @router.post("/test")

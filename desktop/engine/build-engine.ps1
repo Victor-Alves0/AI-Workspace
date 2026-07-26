@@ -19,6 +19,9 @@ param(
     # pasta final do bundle. Padrao: desktop/engine/out/aiworkspace-engine.
     # O build do app desktop passa desktop/src-tauri/engine (vira recurso do Tauri).
     [string]$OutDir = "",
+    # versao do CODIGO do app (camada leve, auto-atualizavel). Vazio => SHA do git.
+    # A camada pesada (motor) usa o arquivo ENGINE_VERSION ao lado deste script.
+    [string]$AppVersion = "",
     [switch]$Zip
 )
 
@@ -151,6 +154,25 @@ Copy-Item (Join-Path $ServerDir "alembic.ini") $AppOut
 Copy-Item (Join-Path $ServerDir "alembic") (Join-Path $AppOut "alembic") -Recurse
 Copy-Item (Join-Path $PSScriptRoot "Start-AIWorkspace.ps1") $Out
 Copy-Item (Join-Path $PSScriptRoot "README.txt") $Out -ErrorAction SilentlyContinue
+
+# ----------------------------------------------------------------------------- #
+# 5b) carimbo de versoes (auto-atualizacao em 2 camadas)
+#
+# engine-version.txt = camada PESADA (Python/deps/Postgres/Node). So muda quando
+#   deps/binarios mudam -> exige instalador completo novo.
+# app-version.txt     = camada LEVE (nosso codigo: aiworkspace + web + migracoes).
+#   Muda a cada commit -> o launcher baixa so o diff e troca em disco, sem reinstalar.
+# O launcher compara estes com o manifesto publicado (app-update.json) no boot.
+# ----------------------------------------------------------------------------- #
+$EngineVersion = (Get-Content (Join-Path $PSScriptRoot "ENGINE_VERSION") -Raw).Trim()
+if (-not $AppVersion) {
+    $AppVersion = (& git -C $RepoRoot rev-parse --short HEAD 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $AppVersion) { $AppVersion = (Get-Date -Format "yyyyMMddHHmmss") }
+    $AppVersion = "$AppVersion".Trim()
+}
+$EngineVersion | Out-File -Encoding ascii -NoNewline (Join-Path $Out "engine-version.txt")
+$AppVersion    | Out-File -Encoding ascii -NoNewline (Join-Path $Out "app-version.txt")
+Write-Host "==> engine-version=$EngineVersion  app-version=$AppVersion"
 
 Write-Host "==> bundle montado em $Out"
 

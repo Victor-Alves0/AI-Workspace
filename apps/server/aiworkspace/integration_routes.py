@@ -22,8 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth.deps import require_admin, require_approved
 from .config import get_settings
 from .db import get_db
-from .integrations import github_service, google_service, ollama_service, tuya_service
-from .models import GithubAccount, GoogleAccount, User
+from .integrations import elevenlabs_service, github_service, google_service, notion_service, ollama_service, slack_service, tuya_service
+from .models import GithubAccount, GoogleAccount, NotionAccount, SlackAccount, User
 from .tools import sift_service
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
@@ -386,6 +386,384 @@ async def github_disconnect_account(
     await db.commit()
     sift_service.invalidate(str(user.id))
     return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+# Notion — tool. Conexão por token de integração interna (colar) OU OAuth (client
+# id/secret na UI). Cada usuário conecta VÁRIAS contas (notion_accounts); o token é
+# lido ao vivo (não expira). Espelha o GitHub.
+# --------------------------------------------------------------------------- #
+async def _notion_accounts(db: AsyncSession, user_id: uuid.UUID) -> list[NotionAccount]:
+    return list(await db.scalars(
+        select(NotionAccount).where(NotionAccount.user_id == user_id).order_by(NotionAccount.created_at)
+    ))
+
+
+@router.get("/notion")
+async def notion_status(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    cfg = await notion_service.get_oauth_config(db)
+    accounts = await _notion_accounts(db, user.id)
+    return {
+        "oauth_configured": cfg is not None,
+        "is_admin": user.role == "admin",
+        "client_id": cfg["client_id"] if cfg else "",
+        "redirect_uri": get_settings().notion_redirect_uri,
+        "accounts": [
+            {"id": str(a.id), "workspace": a.workspace, "auth_type": a.auth_type,
+             "avatar_url": a.avatar_url, "connected_at": a.created_at.isoformat()}
+            for a in accounts
+        ],
+    }
+
+
+@router.put("/notion/oauth")
+async def notion_set_oauth(
+    body: OAuthConfigIn, user: User = Depends(require_admin), db: AsyncSession = Depends(get_db),
+):
+    if not body.client_id.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Client ID é obrigatório")
+    existing = await notion_service.get_oauth_config(db)
+    if existing is None and not (body.client_secret or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Client Secret é obrigatório")
+    await notion_service.set_oauth_config(db, body.client_id, body.client_secret)
+    return {"ok": True}
+
+
+class NotionTokenIn(BaseModel):
+    token: str
+
+
+@router.post("/notion/token")
+async def notion_connect_token(
+    body: NotionTokenIn, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    """Conecta uma conta colando um token de integração interna (ntn_… / secret_…)."""
+    token = (body.token or "").strip()
+    if not token:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Informe o token")
+    info = await notion_service.validate_token(token)
+    if info.get("error"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Token inválido: {info.get('error', 'sem acesso')}")
+    ws = info.get("workspace") or "Notion"
+    bot_id = info.get("bot_id") or ""
+    existing = await db.scalar(
+        select(NotionAccount).where(NotionAccount.user_id == user.id, NotionAccount.bot_id == bot_id)
+    ) if bot_id else None
+    if existing is not None:
+        existing.token = token
+        existing.auth_type = "token"
+        existing.workspace = ws
+        existing.avatar_url = info.get("avatar_url", "")
+    else:
+        db.add(NotionAccount(
+            user_id=user.id, workspace=ws, bot_id=bot_id, token=token, auth_type="token",
+            avatar_url=info.get("avatar_url", ""),
+        ))
+    await db.commit()
+    sift_service.invalidate(str(user.id))
+    return {"ok": True, "workspace": ws}
+
+
+@router.get("/notion/connect")
+async def notion_connect(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    cfg = await notion_service.get_oauth_config(db)
+    if cfg is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "OAuth do Notion não configurado. Um administrador precisa definir o Client ID/Secret — "
+            "ou conecte colando um token de integração interna.",
+        )
+    return RedirectResponse(notion_service.authorization_url(str(user.id), cfg))
+
+
+@router.get("/notion/callback")
+async def notion_callback(
+    state: str = "", code: str = "", error: str = "", db: AsyncSession = Depends(get_db),
+):
+    web = get_settings().web_origin.rstrip("/")
+
+    def _back(kv: str) -> RedirectResponse:
+        return RedirectResponse(f"{web}/chat?{kv}")
+
+    if error:
+        return _back(f"notion=error&reason={error}")
+    user_id = notion_service.verify_state(state)
+    if not user_id or not code:
+        return _back("notion=error&reason=invalid_state")
+    cfg = await notion_service.get_oauth_config(db)
+    if cfg is None:
+        return _back("notion=error&reason=not_configured")
+    result = await notion_service.exchange_code(code, cfg)
+    if result.get("error"):
+        return _back(f"notion=error&reason={result['error'][:60]}")
+    uid = uuid.UUID(user_id)
+    if await db.get(User, uid) is None:
+        return _back("notion=error&reason=user_not_found")
+    ws = result.get("workspace") or "Notion"
+    bot_id = result.get("bot_id") or ""
+    existing = await db.scalar(
+        select(NotionAccount).where(NotionAccount.user_id == uid, NotionAccount.bot_id == bot_id)
+    ) if bot_id else None
+    if existing is not None:
+        existing.token = result["access_token"]
+        existing.auth_type = "oauth"
+        existing.workspace = ws
+        existing.avatar_url = result.get("avatar_url", "")
+    else:
+        db.add(NotionAccount(
+            user_id=uid, workspace=ws, bot_id=bot_id, token=result["access_token"],
+            auth_type="oauth", avatar_url=result.get("avatar_url", ""),
+        ))
+    await db.commit()
+    sift_service.invalidate(user_id)
+    return _back("notion=connected")
+
+
+@router.post("/notion/accounts/{account_id}/test")
+async def notion_test_account(
+    account_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    acc = await db.get(NotionAccount, account_id)
+    if acc is None or acc.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conta não encontrada")
+    result = await notion_service.test_account(str(acc.id))
+    if result.get("ok"):
+        return {"ok": True, "workspace": result.get("workspace") or acc.workspace}
+    return {"ok": False, "error": "Não foi possível acessar este workspace — reconecte (o token pode ter sido revogado)."}
+
+
+@router.delete("/notion/accounts/{account_id}")
+async def notion_disconnect_account(
+    account_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    acc = await db.get(NotionAccount, account_id)
+    if acc is None or acc.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conta não encontrada")
+    await db.delete(acc)
+    await db.commit()
+    sift_service.invalidate(str(user.id))
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+# Slack — tool. Conexão por Bot User OAuth Token (colar) OU OAuth (client id/secret
+# na UI). Cada usuário conecta VÁRIOS workspaces (slack_accounts). Espelha o Notion.
+# --------------------------------------------------------------------------- #
+async def _slack_accounts(db: AsyncSession, user_id: uuid.UUID) -> list[SlackAccount]:
+    return list(await db.scalars(
+        select(SlackAccount).where(SlackAccount.user_id == user_id).order_by(SlackAccount.created_at)
+    ))
+
+
+@router.get("/slack")
+async def slack_status(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    cfg = await slack_service.get_oauth_config(db)
+    accounts = await _slack_accounts(db, user.id)
+    return {
+        "oauth_configured": cfg is not None,
+        "is_admin": user.role == "admin",
+        "client_id": cfg["client_id"] if cfg else "",
+        "redirect_uri": get_settings().slack_redirect_uri,
+        "accounts": [
+            {"id": str(a.id), "team": a.team, "auth_type": a.auth_type,
+             "avatar_url": a.avatar_url, "connected_at": a.created_at.isoformat()}
+            for a in accounts
+        ],
+    }
+
+
+@router.put("/slack/oauth")
+async def slack_set_oauth(
+    body: OAuthConfigIn, user: User = Depends(require_admin), db: AsyncSession = Depends(get_db),
+):
+    if not body.client_id.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Client ID é obrigatório")
+    existing = await slack_service.get_oauth_config(db)
+    if existing is None and not (body.client_secret or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Client Secret é obrigatório")
+    await slack_service.set_oauth_config(db, body.client_id, body.client_secret)
+    return {"ok": True}
+
+
+class SlackTokenIn(BaseModel):
+    token: str
+
+
+@router.post("/slack/token")
+async def slack_connect_token(
+    body: SlackTokenIn, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    """Conecta um workspace colando um Bot User OAuth Token (xoxb-…) ou user token."""
+    token = (body.token or "").strip()
+    if not token:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Informe o token")
+    info = await slack_service.validate_token(token)
+    if info.get("error"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Token inválido: {info.get('error', 'sem acesso')}")
+    team = info.get("team") or "Slack"
+    team_id = info.get("team_id") or ""
+    existing = await db.scalar(
+        select(SlackAccount).where(SlackAccount.user_id == user.id, SlackAccount.team_id == team_id)
+    ) if team_id else None
+    if existing is not None:
+        existing.token = token
+        existing.auth_type = "token"
+        existing.team = team
+        existing.bot_user_id = info.get("bot_user_id", "")
+    else:
+        db.add(SlackAccount(
+            user_id=user.id, team=team, team_id=team_id, token=token, auth_type="token",
+            bot_user_id=info.get("bot_user_id", ""),
+        ))
+    await db.commit()
+    sift_service.invalidate(str(user.id))
+    return {"ok": True, "team": team}
+
+
+@router.get("/slack/connect")
+async def slack_connect(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    cfg = await slack_service.get_oauth_config(db)
+    if cfg is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "OAuth do Slack não configurado. Um administrador precisa definir o Client ID/Secret — "
+            "ou conecte colando um Bot User OAuth Token.",
+        )
+    return RedirectResponse(slack_service.authorization_url(str(user.id), cfg))
+
+
+@router.get("/slack/callback")
+async def slack_callback(
+    state: str = "", code: str = "", error: str = "", db: AsyncSession = Depends(get_db),
+):
+    web = get_settings().web_origin.rstrip("/")
+
+    def _back(kv: str) -> RedirectResponse:
+        return RedirectResponse(f"{web}/chat?{kv}")
+
+    if error:
+        return _back(f"slack=error&reason={error}")
+    user_id = slack_service.verify_state(state)
+    if not user_id or not code:
+        return _back("slack=error&reason=invalid_state")
+    cfg = await slack_service.get_oauth_config(db)
+    if cfg is None:
+        return _back("slack=error&reason=not_configured")
+    result = await slack_service.exchange_code(code, cfg)
+    if result.get("error"):
+        return _back(f"slack=error&reason={result['error'][:60]}")
+    uid = uuid.UUID(user_id)
+    if await db.get(User, uid) is None:
+        return _back("slack=error&reason=user_not_found")
+    team = result.get("team") or "Slack"
+    team_id = result.get("team_id") or ""
+    existing = await db.scalar(
+        select(SlackAccount).where(SlackAccount.user_id == uid, SlackAccount.team_id == team_id)
+    ) if team_id else None
+    if existing is not None:
+        existing.token = result["access_token"]
+        existing.auth_type = "oauth"
+        existing.team = team
+        existing.bot_user_id = result.get("bot_user_id", "")
+    else:
+        db.add(SlackAccount(
+            user_id=uid, team=team, team_id=team_id, token=result["access_token"],
+            auth_type="oauth", bot_user_id=result.get("bot_user_id", ""),
+        ))
+    await db.commit()
+    sift_service.invalidate(user_id)
+    return _back("slack=connected")
+
+
+@router.post("/slack/accounts/{account_id}/test")
+async def slack_test_account(
+    account_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    acc = await db.get(SlackAccount, account_id)
+    if acc is None or acc.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conta não encontrada")
+    result = await slack_service.test_account(str(acc.id))
+    if result.get("ok"):
+        return {"ok": True, "team": result.get("team") or acc.team}
+    return {"ok": False, "error": "Não foi possível acessar este workspace — reconecte (o token pode ter sido revogado)."}
+
+
+@router.delete("/slack/accounts/{account_id}")
+async def slack_disconnect_account(
+    account_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    acc = await db.get(SlackAccount, account_id)
+    if acc is None or acc.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conta não encontrada")
+    await db.delete(acc)
+    await db.commit()
+    sift_service.invalidate(str(user.id))
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
+# ElevenLabs — conexão POR-USUÁRIO (API key). Serve como provedor de voz do sistema
+# (o /voice/tts prefere a ElevenLabs quando ligada) E libera a tool de áudio
+# (elevenlabs.audio.generate). Mesmo padrão da Higgsfield.
+# --------------------------------------------------------------------------- #
+@router.get("/elevenlabs")
+async def elevenlabs_status(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    cfg = await elevenlabs_service.public_config(db, str(user.id))
+    voices: list = []
+    if cfg.get("connected"):
+        conn = await elevenlabs_service.get_config(db, str(user.id))
+        if conn:
+            voices = await run_in_threadpool(elevenlabs_service.list_voices, conn["api_key"])
+    return {**cfg, "voices": voices}
+
+
+class ElevenLabsConfigIn(BaseModel):
+    api_key: str | None = None  # vazio = mantém a atual
+    model: str | None = None
+    default_voice: str | None = None
+    enabled: bool | None = None
+
+
+@router.put("/elevenlabs")
+async def elevenlabs_set_config(
+    body: ElevenLabsConfigIn,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    existing = await elevenlabs_service.is_configured(db, str(user.id))
+    if not existing and not (body.api_key or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "API key é obrigatória")
+    await elevenlabs_service.set_config(
+        db, str(user.id),
+        api_key=body.api_key, model=body.model,
+        default_voice=body.default_voice, enabled=body.enabled,
+    )
+    sift_service.invalidate(str(user.id))  # creds mudaram → rebuild da SIFT
+    return await elevenlabs_status(user=user, db=db)
+
+
+@router.delete("/elevenlabs")
+async def elevenlabs_disconnect(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    await elevenlabs_service.delete_config(db, str(user.id))
+    sift_service.invalidate(str(user.id))
+    return {"ok": True}
+
+
+@router.post("/elevenlabs/test")
+async def elevenlabs_test(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    conn = await elevenlabs_service.get_config(db, str(user.id))
+    if conn is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "ElevenLabs não configurada.")
+    result = await run_in_threadpool(elevenlabs_service.test_connection, conn["api_key"])
+    if result.get("ok"):
+        return {"ok": True}
+    return {"ok": False, "error": result.get("error") or "Não foi possível conectar à ElevenLabs."}
 
 
 # --------------------------------------------------------------------------- #

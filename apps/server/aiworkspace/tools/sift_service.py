@@ -151,6 +151,40 @@ class HiggsfieldConfig:
 
 
 @dataclass
+class NotionConfig:
+    """Config por-modelo da tool Notion. Como a do GitHub, o TOKEN não mora aqui (é
+    buscado ao vivo por conta em cada chamada); só as contas liberadas, as operações
+    ativas e a confirmação. `accounts` = [{"id","workspace"}] (vazio = sem conta →
+    responde 'não conectado'). `ops` = capacidade→ligado (ausente = ligado):
+    nt_read / nt_create / nt_append."""
+    user_id: str = ""
+    require_confirm: bool = True
+    accounts: list = field(default_factory=list)
+    ops: dict = field(default_factory=dict)
+
+
+@dataclass
+class SlackConfig:
+    """Config por-modelo da tool Slack. Como a do GitHub, o TOKEN não mora aqui (é
+    buscado ao vivo por conta em cada chamada); só os workspaces liberados, as operações
+    ativas e a confirmação. `accounts` = [{"id","team"}] (vazio = sem conta →
+    responde 'não conectado'). `ops` = capacidade→ligado (ausente = ligado):
+    sl_read / sl_send."""
+    user_id: str = ""
+    require_confirm: bool = True
+    accounts: list = field(default_factory=list)
+    ops: dict = field(default_factory=dict)
+
+
+@dataclass
+class ElevenLabsConfig:
+    """Config da tool ElevenLabs (áudio: TTS + efeitos sonoros). `conn` = {api_key,
+    model, default_voice} decifrado do app_settings — como a Higgsfield, a chave VIAJA
+    na config: a tool fala com a API direto. Conexão por-usuário."""
+    conn: dict = field(default_factory=dict)
+
+
+@dataclass
 class MessagingConfig:
     """Config por-modelo da tool de mensagens (agir nas conexões de chat do usuário:
     WhatsApp/Telegram/Discord). Nada de token/instância aqui — resolvidos ao vivo por
@@ -232,6 +266,16 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # comentários, PRs e commits. As operações liberadas são escolhidas na engrenagem.
     {"path": "github.repo.manage", "name": "GitHub", "description": "Repositórios GitHub do usuário: listar repos, ler arquivos, buscar código, ver/criar issues, PRs e comentários.",
      "model_desc": "The user's GitHub: list repos, read files, search code, view/create issues, PRs and comments."},
+    # Notion (requer conta conectada em Configurações → Integrações via token de
+    # integração interna ou OAuth). Uma ferramenta com `action`: busca páginas/bases,
+    # lê o conteúdo e (com confirmação) cria páginas e adiciona conteúdo.
+    {"path": "notion.workspace.manage", "name": "Notion", "description": "Workspace Notion do usuário: buscar páginas e bases de dados, ler conteúdo, criar páginas e adicionar conteúdo.",
+     "model_desc": "The user's Notion workspace: search pages and databases, read page content, query databases, create pages and append content."},
+    # Slack (requer workspace conectado em Configurações → Integrações via token ou
+    # OAuth). Uma ferramenta com `action`: lista canais, lê/busca mensagens e (com
+    # confirmação) envia mensagens. As operações liberadas são escolhidas na engrenagem.
+    {"path": "slack.workspace.manage", "name": "Slack", "description": "Workspace Slack do usuário: listar canais, ler e buscar mensagens e enviar mensagens.",
+     "model_desc": "The user's Slack workspace: list channels, read and search messages, and send messages."},
     # Mensagens (requer uma conexão de chat em Integrações: WhatsApp/Telegram/Discord).
     # Uma ferramenta com `action`: lista conversas, lê o histórico e (com confirmação)
     # envia mensagens pelas conexões do usuário. As conexões e ações liberadas são
@@ -244,6 +288,10 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # no chat pelos cards de imagem/vídeo.
     {"path": "higgsfield.media.generate", "name": "Higgsfield (Imagem/Vídeo)", "description": "Gera imagens (Soul, Seedream, FLUX) e vídeos a partir de imagem (DoP, Kling, Seedance) com os modelos da Higgsfield.",
      "model_desc": "Generate images (Soul, Seedream, FLUX) and image-to-video (DoP, Kling, Seedance) via Higgsfield."},
+    # ElevenLabs (requer conexão em Configurações → Conexões). Gera fala premium de
+    # qualquer texto e efeitos sonoros; o áudio é guardado e tocado no chat.
+    {"path": "elevenlabs.audio.generate", "name": "ElevenLabs (Áudio)", "description": "Gera fala premium (TTS) de qualquer texto e efeitos sonoros com a ElevenLabs; o áudio aparece no chat.",
+     "model_desc": "Generate premium speech (TTS) from any text and sound effects via ElevenLabs; the audio is shown in the chat."},
     # Codespace (grafo de código — GraphCodeMap): só funciona em chats vinculados a
     # um projeto (Espaço de Trabalho → Codespace). Query estrutural (símbolos, quem
     # chama quem, blast radius) em vez de grep — menos rodadas de leitura, mais
@@ -292,8 +340,11 @@ _INTEGRATION_PREFIXES: dict[str, str] = {
     "google.": "Google",
     "smartlife.": "Tuya Smart Life",
     "github.": "GitHub",
+    "notion.": "Notion",
+    "slack.": "Slack",
     "messaging.": "Mensagens",
     "higgsfield.": "Higgsfield",
+    "elevenlabs.": "ElevenLabs",
 }
 
 
@@ -603,6 +654,9 @@ def _register_builtins(
     messaging_cfg: "MessagingConfig | None" = None,
     browser_cfg: dict | None = None,
     higgsfield_cfg: "HiggsfieldConfig | None" = None,
+    notion_cfg: "NotionConfig | None" = None,
+    slack_cfg: "SlackConfig | None" = None,
+    elevenlabs_cfg: "ElevenLabsConfig | None" = None,
 ) -> None:
     """Registra as ferramentas de sistema. `allowed=None` = todas; caso contrário
     apenas os paths presentes no conjunto."""
@@ -2023,6 +2077,65 @@ def _register_builtins(
             except Exception as exc:  # noqa: BLE001
                 return {"error": str(exc)}
 
+    if want("elevenlabs.audio.generate"):
+        el_conn = elevenlabs_cfg.conn if elevenlabs_cfg else {}
+
+        @sift.tool(
+            "elevenlabs.audio.generate",
+            description=(
+                "Generate audio with ElevenLabs and show it to the user in the chat. "
+                "`action`: 'tts' (speak `text` in a voice — optional `voice` id or name; "
+                "great for narration/voiceover of any text), 'sound_effect' (generate a sound "
+                "from a description in `text`, optional `duration` in seconds), 'voices' (list "
+                "the available voices). The audio player appears automatically — do not paste "
+                "the url back."
+            ),
+            params={
+                "action": "string:n::tts | sound_effect | voices",
+                "text": "string:o::tts: the text to speak; sound_effect: the sound to describe",
+                "voice": "string:o::tts: a voice id or name (from action 'voices'); omit for the default",
+                "duration": "number:o::sound_effect: length in seconds (0.5-22)",
+            },
+            returns=["kind", "url", "prompt", "voices", "id", "name", "action", "error"],
+            examples=["narrate this paragraph with elevenlabs",
+                      "gere a narração desse texto em áudio",
+                      "make a sound effect of ocean waves",
+                      "which elevenlabs voices do I have?"],
+        )
+        def _elevenlabs_audio(action: str = "", text: str = "", voice: str = "",
+                              duration: Any = None) -> dict[str, Any]:
+            act = (action or "").strip().lower()
+            if act not in ("tts", "sound_effect", "voices"):
+                return {"error": f"unknown action '{action}' (use tts/sound_effect/voices)"}
+            api_key = el_conn.get("api_key") or ""
+            if not api_key:
+                return {"error": "ElevenLabs não conectada. Conecte em Configurações → Conexões."}
+            from ..integrations import elevenlabs_service as els
+            from ..providers import image_gen
+            try:
+                if act == "voices":
+                    return {"voices": els.list_voices(api_key)}
+                if not (text or "").strip():
+                    return {"error": "`text` is required"}
+                if act == "tts":
+                    data, mime = els.tts(api_key, text, voice or el_conn.get("default_voice", ""),
+                                         el_conn.get("model", ""))
+                else:  # sound_effect
+                    dur = None
+                    try:
+                        dur = float(duration) if duration not in (None, "") else None
+                    except (TypeError, ValueError):
+                        dur = None
+                    data, mime = els.sound_effect(api_key, text, dur)
+            except Exception as exc:  # noqa: BLE001
+                return {"error": str(exc)}
+            chat_id = toolctx.current_chat_id.get()
+            iid = asyncio.run(_store_media(user_id, chat_id, data, mime=mime,
+                                           prompt=text[:200], model="elevenlabs"))
+            if not iid:
+                return {"error": "audio generated but failed to store it"}
+            return {"kind": "audio", "url": image_gen.sign_image_url(iid), "prompt": text[:200]}
+
     # ------------------------------ GitHub ------------------------------------ #
     if want("higgsfield.media.generate"):
         hf_conn = higgsfield_cfg.conn if higgsfield_cfg else {}
@@ -2383,6 +2496,286 @@ def _register_builtins(
             except Exception as exc:  # noqa: BLE001
                 return {"error": str(exc)}
 
+    if want("notion.workspace.manage"):
+        nt_confirm = True if notion_cfg is None else bool(notion_cfg.require_confirm)
+        nt_accounts = list(notion_cfg.accounts) if notion_cfg else []  # [{"id","workspace"}]
+        nt_ops = notion_cfg.ops if notion_cfg else {}
+
+        def _nt_on(cap: str) -> bool:
+            return nt_ops.get(cap, True) is not False
+
+        def _nt_truthy(v: Any) -> bool:
+            if v is True:
+                return True
+            return isinstance(v, str) and v.strip().lower() in ("true", "1", "yes", "sim", "on")
+
+        def _nt_pick(account: str = "") -> tuple[dict | None, dict | None]:
+            if not nt_accounts:
+                return None, {"error": "Notion não conectado. Conecte um workspace em Configurações → Integrações."}
+            if (account or "").strip():
+                a = account.strip().lower()
+                chosen = next(
+                    (x for x in nt_accounts
+                     if a == str(x.get("id", "")).lower() or a == (x.get("workspace", "") or "").lower()),
+                    None,
+                )
+                if chosen is None:
+                    names = ", ".join(x.get("workspace", "") for x in nt_accounts)
+                    return None, {"error": f"workspace '{account}' não liberado para este modelo. Disponíveis: {names}"}
+                return chosen, None
+            if len(nt_accounts) == 1:
+                return nt_accounts[0], None
+            from .interaction import ask_options
+            return None, ask_options(
+                "Qual workspace Notion devo usar?",
+                [{"label": x.get("workspace", ""), "value": f"Use o workspace {x.get('workspace', '')}"} for x in nt_accounts],
+                allow_custom=False,
+            )
+
+        def _nt_ctx(account: str = "") -> tuple[str | None, dict | None]:
+            chosen, block = _nt_pick(account)
+            if block is not None:
+                return None, block
+            from ..integrations import notion_service
+            tok = asyncio.run(notion_service.get_token(str(chosen.get("id"))))
+            if not tok:
+                return None, {"error": f"não foi possível acessar o workspace {chosen.get('workspace', '')} (reconecte em Integrações)."}
+            return tok, None
+
+        def _nt_guard(summary: str, confirm: Any) -> dict | None:
+            if nt_confirm and not _nt_truthy(confirm) and not toolctx.background.get():
+                from .interaction import ask_options
+                return ask_options(
+                    summary,
+                    [
+                        {"label": "Confirmar", "value": "Sim, confirmo — refaça a ação agora com confirm=true."},
+                        {"label": "Cancelar", "value": "Cancele, não execute a ação."},
+                    ],
+                    allow_custom=False,
+                )
+            return None
+
+        def _nt_n(limit: Any, default: int = 10) -> int:
+            s = str(limit if limit is not None else "").strip()
+            if not s:
+                return default
+            try:
+                return max(1, min(int(float(s)), 100))
+            except (TypeError, ValueError):
+                return default
+
+        @sift.tool(
+            "notion.workspace.manage",
+            description=(
+                "The user's Notion workspace. `action`: 'search' (find pages/databases by "
+                "`query`; optional `kind` page|database), 'read_page' (`page_id` — returns the "
+                "page's title and readable text content), 'query_database' (`database_id` — list "
+                "its rows), 'create_page' (`title`, optional `content`; a parent is required: "
+                "`parent_page_id` for a subpage OR `database_id` to add a row), 'append' (`page_id`, "
+                "`content` — add content to an existing page). `content` is light markdown ('# ' "
+                "heading, '- ' bullet, blank line = paragraph). Writes ask the user for confirmation "
+                "unless confirm=true. IDs come from a prior 'search'."
+            ),
+            params={
+                "action": "string:n::search | read_page | query_database | create_page | append",
+                "query": "string:o::search: what to look for (empty = list everything shared with the integration)",
+                "kind": "string:o::search: restrict to 'page' or 'database' (default both)",
+                "page_id": "string:o::read_page/append: the page id (from search)",
+                "database_id": "string:o::query_database: the database id; create_page: add a row to this database",
+                "parent_page_id": "string:o::create_page: create the page UNDER this existing page",
+                "title": "string:o::create_page: the new page's title",
+                "content": "string:o::create_page/append: body text (light markdown)",
+                "limit": "number:o::search/query_database: max items (1-100)",
+                "confirm": "boolean:o::set true only after the user confirmed a write",
+                "account": "string:o::which connected Notion workspace to use; omit if only one",
+            },
+            returns=["results", "id", "type", "title", "url", "last_edited", "content",
+                     "ok", "action", "error",
+                     "kind", "question", "options", "allow_custom", "custom_label"],
+            risk=True,
+            examples=["search my notion for the roadmap", "read that notion page",
+                      "list the rows in my tasks database", "create a notion page titled Notes",
+                      "append a summary to that page"],
+        )
+        def _notion(action: str = "", query: str = "", kind: str = "", page_id: str = "",
+                    database_id: str = "", parent_page_id: str = "", title: str = "",
+                    content: str = "", limit: Any = None, confirm: Any = None,
+                    account: str = "") -> dict[str, Any]:
+            act = (action or "").strip().lower()
+            reads = {"search", "read_page", "query_database"}
+            writes = {"create_page", "append"}
+            if act not in reads | writes:
+                return {"error": f"unknown action '{action}' (use search/read_page/query_database/create_page/append)"}
+            cap = ("nt_read" if act in reads else "nt_create" if act == "create_page" else "nt_append")
+            if not _nt_on(cap):
+                return {"error": f"a operação '{act}' está desativada nas configurações desta ferramenta."}
+            if act in writes:
+                summ = (f"Criar a página “{title}” no Notion?" if act == "create_page"
+                        else "Adicionar conteúdo à página do Notion?")
+                blocked = _nt_guard(summ, confirm)
+                if blocked is not None:
+                    return blocked
+            tok, block = _nt_ctx(account)
+            if block is not None:
+                return block
+            from ..integrations import notion_service as nts
+            try:
+                if act == "search":
+                    return {"results": nts.search(tok, query, kind, _nt_n(limit))}
+                if act == "read_page":
+                    if not (page_id or "").strip():
+                        return {"error": "`page_id` is required for read_page"}
+                    return nts.get_page(tok, page_id.strip())
+                if act == "query_database":
+                    if not (database_id or "").strip():
+                        return {"error": "`database_id` is required"}
+                    return {"results": nts.query_database(tok, database_id, _nt_n(limit, 20))}
+                if act == "create_page":
+                    if not (title or "").strip():
+                        return {"error": "`title` is required for create_page"}
+                    if not (parent_page_id or "").strip() and not (database_id or "").strip():
+                        return {"error": "a parent is required: `parent_page_id` or `database_id`"}
+                    return nts.create_page(tok, title, content, parent_page_id, database_id)
+                # append
+                if not ((page_id or "").strip() and (content or "").strip()):
+                    return {"error": "`page_id` and `content` are required for append"}
+                return nts.append_blocks(tok, page_id, content)
+            except nts.NotionError as exc:
+                return {"error": str(exc)}
+            except Exception as exc:  # noqa: BLE001
+                return {"error": str(exc)}
+
+    if want("slack.workspace.manage"):
+        sl_confirm = True if slack_cfg is None else bool(slack_cfg.require_confirm)
+        sl_accounts = list(slack_cfg.accounts) if slack_cfg else []  # [{"id","team"}]
+        sl_ops = slack_cfg.ops if slack_cfg else {}
+
+        def _sl_on(cap: str) -> bool:
+            return sl_ops.get(cap, True) is not False
+
+        def _sl_truthy(v: Any) -> bool:
+            if v is True:
+                return True
+            return isinstance(v, str) and v.strip().lower() in ("true", "1", "yes", "sim", "on")
+
+        def _sl_pick(account: str = "") -> tuple[dict | None, dict | None]:
+            if not sl_accounts:
+                return None, {"error": "Slack não conectado. Conecte um workspace em Configurações → Integrações."}
+            if (account or "").strip():
+                a = account.strip().lower()
+                chosen = next(
+                    (x for x in sl_accounts
+                     if a == str(x.get("id", "")).lower() or a == (x.get("team", "") or "").lower()),
+                    None,
+                )
+                if chosen is None:
+                    names = ", ".join(x.get("team", "") for x in sl_accounts)
+                    return None, {"error": f"workspace '{account}' não liberado para este modelo. Disponíveis: {names}"}
+                return chosen, None
+            if len(sl_accounts) == 1:
+                return sl_accounts[0], None
+            from .interaction import ask_options
+            return None, ask_options(
+                "Qual workspace Slack devo usar?",
+                [{"label": x.get("team", ""), "value": f"Use o workspace {x.get('team', '')}"} for x in sl_accounts],
+                allow_custom=False,
+            )
+
+        def _sl_ctx(account: str = "") -> tuple[str | None, dict | None]:
+            chosen, block = _sl_pick(account)
+            if block is not None:
+                return None, block
+            from ..integrations import slack_service
+            tok = asyncio.run(slack_service.get_token(str(chosen.get("id"))))
+            if not tok:
+                return None, {"error": f"não foi possível acessar o workspace {chosen.get('team', '')} (reconecte em Integrações)."}
+            return tok, None
+
+        def _sl_guard(summary: str, confirm: Any) -> dict | None:
+            if sl_confirm and not _sl_truthy(confirm) and not toolctx.background.get():
+                from .interaction import ask_options
+                return ask_options(
+                    summary,
+                    [
+                        {"label": "Enviar", "value": "Sim, confirmo — reenvie agora com confirm=true."},
+                        {"label": "Cancelar", "value": "Cancele, não envie a mensagem."},
+                    ],
+                    allow_custom=False,
+                )
+            return None
+
+        def _sl_n(limit: Any, default: int = 20) -> int:
+            s = str(limit if limit is not None else "").strip()
+            if not s:
+                return default
+            try:
+                return max(1, min(int(float(s)), 100))
+            except (TypeError, ValueError):
+                return default
+
+        @sift.tool(
+            "slack.workspace.manage",
+            description=(
+                "The user's Slack workspace. `action`: 'list_channels' (channels & DMs the bot is "
+                "in), 'read' (`channel` id — recent messages, chronological), 'search' (`query` — "
+                "needs a user token with search:read), 'send' (`channel` id, `text` — post a "
+                "message). Channel IDs come from list_channels. Sending asks the user for "
+                "confirmation unless confirm=true."
+            ),
+            params={
+                "action": "string:n::list_channels | read | search | send",
+                "channel": "string:o::read/send: the channel or DM id (from list_channels)",
+                "text": "string:o::send: the message text",
+                "query": "string:o::search: what to look for",
+                "limit": "number:o::list_channels/read/search: max items (1-100/200)",
+                "confirm": "boolean:o::set true only after the user confirmed a send",
+                "account": "string:o::which connected Slack workspace to use; omit if only one",
+            },
+            returns=["channels", "messages", "results", "id", "name", "is_private", "is_im",
+                     "is_member", "user", "text", "ts", "channel", "permalink", "ok", "action", "error",
+                     "kind", "question", "options", "allow_custom", "custom_label"],
+            risk=True,
+            examples=["list my slack channels", "what are the latest messages in that channel",
+                      "search slack for the deploy thread", "send a message to the team channel"],
+        )
+        def _slack(action: str = "", channel: str = "", text: str = "", query: str = "",
+                   limit: Any = None, confirm: Any = None, account: str = "") -> dict[str, Any]:
+            act = (action or "").strip().lower()
+            reads = {"list_channels", "read", "search"}
+            writes = {"send"}
+            if act not in reads | writes:
+                return {"error": f"unknown action '{action}' (use list_channels/read/search/send)"}
+            cap = "sl_send" if act == "send" else "sl_read"
+            if not _sl_on(cap):
+                return {"error": f"a operação '{act}' está desativada nas configurações desta ferramenta."}
+            if act == "send":
+                if not ((channel or "").strip() and (text or "").strip()):
+                    return {"error": "`channel` and `text` are required for send"}
+                blocked = _sl_guard(f"Enviar mensagem no canal {channel} do Slack?", confirm)
+                if blocked is not None:
+                    return blocked
+            tok, block = _sl_ctx(account)
+            if block is not None:
+                return block
+            from ..integrations import slack_service as sls
+            try:
+                if act == "list_channels":
+                    return {"channels": sls.list_channels(tok, _sl_n(limit, 50))}
+                if act == "read":
+                    if not (channel or "").strip():
+                        return {"error": "`channel` is required for read"}
+                    return {"messages": sls.channel_history(tok, channel, _sl_n(limit))}
+                if act == "search":
+                    if not (query or "").strip():
+                        return {"error": "`query` is required for search"}
+                    return {"results": sls.search_messages(tok, query, _sl_n(limit))}
+                # send
+                return sls.post_message(tok, channel, text)
+            except sls.SlackError as exc:
+                return {"error": str(exc)}
+            except Exception as exc:  # noqa: BLE001
+                return {"error": str(exc)}
+
     if want("messaging.chat.manage"):
         msg_confirm = True if messaging_cfg is None else bool(messaging_cfg.require_confirm)
         msg_accounts = list(messaging_cfg.accounts) if messaging_cfg else []  # [{id,platform,label}]
@@ -2565,6 +2958,9 @@ def _signature(
     messaging_cfg: "MessagingConfig | None" = None,
     browser_cfg: dict | None = None,
     higgsfield_cfg: "HiggsfieldConfig | None" = None,
+    notion_cfg: "NotionConfig | None" = None,
+    slack_cfg: "SlackConfig | None" = None,
+    elevenlabs_cfg: "ElevenLabsConfig | None" = None,
 ) -> tuple:
     rows = tuple(
         sorted(
@@ -2616,6 +3012,24 @@ def _signature(
          tuple(sorted((str(a.get("id")), a.get("platform", "")) for a in messaging_cfg.accounts)))
         if messaging_cfg else ()
     )
+    # config Notion: contas liberadas (id) + ops + confirmação (token NÃO entra).
+    ntc = (
+        (notion_cfg.require_confirm, tuple(sorted(notion_cfg.ops.items())),
+         tuple(sorted(str(a.get("id")) for a in notion_cfg.accounts)))
+        if notion_cfg else ()
+    )
+    # config Slack: workspaces liberados (id) + ops + confirmação (token NÃO entra).
+    slc = (
+        (slack_cfg.require_confirm, tuple(sorted(slack_cfg.ops.items())),
+         tuple(sorted(str(a.get("id")) for a in slack_cfg.accounts)))
+        if slack_cfg else ()
+    )
+    # config ElevenLabs: a key identifica a conexão; voz/modelo entram (mudam → rebuild).
+    elc = (
+        (elevenlabs_cfg.conn.get("api_key", ""), elevenlabs_cfg.conn.get("model", ""),
+         elevenlabs_cfg.conn.get("default_voice", ""))
+        if elevenlabs_cfg else ()
+    )
     return (
         rows,
         search_cfg.provider,
@@ -2639,6 +3053,9 @@ def _signature(
         # (trocou key/conectou/desconectou → rebuild).
         ((higgsfield_cfg.conn.get("api_key", ""), bool(higgsfield_cfg.conn.get("api_secret")))
          if higgsfield_cfg else ()),
+        ntc,
+        slc,
+        elc,
     )
 
 
@@ -2687,6 +3104,9 @@ def build_user_sift(
     messaging_cfg: "MessagingConfig | None" = None,
     browser_cfg: dict | None = None,
     higgsfield_cfg: "HiggsfieldConfig | None" = None,
+    notion_cfg: "NotionConfig | None" = None,
+    slack_cfg: "SlackConfig | None" = None,
+    elevenlabs_cfg: "ElevenLabsConfig | None" = None,
 ) -> Sift | None:
     """Constrói a instância SIFT completa do usuário (builtins + tools dele).
 
@@ -2711,7 +3131,7 @@ def build_user_sift(
             on_result=_record_call,
             index_cache=_index_cache_path(user_id),
         )
-        _register_builtins(sift, search_cfg, None, finance_cfg, deep_cfg, user_id, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg)
+        _register_builtins(sift, search_cfg, None, finance_cfg, deep_cfg, user_id, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg)
         for t in tool_rows:
             if not t.enabled:
                 continue
@@ -2748,12 +3168,15 @@ def get_user_sift(
     messaging_cfg: "MessagingConfig | None" = None,
     browser_cfg: dict | None = None,
     higgsfield_cfg: "HiggsfieldConfig | None" = None,
+    notion_cfg: "NotionConfig | None" = None,
+    slack_cfg: "SlackConfig | None" = None,
+    elevenlabs_cfg: "ElevenLabsConfig | None" = None,
 ) -> Sift | None:
-    sig = _signature(tool_rows, search_cfg, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg)
+    sig = _signature(tool_rows, search_cfg, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg)
     cached = _cache.get(user_id)
     if cached is not None and cached[0] == sig:
         return cached[1]
-    sift = build_user_sift(tool_rows, search_cfg, user_id, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg)
+    sift = build_user_sift(tool_rows, search_cfg, user_id, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg)
     _cache[user_id] = (sig, sift)
     return sift
 
@@ -2903,6 +3326,14 @@ def higgsfield_config_from_secrets(conn: dict | None) -> "HiggsfieldConfig | Non
     return HiggsfieldConfig(conn=conn)
 
 
+def elevenlabs_config_from_secrets(conn: dict | None) -> "ElevenLabsConfig | None":
+    """Config da tool ElevenLabs. `conn` = {api_key, model, default_voice} do
+    app_settings; None → a tool existe mas responde 'não conectada'."""
+    if not conn or not conn.get("api_key"):
+        return None
+    return ElevenLabsConfig(conn=conn)
+
+
 def github_config_from_secrets(
     user_id: str, accounts: list[dict] | None = None, github_prefs: dict | None = None,
     *, confirm_actions: bool = False,
@@ -2913,6 +3344,39 @@ def github_config_from_secrets(
     global (`confirm_actions`, Configurações → Segurança)."""
     p = github_prefs or {}
     return GithubConfig(
+        user_id=user_id,
+        require_confirm=bool(confirm_actions),
+        accounts=list(accounts or []),
+        ops=p.get("ops") if isinstance(p.get("ops"), dict) else {},
+    )
+
+
+def notion_config_from_secrets(
+    user_id: str, accounts: list[dict] | None = None, notion_prefs: dict | None = None,
+    *, confirm_actions: bool = False,
+) -> "NotionConfig":
+    """Config da tool Notion. `accounts` = contas liberadas p/ este modelo
+    ([{"id","workspace"}]); vazio → a tool existe mas responde 'não conectado'.
+    Confirmação de escritas (criar página/adicionar conteúdo) é OPT-IN pelo perfil
+    global (`confirm_actions`, Configurações → Segurança)."""
+    p = notion_prefs or {}
+    return NotionConfig(
+        user_id=user_id,
+        require_confirm=bool(confirm_actions),
+        accounts=list(accounts or []),
+        ops=p.get("ops") if isinstance(p.get("ops"), dict) else {},
+    )
+
+
+def slack_config_from_secrets(
+    user_id: str, accounts: list[dict] | None = None, slack_prefs: dict | None = None,
+    *, confirm_actions: bool = False,
+) -> "SlackConfig":
+    """Config da tool Slack. `accounts` = workspaces liberados p/ este modelo
+    ([{"id","team"}]); vazio → a tool existe mas responde 'não conectado'.
+    Confirmação de ENVIO é OPT-IN pelo perfil global (`confirm_actions`)."""
+    p = slack_prefs or {}
+    return SlackConfig(
         user_id=user_id,
         require_confirm=bool(confirm_actions),
         accounts=list(accounts or []),

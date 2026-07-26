@@ -94,22 +94,26 @@ function NavButton({
   collapsed,
   onClick,
   trailing,
+  active = false,
 }: {
   icon: React.ReactNode;
   label: string;
   collapsed: boolean;
   onClick: () => void;
   trailing?: React.ReactNode;
+  /** tela atual: destaca "você está aqui" (mesmo idioma do chat ativo) */
+  active?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
       title={collapsed ? label : undefined}
-      className={`group/nav flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-medium text-ink transition-colors hover:bg-hover ${
+      aria-current={active ? "page" : undefined}
+      className={`group/nav flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-medium transition-colors ${
         collapsed ? "justify-center" : ""
-      }`}
+      } ${active ? "bg-surface2 text-ink" : "text-ink hover:bg-hover"}`}
     >
-      <span className="shrink-0 text-ink-soft">{icon}</span>
+      <span className={`shrink-0 ${active ? "text-accent-hover" : "text-ink-soft"}`}>{icon}</span>
       {!collapsed && <span className="truncate">{label}</span>}
       {!collapsed && trailing && <span className="ml-auto shrink-0">{trailing}</span>}
     </button>
@@ -149,6 +153,7 @@ export default function Sidebar({
   onOpenPlayground,
   onOpenAnalytics,
   onLogout,
+  activeView = "chat",
 }: {
   user: User;
   chats: Chat[];
@@ -174,6 +179,8 @@ export default function Sidebar({
   onOpenPlayground: () => void;
   onOpenAnalytics: () => void;
   onLogout: () => void;
+  /** tela aberta no momento — destaca o item correspondente na barra */
+  activeView?: "chat" | "workspace" | "codespace" | "automations" | "playground" | "analytics";
 }) {
   const [sections, setSections] = useState({ models: true, folders: true, chats: true });
 
@@ -268,18 +275,18 @@ export default function Sidebar({
           <Search size={18} />
         </button>
         {show("sb_automations") && (
-          <button onClick={onOpenAutomations} title="Automações" className="relative rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
+          <button onClick={onOpenAutomations} title="Automações" aria-current={activeView === "automations" ? "page" : undefined} className={`relative rounded-lg p-2 transition-colors ${activeView === "automations" ? "bg-surface2 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}>
             <CalendarClock size={18} />
             {unread > 0 && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-accent" />}
           </button>
         )}
         {show("sb_codespace") && (
-          <button onClick={onOpenCodespace} title="Codespace" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
+          <button onClick={onOpenCodespace} title="Codespace" aria-current={activeView === "codespace" ? "page" : undefined} className={`rounded-lg p-2 transition-colors ${activeView === "codespace" ? "bg-surface2 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}>
             <Code2 size={18} />
           </button>
         )}
         {show("sb_workspace") && (
-          <button onClick={onOpenWorkspace} title="Espaço de Trabalho" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
+          <button onClick={onOpenWorkspace} title="Espaço de Trabalho" aria-current={activeView === "workspace" ? "page" : undefined} className={`rounded-lg p-2 transition-colors ${activeView === "workspace" ? "bg-surface2 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}>
             <LayoutGrid size={18} />
           </button>
         )}
@@ -323,18 +330,21 @@ export default function Sidebar({
         {show("sb_automations") && (
           <button
             onClick={onOpenAutomations}
-            className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-medium text-ink transition-colors hover:bg-hover"
+            aria-current={activeView === "automations" ? "page" : undefined}
+            className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-medium transition-colors ${
+              activeView === "automations" ? "bg-surface2 text-ink" : "text-ink hover:bg-hover"
+            }`}
           >
-            <span className="shrink-0 text-ink-soft"><CalendarClock size={17} /></span>
+            <span className={`shrink-0 ${activeView === "automations" ? "text-accent-hover" : "text-ink-soft"}`}><CalendarClock size={17} /></span>
             <span className="truncate">Automações</span>
             {unread > 0 && <span className="ml-auto rounded-full bg-accent px-1.5 text-[11px] font-medium text-white">{unread}</span>}
           </button>
         )}
         {show("sb_codespace") && (
-          <NavButton icon={<Code2 size={17} />} label="Codespace" collapsed={false} onClick={onOpenCodespace} />
+          <NavButton icon={<Code2 size={17} />} label="Codespace" collapsed={false} onClick={onOpenCodespace} active={activeView === "codespace"} />
         )}
         {show("sb_workspace") && (
-          <NavButton icon={<LayoutGrid size={17} />} label="Espaço de Trabalho" collapsed={false} onClick={onOpenWorkspace} />
+          <NavButton icon={<LayoutGrid size={17} />} label="Espaço de Trabalho" collapsed={false} onClick={onOpenWorkspace} active={activeView === "workspace"} />
         )}
       </div>
 

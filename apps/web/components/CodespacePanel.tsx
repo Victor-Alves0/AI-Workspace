@@ -44,6 +44,26 @@ function StatusDot({ status }: { status: string }) {
   );
 }
 
+/* chip de status semântico (verde=indexado, âmbar=em progresso, vermelho=erro) —
+   estado do projeto que se lê num relance, separado do violeta da marca. */
+const STATUS_CHIP: Record<string, { label: string; cls: string; dot: string }> = {
+  pending:  { label: "Na fila",   cls: "border-amber-500/25 bg-amber-500/10 text-amber-300", dot: "bg-amber-400" },
+  cloning:  { label: "Clonando",  cls: "border-amber-500/25 bg-amber-500/10 text-amber-300", dot: "bg-amber-400" },
+  indexing: { label: "Indexando", cls: "border-amber-500/25 bg-amber-500/10 text-amber-300", dot: "bg-amber-400" },
+  ready:    { label: "Indexado",  cls: "border-green-500/25 bg-green-500/10 text-green-300", dot: "bg-green-400" },
+  error:    { label: "Erro",      cls: "border-red-500/25 bg-red-500/10 text-red-300",       dot: "bg-red-400" },
+};
+function StatusChip({ status }: { status: string }) {
+  const s = STATUS_CHIP[status] ?? { label: status, cls: "border-border bg-surface2 text-muted", dot: "bg-muted" };
+  const spin = status === "cloning" || status === "indexing" || status === "pending";
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[11px] ${s.cls}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${s.dot} ${spin ? "animate-pulse" : ""}`} />
+      {s.label}
+    </span>
+  );
+}
+
 /* título editável inline (clique no lápis → vira input; Enter/blur salva, Esc cancela) */
 function EditableTitle({ value, onSave, className = "" }: { value: string; onSave: (v: string) => Promise<void>; className?: string }) {
   const [editing, setEditing] = useState(false);
@@ -792,7 +812,7 @@ function ProjectDetail({
 }
 
 /* --------------------------------- Painel --------------------------------- */
-export default function CodespacePanel({ onOpenChat }: { onOpenChat: (chatId: string, prefill?: string) => void }) {
+export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (chatId: string, prefill?: string) => void; onBack?: () => void }) {
   const [projects, setProjects] = useState<CodespaceProject[]>([]);
   const [accounts, setAccounts] = useState<GithubAccountLite[]>([]);
   const [loading, setLoading] = useState(true);
@@ -845,7 +865,17 @@ export default function CodespacePanel({ onOpenChat }: { onOpenChat: (chatId: st
 
   return (
     <div>
-      <div className="mb-3 flex justify-end">
+      {onBack && (
+        <nav className="mb-4 flex items-center gap-1.5 text-sm">
+          <button onClick={onBack} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-muted transition-colors hover:bg-hover hover:text-ink">
+            <ArrowLeft size={16} /> Espaço de Trabalho
+          </button>
+          <span className="text-muted">/</span>
+          <span className="font-medium text-ink">Codespace</span>
+        </nav>
+      )}
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-ink">Codespace</h1>
         <button onClick={() => setShowNew(true)}
           className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover">
           <Plus size={15} /> Novo projeto
@@ -865,19 +895,27 @@ export default function CodespacePanel({ onOpenChat }: { onOpenChat: (chatId: st
             const SourceIcon = SOURCE_META[p.source]?.icon ?? Globe;
             return (
               <button key={p.id} onClick={() => setOpenId(p.id)}
-                className="group relative flex items-center gap-3 rounded-2xl border border-border bg-surface p-3.5 text-left transition-all duration-150 hover:border-accent/40 hover:bg-hover">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-surface2 text-ink-soft">
+                className="group relative flex items-start gap-3 rounded-2xl border border-border bg-surface p-3.5 text-left transition-all duration-150 hover:border-accent/40 hover:bg-hover">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-surface2 text-muted">
                   <SourceIcon size={17} />
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate text-sm font-medium text-ink">{p.name}</span>
-                    <StatusDot status={p.index_status} />
+                    <StatusChip status={p.index_status} />
                   </div>
-                  <p className="truncate text-[11px] text-muted">
-                    {p.source === "local" ? "sem remoto" : `${p.repo_url} · ${p.branch}`}
-                    {p.index_status === "ready" && fmtStats(p) ? ` · ${fmtStats(p)}` : ""}
+                  <p className="mt-0.5 truncate font-mono text-[11px] text-muted">
+                    {p.source === "local" ? "local · sem remoto" : `${p.repo_url} · ${p.branch}`}
                   </p>
+                  {p.index_status === "ready" && (fmtStats(p) || p.stats?.refined) && (
+                    <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[11px] tabular-nums text-muted">
+                      {fmtStats(p) && <span>{fmtStats(p)}</span>}
+                      {p.stats?.refined && <span className="inline-flex items-center gap-1 text-accent-hover"><Sparkles size={11} /> refinado</span>}
+                    </p>
+                  )}
+                  {p.index_status === "error" && p.error_message && (
+                    <p className="mt-1 truncate text-[11px] text-red-400">{p.error_message}</p>
+                  )}
                 </div>
                 <span
                   role="button"

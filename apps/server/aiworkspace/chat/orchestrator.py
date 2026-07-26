@@ -1932,6 +1932,12 @@ async def run_turn(
                 api_key, model, messages, tools=tools, params=params,
                 modalities=stream_modalities, base_url=base_url,
             ):
+                # o provider recusou o nível de raciocínio e o cliente rebaixou:
+                # repassa p/ a UI (o seletor reflete o nível aceito). Não conta como
+                # chunk real — ainda não veio conteúdo, então o retry-sem-knobs vale.
+                if chunk.get("type") == "reasoning_effort":
+                    yield chunk
+                    continue
                 got_chunk = True
                 if chunk.get("usage"):
                     usage = chunk["usage"]

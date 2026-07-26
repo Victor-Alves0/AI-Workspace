@@ -119,26 +119,40 @@ function ContextMeter({
   );
 }
 
-export type ReasoningEffort = "off" | "low" | "medium" | "high";
-const REASONING_OPTS: { key: ReasoningEffort; label: string }[] = [
-  { key: "off", label: "Desligado" },
-  { key: "low", label: "Baixo" },
-  { key: "medium", label: "Médio" },
-  { key: "high", label: "Alto" },
-];
+export type ReasoningEffort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+const REASONING_LABELS: Record<ReasoningEffort, string> = {
+  off: "Desligado",
+  minimal: "Mínimo",
+  low: "Baixo",
+  medium: "Médio",
+  high: "Alto",
+  xhigh: "Máximo",
+};
+
+// Escada completa de raciocínio, oferecida em TODO modelo: o OpenRouter não expõe
+// quais níveis cada um aceita, então deixamos o usuário escolher. Se o provider
+// recusar o nível, o backend cai um degrau sozinho e emite `reasoning_effort` — o
+// seletor então reflete o nível que de fato funcionou (ver useGeneration).
+export function reasoningLevelsFor(_modelId?: string): ReasoningEffort[] {
+  return ["minimal", "low", "medium", "high", "xhigh"];
+}
 
 // Seletor de nível de raciocínio (thinking) do modelo. Fica à esquerda do Ditar.
+// As opções seguem o modelo ativo (`modelId`): alguns têm "Mínimo"/"Máximo", outros não.
 function ThinkingSelect({
   value,
   onChange,
+  modelId,
 }: {
   value: ReasoningEffort;
   onChange: (v: ReasoningEffort) => void;
+  modelId?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useClickOutside<HTMLDivElement>(() => setOpen(false));
   const active = value !== "off";
-  const label = REASONING_OPTS.find((o) => o.key === value)?.label ?? "Desligado";
+  const label = REASONING_LABELS[value] ?? "Desligado";
+  const opts: ReasoningEffort[] = ["off", ...reasoningLevelsFor(modelId)];
   return (
     <div className="relative" ref={ref}>
       <button
@@ -157,13 +171,13 @@ function ThinkingSelect({
           <p className="px-2.5 pb-1 pt-1 text-[11px] font-medium uppercase tracking-wider text-muted">
             Raciocínio
           </p>
-          {REASONING_OPTS.map((o) => (
+          {opts.map((k) => (
             <MenuItem
-              key={o.key}
-              icon={<Check size={14} className={value === o.key ? "" : "opacity-0"} />}
-              onClick={() => { onChange(o.key); setOpen(false); }}
+              key={k}
+              icon={<Check size={14} className={value === k ? "" : "opacity-0"} />}
+              onClick={() => { onChange(k); setOpen(false); }}
             >
-              {o.label}
+              {REASONING_LABELS[k]}
             </MenuItem>
           ))}
         </div>
@@ -257,6 +271,7 @@ export default function PromptBox({
   menuUp = false,
   reasoning = "off",
   onReasoningChange,
+  reasoningModel,
   context,
   onCompact,
   onHistory,
@@ -304,6 +319,8 @@ export default function PromptBox({
   menuUp?: boolean;
   reasoning?: ReasoningEffort;
   onReasoningChange?: (v: ReasoningEffort) => void;
+  /** id do modelo base ativo — define quais níveis de raciocínio aparecem */
+  reasoningModel?: string;
   /** uso de contexto p/ o medidor circular (null = não mostrar) */
   context?: { tokens: number; limit: number } | null;
   onCompact?: () => void;
@@ -939,7 +956,7 @@ export default function PromptBox({
               />
             )}
             {onReasoningChange && (
-              <ThinkingSelect value={reasoning} onChange={onReasoningChange} />
+              <ThinkingSelect value={reasoning} onChange={onReasoningChange} modelId={reasoningModel} />
             )}
             <button
               onClick={onToggleMic}

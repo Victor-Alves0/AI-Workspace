@@ -88,6 +88,16 @@ class Settings(BaseSettings):
     # precisa bater com o cadastrado no OAuth App do GitHub.
     github_redirect_uri: str = "http://localhost:8000/integrations/github/callback"
 
+    # Integração Notion (OAuth público, opcional — o caminho principal é colar um
+    # token de integração interna). Client ID/Secret ficam em app_settings (UI); só
+    # o redirect_uri fica aqui e precisa bater com o cadastrado na integração Notion.
+    notion_redirect_uri: str = "http://localhost:8000/integrations/notion/callback"
+
+    # Integração Slack (tool: OAuth v2, opcional — o caminho principal é colar um Bot
+    # User OAuth Token). Client ID/Secret ficam em app_settings (UI); só o redirect_uri
+    # fica aqui e precisa bater com o cadastrado no app do Slack.
+    slack_redirect_uri: str = "http://localhost:8000/integrations/slack/callback"
+
     # Integração WhatsApp
     # Evolution API (caminho NÃO oficial, QR Code): serviço opt-in do compose
     # (`--profile whatsapp`). Vazio = caminho não oficial indisponível (o oficial

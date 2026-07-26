@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -11,6 +12,43 @@ from typing import Any
 import httpx
 
 from ..config import get_settings
+
+logger = logging.getLogger(__name__)
+
+# Escada de esforço de raciocínio, do MAIOR ao MENOR. Oferecemos a escada completa na
+# UI (o OpenRouter não diz quais níveis cada modelo aceita); se o provider recusar o
+# nível pedido (ex.: "xhigh" num modelo que só vai até "high"), o fallback automático
+# desce um degrau e refaz — avisando a UI p/ o seletor refletir o que funcionou.
+_EFFORT_LADDER = ["xhigh", "high", "medium", "low", "minimal"]
+
+
+def _lower_effort(payload: dict[str, Any], body: str) -> str | None:
+    """Se o erro do provider é de nível de raciocínio E há um degrau abaixo, rebaixa o
+    esforço no ``payload`` (in-place) e devolve o novo nível. No menor nível, remove o
+    raciocínio e devolve ``"off"``. Devolve ``None`` quando não é caso de rebaixar
+    (erro não relacionado, ou sem esforço explícito no payload)."""
+    low = body.lower()
+    if not any(k in low for k in ("effort", "reasoning", "xhigh", "minimal", "verbosity")):
+        return None
+    reasoning = payload.get("reasoning")
+    if isinstance(reasoning, dict) and reasoning.get("effort") in _EFFORT_LADDER:
+        cur, where = reasoning["effort"], "obj"
+    elif payload.get("reasoning_effort") in _EFFORT_LADDER:
+        cur, where = payload["reasoning_effort"], "flat"
+    else:
+        return None
+    idx = _EFFORT_LADDER.index(cur)
+    if idx + 1 < len(_EFFORT_LADDER):
+        nxt = _EFFORT_LADDER[idx + 1]
+        if where == "obj":
+            payload["reasoning"] = {**reasoning, "effort": nxt}
+        else:
+            payload["reasoning_effort"] = nxt
+        return nxt
+    # já no menor degrau: desliga o raciocínio de vez e sinaliza "off"
+    payload.pop("reasoning", None)
+    payload.pop("reasoning_effort", None)
+    return "off"
 
 
 def _headers(api_key: str) -> dict[str, str]:
@@ -227,26 +265,32 @@ async def stream_chat(
     # byte = conexão morta. Sem isso (read=None), um TCP quebrado deixava o driver da
     # geração pendurado p/ sempre e o chat preso em "Pensando…" sem erro nem fim.
     timeout = httpx.Timeout(connect=15.0, write=30.0, read=300.0, pool=15.0)
+    url = f"{(base_url or settings.openrouter_base_url)}/chat/completions"
     async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream(
-            "POST",
-            f"{(base_url or settings.openrouter_base_url)}/chat/completions",
-            headers=_headers(api_key),
-            json=payload,
-        ) as resp:
-            if resp.status_code >= 400:
-                # lê o corpo ANTES de levantar: raise_for_status num stream só dá o
-                # código HTTP; o motivo real (ex.: "model does not support image
-                # output") está no JSON de erro do OpenRouter.
-                body = (await resp.aread()).decode("utf-8", "replace")[:300]
-                raise RuntimeError(f"OpenRouter HTTP {resp.status_code}: {body}")
-            async for line in resp.aiter_lines():
-                if not line or not line.startswith("data:"):
-                    continue
-                data = line[len("data:") :].strip()
-                if data == "[DONE]":
-                    break
-                try:
-                    yield json.loads(data)
-                except json.JSONDecodeError:
-                    continue
+        # loop de fallback do esforço de raciocínio: se o provider recusar o nível
+        # (erro ANTES do 1º token), desce um degrau e refaz. Cada rebaixamento emite
+        # {"type":"reasoning_effort"} p/ a UI atualizar o seletor. Sai no 1º stream ok.
+        while True:
+            async with client.stream("POST", url, headers=_headers(api_key), json=payload) as resp:
+                if resp.status_code >= 400:
+                    # lê o corpo ANTES de levantar: raise_for_status num stream só dá
+                    # o código HTTP; o motivo real (ex.: "model does not support image
+                    # output" / "unsupported reasoning effort") está no JSON de erro.
+                    body = (await resp.aread()).decode("utf-8", "replace")[:300]
+                    lowered = _lower_effort(payload, body)
+                    if lowered is not None:
+                        logger.info("Nível de raciocínio recusado pelo provider; caindo para '%s'", lowered)
+                        yield {"type": "reasoning_effort", "effort": lowered}
+                        continue  # refaz o request com o esforço rebaixado
+                    raise RuntimeError(f"OpenRouter HTTP {resp.status_code}: {body}")
+                async for line in resp.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    data = line[len("data:") :].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        yield json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+            return

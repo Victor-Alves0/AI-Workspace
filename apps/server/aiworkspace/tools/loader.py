@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import get_settings
-from ..models import GithubAccount, GoogleAccount, Tool, User
+from ..models import GithubAccount, GoogleAccount, NotionAccount, SlackAccount, Tool, User
 from ..secrets_service import (
     ALPHAVANTAGE_KEY,
     BRAVE_KEY,
@@ -205,6 +205,33 @@ async def _assemble_configs(db: AsyncSession, user_id: uuid.UUID, model_config: 
     github_cfg = sift_service.github_config_from_secrets(
         str(user_id), gh_accounts, gh_prefs, confirm_actions=confirm_actions
     )
+    # Notion: contas conectadas do usuário (token/OAuth) filtradas pelas liberadas neste
+    # modelo (tools_cfg.notion.accounts; vazio = todas). O token NÃO entra na config
+    # (é buscado ao vivo na tool) — só id+workspace das contas + ops.
+    nt_prefs = tools_cfg.get("notion") or {}
+    nt_allowed_ids = {str(x) for x in (nt_prefs.get("accounts") or [])}
+    nt_rows = list(await db.scalars(select(NotionAccount).where(NotionAccount.user_id == user_id)))
+    nt_accounts = [
+        {"id": str(a.id), "workspace": a.workspace}
+        for a in nt_rows
+        if not nt_allowed_ids or str(a.id) in nt_allowed_ids
+    ]
+    notion_cfg = sift_service.notion_config_from_secrets(
+        str(user_id), nt_accounts, nt_prefs, confirm_actions=confirm_actions
+    )
+    # Slack (tool): workspaces conectados do usuário filtrados pelos liberados neste
+    # modelo (tools_cfg.slack.accounts; vazio = todos). O token NÃO entra na config.
+    sl_prefs = tools_cfg.get("slack") or {}
+    sl_allowed_ids = {str(x) for x in (sl_prefs.get("accounts") or [])}
+    sl_rows = list(await db.scalars(select(SlackAccount).where(SlackAccount.user_id == user_id)))
+    sl_accounts = [
+        {"id": str(a.id), "team": a.team}
+        for a in sl_rows
+        if not sl_allowed_ids or str(a.id) in sl_allowed_ids
+    ]
+    slack_cfg = sift_service.slack_config_from_secrets(
+        str(user_id), sl_accounts, sl_prefs, confirm_actions=confirm_actions
+    )
     # Tuya/Smart Life: conexão GLOBAL (app_settings) + gating por-modelo. Só busca a
     # conexão se este modelo de fato equipou a tool (evita ler config à toa).
     tuya_cfg = None
@@ -241,7 +268,13 @@ async def _assemble_configs(db: AsyncSession, user_id: uuid.UUID, model_config: 
         from ..integrations import higgsfield_service
         hf_conn = await higgsfield_service.get_config(db, str(user_id))
         higgsfield_cfg = sift_service.higgsfield_config_from_secrets(hf_conn)
-    return cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg
+    # ElevenLabs (áudio): conexão por-usuário — só busca se o modelo equipou a tool.
+    elevenlabs_cfg = None
+    if any(tid == f"{_BUILTIN_PREFIX}elevenlabs.audio.generate" for tid in tool_ids):
+        from ..integrations import elevenlabs_service
+        el_conn = await elevenlabs_service.get_config(db, str(user_id))
+        elevenlabs_cfg = sift_service.elevenlabs_config_from_secrets(el_conn)
+    return cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg
 
 
 async def build_full_sift_for_user(db: AsyncSession, user_id: uuid.UUID):
@@ -249,9 +282,9 @@ async def build_full_sift_for_user(db: AsyncSession, user_id: uuid.UUID):
     Debug de Tools chamar qualquer ferramenta direto (`sift.execute_tool(path, params)`).
     Usa as configs globais do usuário (sem gating por-modelo). None se a SIFT falhar."""
     rows = list(await db.scalars(select(Tool).where(Tool.user_id == user_id)))
-    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg = await _assemble_configs(db, user_id, None, [])
+    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg = await _assemble_configs(db, user_id, None, [])
     return await run_in_threadpool(
-        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg
+        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg
     )
 
 
@@ -282,11 +315,11 @@ async def get_sift_for_user(
     if not allow:
         return None
 
-    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg = await _assemble_configs(
+    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg = await _assemble_configs(
         db, user_id, model_config, tool_ids
     )
     full = await run_in_threadpool(
-        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg
+        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg
     )
     if full is None:
         return None

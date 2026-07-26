@@ -20,6 +20,26 @@ function fmtWhen(iso: string | null): string {
   return d.toLocaleString(undefined, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+// tipo pela cor do tile: agendada=violeta, monitor=azul, lembrete=âmbar.
+const KIND_TILE: Record<string, string> = {
+  scheduled: "bg-accent/15 text-accent-hover",
+  monitor: "bg-sky-500/15 text-sky-300",
+  reminder: "bg-amber-500/15 text-amber-300",
+};
+// estado por pílula (separado da cor do tipo).
+function statePill(a: Automation): { label: string; cls: string } {
+  if (a.kind === "reminder" && !a.next_run_at) return { label: "Concluído", cls: "bg-sky-500/12 text-sky-300" };
+  return a.enabled
+    ? { label: "Ativa", cls: "bg-green-500/12 text-green-300" }
+    : { label: "Pausada", cls: "bg-surface2 text-muted" };
+}
+const KIND_FILTERS: { key: string; label: string }[] = [
+  { key: "all", label: "Todas" },
+  { key: "scheduled", label: "Agendadas" },
+  { key: "monitor", label: "Monitores" },
+  { key: "reminder", label: "Lembretes" },
+];
+
 function scheduleLabel(a: Automation): string {
   if (a.kind === "reminder") {
     if (!a.next_run_at) return "Lembrete · concluído";
@@ -62,6 +82,7 @@ export default function AutomationsView({
   const [toast, setToast] = useState<string | null>(null);
   const [historyFor, setHistoryFor] = useState<Automation | null>(null);
   const [query, setQuery] = useState("");
+  const [kindFilter, setKindFilter] = useState("all");
   const [pushOn, setPushOn] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
   const pushOk = pushSupported();
@@ -163,34 +184,33 @@ export default function AutomationsView({
 
   const unread = notes.filter((n) => !n.read).length;
   const q = query.trim().toLowerCase();
-  const filtered = q
-    ? items.filter((a) => a.title.toLowerCase().includes(q) || scheduleLabel(a).toLowerCase().includes(q))
-    : items;
+  const filtered = items.filter((a) => {
+    if (kindFilter !== "all" && a.kind !== kindFilter) return false;
+    if (q && !a.title.toLowerCase().includes(q) && !scheduleLabel(a).toLowerCase().includes(q)) return false;
+    return true;
+  });
 
   return (
     <div className="flex h-full flex-1 flex-col bg-bg">
-      <div className="flex items-center gap-3 border-b border-border px-3 py-3 sm:px-6">
-        {onBack && (
-          <button
-            onClick={onBack}
-            title="Voltar"
-            className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink"
-          >
-            <ArrowLeft size={18} />
-          </button>
-        )}
-        <CalendarClock size={20} className="text-accent-hover" />
-        <span className="font-semibold text-ink">Automações</span>
-        <button
-          onClick={() => setCreating(true)}
-          className="ml-auto flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
-        >
-          <Plus size={15} /> Nova automação
-        </button>
-      </div>
-
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto grid max-w-5xl grid-cols-1 gap-6 px-3 py-6 sm:px-6 lg:grid-cols-3">
+        <div className="mx-auto max-w-5xl px-3 py-6 sm:px-6">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              {onBack && (
+                <button onClick={onBack} title="Voltar" className="-ml-1.5 rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
+                  <ArrowLeft size={18} />
+                </button>
+              )}
+              <h1 className="text-2xl font-bold text-ink">Automações</h1>
+            </div>
+            <button
+              onClick={() => setCreating(true)}
+              className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
+            >
+              <Plus size={15} /> Nova automação
+            </button>
+          </div>
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           {/* lista de automações */}
           <div className="space-y-3 lg:col-span-2">
             {items.length > 1 && (
@@ -213,6 +233,23 @@ export default function AutomationsView({
                 )}
               </div>
             )}
+            {items.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {KIND_FILTERS.map((f) => (
+                  <button
+                    key={f.key}
+                    onClick={() => setKindFilter(f.key)}
+                    className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                      kindFilter === f.key
+                        ? "border-accent/40 bg-accent/15 text-ink"
+                        : "border-border bg-surface text-muted hover:bg-hover hover:text-ink"
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            )}
             {items.length === 0 ? (
               <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border py-16 text-center">
                 <CalendarClock size={32} className="text-muted" />
@@ -221,10 +258,12 @@ export default function AutomationsView({
             ) : filtered.length === 0 ? (
               <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border py-12 text-center">
                 <Search size={28} className="text-muted" />
-                <p className="text-sm text-muted">Nenhuma automação encontrada para “{query}”.</p>
+                <p className="text-sm text-muted">{query ? `Nenhuma automação encontrada para “${query}”.` : "Nenhuma automação com esse filtro."}</p>
               </div>
             ) : (
-              filtered.map((a) => (
+              filtered.map((a) => {
+                const pill = statePill(a);
+                return (
                 <div key={a.id} className="rounded-2xl border border-border bg-surface p-4 transition-colors hover:border-accent/40">
                   <div className="flex items-start gap-3">
                     <button
@@ -232,16 +271,18 @@ export default function AutomationsView({
                       title="Editar automação"
                       className="flex min-w-0 flex-1 items-start gap-3 text-left"
                     >
-                      <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${a.enabled ? "bg-accent/15 text-accent-hover" : "bg-surface2 text-muted"}`}>
+                      <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${KIND_TILE[a.kind] ?? KIND_TILE.scheduled}`}>
                         {a.kind === "monitor" ? <Eye size={17} /> : a.kind === "reminder" ? <Bell size={17} /> : <Clock size={17} />}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium text-ink">{a.title}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-sm font-medium text-ink">{a.title}</p>
+                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${pill.cls}`}>{pill.label}</span>
+                        </div>
                         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
                           <span>{scheduleLabel(a)}</span>
-                          <span>·</span>
-                          <span>{a.enabled ? `próx.: ${fmtWhen(a.next_run_at)}` : "pausada"}</span>
-                          {a.run_count > 0 && <><span>·</span><span>{a.run_count}× rodou</span></>}
+                          {a.enabled && a.next_run_at && <><span>·</span><span className="font-mono tabular-nums">próx. {fmtWhen(a.next_run_at)}</span></>}
+                          {a.run_count > 0 && <><span>·</span><span className="font-mono tabular-nums">{a.run_count}× rodou</span></>}
                         </div>
                         {a.last_error && <p className="mt-1 truncate text-xs text-red-400">Erro: {a.last_error}</p>}
                       </div>
@@ -262,7 +303,8 @@ export default function AutomationsView({
                     </div>
                   </div>
                 </div>
-              ))
+                );
+              })
             )}
           </div>
 
@@ -308,6 +350,7 @@ export default function AutomationsView({
                 ))
               )}
             </div>
+          </div>
           </div>
         </div>
       </div>

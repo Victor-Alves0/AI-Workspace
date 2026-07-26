@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Mail, MessageSquarePlus, Pencil, Play, RotateCcw, Send, ShieldAlert, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench } from "lucide-react";
+import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Loader2, Mail, MessageSquarePlus, Pencil, Play, RotateCcw, Send, ShieldAlert, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench } from "lucide-react";
 import type { BrainNoteEvent, ChartSpec, ChatArtifact, DeepResearch, Message, SkillProposal, StockQuote, ToolEvent } from "@/lib/types";
 import { api, ApiError, API_URL } from "@/lib/api";
 import { fmtHM, fmtDayShort } from "@/lib/format";
@@ -24,6 +24,7 @@ type Artifact =
   | { kind: "deep_research"; data: DeepResearch }
   | { kind: "image"; data: { url: string; prompt?: string } }
   | { kind: "video"; data: { url: string; prompt?: string } }
+  | { kind: "audio"; data: { url: string; prompt?: string } }
   | { kind: "email_draft"; data: EmailDraft }
   | { kind: "skill_proposal"; data: SkillProposal }
   | { kind: "prompt_proposal"; data: PromptProposal }
@@ -70,6 +71,10 @@ function collect(node: unknown, out: Artifact[], seen: Set<string>, depth = 0): 
   }
   if (kind === "video" && typeof o.url === "string" && o.url) {
     if (!seen.has("v:" + o.url)) { seen.add("v:" + o.url); out.push({ kind, data: { url: o.url, prompt: typeof o.prompt === "string" ? o.prompt : undefined } }); }
+    return;
+  }
+  if (kind === "audio" && typeof o.url === "string" && o.url) {
+    if (!seen.has("a:" + o.url)) { seen.add("a:" + o.url); out.push({ kind, data: { url: o.url, prompt: typeof o.prompt === "string" ? o.prompt : undefined } }); }
     return;
   }
   if (kind === "email_draft" && typeof o.draft_id === "string") {
@@ -223,6 +228,8 @@ function renderArtifact(a: Artifact, key: React.Key) {
     <ImageCard key={key} url={a.data.url} prompt={a.data.prompt} />
   ) : a.kind === "video" ? (
     <VideoCard key={key} url={a.data.url} prompt={a.data.prompt} />
+  ) : a.kind === "audio" ? (
+    <AudioCard key={key} url={a.data.url} prompt={a.data.prompt} />
   ) : a.kind === "email_draft" ? (
     <EmailComposer key={key} draft={a.data} />
   ) : a.kind === "skill_proposal" ? (
@@ -642,6 +649,17 @@ function VideoCard({ url, prompt }: { url: string; prompt?: string }) {
   );
 }
 
+/** Card de um áudio gerado pela IA (ElevenLabs TTS/efeito) — player nativo. */
+function AudioCard({ url, prompt }: { url: string; prompt?: string }) {
+  const src = url.startsWith("http") ? url : `${API_URL}${url}`;
+  return (
+    <div className="my-2 max-w-md rounded-xl border border-border bg-surface px-3 py-2.5">
+      <audio src={src} controls preload="metadata" className="w-full" />
+      {prompt && <p className="mt-1 truncate text-xs text-muted" title={prompt}>{prompt}</p>}
+    </div>
+  );
+}
+
 function ImageCard({ url, prompt }: { url: string; prompt?: string }) {
   const src = url.startsWith("http") ? url : `${API_URL}${url}`;
   return (
@@ -783,15 +801,20 @@ export function fmtTime(iso: string): string {
 /** Painel embutido dos usos de ferramenta do segmento (aberto pelo botão de chave).
  *  Ao abrir, rola a si mesmo para a área visível (na última mensagem ele nasceria
  *  escondido atrás do composer flutuante — o scroll-padding do container compensa). */
-export function ToolEventsPanel({ events }: { events: ToolEvent[] }) {
+export function ToolEventsPanel({ events, live = false }: { events: ToolEvent[]; live?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
+  // AO VIVO, acompanha os eventos chegando (rola pra baixo a cada novo).
   useEffect(() => {
     ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, []);
+  }, [events.length]);
+  // Em modo ao vivo, o último evento sendo uma "chamada" (sem resultado ainda) =
+  // ferramenta executando AGORA → a linha ganha spinner "executando", pra não
+  // parecer travado enquanto a tool (criar arquivo, rodar código…) trabalha.
+  const runningIdx = live && events.length > 0 && events[events.length - 1].kind === "call" ? events.length - 1 : -1;
   return (
     <div ref={ref} className="animate-pop mt-1.5 w-full max-w-full space-y-1.5 rounded-xl border border-border bg-surface p-2 shadow-menu">
       {events.map((e, i) => (
-        <ToolEventRow key={i} event={e} />
+        <ToolEventRow key={i} event={e} running={i === runningIdx} />
       ))}
     </div>
   );
@@ -887,7 +910,7 @@ function GuardEventRow({ event }: { event: ToolEvent }) {
   );
 }
 
-function ToolEventRow({ event }: { event: ToolEvent }) {
+function ToolEventRow({ event, running = false }: { event: ToolEvent; running?: boolean }) {
   const [open, setOpen] = useState(false);
   const preRef = useRef<HTMLPreElement>(null);
   useEffect(() => {
@@ -896,17 +919,19 @@ function ToolEventRow({ event }: { event: ToolEvent }) {
   if (event.kind === "guard") return <GuardEventRow event={event} />;
   const isCall = event.kind === "call";
   return (
-    <div className="overflow-hidden rounded-lg border border-border/70 bg-bg text-xs">
+    <div className={`overflow-hidden rounded-lg border bg-bg text-xs ${running ? "border-accent/40" : "border-border/70"}`}>
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-2 px-2.5 py-1.5 text-muted transition-colors hover:text-ink"
       >
-        {isCall ? (
+        {running ? (
+          <Loader2 size={12} className="shrink-0 animate-spin text-accent-hover" />
+        ) : isCall ? (
           <Wrench size={12} className="shrink-0 text-accent-hover" />
         ) : (
           <Check size={12} className="shrink-0 text-green-400" />
         )}
-        <span className="font-mono">{isCall ? "chamada" : "resultado"} · {event.name}</span>
+        <span className="font-mono">{running ? "executando" : isCall ? "chamada" : "resultado"} · {event.name}</span>
         {!!event.tokens && (
           <span
             title={`Este bloco ocupou ~${event.tokens.toLocaleString("pt-BR")} tokens do contexto (${(event.chars ?? 0).toLocaleString("pt-BR")} caracteres)`}

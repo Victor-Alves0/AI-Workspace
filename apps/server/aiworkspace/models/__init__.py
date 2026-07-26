@@ -12,6 +12,9 @@ from .automation import Automation, Notification
 from .automation_run import AutomationRun
 from .google_account import GoogleAccount
 from .github_account import GithubAccount
+from .notion_account import NotionAccount
+from .slack_account import SlackAccount
+from .slack_channel import SlackChannelConnection, SlackChannelThread
 from .generated_image import GeneratedImage
 from .usage_event import UsageEvent
 from .whatsapp import WhatsAppConnection, WhatsAppThread
@@ -46,6 +49,10 @@ __all__ = [
     "AutomationRun",
     "GoogleAccount",
     "GithubAccount",
+    "NotionAccount",
+    "SlackAccount",
+    "SlackChannelConnection",
+    "SlackChannelThread",
     "GeneratedImage",
     "UsageEvent",
     "WhatsAppConnection",

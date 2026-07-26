@@ -31,8 +31,28 @@ category only appears in Settings when the UI runs inside the installed app.
 ## Install
 
 The installer is published on **[Releases](../../releases)** (built by CI, not versioned in the
-repository). In this version the app does **not** embed the server — keep the stack running
-(`docker compose up -d`) and open the app.
+repository). It **embeds the whole engine** — Postgres, the Python backend, the Node frontend and
+the embeddings model — so there is no Docker to run: install, open, and it boots the stack itself.
+
+## Updates (two layers)
+
+Reinstalling ~1 GB for a small code change would be painful, so updates are split in two:
+
+- **Engine** (heavy: Python, dependencies, Postgres, Node, model) — versioned by
+  `desktop/engine/ENGINE_VERSION`. Rarely changes; a new value ships in a **full installer**.
+- **App code** (light: the `aiworkspace` backend package, the `web` frontend, the migrations) —
+  changes every commit. Published on its own to the rolling **`app-latest`** release
+  (`app-<sha>.zip` + `app-update.json`) by the **App code update** workflow.
+
+On every launch, before starting the servers, the launcher reads the manifest and — if a newer
+`app_version` is published **and** the installed engine satisfies the manifest's `engine_required`
+— downloads only the code zip, verifies its SHA-256, and mirrors those folders in place. Any
+failure (offline, bad checksum) is ignored and the app boots the code already installed. Opt out
+with the env var `AIW_NO_UPDATE=1` or a `.no-update` file in the data dir.
+
+**Publishing a code-only update:** run the *App code update (Windows)* workflow. **Changing a
+Python dependency:** bump `ENGINE_VERSION`, ship a new full installer, then publish the code update
+(its `engine_required` now points at the new engine, so old installs correctly wait for the `.exe`).
 
 ## Build
 

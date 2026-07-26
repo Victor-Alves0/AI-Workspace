@@ -264,13 +264,28 @@ select:focus-visible {
   border: 1px solid rgb(var(--c-border) / 0.8);
 }
 .md table {
-  @apply my-3 w-full border-collapse text-sm;
+  @apply border-collapse text-sm;
 }
+/* Wrapper rolável (montado no componente Markdown): em telas estreitas a tabela
+   rola na horizontal em vez de espremer/cortar as colunas. */
 .md .md-table-wrap {
-  @apply my-3 overflow-x-auto rounded-xl border border-border;
+  @apply my-3 max-w-full overflow-x-auto rounded-xl border border-border;
+  -webkit-overflow-scrolling: touch;
 }
+/* min-width:100% = tabelas curtas preenchem a largura (visual do desktop); com
+   larguras mínimas por coluna, tabelas com MUITAS colunas transbordam e rolam. */
 .md .md-table-wrap table {
   @apply my-0;
+  min-width: 100%;
+}
+/* célula: quebra texto longo (legível, não corta) e quebra tokens gigantes; a
+   largura mínima evita colunas espremidas — o excedente vira scroll horizontal. */
+.md .md-table-wrap th,
+.md .md-table-wrap td {
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  min-width: 6rem;
 }
 .md th {
   @apply border-b border-border bg-surface px-3 py-2 text-left font-medium text-ink-soft;

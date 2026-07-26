@@ -34,6 +34,92 @@ $Loop    = "127.0.0.1"
 
 New-Item -ItemType Directory -Force $Data, (Join-Path $Data "cache") | Out-Null
 
+# ----------------------------------------------------------------------------- #
+# Auto-atualizacao do CODIGO do app (camada leve), em 2 camadas.
+#
+# O MOTOR pesado (Python/Postgres/Node/deps/modelo) e' instalado 1x pelo .exe e
+# raramente muda. NOSSO codigo (aiworkspace + web + migracoes) muda a cada commit
+# e e' leve. Aqui, no boot e ANTES de subir os servidores, o launcher checa um
+# manifesto publicado e troca em disco so' esses arquivos leves — sem reinstalar
+# ~1 GB. Nunca bloqueia o boot: qualquer falha (sem internet, manifesto/
+# checksum invalido) e' ignorada e o app sobe com o codigo que ja' esta' instalado.
+#
+# Guarda de compatibilidade: o manifesto declara `engine_required`; se o motor
+# instalado for mais antigo que o exigido (ex.: o novo codigo precisa de uma dep
+# nova), o update de codigo e' PULADO e o usuario segue ate' instalar o .exe novo.
+$UpdateManifestUrl = "https://github.com/Victor-Alves0/AI-Workspace/releases/download/app-latest/app-update.json"
+
+function Update-AppCode {
+    if ($env:AIW_NO_UPDATE -eq "1") { return }
+    if (Test-Path (Join-Path $Data ".no-update")) { return }  # opt-out por marcador
+
+    $localAppFile    = Join-Path $Root "app-version.txt"
+    $localEngineFile = Join-Path $Root "engine-version.txt"
+    if (-not (Test-Path $localAppFile) -or -not (Test-Path $localEngineFile)) { return }  # bundle sem carimbo
+    $localApp    = (Get-Content $localAppFile -Raw).Trim()
+    $localEngine = [int]((Get-Content $localEngineFile -Raw).Trim())
+
+    # GitHub exige TLS 1.2; a barra de progresso do IWR deixa o download 10x mais lento
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    $ProgressPreference = "SilentlyContinue"
+
+    # busca como TEXTO e converte a mao: o GitHub serve o asset como
+    # application/octet-stream, e o Invoke-RestMethod as vezes devolve string
+    # crua nesse content-type — o ConvertFrom-Json explicito evita isso.
+    try {
+        $resp = Invoke-WebRequest -Uri $UpdateManifestUrl -TimeoutSec 8 -UseBasicParsing
+        $m = $resp.Content | ConvertFrom-Json
+    } catch { Write-Host "==> Sem atualizacao (manifesto inacessivel)"; return }
+    if (-not $m -or -not $m.app_version -or -not $m.url -or -not $m.sha256) { return }
+    if ("$($m.app_version)".Trim() -eq $localApp) { return }  # ja' na versao publicada
+
+    $engineReq = 0; if ($m.engine_required) { $engineReq = [int]$m.engine_required }
+    if ($localEngine -lt $engineReq) {
+        Write-Host "==> Ha' uma atualizacao que exige um motor mais novo; reinstale o app completo para receber."
+        return
+    }
+
+    Write-Host "==> Atualizando o app ($localApp -> $($m.app_version))..."
+    $work = Join-Path $Data "_update"
+    Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force $work | Out-Null
+    try {
+        $zip = Join-Path $work "app.zip"
+        Invoke-WebRequest -Uri $m.url -OutFile $zip -TimeoutSec 300 -UseBasicParsing
+        $got = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLower()
+        if ($got -ne "$($m.sha256)".Trim().ToLower()) { throw "checksum nao confere" }
+
+        $ex = Join-Path $work "x"
+        Expand-Archive -Path $zip -DestinationPath $ex -Force
+
+        # troca cada pasta por espelho (robocopy /MIR): o destino fica IDENTICO a'
+        # nova versao (inclui remover arquivos apagados). Extraimos e validamos o
+        # checksum ANTES de tocar em qualquer arquivo instalado — nada de meia-troca
+        # por download cortado. Os servidores ainda nao subiram, entao nada esta'
+        # com esses .py/.js abertos.
+        $pairs = @(
+            @{ src = (Join-Path $ex "site-packages\aiworkspace"); dst = (Join-Path $Root "python\Lib\site-packages\aiworkspace") },
+            @{ src = (Join-Path $ex "web"); dst = $WebDir },
+            @{ src = (Join-Path $ex "app"); dst = $AppDir }
+        )
+        foreach ($p in $pairs) {
+            if (-not (Test-Path $p.src)) { throw "pacote incompleto: falta $($p.src)" }
+        }
+        foreach ($p in $pairs) {
+            robocopy $p.src $p.dst /MIR /NFL /NDL /NJH /NJS /NP /R:1 /W:1 | Out-Null
+            if ($LASTEXITCODE -ge 8) { throw "robocopy falhou em $($p.dst) (code $LASTEXITCODE)" }
+        }
+        "$($m.app_version)".Trim() | Out-File -Encoding ascii -NoNewline $localAppFile
+        Write-Host "==> App atualizado para $($m.app_version)."
+    } catch {
+        Write-Host "==> Falha ao atualizar (segue com o codigo atual): $_"
+    } finally {
+        Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
+    }
+}
+
+try { Update-AppCode } catch { Write-Host "==> Auto-update ignorado: $_" }
+
 # --- segredo do app: gerado uma vez e reusado (deriva a chave que cifra os
 #     segredos por-usuario no banco; trocar tornaria o banco ilegivel) ---
 $SecretFile = Join-Path $Data "secret.txt"

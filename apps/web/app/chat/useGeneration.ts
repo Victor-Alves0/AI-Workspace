@@ -37,6 +37,9 @@ export interface GenerationDeps {
   // true se `id` ainda é o chat que o usuário está vendo (checado ao vivo). Os
   // handlers de stream só pintam o estado global quando o dono deles está ativo.
   isActiveChat: (id: string | null) => boolean;
+  // o provider recusou o nível de raciocínio pedido e o backend rebaixou; reflete
+  // no seletor (ex.: "xhigh" pedido, "high" aceito).
+  onReasoningEffort?: (effort: string) => void;
 }
 
 /**
@@ -108,6 +111,9 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       } else if (ev.type === "reasoning") {
         state.reason += ev.text;
         maybeFlush();
+      } else if (ev.type === "reasoning_effort") {
+        // provider recusou o nível pedido; o backend rebaixou → o seletor reflete
+        if (paint()) deps.onReasoningEffort?.(ev.effort);
       } else if (ev.type === "tool_call") {
         const t: ToolEvent = { kind: "call", name: ev.name, data: ev.arguments };
         state.tools.push(t);

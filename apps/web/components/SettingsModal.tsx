@@ -14,6 +14,7 @@ import {
   Activity,
   Database,
   AudioLines,
+  Mic,
   Globe,
   Home,
   Info,
@@ -58,6 +59,10 @@ import WhatsAppPanel from "./WhatsAppPanel";
 import TelegramPanel from "./TelegramPanel";
 import DiscordPanel from "./DiscordPanel";
 import GitHubPanel from "./GitHubPanel";
+import NotionPanel from "./NotionPanel";
+import SlackPanel from "./SlackPanel";
+import SlackChannelPanel from "./SlackChannelPanel";
+import ElevenLabsPanel from "./ElevenLabsPanel";
 import HiggsfieldPanel from "./HiggsfieldPanel";
 import SubscriptionsPanel from "./SubscriptionsPanel";
 import OllamaPanel from "./OllamaPanel";
@@ -139,7 +144,6 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Data de nascimento", cat: "account" },
   { label: "Webhook de notificação", cat: "account" },
   { label: "Alterar Senha", cat: "account" },
-  { label: "Chaves API", cat: "account" },
   { label: "APIs", cat: "connections", view: "apis" },
   { label: "Voz Local", cat: "connections", view: "voice" },
   { label: "Kokoro", cat: "connections", view: "voice" },
@@ -178,18 +182,45 @@ interface SecretStatus {
 }
 
 /* ------------------------------- helpers UI ------------------------------- */
-/* "i" ao lado do rótulo: a explicação aparece no HOVER em vez de ocupar uma linha
-   de texto embaixo de cada opção — mantém a lista limpa. Usa `title` nativo (idioma
-   do resto do app) p/ não brigar com o scroll/overflow do modal. */
+/* "i" ao lado do rótulo: a explicação aparece num popover próprio (não no `title`
+   nativo, que demora ~1s p/ o navegador exibir e não abre no toque). Mostra na
+   passada do mouse (instantâneo) E fixa no clique — some ao clicar fora / mouse-out.
+   Mantém a lista limpa: o texto de apoio vive aqui, não numa linha embaixo. */
 function InfoDot({ text }: { text: string }) {
+  const [hover, setHover] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  const open = hover || pinned;
+  useEffect(() => {
+    if (!pinned) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setPinned(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [pinned]);
   return (
-    <span
-      title={text}
-      aria-label={text}
-      tabIndex={0}
-      className="inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full border border-border text-[10px] font-semibold leading-none text-muted transition-colors hover:border-accent hover:text-ink"
-    >
-      i
+    <span ref={ref} className="relative inline-flex">
+      <span
+        role="button"
+        aria-label={text}
+        tabIndex={0}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        onFocus={() => setHover(true)}
+        onBlur={() => setHover(false)}
+        onClick={(e) => { e.stopPropagation(); setPinned((v) => !v); }}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPinned((v) => !v); } }}
+        className="inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full border border-border text-[10px] font-semibold leading-none text-muted transition-colors hover:border-accent hover:text-ink"
+      >
+        i
+      </span>
+      {open && (
+        <span
+          role="tooltip"
+          className="absolute left-0 top-6 z-50 w-60 max-w-[min(80vw,15rem)] rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs font-normal leading-snug text-ink-soft shadow-lg"
+        >
+          {text}
+        </span>
+      )}
     </span>
   );
 }
@@ -225,8 +256,13 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
   );
 }
 
-function Heading({ children }: { children: React.ReactNode }) {
-  return <p className="mb-2 mt-6 border-b border-border pb-1.5 text-sm font-semibold text-ink first:mt-0">{children}</p>;
+function Heading({ children, info }: { children: React.ReactNode; info?: string }) {
+  return (
+    <p className="mb-2 mt-6 flex items-center gap-1.5 border-b border-border pb-1.5 text-sm font-semibold text-ink first:mt-0">
+      {children}
+      {info && <InfoDot text={info} />}
+    </p>
+  );
 }
 
 /* card com título + descrição opcional + toggle à direita (reutilizado nas abas
@@ -517,6 +553,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                 <OllamaPanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
               ) : connView === "voice" ? (
                 <VoicePanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
+              ) : connView === "elevenlabs" ? (
+                <ElevenLabsPanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
               ) : connView === "subscriptions" ? (
                 <SubscriptionsPanel onBack={() => setConnView(null)} />
               ) : connView === "web" ? (
@@ -539,6 +577,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       { key: "web", icon: <Globe size={22} />, name: "Web", desc: "Acesso a internet" },
                       { key: "ollama", icon: <SiOllama size={22} />, name: "Ollama", desc: "Utilize modelos locais" },
                       { key: "voice", icon: <AudioLines size={22} />, name: "Voz Local", desc: "Kokoro / clonagem de voz" },
+                      { key: "elevenlabs", icon: <Mic size={22} />, name: "ElevenLabs", desc: "Voz premium + áudio" },
                     ]}
                     onOpen={setConnView}
                   />
@@ -560,6 +599,12 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                 <GitHubPanel onBack={() => setIntegView(null)} />
               ) : integView === "higgsfield" ? (
                 <HiggsfieldPanel onBack={() => setIntegView(null)} />
+              ) : integView === "notion" ? (
+                <NotionPanel onBack={() => setIntegView(null)} />
+              ) : integView === "slack" ? (
+                <SlackPanel onBack={() => setIntegView(null)} onOpenChannel={() => setIntegView("slack_channel")} />
+              ) : integView === "slack_channel" ? (
+                <SlackChannelPanel onBack={() => setIntegView("slack")} />
               ) : (
                 <div>
                   <Heading>Integrações</Heading>
@@ -634,9 +679,27 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       <span className="text-sm font-medium text-ink">Higgsfield</span>
                       <span className="text-xs leading-4 text-muted">Geração de imagem e vídeo</span>
                     </button>
+                    <button
+                      onClick={() => setIntegView("notion")}
+                      className="group flex flex-col items-center gap-2.5 rounded-2xl border border-border bg-surface px-4 py-7 text-center transition-all duration-150 hover:border-accent/40 hover:bg-hover"
+                    >
+                      <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
+                        <SiNotion size={22} />
+                      </span>
+                      <span className="text-sm font-medium text-ink">Notion</span>
+                      <span className="text-xs leading-4 text-muted">Páginas e bases de dados</span>
+                    </button>
+                    <button
+                      onClick={() => setIntegView("slack")}
+                      className="group flex flex-col items-center gap-2.5 rounded-2xl border border-border bg-surface px-4 py-7 text-center transition-all duration-150 hover:border-accent/40 hover:bg-hover"
+                    >
+                      <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
+                        <Blocks size={22} />
+                      </span>
+                      <span className="text-sm font-medium text-ink">Slack</span>
+                      <span className="text-xs leading-4 text-muted">Canais e mensagens</span>
+                    </button>
                     {[
-                      { name: "Slack", icon: <Blocks size={22} /> },
-                      { name: "Notion", icon: <SiNotion size={22} /> },
                       { name: "Google Drive", icon: <SiGoogledrive size={22} /> },
                       { name: "Trello", icon: <SiTrello size={22} /> },
                     ].map((it) => (
@@ -1093,14 +1156,10 @@ function SecurityTab({ profile, set }: { profile: Record<string, any>; set: (k: 
       <Heading>Segurança</Heading>
       <Row
         label="Pedir confirmação antes de ações sensíveis"
-        info="A IA pede sua aprovação antes de enviar/arquivar e-mails, criar ou alterar eventos na agenda e acionar dispositivos da casa. Desligado (padrão), ela executa direto."
+        info="A IA pede sua aprovação antes de enviar/arquivar e-mails, criar ou alterar eventos na agenda e acionar dispositivos da casa. Desligado (padrão), ela executa direto. Vale para todos os seus modelos. Automações e canais (WhatsApp/Telegram) sempre executam direto, pois rodam sem você presente para confirmar."
       >
         <Toggle on={confirmOn} onClick={() => set("security", { ...sec, confirm_actions: !confirmOn })} />
       </Row>
-      <p className="mt-3 text-xs leading-5 text-muted">
-        Vale para todos os seus modelos. Automações e canais (WhatsApp/Telegram) sempre executam
-        direto, pois rodam sem você presente para confirmar.
-      </p>
 
       <TwoFactorSection />
       <AuditLogSection />
@@ -1146,10 +1205,7 @@ function TwoFactorSection() {
 
   return (
     <>
-      <Heading>Verificação em duas etapas (2FA)</Heading>
-      <p className="mb-2 text-xs leading-5 text-muted">
-        Um código do app autenticador (Google Authenticator, Authy…) além da senha, no login.
-      </p>
+      <Heading info="Um código do app autenticador (Google Authenticator, Authy…) além da senha, no login.">Verificação em duas etapas (2FA)</Heading>
       {enabled === null ? (
         <p className="text-sm text-muted">Carregando…</p>
       ) : enabled ? (
@@ -1199,9 +1255,20 @@ function TwoFactorSection() {
 type AuditRow = { id: string; label: string; ip: string; created_at: string; detail: Record<string, any> };
 function AuditLogSection() {
   const [events, setEvents] = useState<AuditRow[] | null>(null);
+  const [q, setQ] = useState("");
   useEffect(() => {
-    api.get<AuditRow[]>("/security/audit?limit=50").then(setEvents).catch(() => setEvents([]));
+    api.get<AuditRow[]>("/security/audit?limit=200").then(setEvents).catch(() => setEvents([]));
   }, []);
+  const filtered = useMemo(() => {
+    if (!events) return [];
+    const term = q.trim().toLowerCase();
+    if (!term) return events;
+    return events.filter((e) =>
+      e.label.toLowerCase().includes(term) ||
+      (e.ip || "").toLowerCase().includes(term) ||
+      (e.detail?.name ? String(e.detail.name).toLowerCase().includes(term) : false)
+    );
+  }, [events, q]);
   return (
     <>
       <Heading>Logs de segurança</Heading>
@@ -1211,14 +1278,29 @@ function AuditLogSection() {
       ) : events.length === 0 ? (
         <p className="text-sm text-muted">Nenhum evento registrado ainda.</p>
       ) : (
-        <div className="divide-y divide-border overflow-hidden rounded-xl border border-border">
-          {events.map((e) => (
-            <div key={e.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-              <span className="text-ink">{e.label}{e.detail?.name ? ` · ${e.detail.name}` : ""}</span>
-              <span className="shrink-0 text-xs text-muted">{e.ip || "—"} · {fmtTime(e.created_at)}</span>
+        <>
+          <div className="relative mb-2">
+            <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Buscar nos logs…"
+              className="w-full rounded-lg border border-border bg-surface2 py-2 pl-9 pr-3 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
+            />
+          </div>
+          {filtered.length === 0 ? (
+            <p className="px-1 py-3 text-sm text-muted">Nenhum evento corresponde à busca.</p>
+          ) : (
+            <div className="max-h-72 divide-y divide-border overflow-y-auto rounded-xl border border-border">
+              {filtered.map((e) => (
+                <div key={e.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                  <span className="text-ink">{e.label}{e.detail?.name ? ` · ${e.detail.name}` : ""}</span>
+                  <span className="shrink-0 text-xs text-muted">{e.ip || "—"} · {fmtTime(e.created_at)}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
     </>
   );
@@ -1294,7 +1376,6 @@ function PersonalizationTab({ profile, set }: { profile: Record<string, any>; se
 
 function AccountTab({ user, profile, set }: { user: User | null; profile: Record<string, any>; set: (k: string, v: any) => void }) {
   const [showPass, setShowPass] = useState(false);
-  const [showKeys, setShowKeys] = useState(false);
   const [cur, setCur] = useState("");
   const [nw, setNw] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
@@ -1417,15 +1498,6 @@ function AccountTab({ user, profile, set }: { user: User | null; profile: Record
             {msg && <span className="text-xs text-muted">{msg}</span>}
           </div>
         </div>
-      )}
-
-      <Row label="Chaves API">
-        <LinkBtn onClick={() => setShowKeys((v) => !v)}>{showKeys ? "Ocultar" : "Mostrar"}</LinkBtn>
-      </Row>
-      {showKeys && (
-        <p className="pb-2 text-xs text-muted">
-          As chaves de provedores (OpenRouter, busca, voz) ficam em <span className="text-ink-soft">Conexões → APIs</span>. Tokens de acesso à API deste app: em breve.
-        </p>
       )}
 
       <BudgetSettings profile={profile} set={set} />

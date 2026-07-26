@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft, BarChart3, BookOpen, Box, Brain, Check, Code2, Copy, Download, FileText,
   LayoutGrid, MoreHorizontal, Pencil, Plug, Plus, Search, Settings, Sparkles,
-  Gauge, Terminal, Trash2, Upload, Waypoints, Wrench, X,
+  Terminal, Trash2, Upload, Waypoints, Wrench, X,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
@@ -22,12 +22,10 @@ import MemoryView from "./MemoryView";
 import KnowledgeView from "./KnowledgePanel";
 import CodespacePanel from "./CodespacePanel";
 import ApiView from "./ApiView";
-import ObservabilityView from "./ObservabilityView";
 
 export type Section =
   | "Modelos" | "Conhecimento" | "Cerebros" | "Prompts" | "Skills"
-  | "Ferramentas" | "Apps" | "Codespace" | "Memoria" | "Analítica" | "API"
-  | "Observabilidade";
+  | "Ferramentas" | "Apps" | "Codespace" | "Memoria" | "Analítica" | "API";
 
 // meta dos cards da grade inicial (a contagem é injetada em runtime).
 // `admin: true` só aparece para administradores (filtrado em runtime).
@@ -42,8 +40,7 @@ const CARD_META: { key: Section; name: string; desc: string; icon: ReactNode; li
   { key: "Codespace", name: "Codespace", desc: "Programe com IA", icon: <Code2 size={22} />, live: true },
   { key: "Memoria", name: "Memória", desc: "O que a IA lembra de você", icon: <Brain size={22} />, live: true },
   { key: "Analítica", name: "Analítica", desc: "Uso, custos e desempenho", icon: <BarChart3 size={22} />, live: true },
-  { key: "API", name: "API", desc: "Use seus modelos em qualquer app", icon: <Terminal size={22} />, live: true },
-  { key: "Observabilidade", name: "Observabilidade", desc: "Cada chamada, latência e query", icon: <Gauge size={22} />, live: true, admin: true },
+  { key: "API", name: "API", desc: "Use modelos em qualquer app", icon: <Terminal size={22} />, live: true },
 ];
 
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
@@ -54,28 +51,50 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
   );
 }
 
-/* card quadrado da grade inicial */
-function WsCard({ icon, name, desc, live, onClick }: {
-  icon: ReactNode; name: string; desc: string; live: boolean; onClick: () => void;
+/* card de DESTAQUE do hub (Modelos, Codespace): ícone + contagem em mono */
+function FeatureCard({ icon, name, desc, count, unit, onClick }: {
+  icon: ReactNode; name: string; desc: string; count?: number; unit?: string; onClick: () => void;
 }) {
   return (
     <button
       onClick={onClick}
-      className="group relative flex h-[168px] flex-col items-center justify-center gap-3 rounded-2xl border border-border bg-surface p-5 text-center transition-all duration-150 hover:-translate-y-0.5 hover:border-accent/40 hover:bg-hover hover:shadow-sm"
+      className="group flex items-center gap-4 rounded-2xl border border-border bg-surface p-5 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-accent/40 hover:bg-hover"
     >
-      <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
+      <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
         {icon}
       </span>
-      <div className="flex flex-col items-center">
-        <p className="text-sm font-semibold text-ink">{name}</p>
-        <p className="mt-0.5 line-clamp-2 text-xs leading-4 text-muted">{desc}</p>
-      </div>
-      {/* selo fora do fluxo → não desloca o centro do ícone+texto */}
-      {!live && (
-        <span className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-surface2 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted">
-          Em breve
-        </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-base font-semibold text-ink">{name}</span>
+        <span className="mt-0.5 block truncate text-[13px] text-muted">{desc}</span>
+      </span>
+      {count !== undefined && (
+        <span className="shrink-0 font-mono text-[13px] text-muted"><b className="font-semibold text-ink">{count}</b> {unit}</span>
       )}
+    </button>
+  );
+}
+
+/* card da biblioteca: ícone + nome + descrição + contagem (ou "Em breve") */
+function LibraryCard({ icon, name, desc, count, live, onClick }: {
+  icon: ReactNode; name: string; desc: string; count?: number; live: boolean; onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`group flex items-center gap-3.5 rounded-xl border border-border bg-surface px-4 py-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-accent/40 hover:bg-hover ${live ? "" : "opacity-60"}`}
+    >
+      <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-surface2 transition-transform duration-150 group-hover:scale-105 ${live ? "text-accent-hover" : "text-muted"}`}>
+        {icon}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold text-ink">{name}</span>
+        <span className="block truncate text-xs text-muted">{desc}</span>
+      </span>
+      {!live ? (
+        <span className="shrink-0 rounded-full border border-border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted">Em breve</span>
+      ) : count !== undefined ? (
+        <span className="shrink-0 font-mono text-sm tabular-nums text-ink-soft">{count}</span>
+      ) : null}
     </button>
   );
 }
@@ -173,6 +192,10 @@ export default function WorkspaceView({
   // propostas de skill do Aprendizado Proativo (Curator) — aguardando aprovação
   const [proposals, setProposals] = useState<SkillSuggestion[]>([]);
   const [q, setQ] = useState("");
+  // filtro do hub inicial (grade de cards) — separado do `q` das seções
+  const [homeQ, setHomeQ] = useState("");
+  // projetos do Codespace: contagem + nomes p/ o card de destaque do hub
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   // filtro por tag na aba Ferramentas: null = todas; "__none__" = sem tags
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
@@ -203,6 +226,7 @@ export default function WorkspaceView({
     loadPrompts();
     loadSkills();
     loadProposals();
+    api.get<{ id: string; name: string }[]>("/codespace/projects").then(setProjects).catch(() => {});
   }, []);
 
   async function approveProposal(id: string) {
@@ -405,32 +429,85 @@ export default function WorkspaceView({
     );
   }
 
+  // contagens vivas do hub (só o que a view já carrega + projetos do Codespace)
+  const cardCount: Partial<Record<Section, number>> = {
+    Modelos: models.length, Ferramentas: tools.length,
+    Prompts: prompts.length, Skills: skills.length, Codespace: projects.length,
+  };
+  const allCards = CARD_META.filter((c) => !c.admin || user?.role === "admin");
+  const hq = homeQ.trim().toLowerCase();
+  const matchCard = (c: (typeof CARD_META)[number]) => !hq || c.name.toLowerCase().includes(hq);
+  const isFeatured = (k: Section) => k === "Modelos" || k === "Codespace";
+  const featured = allCards.filter((c) => isFeatured(c.key) && matchCard(c));
+  const library = allCards.filter((c) => !isFeatured(c.key) && matchCard(c));
+
   return (
     <div className="h-full flex-1 overflow-y-auto bg-bg">
-      {/* ------------------------------ grade inicial ----------------------------- */}
+      {/* ------------------------------ hub inicial (bento) ----------------------- */}
       {section === null && (
-        <div className="mx-auto max-w-5xl px-4 py-6 md:px-8 md:py-8">
-          <div className="mb-6 flex items-center justify-between gap-3">
+        <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
               <h1 className="text-2xl font-bold text-ink">Espaço de Trabalho</h1>
               <p className="mt-1 text-sm text-muted">Tudo que personaliza sua IA, num só lugar.</p>
             </div>
-            <button onClick={onClose} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">
-              <ArrowLeft size={16} /> Voltar ao chat
-            </button>
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+                <input
+                  value={homeQ}
+                  onChange={(e) => setHomeQ(e.target.value)}
+                  placeholder="Filtrar…"
+                  className="w-56 rounded-full border border-border bg-surface py-1.5 pl-9 pr-3 text-sm text-ink outline-none transition-[border-color] focus:border-accent/50 placeholder:text-muted"
+                />
+              </div>
+              <button onClick={onClose} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">
+                <ArrowLeft size={16} /> Voltar ao chat
+              </button>
+            </div>
           </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {CARD_META.filter((c) => !c.admin || user?.role === "admin").map((c) => (
-              <WsCard
-                key={c.key}
-                icon={c.icon}
-                name={c.name}
-                desc={c.desc}
-                live={c.live}
-                onClick={() => openSection(c.key)}
-              />
-            ))}
-          </div>
+
+          {featured.length > 0 && (
+            <>
+              <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.14em] text-muted/70">Atalhos</p>
+              <div className="mb-7 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {featured.map((c) => (
+                  <FeatureCard
+                    key={c.key}
+                    icon={c.icon}
+                    name={c.name}
+                    desc={c.desc}
+                    count={cardCount[c.key]}
+                    unit={c.key === "Codespace" ? "projetos" : "modelos"}
+                    onClick={() => openSection(c.key)}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
+          {library.length > 0 && (
+            <>
+              <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.14em] text-muted/70">Biblioteca</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {library.map((c) => (
+                  <LibraryCard
+                    key={c.key}
+                    icon={c.icon}
+                    name={c.name}
+                    desc={c.desc}
+                    count={cardCount[c.key]}
+                    live={c.live}
+                    onClick={() => openSection(c.key)}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
+          {featured.length === 0 && library.length === 0 && (
+            <p className="py-16 text-center text-sm text-muted">Nada encontrado para “{homeQ}”.</p>
+          )}
         </div>
       )}
 
@@ -714,9 +791,9 @@ export default function WorkspaceView({
         </SectionShell>
       )}
       {section === "Codespace" && (
-        <SectionShell title="Codespace" onBack={backHome}>
-          <CodespacePanel onOpenChat={(chatId, prefill) => { onOpenChat?.(chatId, prefill); onClose(); }} />
-        </SectionShell>
+        <div className="px-4 py-5 md:px-8 md:py-6">
+          <CodespacePanel onBack={backHome} onOpenChat={(chatId, prefill) => { onOpenChat?.(chatId, prefill); onClose(); }} />
+        </div>
       )}
       {section === "Memoria" && (
         <SectionShell title="Memória" onBack={backHome}>
@@ -733,12 +810,6 @@ export default function WorkspaceView({
           <ApiView />
         </SectionShell>
       )}
-      {section === "Observabilidade" && (
-        <SectionShell title="Observabilidade" onBack={backHome}>
-          <ObservabilityView />
-        </SectionShell>
-      )}
-
       {valvesTool && (
         <ValvesModal tool={valvesTool} onClose={() => setValvesTool(null)} onSaved={loadTools} />
       )}

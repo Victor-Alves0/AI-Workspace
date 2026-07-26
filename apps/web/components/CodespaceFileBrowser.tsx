@@ -471,7 +471,10 @@ const CodeView = forwardRef<HTMLDivElement, {
       </pre>
     );
   }
-  const gutter = `${String(lines.length).length}ch`;
+  // Largura do gutter = dígitos + padding lateral (pl-3 pr-3 = 1.5rem). Com
+  // box-sizing:border-box (padrão do Tailwind) a `width` inclui o padding, então
+  // ela precisa somar os dois — senão o número estoura e cola/sobrepõe o código.
+  const gutter = `calc(${String(lines.length).length}ch + 1.5rem)`;
   return (
     <div
       ref={ref}
@@ -484,11 +487,11 @@ const CodeView = forwardRef<HTMLDivElement, {
         <div key={i} data-line={i + 1} className="flex">
           <span
             style={{ width: gutter }}
-            className="shrink-0 select-none pl-3 pr-3 text-right tabular-nums text-muted/60"
+            className="shrink-0 select-none border-r border-border/60 pl-3 pr-3 text-right tabular-nums text-muted/60"
           >
             {i + 1}
           </span>
-          <span className="whitespace-pre pr-3 text-ink-soft">{l}</span>
+          <span className="whitespace-pre pl-3 pr-3 text-ink-soft">{l}</span>
         </div>
       ))}
     </div>
