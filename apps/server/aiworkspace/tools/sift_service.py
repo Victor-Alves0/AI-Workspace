@@ -312,6 +312,17 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # grafo sem ter isto). Estática e "may-taint": over-aproxima de propósito.
     {"path": "code.flow.analyze", "name": "Fluxo e Segurança do Código", "description": "Analisa para onde os dados fluem no projeto vinculado: o que um parâmetro alcança, se algo chega a um destino sensível (rede, banco, disco) e entradas não confiáveis que chegam a pontos perigosos.",
      "model_desc": "Data-flow and taint analysis on the attached project: where a function's parameters flow, whether a symbol reaches a sink (http/db/fs), and untrusted input reaching dangerous sinks. Static may-analysis — findings are candidates to verify, not proof."},
+    # Execução: roda comandos do projeto (testes/build/lint) num sandbox. Gate DUPLO
+    # (tool por-modelo + exec_enabled por-projeto) + confirmação — é a capacidade mais
+    # sensível do Codespace (roda código de verdade). É o que fecha o loop "escreve →
+    # testa → corrige".
+    {"path": "code.exec.run", "name": "Executar no Projeto", "description": "Roda comandos do projeto vinculado (testes, build, lint, scripts) num sandbox e devolve a saída — para verificar as mudanças. Precisa ser liberado por-projeto em Configurações do projeto.",
+     "model_desc": "Run shell commands in the attached project's sandbox (tests, build, lint, scripts) and get stdout+exit code — use to VERIFY your changes after editing. Prefer the project's test_command. Requires the project to have execution enabled."},
+    # Tarefas/worktrees: cria uma branch isolada (worktree) por tarefa p/ o agente
+    # trabalhar sem colidir com o `src` nem com outros agentes; lista/inspeciona o diff
+    # e mescla/descarta. O merge normalmente é aprovado pelo humano na UI.
+    {"path": "code.task.manage", "name": "Tarefas do Projeto", "description": "Abre uma tarefa isolada (worktree/branch) no projeto vinculado para trabalhar sem afetar o código principal, lista as tarefas, mostra o diff e mescla ou descarta.",
+     "model_desc": "Open an isolated worktree/branch to work in without touching the project's main tree, list tasks, show a task's diff, and merge or discard it. Use 'open' before a big or parallel change; merging is usually approved by the human in the UI."},
 ]
 # NOTA: "perguntar opções" (kind:"ask") é uma PRIMITIVA de sistema (tools/interaction.py),
 # não uma tool equipável — qualquer ferramenta a usa via `ask_options(...)` (ex.: o Lembrete
@@ -1064,7 +1075,7 @@ def _register_builtins(
     # instância SIFT é cacheada por-USUÁRIO (não por-chat) — mesma solução do
     # navegador (current_chat_id) e do mesmo motivo.
     if (want("code.graph.query") or want("code.files.browse") or want("code.files.write")
-            or want("code.flow.analyze")):
+            or want("code.flow.analyze") or want("code.exec.run") or want("code.task.manage")):
         from ..codespace import graph_service
 
         def _cs_project():
@@ -1350,17 +1361,28 @@ def _register_builtins(
             act = (action or "").strip().lower()
             if not (path or "").strip() and act in ("write", "edit", "delete"):
                 return {"error": "provide 'path'"}
+            # Tarefa isolada ativa? Então escreve no WORKTREE (branch própria, sem
+            # reindex do grafo do projeto, sem push — o push acontece no merge).
+            wt = toolctx.current_codespace_worktree.get()
+            wt_root = graph_service.wt_dir(uid, pid, wt) if wt else None
+            reindex = wt_root is None
             try:
                 if act == "write":
-                    return graph_service.write_file(uid, pid, scope, path.strip(), content, message=message)
+                    return graph_service.write_file(uid, pid, scope, path.strip(), content, message=message,
+                                                    root=wt_root, reindex=reindex)
                 if act == "edit":
-                    return graph_service.edit_file(uid, pid, scope, path.strip(), search, replace, message=message)
+                    return graph_service.edit_file(uid, pid, scope, path.strip(), search, replace, message=message,
+                                                   root=wt_root, reindex=reindex)
                 if act == "delete":
                     block = _cs_confirm_guard(confirm_on, f"Apagar '{path.strip()}' do projeto '{proj.name}'?", confirm)
                     if block:
                         return block
-                    return graph_service.delete_file(uid, pid, scope, path.strip(), message=message)
+                    return graph_service.delete_file(uid, pid, scope, path.strip(), message=message,
+                                                     root=wt_root, reindex=reindex)
                 if act == "push":
+                    if wt_root is not None:
+                        return {"error": "você está numa tarefa isolada (worktree) — os commits vão para o "
+                                         "remoto quando a tarefa for mesclada/aprovada, não com push direto"}
                     block = _cs_confirm_guard(confirm_on, f"Enviar os commits locais de '{proj.name}' para o repositório remoto?", confirm)
                     if block:
                         return block
@@ -1370,6 +1392,155 @@ def _register_builtins(
                 return {"error": str(exc)}
             except Exception as exc:  # noqa: BLE001 - erro de escrita não quebra o turno
                 return {"error": str(exc)[:300]}
+
+    if want("code.exec.run"):
+        from ..codespace import exec_service
+
+        @sift.tool(
+            "code.exec.run",
+            description=(
+                "Run shell commands in the attached project's sandbox — the way to VERIFY your "
+                "changes (run tests/build/lint) instead of guessing. Runs with the project root (or "
+                "the active task's worktree) as working directory; returns combined stdout+stderr, "
+                "the exit code and duration. Leave `command` empty to run the project's configured "
+                "test_command. Set `setup=true` to run the project's setup_command first (e.g. install "
+                "deps) — do this once before the first test run. Requires the project owner to have "
+                "enabled execution; a bad exit code means the command failed — read the output and fix."
+            ),
+            params={
+                "command": "string:o::the shell command to run (empty = the project's test_command)",
+                "setup": "boolean:o::run the project's setup_command (install deps) before the command",
+                "confirm": "boolean:o::set true only after the user confirmed running commands",
+            },
+            returns=["ok", "exit_code", "output", "seconds", "truncated", "timed_out",
+                     "command", "steps", "error",
+                     "kind", "question", "options", "allow_custom", "custom_label"],
+            risk=True,
+            examples=["run the tests", "run npm run build and show me errors",
+                      "install the dependencies then run the tests", "run pytest -k auth"],
+        )
+        def _code_exec_run(command: str = "", setup: Any = None, confirm: Any = None) -> dict[str, Any]:
+            proj, confirm_on, err = _cs_project_ctx()
+            if err:
+                return err
+            bad = _cs_require_ready(proj)
+            if bad:
+                return bad
+            if not getattr(proj, "exec_enabled", False):
+                return {"error": "execução desativada neste projeto. O dono precisa ligar "
+                                 "'Permitir execução' nas Configurações do projeto (Codespace)."}
+            uid, pid = str(proj.user_id), str(proj.id)
+            wt = toolctx.current_codespace_worktree.get()
+            root = graph_service.wt_dir(uid, pid, wt) if wt else graph_service.working_copy_path(uid, pid)
+            cmd = (command or "").strip() or (proj.test_command or "").strip()
+            if not cmd:
+                return {"error": "informe 'command' — nenhum test_command configurado no projeto"}
+            block = _cs_confirm_guard(confirm_on, f"Rodar no projeto '{proj.name}':\n`{cmd[:200]}`", confirm)
+            if block:
+                return block
+
+            def _truthy(v: Any) -> bool:
+                return v is True or (isinstance(v, str) and v.strip().lower() in ("true", "1", "yes", "sim", "on"))
+
+            try:
+                steps: list[dict] = []
+                if _truthy(setup) and (proj.setup_command or "").strip():
+                    r0 = exec_service.run_command(root, proj.setup_command.strip(),
+                                                  data_root=graph_service.data_root())
+                    r0["command"] = proj.setup_command.strip()
+                    steps.append(r0)
+                    if r0.get("error") or r0.get("exit_code") not in (0, None):
+                        return {"ok": False, "steps": steps}
+                r = exec_service.run_command(root, cmd, data_root=graph_service.data_root())
+                if r.get("error") and not steps:
+                    return r
+                r["command"] = cmd
+                r["ok"] = r.get("exit_code") == 0
+                # loop de verificação: rodando o test_command DENTRO de um worktree,
+                # grava pass/fail na tarefa (aparece na aba Tarefas p/ o humano).
+                is_test = not (command or "").strip() or cmd == (proj.test_command or "").strip()
+                if wt and is_test:
+                    from ..codespace import worktree_service
+                    try:
+                        asyncio.run(worktree_service.set_test_status(wt, "pass" if r["ok"] else "fail"))
+                    except Exception:  # noqa: BLE001
+                        pass
+                return {"ok": r["ok"], "steps": steps + [r]} if steps else r
+            except Exception as exc:  # noqa: BLE001
+                return {"error": str(exc)[:300]}
+
+    if want("code.task.manage"):
+        from ..codespace import worktree_service
+
+        @sift.tool(
+            "code.task.manage",
+            description=(
+                "Work in an ISOLATED worktree (its own branch) so a big or parallel change never "
+                "clobbers the project's main tree. `action`: 'open' (start a task — creates a worktree/"
+                "branch; AFTER this, your file writes in this chat go into the worktree, not the main "
+                "tree, until it's merged/discarded), 'list' (tasks and their status/diff size), 'diff' "
+                "(the full diff of a task vs its base — pass `task_id`), 'merge' (merge the task into the "
+                "project branch — usually the HUMAN approves this in the UI; set push=true to also push), "
+                "'discard' (throw the worktree away). Use 'open' before delegating parallel coding work."
+            ),
+            params={
+                "action": "string:r::open | list | diff | merge | discard",
+                "title": "string:o::open: a short description of the task",
+                "task_id": "string:o::diff/merge/discard: the task id from 'open'/'list'",
+                "agent": "string:o::open: label of the agent doing the work (optional)",
+                "base": "string:o::open: branch to start from (default: the project branch)",
+                "push": "boolean:o::merge: also push the project branch to the remote after merging",
+                "confirm": "boolean:o::set true only after the user confirmed merge/discard",
+            },
+            returns=["id", "title", "agent", "branch", "base_branch", "status", "diff_stat",
+                     "test_status", "created_at", "tasks", "diff", "ok", "merged", "discarded",
+                     "already", "conflict", "push", "error",
+                     "kind", "question", "options", "allow_custom", "custom_label"],
+            risk=True,
+            examples=["open an isolated task to refactor the auth module", "list the open tasks",
+                      "show me the diff of that task", "merge the task", "discard this task"],
+        )
+        def _code_task_manage(action: str = "", title: str = "", task_id: str = "",
+                               agent: str = "", base: str = "", push: Any = None,
+                               confirm: Any = None) -> dict[str, Any]:
+            proj, confirm_on, err = _cs_project_ctx()
+            if err:
+                return err
+            uid, pid = str(proj.user_id), str(proj.id)
+            act = (action or "").strip().lower()
+            chat_id = toolctx.current_chat_id.get()
+
+            def _truthy(v: Any) -> bool:
+                return v is True or (isinstance(v, str) and v.strip().lower() in ("true", "1", "yes", "sim", "on"))
+
+            tid = (task_id or "").strip()
+            if act == "open":
+                bad = _cs_require_ready(proj)
+                if bad:
+                    return bad
+                return asyncio.run(worktree_service.open_task(uid, pid, title=title, agent=agent,
+                                                              chat_id=chat_id, base=base))
+            if act == "list":
+                return asyncio.run(worktree_service.list_tasks(uid, pid))
+            if act == "diff":
+                if not tid:
+                    return {"error": "informe task_id"}
+                return asyncio.run(worktree_service.task_diff(uid, tid))
+            if act == "merge":
+                if not tid:
+                    return {"error": "informe task_id"}
+                block = _cs_confirm_guard(confirm_on, f"Mesclar a tarefa no projeto '{proj.name}'?", confirm)
+                if block:
+                    return block
+                return asyncio.run(worktree_service.merge_task(uid, tid, push=_truthy(push)))
+            if act == "discard":
+                if not tid:
+                    return {"error": "informe task_id"}
+                block = _cs_confirm_guard(confirm_on, f"Descartar a tarefa (perde as mudanças não mescladas)?", confirm)
+                if block:
+                    return block
+                return asyncio.run(worktree_service.discard_task(uid, tid))
+            return {"error": f"unknown action '{act}' (use open/list/diff/merge/discard)"}
 
     if want("code.flow.analyze"):
         @sift.tool(

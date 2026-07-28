@@ -133,6 +133,9 @@ $env:APP_SECRET          = (Get-Content $SecretFile -Raw).Trim()
 $env:DATABASE_URL        = "postgresql+asyncpg://aiworkspace:aiworkspace@$($Loop):$PgPort/aiworkspace"
 $env:FASTEMBED_CACHE_PATH = Join-Path $Data "cache\fastembed"
 $env:HF_HOME             = Join-Path $Data "cache\huggingface"
+# Codespace: projetos/worktrees dentro de .\data\ (sem Docker, o "/data/codespace"
+# padrao nao existe no Windows). O exec do Codespace cai p/ subprocesso no host aqui.
+$env:CODESPACE_DATA_DIR  = Join-Path $Data "codespace"
 # a interface roda em localhost:3000 e chama a API em localhost:8000; libera as
 # duas grafias do loopback no CORS
 $env:WEB_ORIGIN          = "http://localhost:$WebPort,http://127.0.0.1:$WebPort"

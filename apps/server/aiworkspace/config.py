@@ -115,6 +115,26 @@ class Settings(BaseSettings):
     browser_ws_url: str = ""
     browser_token: str = ""
 
+    # Codespace: onde os repositórios/worktrees dos projetos vivem no disco. No
+    # compose é o volume `codespace_data` montado em /data/codespace; no desktop
+    # (Windows, sem Docker) o Start-AIWorkspace.ps1 aponta para <DataDir>\codespace.
+    # Hardcodar "/data/codespace" quebrava o Codespace fora do Linux/Docker.
+    codespace_data_dir: str = "/data/codespace"
+
+    # Sandbox de execução do Codespace (tool "code.exec.run"): roda testes/build do
+    # projeto. Baseline UNIVERSAL = subprocesso no host (funciona em Win/Linux/desktop,
+    # sem Docker). `code_runner_url` (opt-in) encaminha para um container `runner`
+    # (--profile runner) com isolamento mais forte; vazio = subprocesso no host.
+    code_runner_url: str = ""
+    code_runner_token: str = ""
+    # caps do exec (host): timeout por comando, CPU (rlimit Linux) e teto de saída.
+    code_exec_timeout_seconds: int = 900
+    code_exec_cpu_seconds: int = 600
+    code_exec_output_bytes: int = 200_000
+    # ciclo de vida dos worktrees: TTL de ociosidade (reaper) e teto por usuário.
+    codespace_worktree_ttl_seconds: int = 86_400
+    codespace_max_worktrees_per_user: int = 20
+
     # Transcrição de vídeo (tool "media.video.transcribe" / yt-dlp): anti-bloqueio.
     # YouTube & afins barram scraping repetido do mesmo cliente ("Sign in to confirm
     # you're not a bot", HTTP 429). `transcribe_cookies_dir` aponta p/ uma pasta de

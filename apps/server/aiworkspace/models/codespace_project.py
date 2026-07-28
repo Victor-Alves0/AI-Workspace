@@ -29,8 +29,13 @@ class CodespaceProject(Base):
     slug: Mapped[str] = mapped_column(String(80), default="")
     # "git" (clone HTTPS) | "git-ssh" (clone via SSH, deploy key gerada por-projeto)
     # | "local" (sem remoto — git init vazio, arquivos criados do zero)
+    # | "folder" (abre um diretório EXISTENTE no host, estilo VSCode — usa local_path)
     source: Mapped[str] = mapped_column(String(16), default="git")
     repo_url: Mapped[str] = mapped_column(Text, default="")
+    # source="folder": caminho ABSOLUTO de um diretório existente no host (desktop/
+    # bare-metal). Fora do jail de codespace_data, então só usável onde o server tem
+    # acesso ao FS local; em Docker exige um caminho montado.
+    local_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     branch: Mapped[str] = mapped_column(String(120), default="main")
     # conta GitHub conectada (Integrações) usada p/ autenticar o clone de repos
     # privados; None = clone anônimo (só funciona com repos públicos)
@@ -53,6 +58,12 @@ class CodespaceProject(Base):
     # escopo do projeto: pastas/arquivos liberados/bloqueados p/ a IA (globs),
     # aplicado DEPOIS do jail de path — {"allow": [...], "deny": [...]}
     scope: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # Sandbox de execução (tool code.exec.run): comando de preparo (ex.: "npm install")
+    # e de verificação (ex.: "npm test"); `exec_enabled` é o gate por-projeto — sem ele
+    # a tool recusa rodar qualquer comando, mesmo equipada no modelo.
+    setup_command: Mapped[str] = mapped_column(Text, default="")
+    test_command: Mapped[str] = mapped_column(Text, default="")
+    exec_enabled: Mapped[bool] = mapped_column(default=False)
     # pending -> cloning -> indexing -> ready | error
     index_status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

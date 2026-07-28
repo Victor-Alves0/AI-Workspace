@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth.deps import require_approved
-from .codespace import graph_service
+from .codespace import graph_service, worktree_service
 from .db import get_db
 from .memory import mem0_service
 from .models import Chat, CodespaceProject, GithubAccount, MemoryBank, User
@@ -31,11 +31,13 @@ _spawn_refine = graph_service.spawn_refine
 # --------------------------------------------------------------------------- #
 class ProjectIn(BaseModel):
     name: str
-    # "git" (HTTPS) | "git-ssh" (deploy key gerada no servidor) | "local" (sem remoto)
+    # "git" | "git-ssh" | "local" | "folder" (abre um diretório existente no host)
     source: str = "git"
     repo_url: str = ""
     branch: str = "main"
     github_account_id: str | None = None
+    # source="folder": caminho absoluto de um diretório existente no servidor
+    local_path: str = ""
 
 
 class ProjectScopeIn(BaseModel):
@@ -50,6 +52,10 @@ class ProjectUpdate(BaseModel):
     # modelo padrão dos novos chats do projeto ("custom:<id>" ou modelo base);
     # "" limpa (volta a herdar o padrão do usuário)
     default_model: str | None = None
+    # sandbox de execução (tool code.exec.run)
+    setup_command: str | None = None
+    test_command: str | None = None
+    exec_enabled: bool | None = None
 
 
 class ProjectOut(BaseModel):
@@ -71,6 +77,11 @@ class ProjectOut(BaseModel):
     error_message: str | None = None
     stats: dict | None = None
     last_indexed_at: str | None = None
+    # sandbox de execução
+    setup_command: str = ""
+    test_command: str = ""
+    exec_enabled: bool = False
+    local_path: str | None = None
 
 
 def _out(p: CodespaceProject) -> ProjectOut:
@@ -82,6 +93,8 @@ def _out(p: CodespaceProject) -> ProjectOut:
         default_model=p.default_model,
         scope=p.scope or {}, index_status=p.index_status, error_message=p.error_message,
         stats=p.stats, last_indexed_at=p.last_indexed_at.isoformat() if p.last_indexed_at else None,
+        setup_command=p.setup_command or "", test_command=p.test_command or "",
+        exec_enabled=bool(p.exec_enabled), local_path=p.local_path,
     )
 
 
@@ -118,7 +131,7 @@ async def list_projects(user: User = Depends(require_approved), db: AsyncSession
     return [_out(p) for p in rows]
 
 
-_SOURCES = ("git", "git-ssh", "local")
+_SOURCES = ("git", "git-ssh", "local", "folder")
 
 
 @router.post("/projects", response_model=ProjectOut)
@@ -129,8 +142,14 @@ async def create_project(
     if source not in _SOURCES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"origem inválida (use: {', '.join(_SOURCES)})")
     repo_url = (body.repo_url or "").strip()
-    if source != "local" and not repo_url:
+    if source in ("git", "git-ssh") and not repo_url:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "repo_url é obrigatório")
+    local_path = (body.local_path or "").strip()
+    if source == "folder":
+        import os
+        if not local_path or not os.path.isdir(local_path):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "informe local_path — um diretório existente no servidor")
 
     gh_id: uuid.UUID | None = None
     if source == "git" and body.github_account_id:
@@ -154,7 +173,7 @@ async def create_project(
         user_id=user.id, name=(body.name or "Projeto").strip()[:255],
         source=source, repo_url=repo_url, branch=(body.branch or "main").strip()[:120] or "main",
         github_account_id=gh_id, ssh_private_key=ssh_priv, ssh_public_key=ssh_pub,
-        scope={}, index_status="pending",
+        local_path=local_path or None, scope={}, index_status="pending",
     )
     db.add(p)
     await db.commit()
@@ -372,6 +391,12 @@ async def update_project(
         p.default_model = body.default_model.strip()[:255] or None
     if body.scope is not None:
         p.scope = {"allow": body.scope.allow or [], "deny": body.scope.deny or []}
+    if body.setup_command is not None:
+        p.setup_command = body.setup_command.strip()[:2000]
+    if body.test_command is not None:
+        p.test_command = body.test_command.strip()[:2000]
+    if body.exec_enabled is not None:
+        p.exec_enabled = bool(body.exec_enabled)
     await db.commit()
     await db.refresh(p)
     return _out(p)
@@ -403,8 +428,8 @@ async def resync_project(
     local não enviado (inclusive os que a IA fez). Só use se quiser jogar fora
     o trabalho local e puxar de novo o que está no GitHub."""
     p = await _owned_project(db, user, project_id)
-    if p.source == "local":
-        raise HTTPException(status.HTTP_409_CONFLICT, "Projeto local não tem origem remota para ressincronizar")
+    if p.source in ("local", "folder"):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Este projeto não tem origem remota para ressincronizar")
     if p.index_status in ("cloning", "indexing"):
         raise HTTPException(status.HTTP_409_CONFLICT, "Já está indexando")
     p.index_status = "pending"
@@ -436,6 +461,80 @@ async def refine_project(
         raise HTTPException(status.HTTP_409_CONFLICT, "Projeto precisa estar indexado (ready) primeiro")
     _spawn_refine(p.id, str(p.user_id))
     return {"ok": True, "note": "refinamento iniciado em background (pode levar alguns minutos)"}
+
+
+# --------------------------------------------------------------------------- #
+# Tarefas (worktrees isolados) — revisão/merge do trabalho dos agentes
+# --------------------------------------------------------------------------- #
+class TaskOpenIn(BaseModel):
+    title: str = ""
+    agent: str = ""
+    base: str = ""
+
+
+class TaskMergeIn(BaseModel):
+    push: bool = False
+    open_pr: bool = False
+    title: str = ""
+    body: str = ""
+
+
+@router.get("/projects/{project_id}/tasks")
+async def list_tasks_route(
+    project_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    p = await _owned_project(db, user, project_id)
+    return await worktree_service.list_tasks(str(user.id), str(p.id))
+
+
+@router.post("/projects/{project_id}/tasks")
+async def open_task_route(
+    project_id: uuid.UUID, body: TaskOpenIn,
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    p = await _owned_project(db, user, project_id)
+    if p.index_status != "ready":
+        raise HTTPException(status.HTTP_409_CONFLICT, "projeto ainda não está pronto (aguarde a indexação)")
+    res = await worktree_service.open_task(str(user.id), str(p.id), title=body.title, agent=body.agent, base=body.base)
+    if res.get("error"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, res["error"])
+    return res
+
+
+@router.get("/projects/{project_id}/tasks/{task_id}/diff")
+async def task_diff_route(
+    project_id: uuid.UUID, task_id: uuid.UUID,
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    await _owned_project(db, user, project_id)
+    return await worktree_service.task_diff(str(user.id), str(task_id))
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/merge")
+async def merge_task_route(
+    project_id: uuid.UUID, task_id: uuid.UUID, body: TaskMergeIn,
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    await _owned_project(db, user, project_id)
+    if body.open_pr:
+        res = await worktree_service.open_pr(str(user.id), str(task_id), title=body.title, body=body.body)
+    else:
+        res = await worktree_service.merge_task(str(user.id), str(task_id), push=body.push)
+    if res.get("error"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, res["error"])
+    return res
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}/discard")
+async def discard_task_route(
+    project_id: uuid.UUID, task_id: uuid.UUID,
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    await _owned_project(db, user, project_id)
+    res = await worktree_service.discard_task(str(user.id), str(task_id))
+    if res.get("error"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, res["error"])
+    return res
 
 
 @router.delete("/projects/{project_id}")

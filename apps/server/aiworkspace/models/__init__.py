@@ -26,6 +26,7 @@ from .memory_bank import MemoryBank
 from .knowledge import KnowledgeBase, KnowledgeFolder, KnowledgeDoc, KnowledgeChunk
 from .benchmark import Benchmark, BenchmarkRun
 from .codespace_project import CodespaceProject
+from .codespace_task import CodespaceTask
 from .api_key import ApiKey, ApiRequest
 from .trace import ObsTrace, ObsSpan
 
@@ -72,6 +73,7 @@ __all__ = [
     "Benchmark",
     "BenchmarkRun",
     "CodespaceProject",
+    "CodespaceTask",
     "ApiKey",
     "ApiRequest",
     "ObsTrace",

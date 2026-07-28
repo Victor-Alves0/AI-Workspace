@@ -985,7 +985,7 @@ export function ReasoningBlock({
         <ChevronDown size={14} className={`transition-transform duration-150 ${open ? "" : "-rotate-90"}`} />
       </button>
       {open && (
-        <div className="mt-2 whitespace-pre-wrap border-l-2 border-border pl-3 text-sm leading-6 text-muted">
+        <div className="mt-2 max-h-[28rem] overflow-y-auto whitespace-pre-wrap break-words border-l-2 border-border pl-3 text-sm leading-6 text-muted">
           {text}
         </div>
       )}

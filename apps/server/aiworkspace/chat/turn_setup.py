@@ -818,6 +818,9 @@ async def _resolve_subagents(
         # opt-in: operários enxergam o histórico do chat / usam a própria memória
         "pass_context": bool(cfg.get("pass_context")),
         "worker_memory": bool(cfg.get("worker_memory")),
+        # opt-in: cada operário trabalha num worktree ISOLADO do projeto do chat
+        # (branch própria) — sem colisão em paralelo; o resultado vira tarefa a revisar.
+        "worktree_isolation": bool(cfg.get("worktree_isolation")),
     }
     return specs, conf
 
@@ -840,10 +843,13 @@ def _make_subagent_runner(
     db: AsyncSession, user: User, chat_id: uuid.UUID | None, max_depth: int,
     pass_context: bool = False, worker_memory: bool = False,
     depth: int = 0, ancestry: frozenset[str] = frozenset(),
+    project_id: str | None = None, worktree_isolation: bool = False,
 ):
     """Closure que executa um operário: resolve o ModelConfig e roda um turno aninhado.
-    Opções: `pass_context` (dá o histórico do chat ao operário) e `worker_memory` (o
-    operário lê/escreve na PRÓPRIA memória). Blinda contra ciclos e recursão profunda."""
+    Opções: `pass_context` (dá o histórico do chat ao operário), `worker_memory` (o
+    operário lê/escreve na PRÓPRIA memória) e `worktree_isolation` (cada operário
+    trabalha num worktree isolado do `project_id`, sem colidir com os outros — o
+    resultado vira uma tarefa a revisar). Blinda contra ciclos e recursão profunda."""
     async def run_subagent(key: str, task: str) -> dict:
         if key in ancestry:
             return {"error": "ciclo de subagentes detectado; delegação abortada"}
@@ -873,6 +879,8 @@ def _make_subagent_runner(
                     pass_context=sub_conf.get("pass_context", False),
                     worker_memory=sub_conf.get("worker_memory", False),
                     depth=depth + 1, ancestry=ancestry | {key},
+                    project_id=project_id,
+                    worktree_isolation=sub_conf.get("worktree_isolation", False),
                 )
         # contexto do chat (opt-in)
         history = await _recent_history(db, chat_id) if (pass_context and chat_id) else []
@@ -883,6 +891,19 @@ def _make_subagent_runner(
         if worker_memory and chat_id:
             _stub = SimpleNamespace(memory_config=None)
             mem_read, mem_write, mem_review = _resolve_memory(_stub, mc, user)  # type: ignore[arg-type]
+        # worktree isolado (opt-in): o operário trabalha numa branch própria do projeto
+        # do chat, sem colidir com o `src` nem com operários paralelos. O resultado vira
+        # uma tarefa `awaiting_review` que o humano aprova/descarta na UI.
+        wt_task_id: str | None = None
+        if worktree_isolation and project_id:
+            from ..codespace import worktree_service
+            opened = await worktree_service.open_task(
+                str(user.id), project_id, title=task[:200], agent=mc.name,
+                chat_id=str(chat_id) if chat_id else None,
+            )
+            if opened.get("error"):
+                return {"error": f"não consegui abrir o worktree isolado: {opened['error']}"}
+            wt_task_id = opened.get("id")
         collected = ""
         usage = None
         try:
@@ -894,6 +915,9 @@ def _make_subagent_runner(
                     user_id=str(user.id),
                     chat_id=str(chat_id) if chat_id else None,
                     agent_id=_mem_agent_id(mc, mc.base_model),
+                    # com worktree isolado, o operário ganha o projeto + a branch própria
+                    codespace_project_id=project_id if wt_task_id else None,
+                    codespace_worktree=wt_task_id,
                 ),
                 memory=MemoryOpts(read=mem_read, write=mem_write, review=mem_review),
                 skills=skills, use_context=True,
@@ -906,7 +930,20 @@ def _make_subagent_runner(
                     collected = ev.get("content") or collected
                     usage = ev.get("usage")
         except Exception as exc:  # noqa: BLE001
+            if wt_task_id:
+                from ..codespace import worktree_service
+                try:
+                    await worktree_service.mark_awaiting(wt_task_id)
+                except Exception:  # noqa: BLE001
+                    pass
             return {"error": f"o subagente falhou: {exc}"}
+        # fecha o worktree como pronto p/ revisão (commita o resto + calcula o diff)
+        if wt_task_id:
+            from ..codespace import worktree_service
+            try:
+                await worktree_service.mark_awaiting(wt_task_id)
+            except Exception:  # noqa: BLE001
+                pass
         # analítica por-agente: registra o uso do operário no ledger
         if usage:
             try:
@@ -918,7 +955,12 @@ def _make_subagent_runner(
                         await s.commit()
             except Exception:  # noqa: BLE001 - ledger é best-effort
                 pass
-        return {"kind": "subagent", "agent": mc.name, "output": collected or "(sem resposta)"}
+        out = {"kind": "subagent", "agent": mc.name, "output": collected or "(sem resposta)"}
+        if wt_task_id:
+            out["task_id"] = wt_task_id
+            out["note"] = ("O trabalho ficou num worktree isolado (tarefa a revisar) — "
+                           "NÃO foi mesclado ainda; o usuário aprova/descarta na aba Tarefas.")
+        return out
 
     return run_subagent
 

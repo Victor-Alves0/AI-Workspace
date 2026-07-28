@@ -761,6 +761,7 @@ export default function ModelEditor({
         max_depth: Math.max(1, Math.min(3, Number(sc.max_depth) || 2)),
         pass_context: !!sc.pass_context,
         worker_memory: !!sc.worker_memory,
+        worktree_isolation: !!sc.worktree_isolation,
       };
     }
 
@@ -1433,6 +1434,13 @@ export default function ModelEditor({
                       <p className="text-[11px] text-muted">Cada operário lê/escreve na memória do próprio modelo (config em Memória).</p>
                     </div>
                     <Toggle on={!!subCfg.worker_memory} onChange={(v) => setSubCfg({ worker_memory: v })} />
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm text-ink">Operários em worktree isolado</p>
+                      <p className="text-[11px] text-muted">Em projetos do Codespace, cada operário trabalha numa branch própria (sem colidir em paralelo); o resultado vira uma tarefa a revisar/mesclar.</p>
+                    </div>
+                    <Toggle on={!!subCfg.worktree_isolation} onChange={(v) => setSubCfg({ worktree_isolation: v })} />
                   </div>
                 </div>
                 <p className="text-[11px] text-muted">

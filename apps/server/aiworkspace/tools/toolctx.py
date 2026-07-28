@@ -22,6 +22,14 @@ current_codespace_project_id: contextvars.ContextVar[str | None] = contextvars.C
     "current_codespace_project_id", default=None
 )
 
+# Worktree ATIVO do Codespace (id da CodespaceTask) quando o turno/worker roda dentro
+# de uma tarefa isolada. Quando setado, as tools de escrita/exec operam no worktree
+# (`<proj>/wt/<task_id>`) em vez do `src`, e commitam na branch do worktree sem push.
+# None = trabalha direto no `src` do projeto (comportamento padrão).
+current_codespace_worktree: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "current_codespace_worktree", default=None
+)
+
 # Fuso IANA do usuário no turno (ex.: "America/Sao_Paulo"), vindo do navegador.
 # Vazio = desconhecido → tratar como UTC. Usado por lembretes e eventos de agenda
 # para interpretar horários no fuso local do usuário, não no do servidor (UTC).

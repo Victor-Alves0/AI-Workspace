@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  ArrowLeft, Brain, Check, Copy, Globe, HardDrive, KeyRound, Loader2, MessageSquare, MoreVertical,
-  Pencil, Plus, RefreshCw, Search, Sparkles, Trash2, Waypoints, X,
+  ArrowLeft, Brain, Check, CheckCircle2, Copy, FolderOpen, GitBranch, GitMerge, Globe, HardDrive,
+  KeyRound, Loader2, MessageSquare, MoreVertical, Pencil, Plus, RefreshCw, Search, Sparkles,
+  Terminal, Trash2, Waypoints, X, XCircle,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import type { CodespaceChatLite, CodespaceEgo, CodespaceEgoEdge, CodespaceProject, CodespaceSymbol, MemoryItem, User } from "@/lib/types";
+import type { CodespaceChatLite, CodespaceEgo, CodespaceEgoEdge, CodespaceProject, CodespaceSymbol, CodespaceTask, MemoryItem, User } from "@/lib/types";
 import { useConfirm, usePrompt } from "@/components/ConfirmDialog";
 import { AnchoredMenu, MenuItem } from "@/components/ui";
 import { copyText } from "@/lib/clipboard";
@@ -18,12 +19,13 @@ interface GithubAccountLite {
   login: string;
 }
 
-type Source = "git" | "git-ssh" | "local";
+type Source = "git" | "git-ssh" | "local" | "folder";
 
 const SOURCE_META: Record<Source, { icon: typeof Globe; label: string }> = {
   git: { icon: Globe, label: "HTTPS" },
   "git-ssh": { icon: KeyRound, label: "SSH" },
   local: { icon: HardDrive, label: "Local" },
+  folder: { icon: FolderOpen, label: "Pasta" },
 };
 
 const STATUS_DOT: Record<string, string> = {
@@ -111,22 +113,26 @@ function NewProjectModal({
   const [source, setSource] = useState<Source>("git");
   const [name, setName] = useState("");
   const [repoUrl, setRepoUrl] = useState("");
+  const [localPath, setLocalPath] = useState("");
   const [branch, setBranch] = useState("main");
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [created, setCreated] = useState<CodespaceProject | null>(null);
   const [copied, setCopied] = useState(false);
+  const needsRepo = source === "git" || source === "git-ssh";
 
   async function submit() {
-    if (source !== "local" && !repoUrl.trim()) { setError("Informe a URL do repositório."); return; }
+    if (needsRepo && !repoUrl.trim()) { setError("Informe a URL do repositório."); return; }
+    if (source === "folder" && !localPath.trim()) { setError("Informe o caminho da pasta no servidor."); return; }
     setSaving(true);
     setError("");
     try {
       const p = await api.post<CodespaceProject>("/codespace/projects", {
-        name: name.trim() || repoUrl.trim().split("/").pop()?.replace(/\.git$/, "") || "Projeto",
+        name: name.trim() || (source === "folder" ? localPath.trim().split(/[\\/]/).pop() : repoUrl.trim().split("/").pop()?.replace(/\.git$/, "")) || "Projeto",
         source,
         repo_url: repoUrl.trim(),
+        local_path: localPath.trim(),
         branch: branch.trim() || "main",
         github_account_id: source === "git" ? (accountId || null) : null,
       });
@@ -183,7 +189,7 @@ function NewProjectModal({
         </div>
         <div className="flex flex-col gap-3 p-4">
           <div className="flex rounded-lg border border-border bg-surface2 p-0.5">
-            {(["git", "git-ssh", "local"] as Source[]).map((s) => {
+            {(["git", "git-ssh", "local", "folder"] as Source[]).map((s) => {
               const M = SOURCE_META[s];
               return (
                 <button key={s} onClick={() => setSource(s)}
@@ -194,7 +200,7 @@ function NewProjectModal({
             })}
           </div>
 
-          {source !== "local" && (
+          {needsRepo && (
             <label className="flex flex-col gap-1">
               <span className="text-xs font-medium text-muted">URL do repositório</span>
               <input value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)}
@@ -202,9 +208,18 @@ function NewProjectModal({
                 className="rounded-lg border border-border bg-surface2 px-3 py-2 font-mono text-xs text-ink outline-none focus:border-accent/50" />
             </label>
           )}
+          {source === "folder" && (
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-muted">Caminho da pasta (no servidor)</span>
+              <input value={localPath} onChange={(e) => setLocalPath(e.target.value)}
+                placeholder="/home/voce/meu-projeto  ou  C:\\projetos\\app"
+                className="rounded-lg border border-border bg-surface2 px-3 py-2 font-mono text-xs text-ink outline-none focus:border-accent/50" />
+              <span className="text-[11px] text-muted">Abre um diretório existente (estilo VSCode). Vira um repositório git se ainda não for.</span>
+            </label>
+          )}
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-muted">Nome {source !== "local" && "(opcional)"}</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder={source === "local" ? "Meu projeto" : "Deriva do repositório se vazio"}
+            <span className="text-xs font-medium text-muted">Nome {needsRepo && "(opcional)"}</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder={needsRepo ? "Deriva do repositório se vazio" : "Meu projeto"}
               className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent/50 placeholder:text-muted" />
           </label>
           <label className="flex flex-col gap-1">
@@ -628,7 +643,7 @@ function ProjectMemoryTab({ bankId }: { bankId: string }) {
 }
 
 /* ------------------------------ Project detail ----------------------------- */
-type Tab = "chats" | "arquivos" | "grafo" | "memoria";
+type Tab = "chats" | "arquivos" | "grafo" | "memoria" | "tarefas" | "config";
 
 function ProjectDetail({
   project, onBack, onUpdated, onDeleted, onOpenChat,
@@ -781,7 +796,8 @@ function ProjectDetail({
         <>
           <div className="mb-3 flex items-center gap-1 overflow-x-auto border-b border-border">
             {([
-              ["chats", "Chats"], ["arquivos", "Arquivos"], ["grafo", "Grafo"], ["memoria", "Memória"],
+              ["chats", "Chats"], ["arquivos", "Arquivos"], ["grafo", "Grafo"],
+              ["tarefas", "Tarefas"], ["memoria", "Memória"], ["config", "Config"],
             ] as [Tab, string][]).map(([key, label]) => (
               <button key={key} onClick={() => setTab(key)}
                 className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors ${tab === key ? "border-accent text-ink" : "border-transparent text-muted hover:text-ink"}`}>
@@ -792,6 +808,8 @@ function ProjectDetail({
           {tab === "chats" && <ProjectChatsTab project={project} onOpenChat={onOpenChat} />}
           {tab === "arquivos" && <CodespaceFileBrowser key={jumpPath} projectId={project.id} onUse={reference} initialPath={jumpPath} />}
           {tab === "grafo" && <ProjectGraphTab project={project} onOpenFile={openInExplorer} />}
+          {tab === "tarefas" && <ProjectTasksTab project={project} />}
+          {tab === "config" && <ProjectConfigTab project={project} onUpdated={onUpdated} />}
           {tab === "memoria" && (
             project.memory_bank_id ? <ProjectMemoryTab bankId={project.memory_bank_id} /> : (
               <div className="rounded-2xl border border-dashed border-border px-4 py-10 text-center">
@@ -807,6 +825,186 @@ function ProjectDetail({
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/* --------------------------------- Tarefas -------------------------------- */
+const TASK_STATUS: Record<string, { label: string; cls: string }> = {
+  running: { label: "Trabalhando", cls: "bg-accent/15 text-accent-hover" },
+  awaiting_review: { label: "A revisar", cls: "bg-amber-400/15 text-amber-400" },
+  merged: { label: "Mesclada", cls: "bg-green-400/15 text-green-400" },
+  discarded: { label: "Descartada", cls: "bg-surface2 text-muted" },
+  error: { label: "Erro/conflito", cls: "bg-red-400/15 text-red-400" },
+};
+
+function ProjectTasksTab({ project }: { project: CodespaceProject }) {
+  const [tasks, setTasks] = useState<CodespaceTask[] | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [diff, setDiff] = useState<string>("");
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const confirm = useConfirm();
+  const hasGithub = project.source === "git" && !!project.github_account_id;
+
+  const load = () => api.get<{ tasks: CodespaceTask[] }>(`/codespace/projects/${project.id}/tasks`)
+    .then((r) => setTasks(r.tasks || [])).catch(() => setTasks([]));
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [project.id]);
+  // enquanto houver tarefa "trabalhando", faz polling leve
+  useEffect(() => {
+    if (!tasks?.some((t) => t.status === "running")) return;
+    const iv = setInterval(load, 3000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line
+  }, [tasks]);
+
+  async function openDiff(t: CodespaceTask) {
+    if (openId === t.id) { setOpenId(null); return; }
+    setOpenId(t.id); setDiff(""); setDiffLoading(true);
+    try {
+      const r = await api.get<{ diff: string }>(`/codespace/projects/${project.id}/tasks/${t.id}/diff`);
+      setDiff(r.diff || "(sem mudanças)");
+    } catch { setDiff("(não foi possível carregar o diff)"); }
+    finally { setDiffLoading(false); }
+  }
+
+  async function merge(t: CodespaceTask, openPr: boolean) {
+    const label = openPr ? "abrir um Pull Request no GitHub" : "mesclar no branch do projeto";
+    if (!(await confirm({ title: `Aprovar a tarefa?`, body: `Isso vai ${label}.`, confirmLabel: "Aprovar" }))) return;
+    setBusy(t.id);
+    try {
+      const r = await api.post<{ pr?: { html_url?: string } }>(`/codespace/projects/${project.id}/tasks/${t.id}/merge`,
+        openPr ? { open_pr: true } : { push: hasGithub });
+      if (openPr && r.pr?.html_url) window.open(r.pr.html_url, "_blank");
+      await load(); setOpenId(null);
+    } catch (e) { alert(e instanceof ApiError ? e.message : "Falha ao mesclar"); }
+    finally { setBusy(null); }
+  }
+
+  async function discard(t: CodespaceTask) {
+    if (!(await confirm({ title: "Descartar a tarefa?", body: "As mudanças não mescladas serão perdidas.", confirmLabel: "Descartar", danger: true }))) return;
+    setBusy(t.id);
+    try { await api.post(`/codespace/projects/${project.id}/tasks/${t.id}/discard`); await load(); setOpenId(null); }
+    finally { setBusy(null); }
+  }
+
+  if (tasks === null) return <div className="py-10 text-center"><Loader2 size={18} className="mx-auto animate-spin text-muted" /></div>;
+  if (tasks.length === 0) {
+    return (
+      <div className="rounded-2xl border border-dashed border-border px-4 py-10 text-center">
+        <GitBranch size={22} className="mx-auto mb-2 text-muted" />
+        <p className="text-sm text-muted">Nenhuma tarefa isolada ainda.</p>
+        <p className="mx-auto mt-1 max-w-sm text-xs text-muted">
+          Peça no chat para trabalhar numa tarefa isolada, ou use subagentes com “worktree isolado” —
+          cada agente trabalha numa branch própria e o resultado aparece aqui para você revisar e mesclar.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      {tasks.map((t) => {
+        const st = TASK_STATUS[t.status] ?? { label: t.status, cls: "bg-surface2 text-muted" };
+        const isOpen = openId === t.id;
+        const canAct = t.status === "awaiting_review" || t.status === "error" || t.status === "running";
+        const ds = t.diff_stat || {};
+        return (
+          <div key={t.id} className="rounded-xl border border-border bg-surface">
+            <div className="flex items-center gap-2 px-3 py-2.5">
+              <GitBranch size={15} className="shrink-0 text-muted" />
+              <button onClick={() => openDiff(t)} className="min-w-0 flex-1 text-left">
+                <div className="truncate text-sm text-ink">{t.title || t.branch || "Tarefa"}</div>
+                <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted">
+                  <span className={`rounded-full px-1.5 py-0.5 ${st.cls}`}>{st.label}</span>
+                  {t.agent && <span>{t.agent}</span>}
+                  {(ds.files ?? 0) > 0 && (
+                    <span>{ds.files} arq · <span className="text-green-400">+{ds.insertions ?? 0}</span> <span className="text-red-400">−{ds.deletions ?? 0}</span></span>
+                  )}
+                  {t.test_status === "pass" && <span className="inline-flex items-center gap-0.5 text-green-400"><CheckCircle2 size={11} /> testes ok</span>}
+                  {t.test_status === "fail" && <span className="inline-flex items-center gap-0.5 text-red-400"><XCircle size={11} /> testes falharam</span>}
+                </div>
+              </button>
+              {canAct && (
+                <div className="flex shrink-0 items-center gap-1">
+                  <button onClick={() => merge(t, false)} disabled={busy === t.id} title="Aprovar e mesclar"
+                    className="inline-flex items-center gap-1 rounded-lg bg-accent px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50">
+                    {busy === t.id ? <Loader2 size={12} className="animate-spin" /> : <GitMerge size={12} />} Mesclar
+                  </button>
+                  {hasGithub && (
+                    <button onClick={() => merge(t, true)} disabled={busy === t.id} title="Abrir Pull Request no GitHub"
+                      className="rounded-lg border border-border px-2 py-1 text-xs text-muted transition-colors hover:text-ink">PR</button>
+                  )}
+                  <button onClick={() => discard(t)} disabled={busy === t.id} title="Descartar"
+                    className="rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-red-400"><Trash2 size={14} /></button>
+                </div>
+              )}
+            </div>
+            {t.error && <div className="border-t border-border px-3 py-2 text-xs text-red-400">{t.error}</div>}
+            {isOpen && (
+              <div className="border-t border-border">
+                {diffLoading ? (
+                  <div className="py-6 text-center"><Loader2 size={16} className="mx-auto animate-spin text-muted" /></div>
+                ) : (
+                  <pre className="max-h-96 overflow-auto p-3 font-mono text-[12px] leading-5 text-ink-soft">{diff}</pre>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* -------------------------------- Config ---------------------------------- */
+function ProjectConfigTab({ project, onUpdated }: { project: CodespaceProject; onUpdated: (p: CodespaceProject) => void }) {
+  const [setupCmd, setSetupCmd] = useState(project.setup_command ?? "");
+  const [testCmd, setTestCmd] = useState(project.test_command ?? "");
+  const [execOn, setExecOn] = useState(!!project.exec_enabled);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const dirty = setupCmd !== (project.setup_command ?? "") || testCmd !== (project.test_command ?? "") || execOn !== !!project.exec_enabled;
+
+  async function save() {
+    setSaving(true); setSaved(false);
+    try {
+      const p = await api.patch<CodespaceProject>(`/codespace/projects/${project.id}`, {
+        setup_command: setupCmd, test_command: testCmd, exec_enabled: execOn,
+      });
+      onUpdated(p); setSaved(true); setTimeout(() => setSaved(false), 2000);
+    } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <div className="mb-1 flex items-center gap-2 text-sm font-medium text-ink"><Terminal size={15} /> Execução (sandbox)</div>
+        <p className="mb-3 text-xs text-muted">
+          Permite que a IA rode comandos do projeto (testes, build, lint) para verificar as mudanças.
+          Roda num sandbox com o projeto como diretório de trabalho. Desligado, a ferramenta recusa.
+        </p>
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-ink">
+          <input type="checkbox" checked={execOn} onChange={(e) => setExecOn(e.target.checked)}
+            className="h-4 w-4 rounded border-border accent-accent" />
+          Permitir execução neste projeto
+        </label>
+      </div>
+      <div>
+        <label className="mb-1 block text-xs font-medium text-muted">Comando de preparo (setup)</label>
+        <input value={setupCmd} onChange={(e) => setSetupCmd(e.target.value)} placeholder="ex.: npm install"
+          className="w-full rounded-lg border border-border bg-bg px-3 py-2 font-mono text-sm text-ink outline-none focus:border-accent" />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs font-medium text-muted">Comando de teste</label>
+        <input value={testCmd} onChange={(e) => setTestCmd(e.target.value)} placeholder="ex.: npm test"
+          className="w-full rounded-lg border border-border bg-bg px-3 py-2 font-mono text-sm text-ink outline-none focus:border-accent" />
+        <p className="mt-1 text-[11px] text-muted">A IA usa este comando ao “rodar os testes” sem especificar outro.</p>
+      </div>
+      <button onClick={save} disabled={!dirty || saving}
+        className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50">
+        {saving ? <Loader2 size={14} className="animate-spin" /> : saved ? <Check size={14} /> : null}
+        {saved ? "Salvo" : "Salvar"}
+      </button>
     </div>
   );
 }

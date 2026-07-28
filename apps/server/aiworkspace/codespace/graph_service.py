@@ -49,7 +49,9 @@ from ..models import CodespaceProject, User
 
 logger = logging.getLogger(__name__)
 
-_DATA_ROOT = Path("/data/codespace")
+# Onde os projetos/worktrees vivem no disco. Configurável (get_settings) para
+# funcionar fora do Linux/Docker (Windows/desktop) — ver Settings.codespace_data_dir.
+_DATA_ROOT = Path(get_settings().codespace_data_dir)
 
 # tetos anti-explosão de contexto: o ganho do grafo é reduzir o que volta ao
 # modelo, não devolver o banco inteiro numa chamada.
@@ -77,8 +79,36 @@ def _project_dir(user_id: str, project_id: str) -> Path:
     return _DATA_ROOT / str(user_id) / str(project_id)
 
 
+# source="folder": a working copy é um diretório EXISTENTE no host (fora do
+# codespace_data), não `<proj>/src`. Cache em-processo populado por `register_folder`
+# em todo ponto que carrega o projeto — o graph.db e os worktrees continuam sob
+# `<proj>/` (dentro do codespace_data), então apagar o projeto NUNCA toca a pasta.
+_FOLDER_SRC: dict[str, str] = {}
+
+
+def register_folder(project) -> None:
+    """Registra (ou remove) o caminho da pasta de um projeto source='folder'."""
+    try:
+        pid = str(project.id)
+        if getattr(project, "source", "") == "folder" and getattr(project, "local_path", ""):
+            _FOLDER_SRC[pid] = project.local_path
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def working_copy_path(user_id: str, project_id: str) -> Path:
-    return _project_dir(user_id, project_id) / "src"
+    ov = _FOLDER_SRC.get(str(project_id))
+    return Path(ov) if ov else _project_dir(user_id, project_id) / "src"
+
+
+def data_root() -> Path:
+    """Raiz onde todos os projetos/worktrees vivem (para caminhos relativos do runner)."""
+    return _DATA_ROOT
+
+
+def wt_dir(user_id: str, project_id: str, task_id: str) -> Path:
+    """Diretório do worktree de uma tarefa: `<proj>/wt/<task_id>` (irmão de `src`)."""
+    return _project_dir(user_id, project_id) / "wt" / str(task_id)
 
 
 def _db_path(user_id: str, project_id: str) -> Path:
@@ -197,6 +227,22 @@ def _init_local(dest: Path, branch: str) -> None:
         raise RuntimeError(f"git init falhou: {(proc.stderr or proc.stdout).strip()[-400:]}")
 
 
+def _prepare_folder(dest: Path, branch: str) -> None:
+    """source='folder': usa um diretório EXISTENTE do host (estilo "abrir pasta no
+    VSCode"). Faz `git init` se ainda não for repo (sem apagar nada) e garante ao
+    menos 1 commit — os worktrees precisam de uma base. Nunca reclona/descarta."""
+    if not dest.exists() or not dest.is_dir():
+        raise RuntimeError(f"pasta não encontrada no servidor: {dest}")
+    if not (dest / ".git").exists():
+        proc = subprocess.run(["git", "init", "-b", branch or "main", str(dest)],
+                              capture_output=True, text=True, timeout=30)
+        if proc.returncode != 0:
+            raise RuntimeError(f"git init falhou: {(proc.stderr or proc.stdout).strip()[-400:]}")
+    if _git(dest, "rev-parse", "--verify", "HEAD").returncode != 0:
+        # repo sem nenhum commit → cria a base (stage tudo que já está na pasta)
+        _git_commit(dest, "Codespace: commit inicial da pasta")
+
+
 # --------------------------------------------------------------------------- #
 # Indexação em background (clona/atualiza → CodeGraph.index() → persiste status)
 # --------------------------------------------------------------------------- #
@@ -259,17 +305,25 @@ async def _index_project(project_id: uuid.UUID, reclone: bool = True) -> None:
             repo_url, branch, source = proj.repo_url, proj.branch, proj.source
             gh_account_id = str(proj.github_account_id) if proj.github_account_id else None
             ssh_key = proj.ssh_private_key
+            register_folder(proj)  # source='folder' → working_copy_path aponta p/ local_path
 
         dest = working_copy_path(user_id, str(project_id))
         # "local" nunca reclona (não há origem pra puxar de novo) — só inicializa
-        # uma vez; reaproveita a working copy em qualquer outra chamada.
-        need_clone = (not dest.exists()) if source == "local" else (reclone or not dest.exists())
+        # uma vez; "folder" sempre roda o preparo idempotente (init/commit se preciso).
+        if source == "local":
+            need_clone = not dest.exists()
+        elif source == "folder":
+            need_clone = True
+        else:
+            need_clone = reclone or not dest.exists()
 
         if need_clone:
             await _mark(Session, project_id, index_status="cloning", error_message=None)
             try:
                 if source == "local":
                     await run_in_threadpool(_init_local, dest, branch)
+                elif source == "folder":
+                    await run_in_threadpool(_prepare_folder, dest, branch)
                 elif source == "git-ssh":
                     if not ssh_key:
                         raise RuntimeError("projeto sem deploy key gerada")
@@ -378,14 +432,18 @@ async def load_project(user_id: str, project_id: str) -> CodespaceProject | None
             p = await db.get(CodespaceProject, pid)
             if p is None or str(p.user_id) != str(user_id):
                 return None
+            register_folder(p)
             return p
     finally:
         await eng.dispose()
 
 
 def delete_project_files(user_id: str, project_id: str) -> None:
-    """Remove a working copy + índice do disco (chamado ao apagar o projeto)."""
+    """Remove o índice + worktrees do disco (chamado ao apagar o projeto). Para
+    source='folder' isso apaga só `<proj>/` (graph.db + wt/) sob o codespace_data —
+    NUNCA a pasta do usuário (local_path fica fora daqui)."""
     invalidate(project_id)
+    _FOLDER_SRC.pop(str(project_id), None)
     d = _project_dir(user_id, project_id)
     if d.exists():
         shutil.rmtree(d, ignore_errors=True)
@@ -410,6 +468,7 @@ async def load_project_ctx(user_id: str, project_id: str) -> tuple[CodespaceProj
                 return None, False
             u = await db.get(User, uid)
             confirm = bool(((u.profile or {}).get("security") or {}).get("confirm_actions", False)) if u else False
+            register_folder(p)
             return p, confirm
     finally:
         await eng.dispose()
@@ -1106,8 +1165,12 @@ def _reindex_after_write(user_id: str, project_id: str) -> dict | None:
 
 
 def write_file(user_id: str, project_id: str, scope: dict | None, path: str,
-                content: str, message: str = "") -> dict:
-    root = working_copy_path(user_id, project_id)
+                content: str, message: str = "", root: Path | None = None,
+                reindex: bool = True) -> dict:
+    # `root` != None → escrita num WORKTREE (tarefa isolada): commita na branch do
+    # worktree e NÃO reindexa o grafo do projeto (o grafo reflete o `src`; o worktree
+    # só entra no grafo ao ser mesclado).
+    root = root or working_copy_path(user_id, project_id)
     if not root.exists():
         return {"error": "projeto ainda não clonado"}
     target = safe_path(root, path)
@@ -1120,7 +1183,7 @@ def write_file(user_id: str, project_id: str, scope: dict | None, path: str,
     target.write_text(content, encoding="utf-8")
     rel = _rel(root, target)
     commit = _git_commit(root, message.strip() or f"AI: {'cria' if is_new else 'atualiza'} {rel}")
-    changes = _reindex_after_write(user_id, project_id)
+    changes = _reindex_after_write(user_id, project_id) if reindex else None
     out = {"ok": True, "path": rel, "created": is_new, "commit": commit}
     if changes:
         out["symbol_changes"] = changes
@@ -1128,11 +1191,12 @@ def write_file(user_id: str, project_id: str, scope: dict | None, path: str,
 
 
 def edit_file(user_id: str, project_id: str, scope: dict | None, path: str,
-              search: str, replace: str, message: str = "") -> dict:
+              search: str, replace: str, message: str = "", root: Path | None = None,
+              reindex: bool = True) -> dict:
     """SEARCH/REPLACE: `search` precisa bater EXATAMENTE (copiado do `read`) e
     ser ÚNICO no arquivo — mesma disciplina do `<artifact-edit>` do chat, evita
-    o modelo trocar o trecho errado por ambiguidade."""
-    root = working_copy_path(user_id, project_id)
+    o modelo trocar o trecho errado por ambiguidade. `root`/`reindex`: ver write_file."""
+    root = root or working_copy_path(user_id, project_id)
     if not root.exists():
         return {"error": "projeto ainda não clonado"}
     target = safe_path(root, path)
@@ -1151,7 +1215,7 @@ def edit_file(user_id: str, project_id: str, scope: dict | None, path: str,
     target.write_text(text.replace(search, replace, 1), encoding="utf-8")
     rel = _rel(root, target)
     commit = _git_commit(root, message.strip() or f"AI: edita {rel}")
-    changes = _reindex_after_write(user_id, project_id)
+    changes = _reindex_after_write(user_id, project_id) if reindex else None
     out = {"ok": True, "path": rel, "commit": commit}
     if changes:
         out["symbol_changes"] = changes
@@ -1225,8 +1289,9 @@ def move_file(user_id: str, project_id: str, scope: dict | None, path: str,
     return out
 
 
-def delete_file(user_id: str, project_id: str, scope: dict | None, path: str, message: str = "") -> dict:
-    root = working_copy_path(user_id, project_id)
+def delete_file(user_id: str, project_id: str, scope: dict | None, path: str, message: str = "",
+                root: Path | None = None, reindex: bool = True) -> dict:
+    root = root or working_copy_path(user_id, project_id)
     if not root.exists():
         return {"error": "projeto ainda não clonado"}
     target = safe_path(root, path)
@@ -1240,7 +1305,7 @@ def delete_file(user_id: str, project_id: str, scope: dict | None, path: str, me
     else:
         target.unlink()
     commit = _git_commit(root, message.strip() or f"AI: remove {rel}")
-    changes = _reindex_after_write(user_id, project_id)
+    changes = _reindex_after_write(user_id, project_id) if reindex else None
     out = {"ok": True, "path": rel, "commit": commit}
     if changes:
         out["symbol_changes"] = changes

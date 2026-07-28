@@ -743,7 +743,7 @@ export interface CodespaceStats {
 export interface CodespaceProject {
   id: string;
   name: string;
-  source: "git" | "git-ssh" | "local";
+  source: "git" | "git-ssh" | "local" | "folder";
   repo_url: string;
   branch: string;
   github_account_id: string | null;
@@ -756,6 +756,26 @@ export interface CodespaceProject {
   error_message: string | null;
   stats: CodespaceStats | null;
   last_indexed_at: string | null;
+  /** sandbox de execução (tool code.exec.run) */
+  setup_command?: string;
+  test_command?: string;
+  exec_enabled?: boolean;
+  /** source="folder": diretório existente no host */
+  local_path?: string | null;
+}
+
+/** Tarefa isolada (worktree) — trabalho de um agente numa branch própria, a revisar */
+export interface CodespaceTask {
+  id: string;
+  title: string;
+  agent: string;
+  branch: string;
+  base_branch: string;
+  status: "running" | "awaiting_review" | "merged" | "discarded" | "error";
+  diff_stat: { files?: number; insertions?: number; deletions?: number };
+  test_status: "pass" | "fail" | null;
+  error: string | null;
+  created_at: string | null;
 }
 
 export interface CodespaceChatLite {

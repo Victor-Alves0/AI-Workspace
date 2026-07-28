@@ -120,9 +120,18 @@ async def lifespan(app: FastAPI):
         _asyncio.create_task(_prewarm_memory())
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível agendar o pré-aquecimento da memória (%s)", exc)
+    # reaper dos worktrees isolados ociosos do Codespace (ciclo de vida das tarefas)
+    _wt_reaper_task = None
+    try:
+        import asyncio as _asyncio
+        _wt_reaper_task = _asyncio.create_task(_worktree_reaper())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Não foi possível agendar o reaper de worktrees (%s)", exc)
     try:
         yield
     finally:
+        if _wt_reaper_task is not None:
+            _wt_reaper_task.cancel()
         await automation_scheduler.stop()
         try:
             from .integrations import telegram_poller
@@ -149,6 +158,25 @@ async def lifespan(app: FastAPI):
             await tracing.sink.stop()
         except Exception:  # noqa: BLE001
             pass
+
+
+async def _worktree_reaper() -> None:
+    """Descarta periodicamente os worktrees isolados ociosos além do TTL (limpeza do
+    disco + ciclo de vida das tarefas do Codespace). Best-effort; nunca derruba o app."""
+    import asyncio
+
+    from .codespace import worktree_service
+
+    while True:
+        try:
+            await asyncio.sleep(3600)
+            n = await worktree_service.reap_stale()
+            if n:
+                logger.info("codespace: %d worktree(s) ociosos descartados pelo reaper", n)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            logger.warning("reaper de worktrees do Codespace falhou", exc_info=True)
 
 
 async def _prewarm_memory() -> None:

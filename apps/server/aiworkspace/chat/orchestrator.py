@@ -758,6 +758,10 @@ class TurnSession:
     # Codespace: projeto vinculado a este chat (habilita code.graph.query/
     # code.files.browse mirando ele). None = sem projeto — as tools avisam.
     codespace_project_id: str | None = None
+    # Codespace: tarefa/worktree ATIVO (id da CodespaceTask) — quando setado, as
+    # escritas e o exec operam no worktree isolado, não no `src`. Usado pela
+    # orquestração (operário com worktree próprio). None = trabalha no `src`.
+    codespace_worktree: str | None = None
 
 
 @dataclass
@@ -1732,6 +1736,7 @@ async def run_turn(
     toolctx.user_profile.set(session.user_profile or {})
     # projeto do Codespace vinculado a este chat, visível às tools code.graph/code.files
     toolctx.current_codespace_project_id.set(session.codespace_project_id)
+    toolctx.current_codespace_worktree.set(session.codespace_worktree)
 
     # 1. contexto do turno: memória (mem0) + Base de Conhecimento (auto) + "#"refs
     g = _GatheredContext()
