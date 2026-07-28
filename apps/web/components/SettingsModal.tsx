@@ -984,6 +984,17 @@ function DesktopTab() {
           />
         </Row>
       )}
+      <Row
+        label="Atalho global do modo voz"
+        info="Combinação de teclas que ativa o modo voz de qualquer lugar do PC, mesmo com o app em segundo plano. Formato do Tauri (ex.: CommandOrControl+Shift+Space). Vazio = desligado."
+      >
+        <input
+          defaultValue={s.voice_hotkey ?? ""}
+          onBlur={(e) => { const v = e.target.value.trim(); if (!busy && v !== (s.voice_hotkey ?? "")) patch({ voiceHotkey: v }); }}
+          placeholder="CommandOrControl+Shift+Space"
+          className="w-56 rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-xs text-ink outline-none focus:border-accent"
+        />
+      </Row>
     </div>
   );
 }

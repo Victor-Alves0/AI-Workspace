@@ -2,15 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, Code2, Copy, FlaskConical, GitBranch, Image as ImageIcon, Link2, Menu, MessageSquareDashed, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
+import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, Code2, Copy, Ear, FlaskConical, GitBranch, Image as ImageIcon, Link2, Loader2, Menu, MessageSquareDashed, Mic, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamRoundtable } from "@/lib/sse";
-import { speak, startBrowserDictation, startRecording, transcribe } from "@/lib/voice";
+import { speak, startBrowserDictation, startRecording, stopSpeaking, transcribe } from "@/lib/voice";
+import { captureUtterance } from "@/lib/voiceSession";
+import { startWakeWord, type WakeHandle } from "@/lib/wakeword";
+import { onVoiceActivate } from "@/lib/desktop";
 import { browserNotify, playChime, requestNotifPermission } from "@/lib/notify";
 import { downloadJSON, downloadPDF, downloadTXT } from "@/lib/download";
 import { pickSuggestions, type Suggestion } from "@/lib/suggestions";
-import type { AskSpec, Attachment, Chat, ChatArtifact, CodespaceProject, Folder, KnowledgeRef, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User } from "@/lib/types";
+import type { AskSpec, Attachment, Chat, ChatArtifact, CodespaceProject, Folder, KnowledgeRef, ListenConfig, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User, VoiceSession } from "@/lib/types";
 import ArtifactPanel from "@/components/ArtifactPanel";
 import CodespaceFileBrowser, { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME, extLang, stripLineNumbers } from "@/components/CodespaceFileBrowser";
 import type { CodespaceDragPayload, CodespaceSnippetPayload } from "@/components/CodespaceFileBrowser";
@@ -300,6 +303,14 @@ export default function ChatPage() {
   const [toasts, setToasts] = useState<{ id: number; title: string; body?: string }[]>([]);
   const recorderRef = useRef<{ stop: () => Promise<Blob> } | null>(null);
   const browserDictRef = useRef<{ stop: () => Promise<string> } | null>(null);
+  // Modo voz (assistente hands-free): fase visível no HUD + controle do loop.
+  const [voicePhase, setVoicePhase] = useState<"off" | "listening" | "thinking" | "speaking">("off");
+  const [voiceLevel, setVoiceLevel] = useState(0);
+  const voiceRef = useRef<{ active: boolean; utter: { stop: () => void; cancel: () => void } | null; session: VoiceSession | null }>({ active: false, utter: null, session: null });
+  // Wake word ("hey nome"): escuta sempre-ativa opt-in.
+  const [wakeOn, setWakeOn] = useState(false);
+  const [wakeStatus, setWakeStatus] = useState<"off" | "starting" | "on" | "error">("off");
+  const wakeRef = useRef<{ handle: WakeHandle | null; on: boolean }>({ handle: null, on: false });
   const scrollRef = useRef<HTMLDivElement>(null);
   // botão "ir até o fim": visível só quando o usuário rolou p/ cima
   const [atBottom, setAtBottom] = useState(true);
@@ -477,6 +488,9 @@ export default function ChatPage() {
   // (também usado pelo poll de 15s lá embaixo)
   const pollRef = useRef({ active, sending, streaming, atBottom });
   pollRef.current = { active, sending, streaming, atBottom };
+  // espelho de mensagens/sending p/ o loop do modo voz ler o estado mais recente
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
 
   // auto-scroll "grudento": segue o conteúdo novo SÓ se o usuário já está no fim.
   // Antes rolava SEMPRE — impossível rolar p/ ler painéis expandidos (ferramentas/
@@ -1283,6 +1297,206 @@ export default function ChatPage() {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Modo voz (assistente hands-free): fala → STT → envia no chat → responde falando.
+  // Reusa a captura (VAD), o STT, o send() e o TTS existentes. O `sendRef` evita
+  // closure obsoleto: depois de abrir o chat de voz, o loop usa o `send` do render
+  // mais novo (com o `active` já apontando para o chat certo).
+  // ---------------------------------------------------------------------------
+  const sendRef = useRef(send);
+  sendRef.current = send;
+
+  function stopVoiceMode() {
+    voiceRef.current.active = false;
+    voiceRef.current.utter?.cancel();
+    voiceRef.current.utter = null;
+    stopSpeaking();
+    setVoicePhase("off");
+    setVoiceLevel(0);
+    // retoma a wake word se a escuta continua ligada (o modo voz "pausou" o mic dela)
+    const w = wakeRef.current;
+    if (w.on && w.handle) w.handle.resume().catch(() => {});
+  }
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  // envia `text` no chat ativo e resolve com o texto da resposta quando o stream termina
+  async function voiceSendAndWait(text: string): Promise<string> {
+    const before = messagesRef.current.length;
+    await sendRef.current(text);
+    const t0 = Date.now();
+    // espera o turno começar e depois terminar (sending/streaming voltam a false)
+    await sleep(150);
+    while ((pollRef.current.sending || pollRef.current.streaming) && Date.now() - t0 < 180_000) {
+      if (!voiceRef.current.active) return "";
+      await sleep(200);
+    }
+    const msgs = messagesRef.current;
+    // só as mensagens NOVAS deste turno (índices >= before); `before-1` cairia na
+    // resposta ANTERIOR e, num turno só-tool/artefato (sem texto), a falaria de novo.
+    for (let i = msgs.length - 1; i >= before; i--) {
+      if (msgs[i].role === "assistant" && msgs[i].content) return msgs[i].content;
+    }
+    return "";
+  }
+
+  async function voiceLoop(session: VoiceSession) {
+    const voice = curCustom?.tts_voice ?? undefined;
+    // Conversa contínua (Fase 3): reabre a escuta após cada resposta com uma
+    // JANELA DE GRAÇA — o usuário fala de novo sem repetir a wake word. Se ficar
+    // em silêncio na janela, a conversa ENCERRA sozinha (volta ao standby da wake
+    // word), em vez de repetir para sempre como o hands_free puro.
+    const continuous = !!session.continuous;
+    const loops = continuous || session.hands_free;
+    const followUpMs = Math.max(2, session.follow_up_secs || 8) * 1000;
+    // throttle do nível: ~12fps (senão o VAD re-renderiza a página a 60fps)
+    let lastLvl = 0;
+    const onLevel = (l: number) => {
+      const now = Date.now();
+      if (now - lastLvl > 80) { lastLvl = now; setVoiceLevel(l); }
+    };
+    let firstTurn = true;
+    while (voiceRef.current.active) {
+      setVoicePhase("listening");
+      let blob: Blob | null = null;
+      try {
+        // no follow-up de uma conversa contínua a paciência é a janela de graça;
+        // no 1º turno (após wake/atalho/botão) mantém o timeout padrão de início
+        const startTimeoutMs = continuous && !firstTurn ? followUpMs : undefined;
+        const utter = await captureUtterance({ onLevel, startTimeoutMs });
+        voiceRef.current.utter = utter;
+        blob = await utter.done;
+        voiceRef.current.utter = null;
+      } catch {
+        alert("Não foi possível acessar o microfone.");
+        break;
+      }
+      setVoiceLevel(0);
+      if (!voiceRef.current.active) break;
+      if (!blob) {
+        // silêncio: em conversa contínua a janela de graça expirou → encerra
+        // (não segura o mic à toa); no hands_free puro reabre; senão encerra.
+        if (continuous) break;
+        if (loops) continue; else break;
+      }
+
+      setVoicePhase("thinking");
+      let text = "";
+      try { text = (await transcribe(blob)).trim(); } catch { text = ""; }
+      if (!voiceRef.current.active) break;
+      if (!text) { if (loops) continue; else break; }
+      firstTurn = false;
+
+      const reply = await voiceSendAndWait(text);
+      if (!voiceRef.current.active) break;
+
+      if (session.auto_speak && reply) {
+        setVoicePhase("speaking");
+        try { await speak(reply, voice); } catch { /* fallback interno */ }
+      }
+      if (!voiceRef.current.active || !loops) break;
+    }
+    stopVoiceMode();
+  }
+
+  async function startVoiceMode() {
+    if (voiceRef.current.active) { stopVoiceMode(); return; }
+    const mcId = curCustom?.id ?? active?.model_config_id ?? null;
+    if (!mcId) {
+      alert('O modo voz precisa de um modelo com "Assistente de voz" ligado (Configurações do modelo → Voz).');
+      return;
+    }
+    let session: VoiceSession;
+    try {
+      session = await api.post<VoiceSession>("/voice/session", { model_config_id: mcId });
+    } catch (e) {
+      alert(e instanceof ApiError ? e.message : "Não foi possível iniciar o modo voz.");
+      return;
+    }
+    voiceRef.current = { active: true, utter: null, session };
+    // solta o mic da wake word enquanto o modo voz grava (idempotente: se veio de
+    // onWakeTriggered já está pausada; cobre também o start manual/atalho global).
+    if (wakeRef.current.on && wakeRef.current.handle) {
+      try { await wakeRef.current.handle.pause(); } catch { /* segue: o mic é multi-stream */ }
+    }
+    setVoicePhase("listening");
+    if (pollRef.current.active?.id !== session.chat_id) {
+      try { await selectChat(session.chat_id); } catch { /* segue mesmo assim */ }
+      // espera o `active` refletir o chat de voz antes de enviar (evita mandar no chat errado)
+      const t0 = Date.now();
+      while (voiceRef.current.active && pollRef.current.active?.id !== session.chat_id && Date.now() - t0 < 5000) {
+        await sleep(50);
+      }
+    }
+    if (voiceRef.current.active) voiceLoop(session);
+  }
+
+  function toggleVoiceMode() {
+    if (voiceRef.current.active) stopVoiceMode(); else startVoiceMode();
+  }
+
+  // atalho GLOBAL do desktop (Tauri) → abre o modo voz mesmo com o app em segundo plano
+  const startVoiceModeRef = useRef(startVoiceMode);
+  startVoiceModeRef.current = startVoiceMode;
+  useEffect(() => {
+    let unlisten = () => {};
+    onVoiceActivate(() => startVoiceModeRef.current()).then((fn) => { unlisten = fn; });
+    return () => unlisten();
+  }, []);
+
+  // ---- Wake word ("hey nome"): escuta sempre-ativa opt-in ----
+  async function onWakeTriggered() {
+    if (voiceRef.current.active) return; // já dentro do modo voz
+    const h = wakeRef.current.handle;
+    if (h) { try { await h.pause(); } catch { /* solta o mic p/ o modo voz */ } }
+    void startVoiceModeRef.current();
+  }
+
+  async function startWake() {
+    const lc = (curCustom?.filter_config?.listen ?? {}) as ListenConfig;
+    if (!lc.wake_enabled) { alert("Ative a wake word nas Configurações do modelo → Voz."); return; }
+    setWakeStatus("starting");
+    try {
+      const handle = await startWakeWord({
+        engine: lc.wake_engine === "vosk" ? "vosk" : "porcupine",
+        callName: lc.call_name,
+        accessKey: lc.picovoice_key,
+        porcupineKeyword: lc.porcupine_keyword,
+        voskModelUrl: lc.vosk_model_url,
+        onError: () => setWakeStatus("error"),
+      }, () => { void onWakeTriggered(); });
+      wakeRef.current = { handle, on: true };
+      setWakeOn(true);
+      setWakeStatus("on");
+    } catch (e) {
+      setWakeStatus("error");
+      alert(e instanceof Error ? e.message : "Falha ao iniciar a escuta (verifique a AccessKey / URL do modelo).");
+    }
+  }
+
+  async function stopWake() {
+    const h = wakeRef.current.handle;
+    wakeRef.current = { handle: null, on: false };
+    setWakeOn(false);
+    setWakeStatus("off");
+    if (h) { try { await h.stop(); } catch { /* noop */ } }
+  }
+
+  function toggleWake() { if (wakeRef.current.on) stopWake(); else startWake(); }
+
+  // some a escuta ao desmontar (não deixa o mic ligado)
+  useEffect(() => () => { void wakeRef.current.handle?.stop(); }, []);
+
+  const wakeAvailable = !!(curCustom?.filter_config?.listen as ListenConfig | undefined)?.wake_enabled;
+  const wakeName = ((curCustom?.filter_config?.listen as ListenConfig | undefined)?.call_name || "").trim();
+
+  // Trocar para um modelo SEM wake esconde o chip; sem isto o handle (e o mic)
+  // continuariam vivos sem UI para parar. Desliga a escuta nessa transição.
+  useEffect(() => {
+    if (!wakeAvailable && wakeRef.current.on) void stopWake();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wakeAvailable]);
+
   async function logout() {
     await api.post("/auth/logout");
     router.replace("/login");
@@ -1398,6 +1612,7 @@ export default function ChatPage() {
     settings: () => setShowSettings(true),
     archived: () => setShowArchived(true),
     dictate: () => toggleMic(),
+    voice_mode: () => toggleVoiceMode(),
     compact: () => { if (active) compactContext(); },
     context_graph: () => { if (active) setShowCompactions(true); },
     focus_input: () => (document.querySelector<HTMLTextAreaElement>("[data-prompt-input]"))?.focus(),
@@ -1688,7 +1903,7 @@ export default function ChatPage() {
                   onDragLeave={() => setCsDropOver(false)}
                   onDrop={handleComposerFileDrop}
                 >
-                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} temporary={temporary} />
+                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} temporary={temporary} />
                 </div>
                 {/* menu do "+" abre para baixo aqui (há espaço); na conversa abre para cima */}
                 {temporary && <p className="mt-2 text-xs text-muted">Chat temporário — esta conversa não será salva.</p>}
@@ -1896,7 +2111,7 @@ export default function ChatPage() {
                       {showAsk && askSpec && (
                         <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                       )}
-                      <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
+                      <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
                     </div>
                   </div>
                 </div>
@@ -2055,6 +2270,44 @@ export default function ChatPage() {
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Wake word — botão/indicador de escuta (só quando o modelo tem wake ligado) */}
+      {wakeAvailable && voicePhase === "off" && (
+        <button
+          onClick={toggleWake}
+          title={wakeOn ? "Escuta ativa — clique para parar" : "Ativar escuta (wake word)"}
+          className={`fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] left-4 z-[105] flex items-center gap-2 rounded-full border py-2 pl-2.5 pr-3 text-xs font-medium shadow-menu backdrop-blur transition-colors ${
+            wakeOn ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border bg-surface/95 text-muted hover:text-ink"
+          }`}
+        >
+          <Ear size={15} className={wakeOn ? "animate-pulse" : ""} />
+          {wakeStatus === "starting" ? "iniciando…" : wakeOn ? (wakeName ? `escutando "${wakeName}"` : "escutando") : "escuta"}
+        </button>
+      )}
+
+      {/* Modo voz (assistente) — HUD flutuante */}
+      {voicePhase !== "off" && (
+        <div className="fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] left-1/2 z-[110] -translate-x-1/2">
+          <div className="animate-fade-up flex items-center gap-3 rounded-full border border-border bg-surface/95 py-2 pl-3 pr-2 shadow-menu backdrop-blur">
+            <span
+              className={`relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white transition-colors ${voicePhase === "listening" ? "bg-accent" : voicePhase === "speaking" ? "bg-green-500" : "bg-surface2 text-muted"}`}
+              style={voicePhase === "listening" ? { transform: `scale(${1 + Math.min(voiceLevel, 1) * 0.3})` } : undefined}
+            >
+              {voicePhase === "listening" ? <Mic size={16} /> : voicePhase === "speaking" ? <Volume2 size={16} /> : <Loader2 size={16} className="animate-spin" />}
+            </span>
+            <span className="min-w-[7.5rem] text-sm text-ink">
+              {voicePhase === "listening" ? "Ouvindo…" : voicePhase === "thinking" ? "Processando…" : "Falando…"}
+            </span>
+            <button
+              onClick={stopVoiceMode}
+              title="Encerrar modo voz"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-hover text-muted transition-colors hover:bg-red-500/15 hover:text-red-400"
+            >
+              <Square size={15} />
+            </button>
+          </div>
         </div>
       )}
     </div>

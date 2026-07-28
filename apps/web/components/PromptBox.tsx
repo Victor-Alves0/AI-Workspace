@@ -251,6 +251,7 @@ export default function PromptBox({
   sending,
   recording,
   onToggleMic,
+  onVoiceMode,
   modelTools = [],
   prompts = [],
   skills = [],
@@ -288,6 +289,8 @@ export default function PromptBox({
   sending: boolean;
   recording: boolean;
   onToggleMic: () => void;
+  /** entra no modo voz (assistente hands-free) — ausente esconde o botão */
+  onVoiceMode?: () => void;
   /** ferramentas que o modelo ativo pode usar (nome + descrição) */
   modelTools?: { name: string; description?: string; category?: "native" | "codespace" | "integration"; integration?: string }[];
   prompts?: Prompt[];
@@ -967,6 +970,15 @@ export default function PromptBox({
             >
               <Mic size={18} />
             </button>
+            {onVoiceMode && (
+              <button
+                onClick={onVoiceMode}
+                title="Modo voz (assistente)"
+                className="rounded-full p-2 text-ink-soft transition-colors hover:bg-hover hover:text-ink"
+              >
+                <AudioLines size={18} />
+              </button>
+            )}
             {sending && onStop ? (
               <button
                 onClick={onStop}

@@ -9,18 +9,21 @@ provedor global (Kokoro não faz STT).
 
 from __future__ import annotations
 
+import uuid
+
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth.deps import require_approved
 from .config import get_settings
 from .db import get_db
 from .integrations import elevenlabs_service, voice_service
-from .models import User
+from .models import Chat, Folder, ModelConfig, User
 from .secrets_service import VOICE_KEY, get_secret
 
 router = APIRouter(prefix="/voice", tags=["voice"])
@@ -218,3 +221,83 @@ async def voice_test(
 ):
     base = body.base_url or (await voice_service.public_config(db, user.id))["base_url"]
     return await voice_service.test_connection(base, body.api_key or "local")
+
+
+# --------------------------------------------------------------------------- #
+# Modo voz (assistente): resolve o chat que o modo voz usa para um modelo.
+# `filter_config.listen`: {enabled, call_name, chat_mode: fixed|new, folder,
+# auto_speak, hands_free, continuous, follow_up_secs}. "fixed" reusa um chat contínuo numa pasta
+# `<folder>/<modelo>` (mesmo padrão dos canais); "new" abre um chat limpo.
+# --------------------------------------------------------------------------- #
+_VOICE_CHAT_TITLE = "Modo voz"
+
+
+class VoiceSessionIn(BaseModel):
+    model_config_id: str = Field(max_length=64)
+
+
+async def _find_or_create_folder(db: AsyncSession, user_id, name: str, parent_id):
+    f = await db.scalar(
+        select(Folder).where(
+            Folder.user_id == user_id, Folder.name == name, Folder.parent_id == parent_id
+        )
+    )
+    if f is None:
+        f = Folder(user_id=user_id, name=name, parent_id=parent_id)
+        db.add(f)
+        await db.flush()
+    return f
+
+
+@router.post("/session")
+async def voice_session(
+    body: VoiceSessionIn,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        mcid = uuid.UUID(body.model_config_id)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "model_config_id inválido")
+    mc = await db.get(ModelConfig, mcid)
+    if mc is None or mc.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Modelo não encontrado")
+    listen = (mc.filter_config or {}).get("listen") or {}
+    if not listen.get("enabled"):
+        raise HTTPException(status.HTTP_409_CONFLICT, "O assistente de voz não está ligado neste modelo")
+
+    mode = "new" if listen.get("chat_mode") == "new" else "fixed"
+    chat = None
+    if mode == "fixed":
+        root_name = (str(listen.get("folder") or "Assistente").strip() or "Assistente")[:120]
+        root = await _find_or_create_folder(db, user.id, root_name, None)
+        sub = await _find_or_create_folder(db, user.id, (getattr(mc, "name", None) or "Modelo")[:120], root.id)
+        chat = await db.scalar(
+            select(Chat).where(
+                Chat.user_id == user.id, Chat.model_config_id == mc.id,
+                Chat.folder_id == sub.id, Chat.archived.is_(False),
+            ).order_by(Chat.updated_at.desc()).limit(1)
+        )
+        if chat is None:
+            chat = Chat(user_id=user.id, title=_VOICE_CHAT_TITLE, model=mc.base_model,
+                        model_config_id=mc.id, params=mc.params or {}, folder_id=sub.id)
+            db.add(chat)
+            await db.flush()
+    else:
+        chat = Chat(user_id=user.id, title=_VOICE_CHAT_TITLE, model=mc.base_model,
+                    model_config_id=mc.id, params=mc.params or {})
+        db.add(chat)
+        await db.flush()
+
+    await db.commit()
+    return {
+        "chat_id": str(chat.id),
+        "model": mc.base_model,
+        "model_config_id": str(mc.id),
+        "auto_speak": bool(listen.get("auto_speak", True)),
+        "hands_free": bool(listen.get("hands_free", False)),
+        "continuous": bool(listen.get("continuous", False)),
+        # janela de graça (s) da conversa contínua; clamp defensivo 2..30
+        "follow_up_secs": max(2, min(30, int(listen.get("follow_up_secs") or 8))),
+        "call_name": str(listen.get("call_name") or ""),
+    }

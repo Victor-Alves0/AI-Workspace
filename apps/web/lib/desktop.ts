@@ -9,6 +9,8 @@ export interface DesktopSettings {
   minimize_to_tray: boolean;
   autostart: boolean;
   start_minimized: boolean;
+  /** atalho GLOBAL do modo voz (formato do Tauri, ex.: "CommandOrControl+Shift+Space") */
+  voice_hotkey: string;
 }
 
 /** Campos aceitos num patch. Em camelCase porque é assim que o Tauri v2 mapeia os
@@ -17,10 +19,12 @@ export interface DesktopPatch {
   minimizeToTray?: boolean;
   autostart?: boolean;
   startMinimized?: boolean;
+  voiceHotkey?: string;
 }
 
 interface TauriBridge {
   core?: { invoke?: (cmd: string, args?: unknown) => Promise<unknown> };
+  event?: { listen?: (event: string, handler: (e: unknown) => void) => Promise<() => void> };
 }
 
 function bridge(): TauriBridge | null {
@@ -49,3 +53,15 @@ export const getDesktopSettings = () => invoke<DesktopSettings>("desktop_get_set
 
 export const setDesktopSettings = (patch: DesktopPatch) =>
   invoke<DesktopSettings>("desktop_set_settings", patch as Record<string, unknown>);
+
+/** Assina o evento "voice-activate" que o atalho GLOBAL do desktop dispara.
+ *  Retorna uma função para cancelar a assinatura (no-op fora do desktop). */
+export async function onVoiceActivate(cb: () => void): Promise<() => void> {
+  const listen = bridge()?.event?.listen;
+  if (!listen) return () => {};
+  try {
+    return await listen("voice-activate", () => cb());
+  } catch {
+    return () => {};
+  }
+}

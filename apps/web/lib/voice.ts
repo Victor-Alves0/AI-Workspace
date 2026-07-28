@@ -16,7 +16,7 @@ export async function transcribe(blob: Blob): Promise<string> {
 // Voz do NAVEGADOR (speechSynthesis): grátis, offline, sempre presente. É o
 // fallback de "Ler em voz alta" quando não há servidor de voz (sem chave e sem
 // conexão local) — antes o botão falhava em silêncio.
-function browserSpeak(text: string): void {
+function browserSpeak(text: string): Promise<void> {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) {
     throw new Error("Nenhum provedor de voz disponível");
   }
@@ -25,11 +25,31 @@ function browserSpeak(text: string): void {
   const pt = window.speechSynthesis.getVoices().find((v) => v.lang?.toLowerCase().startsWith("pt"));
   if (pt) u.voice = pt;
   u.lang = pt?.lang ?? "pt-BR";
-  window.speechSynthesis.speak(u);
+  return new Promise<void>((resolve) => {
+    u.onend = () => resolve();
+    u.onerror = () => resolve();
+    window.speechSynthesis.speak(u);
+  });
+}
+
+// Áudio em reprodução no momento (para o barge-in do modo voz poder cortá-lo).
+let _currentAudio: HTMLAudioElement | null = null;
+
+// Interrompe qualquer fala em curso (servidor ou navegador). Usado quando o usuário
+// volta a falar (barge-in) ou encerra o modo voz.
+export function stopSpeaking(): void {
+  if (typeof window !== "undefined" && "speechSynthesis" in window) {
+    try { window.speechSynthesis.cancel(); } catch { /* noop */ }
+  }
+  if (_currentAudio) {
+    try { _currentAudio.pause(); } catch { /* noop */ }
+    _currentAudio = null;
+  }
 }
 
 // Converte texto em fala (TTS) e toca o áudio. Servidor primeiro (voz local/
-// OpenAI); qualquer falha cai na voz do navegador.
+// OpenAI); qualquer falha cai na voz do navegador. Resolve quando a fala TERMINA
+// (não só quando começa) — o modo voz espera isso antes de voltar a ouvir.
 export async function speak(text: string, voice?: string): Promise<void> {
   try {
     const res = await fetch(`${API_URL}/voice/tts`, {
@@ -42,10 +62,15 @@ export async function speak(text: string, voice?: string): Promise<void> {
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
-    audio.onended = () => URL.revokeObjectURL(url);
-    await audio.play();
+    _currentAudio = audio;
+    await new Promise<void>((resolve) => {
+      audio.onended = () => { URL.revokeObjectURL(url); if (_currentAudio === audio) _currentAudio = null; resolve(); };
+      audio.onerror = () => { URL.revokeObjectURL(url); if (_currentAudio === audio) _currentAudio = null; resolve(); };
+      audio.onpause = () => { URL.revokeObjectURL(url); resolve(); };  // barge-in
+      audio.play().catch(() => resolve());
+    });
   } catch {
-    browserSpeak(text);
+    await browserSpeak(text);
   }
 }
 

@@ -465,6 +465,38 @@ export interface ModelConfig {
   updated_at: string;
 }
 
+// Assistente de voz por-modelo (filter_config.listen)
+export interface ListenConfig {
+  enabled?: boolean;
+  call_name?: string;
+  chat_mode?: "fixed" | "new";
+  folder?: string;
+  auto_speak?: boolean;
+  hands_free?: boolean;
+  // conversa contínua: após a resposta reabre a escuta por uma janela de graça;
+  // silêncio na janela encerra a conversa (volta ao standby da wake word)
+  continuous?: boolean;
+  follow_up_secs?: number;
+  // wake word ("hey nome")
+  wake_enabled?: boolean;
+  wake_engine?: "porcupine" | "vosk";
+  porcupine_keyword?: string;
+  picovoice_key?: string;
+  vosk_model_url?: string;
+}
+
+// resposta de POST /voice/session (chat que o modo voz usa)
+export interface VoiceSession {
+  chat_id: string;
+  model: string;
+  model_config_id: string;
+  auto_speak: boolean;
+  hands_free: boolean;
+  continuous: boolean;
+  follow_up_secs: number;
+  call_name: string;
+}
+
 // ferramenta de sistema (embutida) exposta em /tools/system
 export interface SystemTool {
   path: string;

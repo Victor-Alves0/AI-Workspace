@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_autostart::ManagerExt;
 
@@ -41,6 +41,10 @@ struct DesktopSettings {
     autostart: bool,
     /// Ao iniciar com o Windows, abre ja escondido na bandeja.
     start_minimized: bool,
+    /// Atalho GLOBAL (funciona com o app em segundo plano) que ativa o "modo voz".
+    /// Formato do tauri-plugin-global-shortcut (ex.: "CommandOrControl+Shift+Space").
+    /// Vazio = desligado.
+    voice_hotkey: String,
 }
 
 impl Default for DesktopSettings {
@@ -49,6 +53,7 @@ impl Default for DesktopSettings {
             minimize_to_tray: true,
             autostart: false,
             start_minimized: true,
+            voice_hotkey: "CommandOrControl+Shift+Space".to_string(),
         }
     }
 }
@@ -92,6 +97,21 @@ fn show_main_window(app: &AppHandle) {
         let _ = win.show();
         let _ = win.unminimize();
         let _ = win.set_focus();
+    }
+}
+
+/// (Re)registra o atalho GLOBAL do modo voz. Best-effort: um combo invalido ou ja
+/// ocupado por outro app e' ignorado (a UI segue funcionando com o botao/atalho interno).
+fn apply_voice_hotkey(app: &AppHandle, hotkey: &str) {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    let gs = app.global_shortcut();
+    let _ = gs.unregister_all();
+    let hk = hotkey.trim();
+    if hk.is_empty() {
+        return;
+    }
+    if let Ok(sc) = hk.parse::<tauri_plugin_global_shortcut::Shortcut>() {
+        let _ = gs.register(sc);
     }
 }
 
@@ -213,6 +233,7 @@ fn desktop_set_settings(
     minimize_to_tray: Option<bool>,
     autostart: Option<bool>,
     start_minimized: Option<bool>,
+    voice_hotkey: Option<String>,
 ) -> Result<DesktopSettings, String> {
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
     if let Some(v) = minimize_to_tray {
@@ -224,6 +245,10 @@ fn desktop_set_settings(
     if let Some(v) = autostart {
         guard.autostart = v;
         apply_autostart(&app, v);
+    }
+    if let Some(v) = voice_hotkey {
+        guard.voice_hotkey = v.clone();
+        apply_voice_hotkey(&app, &v);
     }
     let out = guard.clone();
     drop(guard);
@@ -242,6 +267,18 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             show_main_window(app);
         }))
+        // Atalho GLOBAL do modo voz: no gatilho, traz a janela e avisa a UI web
+        // (evento "voice-activate") — a UI abre o modo voz (ver lib/desktop.ts).
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        show_main_window(app);
+                        let _ = app.emit("voice-activate", ());
+                    }
+                })
+                .build(),
+        )
         .manage(EngineState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             desktop_get_settings,
@@ -251,6 +288,7 @@ fn main() {
             let handle = app.handle().clone();
             let settings = load_settings(&handle);
             apply_autostart(&handle, settings.autostart);
+            apply_voice_hotkey(&handle, &settings.voice_hotkey);
 
             // sobe o motor embarcado e guarda o PID para encerrar ao sair
             if let Some(pid) = spawn_engine(&handle) {
@@ -271,7 +309,7 @@ fn main() {
                 .center()
                 .visible(!start_hidden)
                 .initialization_script(
-                    "window.__AIW_DESKTOP__ = { platform: 'windows', version: '0.2.2' };",
+                    "window.__AIW_DESKTOP__ = { platform: 'windows', version: '0.3.0' };",
                 )
                 .build()?;
 
