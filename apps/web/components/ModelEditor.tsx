@@ -442,6 +442,13 @@ function CfgModal({ title, onClose, children }: { title: string; onClose: () => 
   );
 }
 
+// palavras embutidas do Porcupine (valores do enum BuiltInKeyword)
+const PORCUPINE_WORDS = [
+  "Alexa", "Americano", "Blueberry", "Bumblebee", "Computer", "Grapefruit",
+  "Grasshopper", "Hey Google", "Hey Siri", "Jarvis", "Ok Google", "Picovoice",
+  "Porcupine", "Terminator",
+];
+
 export default function ModelEditor({
   model,
   onClose,
@@ -546,6 +553,11 @@ export default function ModelEditor({
   const listenCfg: Record<string, any> = filterConfig.listen ?? {};
   const setListenCfg = (patch: Record<string, any>) =>
     setFilterConfig((fc) => ({ ...fc, listen: { ...(fc.listen ?? {}), ...patch } }));
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  // engrenagem → abre Configurações → Conexões → Assistente de voz (onde vivem as
+  // chaves/URL, que são do usuário). Evento global: chat/page ouve; /workspace redireciona.
+  const openWakeSettings = () =>
+    window.dispatchEvent(new CustomEvent("aiw:open-settings", { detail: { view: "assistant-voice" } }));
   const team: string[] = Array.isArray(subCfg.team) ? subCfg.team : [];
   const teamCandidates = useMemo(() => myModels.filter((m) => m.id !== model?.id), [myModels, model]);
   const [teamModal, setTeamModal] = useState(false);
@@ -780,12 +792,10 @@ export default function ModelEditor({
         hands_free: !!lc.hands_free,
         continuous: !!lc.continuous,
         follow_up_secs: Math.max(2, Math.min(30, Number(lc.follow_up_secs) || 8)),
-        // wake word
+        // wake word — só as escolhas do modelo; chaves/URL vivem em profile.wake
         wake_enabled: !!lc.wake_enabled,
         wake_engine: lc.wake_engine === "vosk" ? "vosk" : "porcupine",
-        porcupine_keyword: String(lc.porcupine_keyword ?? "").slice(0, 300),
-        picovoice_key: String(lc.picovoice_key ?? "").slice(0, 200),
-        vosk_model_url: String(lc.vosk_model_url ?? "").slice(0, 500),
+        porcupine_keyword: String(lc.porcupine_keyword ?? "Jarvis").slice(0, 120),
       };
     }
 
@@ -962,149 +972,155 @@ export default function ModelEditor({
           >
             <VoicePicker voices={voices} provider={voiceInfo} value={ttsVoice} onChange={setTtsVoice} />
 
-            {/* Assistente de voz (modo voz hands-free) */}
-            <div className="mt-4 space-y-3 border-t border-border pt-4">
-              <div className="flex items-center justify-between gap-3">
+            {/* Assistente de voz (modo voz) — recolhível para não pesar a tela */}
+            <div className="mt-4 border-t border-border pt-4">
+              <button
+                type="button"
+                onClick={() => setVoiceOpen((o) => !o)}
+                className="flex w-full items-center justify-between gap-3 text-left"
+              >
                 <div>
                   <p className="text-sm text-ink">Assistente de voz</p>
-                  <p className="text-[11px] text-muted">Ativa o "Modo voz" (🎙️ no chat ou {"Ctrl/⌘+Shift+V"}): você fala, a IA responde falando.</p>
+                  <p className="text-[11px] text-muted">
+                    Modo voz (🎙️/{"Ctrl/⌘+Shift+V"}) + wake word.{" "}
+                    <span className={listenCfg.enabled ? "text-accent" : ""}>{listenCfg.enabled ? "Ligado" : "Desligado"}</span>
+                  </p>
                 </div>
-                <Toggle on={!!listenCfg.enabled} onChange={(v) => setListenCfg({ enabled: v })} />
-              </div>
-              {listenCfg.enabled && (
-                <div className="space-y-3 rounded-xl border border-border bg-surface2/40 p-3">
-                  <label className="block">
-                    <span className="mb-1 block text-xs font-medium text-muted">Chamado / nome (opcional)</span>
-                    <input
-                      value={listenCfg.call_name ?? ""}
-                      onChange={(e) => setListenCfg({ call_name: e.target.value })}
-                      placeholder="ex.: Max"
-                      className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent"
-                    />
-                    <span className="mt-1 block text-[11px] text-muted">Por ora é só um rótulo; vira palavra de ativação ("hey Max") numa próxima etapa.</span>
-                  </label>
-                  <div>
-                    <span className="mb-1 block text-xs font-medium text-muted">Chat do modo voz</span>
-                    <div className="flex rounded-lg border border-border bg-surface2 p-0.5">
-                      {([["fixed", "Chat fixo (pasta)"], ["new", "Novo chat"]] as [string, string][]).map(([val, lbl]) => (
-                        <button
-                          key={val}
-                          onClick={() => setListenCfg({ chat_mode: val })}
-                          className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-colors ${(listenCfg.chat_mode ?? "fixed") === val ? "bg-accent text-white" : "text-ink-soft hover:bg-hover"}`}
-                        >
-                          {lbl}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  {(listenCfg.chat_mode ?? "fixed") === "fixed" && (
-                    <label className="block">
-                      <span className="mb-1 block text-xs font-medium text-muted">Pasta</span>
-                      <input
-                        value={listenCfg.folder ?? ""}
-                        onChange={(e) => setListenCfg({ folder: e.target.value })}
-                        placeholder="Assistente"
-                        className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent"
-                      />
-                      <span className="mt-1 block text-[11px] text-muted">O chat contínuo vai para <span className="font-mono text-ink-soft">{(listenCfg.folder || "Assistente")}/{name || "modelo"}</span>.</span>
-                    </label>
-                  )}
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-sm text-ink">Falar a resposta (TTS)</p>
-                    <Toggle on={listenCfg.auto_speak !== false} onChange={(v) => setListenCfg({ auto_speak: v })} />
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm text-ink">Modo conversa (hands-free)</p>
-                      <p className="text-[11px] text-muted">Depois de responder, volta a ouvir sozinho até você encerrar.</p>
-                    </div>
-                    <Toggle on={!!listenCfg.hands_free} onChange={(v) => setListenCfg({ hands_free: v })} />
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm text-ink">Conversa contínua</p>
-                      <p className="text-[11px] text-muted">Após responder, reabre a escuta por uns segundos para você continuar sem repetir a palavra; se ficar em silêncio, encerra sozinho.</p>
-                    </div>
-                    <Toggle on={!!listenCfg.continuous} onChange={(v) => setListenCfg({ continuous: v })} />
-                  </div>
-                  {listenCfg.continuous && (
-                    <label className="block">
-                      <span className="mb-1 block text-xs font-medium text-muted">Janela de resposta (segundos)</span>
-                      <input
-                        type="number"
-                        min={2}
-                        max={30}
-                        value={listenCfg.follow_up_secs ?? 8}
-                        onChange={(e) => setListenCfg({ follow_up_secs: Math.max(2, Math.min(30, Number(e.target.value) || 8)) })}
-                        className="w-24 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent"
-                      />
-                      <span className="mt-1 block text-[11px] text-muted">Silêncio por esse tempo encerra a conversa.</span>
-                    </label>
-                  )}
+                <ChevronDown size={16} className={`shrink-0 text-muted transition-transform ${voiceOpen ? "rotate-180" : ""}`} />
+              </button>
 
-                  {/* Wake word ("hey nome") — escuta sempre-ativa on-device */}
-                  <div className="space-y-3 border-t border-border pt-3">
-                    <div className="flex items-center justify-between gap-3">
+              {voiceOpen && (
+                <div className="mt-3 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-sm text-ink">Ativar assistente de voz</p>
+                    <Toggle on={!!listenCfg.enabled} onChange={(v) => setListenCfg({ enabled: v })} />
+                  </div>
+                  {listenCfg.enabled && (
+                    <div className="space-y-3 rounded-xl border border-border bg-surface2/40 p-3">
+                      <label className="block">
+                        <span className="mb-1 block text-xs font-medium text-muted">Palavra de ativação</span>
+                        <input
+                          value={listenCfg.call_name ?? ""}
+                          onChange={(e) => setListenCfg({ call_name: e.target.value })}
+                          placeholder="ex.: Max"
+                          className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent"
+                        />
+                        <span className="mt-1 block text-[11px] text-muted">O que você diz para chamar. Com <strong>Vosk</strong> já ativa direto; com <strong>Porcupine</strong>, escolha a palavra na seção Wake word.</span>
+                      </label>
                       <div>
-                        <p className="text-sm text-ink">Wake word (&quot;hey nome&quot;)</p>
-                        <p className="text-[11px] text-muted">Escuta sempre-ativa (on-device) que abre o modo voz ao ouvir a palavra. Opt-in; o mic fica ligado enquanto ativado no chat.</p>
-                      </div>
-                      <Toggle on={!!listenCfg.wake_enabled} onChange={(v) => setListenCfg({ wake_enabled: v })} />
-                    </div>
-                    {listenCfg.wake_enabled && (
-                      <div className="space-y-3 rounded-lg border border-border bg-bg/40 p-3">
-                        <div>
-                          <span className="mb-1 block text-xs font-medium text-muted">Engine</span>
-                          <div className="flex rounded-lg border border-border bg-surface2 p-0.5">
-                            {([["porcupine", "Porcupine"], ["vosk", "Vosk (open-source)"]] as [string, string][]).map(([val, lbl]) => (
-                              <button
-                                key={val}
-                                onClick={() => setListenCfg({ wake_engine: val })}
-                                className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-colors ${(listenCfg.wake_engine ?? "porcupine") === val ? "bg-accent text-white" : "text-ink-soft hover:bg-hover"}`}
-                              >
-                                {lbl}
-                              </button>
-                            ))}
-                          </div>
+                        <span className="mb-1 block text-xs font-medium text-muted">Chat do modo voz</span>
+                        <div className="flex rounded-lg border border-border bg-surface2 p-0.5">
+                          {([["fixed", "Chat fixo (pasta)"], ["new", "Novo chat"]] as [string, string][]).map(([val, lbl]) => (
+                            <button
+                              key={val}
+                              onClick={() => setListenCfg({ chat_mode: val })}
+                              className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-colors ${(listenCfg.chat_mode ?? "fixed") === val ? "bg-accent text-white" : "text-ink-soft hover:bg-hover"}`}
+                            >
+                              {lbl}
+                            </button>
+                          ))}
                         </div>
-                        {(listenCfg.wake_engine ?? "porcupine") === "porcupine" ? (
-                          <>
-                            <label className="block">
-                              <span className="mb-1 block text-xs font-medium text-muted">Palavra embutida ou URL de um .ppn custom</span>
-                              <input
-                                value={listenCfg.porcupine_keyword ?? ""}
-                                onChange={(e) => setListenCfg({ porcupine_keyword: e.target.value })}
-                                placeholder="JARVIS / COMPUTER / BUMBLEBEE …"
-                                className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent"
-                              />
-                              <span className="mt-1 block text-[11px] text-muted">Embutidas grátis: JARVIS, COMPUTER, BUMBLEBEE, ALEXA… Para &quot;hey &lt;nome&gt;&quot; gere um .ppn no console da Picovoice e cole a URL.</span>
-                            </label>
-                            <label className="block">
-                              <span className="mb-1 block text-xs font-medium text-muted">Picovoice AccessKey</span>
-                              <input
-                                value={listenCfg.picovoice_key ?? ""}
-                                onChange={(e) => setListenCfg({ picovoice_key: e.target.value })}
-                                type="password"
-                                placeholder="cole sua AccessKey grátis (picovoice.ai)"
-                                className="w-full rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs text-ink outline-none focus:border-accent"
-                              />
-                            </label>
-                          </>
-                        ) : (
-                          <label className="block">
-                            <span className="mb-1 block text-xs font-medium text-muted">URL do modelo Vosk (.tar.gz)</span>
-                            <input
-                              value={listenCfg.vosk_model_url ?? ""}
-                              onChange={(e) => setListenCfg({ vosk_model_url: e.target.value })}
-                              placeholder="https://…/vosk-model-small-….tar.gz"
-                              className="w-full rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs text-ink outline-none focus:border-accent"
-                            />
-                            <span className="mt-1 block text-[11px] text-muted">Modelo pequeno (~40MB) baixado 1x. Reconhece o &quot;chamado/nome&quot; acima. Sem chave.</span>
-                          </label>
+                      </div>
+                      {(listenCfg.chat_mode ?? "fixed") === "fixed" && (
+                        <label className="block">
+                          <span className="mb-1 block text-xs font-medium text-muted">Pasta</span>
+                          <input
+                            value={listenCfg.folder ?? ""}
+                            onChange={(e) => setListenCfg({ folder: e.target.value })}
+                            placeholder="Assistente"
+                            className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent"
+                          />
+                          <span className="mt-1 block text-[11px] text-muted">O chat contínuo vai para <span className="font-mono text-ink-soft">{(listenCfg.folder || "Assistente")}/{name || "modelo"}</span>.</span>
+                        </label>
+                      )}
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm text-ink">Falar a resposta (TTS)</p>
+                        <Toggle on={listenCfg.auto_speak !== false} onChange={(v) => setListenCfg({ auto_speak: v })} />
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm text-ink">Modo conversa (hands-free)</p>
+                          <p className="text-[11px] text-muted">Depois de responder, volta a ouvir sozinho até você encerrar.</p>
+                        </div>
+                        <Toggle on={!!listenCfg.hands_free} onChange={(v) => setListenCfg({ hands_free: v })} />
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm text-ink">Conversa contínua</p>
+                          <p className="text-[11px] text-muted">Após responder, reabre a escuta por uns segundos para você continuar sem repetir a palavra; se ficar em silêncio, encerra sozinho.</p>
+                        </div>
+                        <Toggle on={!!listenCfg.continuous} onChange={(v) => setListenCfg({ continuous: v })} />
+                      </div>
+                      {listenCfg.continuous && (
+                        <label className="block">
+                          <span className="mb-1 block text-xs font-medium text-muted">Janela de resposta (segundos)</span>
+                          <input
+                            type="number"
+                            min={2}
+                            max={30}
+                            value={listenCfg.follow_up_secs ?? 8}
+                            onChange={(e) => setListenCfg({ follow_up_secs: Math.max(2, Math.min(30, Number(e.target.value) || 8)) })}
+                            className="w-24 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent"
+                          />
+                          <span className="mt-1 block text-[11px] text-muted">Silêncio por esse tempo encerra a conversa.</span>
+                        </label>
+                      )}
+
+                      {/* Wake word ("hey nome") — só as escolhas do modelo; chaves ficam em Conexões */}
+                      <div className="space-y-3 border-t border-border pt-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm text-ink">Wake word (&quot;hey nome&quot;)</p>
+                            <p className="text-[11px] text-muted">Escuta sempre-ativa (on-device) que abre o modo voz ao ouvir a palavra. O mic fica ligado enquanto ativado no chat.</p>
+                          </div>
+                          <Toggle on={!!listenCfg.wake_enabled} onChange={(v) => setListenCfg({ wake_enabled: v })} />
+                        </div>
+                        {listenCfg.wake_enabled && (
+                          <div className="space-y-3 rounded-lg border border-border bg-bg/40 p-3">
+                            <div>
+                              <span className="mb-1 block text-xs font-medium text-muted">Provedor</span>
+                              <div className="flex rounded-lg border border-border bg-surface2 p-0.5">
+                                {([["porcupine", "Porcupine"], ["vosk", "Vosk (sem chave)"]] as [string, string][]).map(([val, lbl]) => (
+                                  <button
+                                    key={val}
+                                    onClick={() => setListenCfg({ wake_engine: val })}
+                                    className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-colors ${(listenCfg.wake_engine ?? "porcupine") === val ? "bg-accent text-white" : "text-ink-soft hover:bg-hover"}`}
+                                  >
+                                    {lbl}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                            {(listenCfg.wake_engine ?? "porcupine") === "porcupine" ? (
+                              <label className="block">
+                                <span className="mb-1 block text-xs font-medium text-muted">Palavra</span>
+                                <select
+                                  value={listenCfg.porcupine_keyword ?? "Jarvis"}
+                                  onChange={(e) => setListenCfg({ porcupine_keyword: e.target.value })}
+                                  className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent"
+                                >
+                                  {PORCUPINE_WORDS.map((w) => (
+                                    <option key={w} value={w}>{w}</option>
+                                  ))}
+                                  <option value="__custom__">Personalizada (.ppn nas Conexões)</option>
+                                </select>
+                                <span className="mt-1 block text-[11px] text-muted">Embutidas grátis (precisam da AccessKey). Para &quot;hey &lt;nome&gt;&quot;, use &quot;Personalizada&quot; e cadastre o .ppn nas Conexões.</span>
+                              </label>
+                            ) : (
+                              <p className="text-[11px] text-muted">O Vosk reconhece a <strong>Palavra de ativação</strong> acima. Offline, sem chave — só precisa da URL do modelo nas Conexões (ou o padrão).</p>
+                            )}
+                            <button
+                              type="button"
+                              onClick={openWakeSettings}
+                              className="flex items-center gap-1.5 text-[11px] font-medium text-accent hover:underline"
+                            >
+                              <Settings size={13} /> Chaves e modelos em Conexões → Assistente de voz
+                            </button>
+                          </div>
                         )}
                       </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

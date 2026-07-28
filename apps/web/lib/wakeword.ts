@@ -28,6 +28,9 @@ export interface WakeOptions {
   voskModelUrl?: string;
   onError?: (msg: string) => void;
   onReady?: () => void;
+  /** Vosk: transcript reconhecido ao vivo (parcial/final), casando a palavra ou não.
+   *  Serve para o "Testar escuta" mostrar o que foi entendido. Porcupine não transcreve. */
+  onPartial?: (text: string) => void;
 }
 
 export interface WakeHandle {
@@ -125,8 +128,8 @@ async function startVosk(opts: WakeOptions, onWake: () => void): Promise<WakeHan
     const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     ctx = new AC();
     rec = new (model as unknown as { KaldiRecognizer: new (n: number) => any }).KaldiRecognizer(ctx.sampleRate); // eslint-disable-line @typescript-eslint/no-explicit-any
-    rec.on("result", (m: { result?: { text?: string } }) => match(m?.result?.text || ""));
-    rec.on("partialresult", (m: { result?: { partial?: string } }) => match(m?.result?.partial || ""));
+    rec.on("result", (m: { result?: { text?: string } }) => { const t = m?.result?.text || ""; if (t) opts.onPartial?.(t); match(t); });
+    rec.on("partialresult", (m: { result?: { partial?: string } }) => { const t = m?.result?.partial || ""; if (t) opts.onPartial?.(t); match(t); });
     const source = ctx.createMediaStreamSource(stream);
     node = ctx.createScriptProcessor(4096, 1, 1);
     node.onaudioprocess = (e) => { try { rec.acceptWaveform(e.inputBuffer); } catch { /* frame ruim */ } };

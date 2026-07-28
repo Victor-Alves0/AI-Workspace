@@ -13,7 +13,7 @@ import { onVoiceActivate } from "@/lib/desktop";
 import { browserNotify, playChime, requestNotifPermission } from "@/lib/notify";
 import { downloadJSON, downloadPDF, downloadTXT } from "@/lib/download";
 import { pickSuggestions, type Suggestion } from "@/lib/suggestions";
-import type { AskSpec, Attachment, Chat, ChatArtifact, CodespaceProject, Folder, KnowledgeRef, ListenConfig, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User, VoiceSession } from "@/lib/types";
+import type { AskSpec, Attachment, Chat, ChatArtifact, CodespaceProject, Folder, KnowledgeRef, ListenConfig, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User, VoiceSession, WakeCreds } from "@/lib/types";
 import ArtifactPanel from "@/components/ArtifactPanel";
 import CodespaceFileBrowser, { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME, extLang, stripLineNumbers } from "@/components/CodespaceFileBrowser";
 import type { CodespaceDragPayload, CodespaceSnippetPayload } from "@/components/CodespaceFileBrowser";
@@ -292,7 +292,8 @@ export default function ChatPage() {
   const [isMobile, setIsMobile] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [settingsCat, setSettingsCat] = useState<string | undefined>(undefined);
-  const openSettings = useCallback((cat?: string) => { setSettingsCat(cat); setShowSettings(true); }, []);
+  const [settingsView, setSettingsView] = useState<string | undefined>(undefined);
+  const openSettings = useCallback((cat?: string, view?: string) => { setSettingsCat(cat); setSettingsView(view); setShowSettings(true); }, []);
   const [showArchived, setShowArchived] = useState(false);
   const [showChatMgr, setShowChatMgr] = useState(false);
   const [showCompactions, setShowCompactions] = useState(false);
@@ -1444,6 +1445,18 @@ export default function ChatPage() {
     return () => unlisten();
   }, []);
 
+  // engrenagem "Assistente de voz" no ModelEditor → abre Configurações no card certo.
+  // Evento global (desacopla do WorkspaceView); a flag cobre quando veio da rota /workspace.
+  useEffect(() => {
+    const onOpen = (e: Event) => openSettings("connections", (e as CustomEvent).detail?.view);
+    window.addEventListener("aiw:open-settings", onOpen);
+    try {
+      const flag = sessionStorage.getItem("aiw_open_settings");
+      if (flag) { sessionStorage.removeItem("aiw_open_settings"); openSettings("connections", flag); }
+    } catch { /* sessionStorage indisponível */ }
+    return () => window.removeEventListener("aiw:open-settings", onOpen);
+  }, [openSettings]);
+
   // ---- Wake word ("hey nome"): escuta sempre-ativa opt-in ----
   async function onWakeTriggered() {
     if (voiceRef.current.active) return; // já dentro do modo voz
@@ -1455,14 +1468,27 @@ export default function ChatPage() {
   async function startWake() {
     const lc = (curCustom?.filter_config?.listen ?? {}) as ListenConfig;
     if (!lc.wake_enabled) { alert("Ative a wake word nas Configurações do modelo → Voz."); return; }
+    // credenciais são DO USUÁRIO (profile.wake), não do modelo
+    const wake = ((user?.profile as Record<string, unknown> | undefined)?.wake ?? {}) as WakeCreds;
+    const engine = lc.wake_engine === "vosk" ? "vosk" : "porcupine";
+    // Porcupine "__custom__" usa o .ppn do usuário; senão a palavra embutida
+    const custom = lc.porcupine_keyword === "__custom__";
+    const kw = custom ? (wake.ppn_url || "") : (lc.porcupine_keyword || "Jarvis");
+    // valida cedo com mensagem que aponta o lugar certo
+    if (engine === "porcupine" && !wake.picovoice_key) {
+      alert("Configure a AccessKey da Picovoice em Configurações → Conexões → Assistente de voz."); return;
+    }
+    if (engine === "porcupine" && custom && !wake.ppn_url) {
+      alert("Palavra 'Personalizada' selecionada, mas nenhum .ppn cadastrado em Conexões → Assistente de voz."); return;
+    }
     setWakeStatus("starting");
     try {
       const handle = await startWakeWord({
-        engine: lc.wake_engine === "vosk" ? "vosk" : "porcupine",
+        engine,
         callName: lc.call_name,
-        accessKey: lc.picovoice_key,
-        porcupineKeyword: lc.porcupine_keyword,
-        voskModelUrl: lc.vosk_model_url,
+        accessKey: wake.picovoice_key,
+        porcupineKeyword: kw,
+        voskModelUrl: wake.vosk_model_url,
         onError: () => setWakeStatus("error"),
       }, () => { void onWakeTriggered(); });
       wakeRef.current = { handle, on: true };
@@ -1470,7 +1496,7 @@ export default function ChatPage() {
       setWakeStatus("on");
     } catch (e) {
       setWakeStatus("error");
-      alert(e instanceof Error ? e.message : "Falha ao iniciar a escuta (verifique a AccessKey / URL do modelo).");
+      alert(e instanceof Error ? e.message : "Falha ao iniciar a escuta (verifique as chaves em Conexões → Assistente de voz).");
     }
   }
 
@@ -2214,7 +2240,8 @@ export default function ChatPage() {
       {showSettings && (
         <SettingsModal
           initialCat={settingsCat}
-          onClose={() => { setShowSettings(false); setSettingsCat(undefined); }}
+          initialView={settingsView}
+          onClose={() => { setShowSettings(false); setSettingsCat(undefined); setSettingsView(undefined); }}
           onSaved={() => { api.get<User>("/auth/me").then(setUser).catch(() => {}); }}
           onConnectionsChanged={refreshExtModels}
         />

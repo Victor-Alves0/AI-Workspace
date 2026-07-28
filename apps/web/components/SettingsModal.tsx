@@ -14,6 +14,7 @@ import {
   Activity,
   Database,
   AudioLines,
+  Ear,
   Mic,
   Globe,
   Home,
@@ -67,6 +68,7 @@ import HiggsfieldPanel from "./HiggsfieldPanel";
 import SubscriptionsPanel from "./SubscriptionsPanel";
 import OllamaPanel from "./OllamaPanel";
 import VoicePanel from "./VoicePanel";
+import AssistantVoicePanel from "./AssistantVoicePanel";
 import { WebSearchPanel, BrowserPanel } from "./toolPanels";
 import { useConfirm, usePrompt } from "./ConfirmDialog";
 import {
@@ -147,6 +149,11 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "APIs", cat: "connections", view: "apis" },
   { label: "Voz Local", cat: "connections", view: "voice" },
   { label: "Kokoro", cat: "connections", view: "voice" },
+  { label: "Assistente de voz", cat: "connections", view: "assistant-voice" },
+  { label: "Wake word", cat: "connections", view: "assistant-voice" },
+  { label: "AccessKey Picovoice", cat: "connections", view: "assistant-voice" },
+  { label: "Vosk", cat: "connections", view: "assistant-voice" },
+  { label: "Testar escuta", cat: "connections", view: "assistant-voice" },
   { label: "Chave do OpenRouter", cat: "connections", view: "apis" },
   { label: "Chave Tavily", cat: "connections", view: "apis" },
   { label: "Chave Brave Search", cat: "connections", view: "apis" },
@@ -377,7 +384,7 @@ function SecretField({ label, name, configured, hint, onSaved }: {
 }
 
 /* --------------------------------- modal ---------------------------------- */
-export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, initialCat }: { onClose: () => void; onSaved?: () => void; onConnectionsChanged?: () => void; initialCat?: string }) {
+export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, initialCat, initialView }: { onClose: () => void; onSaved?: () => void; onConnectionsChanged?: () => void; initialCat?: string; initialView?: string }) {
   const router = useRouter();
   const [visible, setVisible] = useState(false);
   const [cat, setCat] = useState<Cat>((initialCat as Cat) || "general");
@@ -385,8 +392,11 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<Record<string, any>>({});
   const [status, setStatus] = useState<SecretStatus | null>(null);
-  // card aberto dentro de Conexões / Integrações (null = mostra a grade)
-  const [connView, setConnView] = useState<string | null>(null);
+  // card aberto dentro de Conexões / Integrações (null = mostra a grade).
+  // `initialView` (deep-link, ex.: da engrenagem do ModelEditor) abre já no card.
+  const [connView, setConnView] = useState<string | null>(
+    initialCat === "connections" ? initialView ?? null : null,
+  );
   const [integView, setIntegView] = useState<string | null>(null);
   // mobile: abre direto no conteúdo quando veio de um deep-link (paleta de comandos)
   const [mobilePane, setMobilePane] = useState<"nav" | "content">(initialCat ? "content" : "nav");
@@ -553,6 +563,10 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                 <OllamaPanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
               ) : connView === "voice" ? (
                 <VoicePanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
+              ) : connView === "assistant-voice" ? (
+                <DetailView title="Assistente de voz" onBack={() => setConnView(null)}>
+                  <AssistantVoicePanel value={profile.wake ?? {}} onChange={(v) => set("wake", v)} />
+                </DetailView>
               ) : connView === "elevenlabs" ? (
                 <ElevenLabsPanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
               ) : connView === "subscriptions" ? (
@@ -577,6 +591,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       { key: "web", icon: <Globe size={22} />, name: "Web", desc: "Acesso a internet" },
                       { key: "ollama", icon: <SiOllama size={22} />, name: "Ollama", desc: "Utilize modelos locais" },
                       { key: "voice", icon: <AudioLines size={22} />, name: "Voz Local", desc: "Kokoro / clonagem de voz" },
+                      { key: "assistant-voice", icon: <Ear size={22} />, name: "Assistente de voz", desc: "Wake word (Porcupine / Vosk)" },
                       { key: "elevenlabs", icon: <Mic size={22} />, name: "ElevenLabs", desc: "Voz premium + áudio" },
                     ]}
                     onOpen={setConnView}

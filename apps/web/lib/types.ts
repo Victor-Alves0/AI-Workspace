@@ -477,12 +477,20 @@ export interface ListenConfig {
   // silêncio na janela encerra a conversa (volta ao standby da wake word)
   continuous?: boolean;
   follow_up_secs?: number;
-  // wake word ("hey nome")
+  // wake word ("hey nome") — escolhas POR-MODELO; as credenciais (chave/URL) são
+  // do usuário e vivem em profile.wake (WakeCreds), não aqui.
   wake_enabled?: boolean;
   wake_engine?: "porcupine" | "vosk";
+  // Porcupine: nome da palavra embutida ("Jarvis"…) ou "__custom__" (usa o .ppn do usuário)
   porcupine_keyword?: string;
-  picovoice_key?: string;
-  vosk_model_url?: string;
+}
+
+// Credenciais da wake word — DO USUÁRIO (profile.wake), como chave de API.
+// Compartilhadas por todos os modelos; o modelo só escolhe engine/palavra.
+export interface WakeCreds {
+  picovoice_key?: string;   // AccessKey grátis da Picovoice (usada no WASM do navegador)
+  ppn_url?: string;         // .ppn custom (para "hey <nome>" no Porcupine)
+  vosk_model_url?: string;  // URL do modelo Vosk (.tar.gz) — offline, sem chave
 }
 
 // resposta de POST /voice/session (chat que o modo voz usa)
