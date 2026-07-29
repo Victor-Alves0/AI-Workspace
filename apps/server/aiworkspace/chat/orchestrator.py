@@ -28,6 +28,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi.concurrency import run_in_threadpool
+from sqlalchemy import select
 
 from .. import extraction
 from .. import tracing
@@ -37,7 +38,7 @@ from ..knowledge import brain as brain_service
 from ..knowledge import retrieval as kb_retrieval
 from ..knowledge.links import sign_doc_url
 from ..memory import mem0_service
-from ..models import GeneratedImage
+from ..models import GeneratedImage, Message
 from ..providers import image_gen, openrouter
 from ..tools import sift_service, toolctx
 from . import curator
@@ -366,15 +367,23 @@ def _generate_image_tool() -> dict[str, Any]:
         "function": {
             "name": "generate_image",
             "description": (
-                "Generate an image from a text prompt and show it to the user. Use whenever "
-                "the user asks to create/draw/generate a picture, logo, illustration, etc. "
-                "Write a rich, detailed English `prompt`. The image is displayed automatically."
+                "Generate OR EDIT an image and show it to the user. Use whenever the user asks to "
+                "create/draw/generate a picture, logo, illustration, etc.\n"
+                "EDITING: if the user attached image(s) THIS turn, they are the BASE and your `prompt` "
+                "describes the change ('make the sky purple', 'add a hat'); set `edit` false to ignore "
+                "them and generate fresh. If instead the user refers to an image ALREADY in the "
+                "conversation — one you generated earlier or they sent earlier — WITHOUT re-attaching it "
+                "(e.g. 'now make it blue', 'change the background', 'add a hat to it'), set "
+                "`edit_previous` true to fetch and edit that most recent image. For a brand-new, "
+                "unrelated image, leave both off. Write a rich, detailed English `prompt`."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "prompt": {"type": "string", "description": "detailed image description (English works best)"},
+                    "prompt": {"type": "string", "description": "detailed image/edit description (English works best)"},
                     "size": {"type": "string", "description": "optional, e.g. 1024x1024, 1792x1024"},
+                    "edit": {"type": "boolean", "description": "default true: use images attached THIS turn as the base. false = ignore them."},
+                    "edit_previous": {"type": "boolean", "description": "default false. Set true when the user refers to an image from EARLIER in the conversation (generated or sent) without re-attaching it — fetches the most recent one and edits it."},
                 },
                 "required": ["prompt"],
             },
@@ -572,6 +581,40 @@ async def _save_generated_image(
         await db.commit()
         await db.refresh(row)
         return str(row.id)
+
+
+async def _recent_chat_images(chat_id: str, limit: int = 1) -> list[str]:
+    """Data-URLs das imagens MAIS RECENTES do chat — geradas pela IA (GeneratedImage)
+    ou enviadas pelo usuário (attachments das mensagens). Usadas como base de EDIÇÃO
+    quando o usuário se refere a "a imagem" sem reanexá-la. Mais recente primeiro."""
+    try:
+        cid = uuid.UUID(chat_id)
+    except (ValueError, TypeError):
+        return []
+    out: list[tuple[Any, str]] = []  # (created_at, data_url)
+    async with SessionLocal() as db:
+        gens = list(await db.scalars(
+            select(GeneratedImage).where(GeneratedImage.chat_id == cid)
+            .order_by(GeneratedImage.created_at.desc()).limit(limit)
+        ))
+        for g in gens:
+            b64 = base64.b64encode(g.data).decode("ascii")
+            out.append((g.created_at, f"data:{g.mime or 'image/png'};base64,{b64}"))
+        # imagens ENVIADAS pelo usuário (attachments type=image, data URL pronta)
+        msgs = list(await db.scalars(
+            select(Message).where(
+                Message.chat_id == cid, Message.role == "user",
+                Message.attachments.isnot(None),
+            ).order_by(Message.created_at.desc()).limit(6)
+        ))
+        for m in msgs:
+            for a in (m.attachments or []):
+                if isinstance(a, dict) and a.get("type") == "image" and a.get("url"):
+                    out.append((m.created_at, str(a["url"])))
+                    break
+    # chave numérica (epoch): nunca compara datetime com int nem naive com aware
+    out.sort(key=lambda t: t[0].timestamp() if t[0] else 0.0, reverse=True)
+    return [u for _c, u in out[:limit]]
 
 
 def _skills_block(skills: list[dict[str, Any]]) -> str:
@@ -1322,6 +1365,9 @@ class _ToolDispatcher:
     subagent_pass_context: bool
     subagent_worker_memory: bool
     run_subagent: Any
+    # imagens que o usuário anexou NESTE turno — usadas como contexto de EDIÇÃO
+    # pelo generate_image (estilo nano-banana: anexa imagem + "mude X").
+    input_images: list[str] = field(default_factory=list)
     delegations_used: int = 0
     delegate_pre: dict[str, dict] = field(default_factory=dict)
     result: Any = None
@@ -1379,15 +1425,29 @@ class _ToolDispatcher:
         if not prompt:
             self.result = {"error": "`prompt` é obrigatório"}
             return
-        yield {"type": "image_gen", "status": "start", "prompt": prompt[:120]}
+        # EDIÇÃO com contexto (nano-banana):
+        #  - anexo DESTE turno → base (edit, default true) — ação explícita do usuário;
+        #  - senão, se o modelo pediu `edit_previous`, busca a imagem MAIS RECENTE do
+        #    chat (gerada antes ou enviada antes) — cobre "gera → depois muda X" sem
+        #    reanexar. Não é automático p/ não contaminar uma geração nova ("desenhe um cão").
+        if args.get("edit", True) and self.input_images:
+            edit_imgs = self.input_images
+        elif args.get("edit_previous") and self.chat_id:
+            edit_imgs = await _recent_chat_images(self.chat_id, 1)
+        else:
+            edit_imgs = []
+        yield {"type": "image_gen", "status": "start", "prompt": prompt[:120], "edit": bool(edit_imgs)}
         try:
             keys = {"openrouter": self.api_key, "imagegen": (self.genimage or {}).get("imagegen_key")}
-            img_bytes, mime = await image_gen.generate(
-                self.genimage, keys, prompt, str(args.get("size") or "1024x1024")
+            img_bytes, mime, cost = await image_gen.generate(
+                self.genimage, keys, prompt, str(args.get("size") or "1024x1024"), images=edit_imgs
             )
             image_id = await _save_generated_image(
                 self.user_id, self.chat_id, mime, img_bytes, prompt, (self.genimage or {}).get("model", "")
             )
+            # custo real da geração entra no gasto do turno (antes era descartado)
+            if cost:
+                yield {"type": "usage_delta", "cost": cost}
             self.result = {"kind": "image", "url": image_gen.sign_image_url(image_id), "prompt": prompt}
         except Exception as exc:  # noqa: BLE001
             logger.warning("Falha ao gerar imagem: %s", exc)
@@ -1776,6 +1836,7 @@ async def run_turn(
         sift=sift, code_mode=code_mode, api_key=api_key, user_id=user_id, chat_id=chat_id,
         skills=skills, skills_by_slug=skills_by_slug,
         genimage_on=genimage_on, genimage=genimage,
+        input_images=[a["url"] for a in (_md.attachments or []) if a.get("type") == "image" and a.get("url")],
         kb_tool_on=kb_tool_on, kb_bases=kb_bases, kb_k=kb_k, user_text=user_text,
         brain_on=asm.brain_on, brain_write=asm.brain_write,
         brain_ids=[str(b) for b in _brain_cfg.get("brains") or []],
@@ -2135,6 +2196,9 @@ async def run_turn(
                     continue
                 evs, res = out
                 for ev in evs:
+                    if isinstance(ev, dict) and ev.get("type") == "usage_delta":
+                        _merge_usage(total_usage, {"cost": ev.get("cost")})
+                        continue
                     yield ev
                 yield _absorb(name, tc, res)
         else:
@@ -2142,6 +2206,11 @@ async def run_turn(
                 yield _announce(name, args)
                 # despacha a tool (emite os eventos de progresso na ordem certa)
                 async for ev in disp.run(name, args, tc):
+                    # custo de tool (ex.: geração de imagem) → soma no uso do turno,
+                    # sem vazar o evento interno para a UI.
+                    if isinstance(ev, dict) and ev.get("type") == "usage_delta":
+                        _merge_usage(total_usage, {"cost": ev.get("cost")})
+                        continue
                     yield ev
                 yield _absorb(name, tc, disp.result)
 

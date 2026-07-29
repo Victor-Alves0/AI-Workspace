@@ -538,8 +538,11 @@ export default function WorkspaceView({
                   </span>
                 )}
                 <button onClick={() => setEditingModel(m)} className="min-w-0 flex-1 text-left">
-                  <p className="truncate text-sm font-medium text-ink">{m.name}</p>
-                  <p className="truncate text-xs text-muted">Por {author} • {m.base_model}</p>
+                  <p className="flex items-center gap-2 truncate text-sm font-medium text-ink">
+                    <span className="truncate">{m.name}</span>
+                    <span className="shrink-0 font-mono text-xs text-muted">{m.base_model}</span>
+                  </p>
+                  <p className="truncate text-xs text-muted">{m.description || "Sem descrição"}</p>
                 </button>
                 <div className="relative">
                   <button ref={menu === m.id ? menuBtnRef : undefined} onClick={() => setMenu(menu === m.id ? null : m.id)} className={`rounded p-1 text-muted hover:text-ink ${menu === m.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>

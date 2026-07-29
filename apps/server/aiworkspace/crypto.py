@@ -15,6 +15,7 @@ from functools import lru_cache
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import Text
 from sqlalchemy.types import TypeDecorator
@@ -113,6 +114,44 @@ def decrypt_with_password(blob: str, password: str) -> str:
         return Fernet(_password_key(password, salt)).decrypt(token).decode("utf-8")
     except InvalidToken:
         raise ValueError("senha incorreta")
+
+
+# --------------------------------------------------------------------------- #
+# Cifra do ARQUIVO DE BACKUP (streaming): AES-256-CTR com chave derivada do
+# APP_SECRET. Streaming (chunk a chunk) para não carregar o dump inteiro em
+# memória. Cabeçalho = MAGIC + nonce(16). Assim o dump do pg_dump — que sozinho
+# é texto claro — vira ciphertext em repouso; restaurar exige o mesmo APP_SECRET
+# (já necessário para os campos cifrados). Sem o header = backup legado (claro).
+# --------------------------------------------------------------------------- #
+BACKUP_MAGIC = b"AIWBK1\n"     # 7 bytes - payload = pg_dump (formato antigo)
+# AIWBK2: payload e um TAR (bundle) com `database.dump` + a arvore `codespace/`
+# (arquivos do Codespace, que vivem em disco fora do banco). Mesmo tamanho (7 bytes)
+# que o magic antigo, entao a leitura do nonce (16 bytes seguintes) nao muda.
+BACKUP_MAGIC_V2 = b"AIWBK2\n"  # 7 bytes - payload = tar bundle (db + codespace)
+
+
+@lru_cache
+def _backup_key() -> bytes:
+    kdf = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=b"ai-workspace-backup-encryption",
+        info=b"backup-aes-ctr",
+    )
+    return kdf.derive(get_settings().app_secret.encode("utf-8"))
+
+
+def backup_encryptor(magic: bytes = BACKUP_MAGIC) -> tuple[bytes, "object"]:
+    """(header, encryptor). Emita o header primeiro, depois `encryptor.update(chunk)`
+    para cada bloco e `encryptor.finalize()` no fim. `magic` escolhe o formato do
+    payload (BACKUP_MAGIC = pg_dump; BACKUP_MAGIC_V2 = tar bundle)."""
+    nonce = os.urandom(16)
+    enc = Cipher(algorithms.AES(_backup_key()), modes.CTR(nonce)).encryptor()
+    return magic + nonce, enc
+
+
+def backup_decryptor(nonce: bytes) -> "object":
+    return Cipher(algorithms.AES(_backup_key()), modes.CTR(nonce)).decryptor()
 
 
 class EncryptedText(TypeDecorator):

@@ -67,6 +67,17 @@ def _slugify(s: str) -> str:
     return s[:64] or "skill"
 
 
+# corpo mínimo p/ uma skill valer a pena — barra propostas-lixo (ex.: content "d"),
+# que aconteciam quando o modelo de revisão devolvia placeholder em vez de passos reais.
+_MIN_SKILL_CHARS = 40
+_MIN_SKILL_WORDS = 8
+
+
+def _useful_skill(name: str, content: str) -> bool:
+    c = (content or "").strip()
+    return len(c) >= _MIN_SKILL_CHARS and len(c.split()) >= _MIN_SKILL_WORDS and len((name or "").strip()) >= 3
+
+
 def turn_signals(user_text: str, tool_events: list[dict] | None) -> dict[str, Any]:
     """Deriva os sinais do turno (para o gatilho heurístico + contexto da revisão)."""
     evs = tool_events or []
@@ -108,7 +119,7 @@ def _parse_review(raw: str) -> dict[str, list]:
             scope = m.get("scope") if m.get("scope") in ("global", "model", "chat") else "global"
             mems.append({"text": str(m["text"]).strip()[:500], "scope": scope})
     for s in data.get("skills") or []:
-        if isinstance(s, dict) and str(s.get("name") or "").strip() and str(s.get("content") or "").strip():
+        if isinstance(s, dict) and _useful_skill(str(s.get("name") or ""), str(s.get("content") or "")):
             tags = [str(t).strip().lower()[:40] for t in (s.get("tags") or []) if str(t).strip()][:10]
             skills.append({
                 "name": str(s["name"]).strip()[:255],

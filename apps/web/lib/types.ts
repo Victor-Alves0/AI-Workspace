@@ -470,9 +470,10 @@ export interface ListenConfig {
   enabled?: boolean;
   call_name?: string;
   chat_mode?: "fixed" | "new";
-  folder?: string;
   auto_speak?: boolean;
   hands_free?: boolean;
+  // transcreve a fala no NAVEGADOR com Whisper (offline, sem provedor de STT)
+  stt_local?: boolean;
   // conversa contínua: após a resposta reabre a escuta por uma janela de graça;
   // silêncio na janela encerra a conversa (volta ao standby da wake word)
   continuous?: boolean;
@@ -480,7 +481,7 @@ export interface ListenConfig {
   // wake word ("hey nome") — escolhas POR-MODELO; as credenciais (chave/URL) são
   // do usuário e vivem em profile.wake (WakeCreds), não aqui.
   wake_enabled?: boolean;
-  wake_engine?: "porcupine" | "vosk";
+  wake_engine?: "porcupine" | "vosk" | "whisper";
   // Porcupine: nome da palavra embutida ("Jarvis"…) ou "__custom__" (usa o .ppn do usuário)
   porcupine_keyword?: string;
 }

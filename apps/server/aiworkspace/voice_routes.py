@@ -9,6 +9,7 @@ provedor global (Kokoro não faz STT).
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import httpx
@@ -24,7 +25,7 @@ from .config import get_settings
 from .db import get_db
 from .integrations import elevenlabs_service, voice_service
 from .models import Chat, Folder, ModelConfig, User
-from .secrets_service import VOICE_KEY, get_secret
+from .secrets_service import VOICE_KEY, WAKE_CONFIG_KEY, get_secret, set_secret
 
 router = APIRouter(prefix="/voice", tags=["voice"])
 
@@ -224,12 +225,49 @@ async def voice_test(
 
 
 # --------------------------------------------------------------------------- #
+# Credenciais da WAKE WORD (por-usuário, CIFRADAS): AccessKey Picovoice, .ppn e URL
+# do Vosk. Um JSON cifrado em UserSecret (não em profile), então não vaza no dump.
+# --------------------------------------------------------------------------- #
+class WakeConfigIn(BaseModel):
+    picovoice_key: str = Field(default="", max_length=400)
+    ppn_url: str = Field(default="", max_length=600)
+    vosk_model_url: str = Field(default="", max_length=600)
+
+
+@router.get("/wake")
+async def get_wake(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    raw = await get_secret(db, user.id, WAKE_CONFIG_KEY)
+    if not raw:
+        return {"picovoice_key": "", "ppn_url": "", "vosk_model_url": ""}
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        data = {}
+    return {
+        "picovoice_key": str(data.get("picovoice_key") or ""),
+        "ppn_url": str(data.get("ppn_url") or ""),
+        "vosk_model_url": str(data.get("vosk_model_url") or ""),
+    }
+
+
+@router.put("/wake")
+async def put_wake(
+    body: WakeConfigIn,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    await set_secret(db, user.id, WAKE_CONFIG_KEY, json.dumps(body.model_dump()))
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------- #
 # Modo voz (assistente): resolve o chat que o modo voz usa para um modelo.
 # `filter_config.listen`: {enabled, call_name, chat_mode: fixed|new, folder,
-# auto_speak, hands_free, continuous, follow_up_secs}. "fixed" reusa um chat contínuo numa pasta
-# `<folder>/<modelo>` (mesmo padrão dos canais); "new" abre um chat limpo.
+# auto_speak, hands_free, continuous, follow_up_secs}. "fixed" reusa um chat contínuo na pasta
+# padrão "Assistente" com o nome do modelo (como o WhatsApp); "new" abre um chat limpo.
 # --------------------------------------------------------------------------- #
 _VOICE_CHAT_TITLE = "Modo voz"
+_VOICE_FOLDER = "Assistente"  # pasta padrão do chat fixo (como a do WhatsApp)
 
 
 class VoiceSessionIn(BaseModel):
@@ -269,18 +307,19 @@ async def voice_session(
     mode = "new" if listen.get("chat_mode") == "new" else "fixed"
     chat = None
     if mode == "fixed":
-        root_name = (str(listen.get("folder") or "Assistente").strip() or "Assistente")[:120]
-        root = await _find_or_create_folder(db, user.id, root_name, None)
-        sub = await _find_or_create_folder(db, user.id, (getattr(mc, "name", None) or "Modelo")[:120], root.id)
+        # pasta padrão única "Assistente" (como o WhatsApp); o CHAT leva o nome do
+        # modelo — sem subpasta e sem pasta configurável.
+        model_name = (getattr(mc, "name", None) or "Modelo")[:120]
+        root = await _find_or_create_folder(db, user.id, _VOICE_FOLDER, None)
         chat = await db.scalar(
             select(Chat).where(
                 Chat.user_id == user.id, Chat.model_config_id == mc.id,
-                Chat.folder_id == sub.id, Chat.archived.is_(False),
+                Chat.folder_id == root.id, Chat.archived.is_(False),
             ).order_by(Chat.updated_at.desc()).limit(1)
         )
         if chat is None:
-            chat = Chat(user_id=user.id, title=_VOICE_CHAT_TITLE, model=mc.base_model,
-                        model_config_id=mc.id, params=mc.params or {}, folder_id=sub.id)
+            chat = Chat(user_id=user.id, title=model_name, model=mc.base_model,
+                        model_config_id=mc.id, params=mc.params or {}, folder_id=root.id)
             db.add(chat)
             await db.flush()
     else:

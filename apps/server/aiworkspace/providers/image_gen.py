@@ -34,11 +34,26 @@ def _decode_data_url(url: str) -> tuple[bytes, str]:
     return base64.b64decode(m.group("b64")), m.group("mime") or "image/png"
 
 
-async def generate_openrouter(api_key: str, model: str, prompt: str) -> tuple[bytes, str]:
+async def generate_openrouter(
+    api_key: str, model: str, prompt: str, images: list[str] | None = None
+) -> tuple[bytes, str, float]:
+    """Gera (ou EDITA) uma imagem por um modelo de imagem do OpenRouter.
+
+    `images`: URLs/data-URLs de imagens de ENTRADA — quando presentes, o modelo edita
+    com esse contexto (estilo nano-banana). Retorna (bytes, mime, custo_usd)."""
     settings = get_settings()
+    # com imagens de entrada, o content vira multipart (texto + image_url); sem elas,
+    # uma string simples (compat com modelos que não aceitam array de 1 item).
+    if images:
+        content: Any = [
+            {"type": "text", "text": prompt},
+            *[{"type": "image_url", "image_url": {"url": u}} for u in images if u],
+        ]
+    else:
+        content = prompt
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": content}],
         "modalities": ["image", "text"],
     }
     async with httpx.AsyncClient(timeout=180) as client:
@@ -51,12 +66,18 @@ async def generate_openrouter(api_key: str, model: str, prompt: str) -> tuple[by
         raise RuntimeError(f"OpenRouter image gen falhou ({r.status_code}): {r.text[:300]}")
     data = r.json()
     msg = ((data.get("choices") or [{}])[0].get("message")) or {}
-    images = msg.get("images") or []
-    if not images:
+    out_images = msg.get("images") or []
+    if not out_images:
         # alguns modelos devolvem a imagem como parte do content
         raise RuntimeError("o modelo não retornou imagem (verifique se é um modelo de imagem)")
-    url = (images[0].get("image_url") or {}).get("url") or ""
-    return _decode_data_url(url)
+    url = (out_images[0].get("image_url") or {}).get("url") or ""
+    # custo real reportado pelo OpenRouter (para entrar no gasto do turno)
+    usage = data.get("usage") or {}
+    cost = usage.get("cost")
+    if cost is None and isinstance(usage.get("cost_details"), dict):
+        cost = usage["cost_details"].get("upstream_inference_cost")
+    b, mime = _decode_data_url(url)
+    return b, mime, float(cost) if isinstance(cost, (int, float)) else 0.0
 
 
 async def generate_openai_compat(
@@ -86,10 +107,15 @@ async def generate_openai_compat(
     raise RuntimeError("resposta de imagem vazia")
 
 
-async def generate(cfg: dict[str, Any], keys: dict[str, str], prompt: str, size: str = "1024x1024") -> tuple[bytes, str]:
-    """Gera a imagem pelo provedor configurado no GenImage Router.
+async def generate(
+    cfg: dict[str, Any], keys: dict[str, str], prompt: str,
+    size: str = "1024x1024", images: list[str] | None = None,
+) -> tuple[bytes, str, float]:
+    """Gera (ou edita) a imagem pelo provedor configurado no GenImage Router.
 
     cfg: {provider, model, base_url?}. keys: {openrouter?, imagegen?}.
+    `images`: imagens de entrada p/ EDIÇÃO (só o provedor openrouter usa hoje).
+    Retorna (bytes, mime, custo_usd).
     """
     provider = (cfg.get("provider") or "openrouter").strip()
     model = (cfg.get("model") or "").strip()
@@ -99,12 +125,14 @@ async def generate(cfg: dict[str, Any], keys: dict[str, str], prompt: str, size:
         key = keys.get("imagegen") or ""
         if not key:
             raise RuntimeError("configure a chave do provedor de imagem em Conexões → APIs")
-        return await generate_openai_compat(cfg.get("base_url") or "", key, model, prompt, size)
-    # padrão: openrouter
+        # /images/generations não faz edição por contexto; ignora `images` por ora.
+        b, mime = await generate_openai_compat(cfg.get("base_url") or "", key, model, prompt, size)
+        return b, mime, 0.0
+    # padrão: openrouter (suporta edição com imagens de entrada)
     key = keys.get("openrouter") or ""
     if not key:
         raise RuntimeError("configure sua chave do OpenRouter")
-    return await generate_openrouter(key, model, prompt)
+    return await generate_openrouter(key, model, prompt, images)
 
 
 # --------------------------------------------------------------------------- #

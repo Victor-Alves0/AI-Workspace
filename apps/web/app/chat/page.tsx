@@ -8,7 +8,7 @@ import { copyText } from "@/lib/clipboard";
 import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamRoundtable } from "@/lib/sse";
 import { speak, startBrowserDictation, startRecording, stopSpeaking, transcribe } from "@/lib/voice";
 import { captureUtterance } from "@/lib/voiceSession";
-import { startWakeWord, type WakeHandle } from "@/lib/wakeword";
+import { startWakeWord, transcribeWhisper, type WakeHandle } from "@/lib/wakeword";
 import { onVoiceActivate } from "@/lib/desktop";
 import { browserNotify, playChime, requestNotifPermission } from "@/lib/notify";
 import { downloadJSON, downloadPDF, downloadTXT } from "@/lib/download";
@@ -1350,6 +1350,8 @@ export default function ChatPage() {
     const continuous = !!session.continuous;
     const loops = continuous || session.hands_free;
     const followUpMs = Math.max(2, session.follow_up_secs || 8) * 1000;
+    // STT no navegador (Whisper offline) quando o modelo pede, senão o servidor
+    const sttLocal = !!(curCustom?.filter_config?.listen as ListenConfig | undefined)?.stt_local;
     // throttle do nível: ~12fps (senão o VAD re-renderiza a página a 60fps)
     let lastLvl = 0;
     const onLevel = (l: number) => {
@@ -1383,7 +1385,7 @@ export default function ChatPage() {
 
       setVoicePhase("thinking");
       let text = "";
-      try { text = (await transcribe(blob)).trim(); } catch { text = ""; }
+      try { text = (await (sttLocal ? transcribeWhisper(blob) : transcribe(blob))).trim(); } catch { text = ""; }
       if (!voiceRef.current.active) break;
       if (!text) { if (loops) continue; else break; }
       firstTurn = false;
@@ -1468,9 +1470,12 @@ export default function ChatPage() {
   async function startWake() {
     const lc = (curCustom?.filter_config?.listen ?? {}) as ListenConfig;
     if (!lc.wake_enabled) { alert("Ative a wake word nas Configurações do modelo → Voz."); return; }
-    // credenciais são DO USUÁRIO (profile.wake), não do modelo
-    const wake = ((user?.profile as Record<string, unknown> | undefined)?.wake ?? {}) as WakeCreds;
-    const engine = lc.wake_engine === "vosk" ? "vosk" : "porcupine";
+    const engine = lc.wake_engine === "vosk" ? "vosk" : lc.wake_engine === "whisper" ? "whisper" : "porcupine";
+    // Whisper/Vosk não têm chave; só o Porcupine precisa das creds (cifradas no servidor).
+    let wake: WakeCreds = {};
+    if (engine !== "whisper") {
+      try { wake = (await api.get<WakeCreds>("/voice/wake")) ?? {}; } catch { /* segue com vazio → valida abaixo */ }
+    }
     // Porcupine "__custom__" usa o .ppn do usuário; senão a palavra embutida
     const custom = lc.porcupine_keyword === "__custom__";
     const kw = custom ? (wake.ppn_url || "") : (lc.porcupine_keyword || "Jarvis");
@@ -1480,6 +1485,9 @@ export default function ChatPage() {
     }
     if (engine === "porcupine" && custom && !wake.ppn_url) {
       alert("Palavra 'Personalizada' selecionada, mas nenhum .ppn cadastrado em Conexões → Assistente de voz."); return;
+    }
+    if (engine !== "porcupine" && !(lc.call_name || "").trim()) {
+      alert("Defina a 'Palavra de ativação' nas Configurações do modelo → Assistente."); return;
     }
     setWakeStatus("starting");
     try {

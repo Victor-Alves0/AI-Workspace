@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Cpu, Link2, Search } from "lucide-react";
 import type { Model, ModelConfig } from "@/lib/types";
-import { dismissKeyboard, finePointer, useClickOutside } from "./ui";
+import { AnchoredMenu, dismissKeyboard, finePointer } from "./ui";
 
 interface Row {
   key: string; // id externo, ou "custom:<id>"
@@ -38,7 +38,7 @@ export default function ModelField({
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"all" | "openrouter" | "custom" | "local">("all");
   const [q, setQ] = useState("");
-  const ref = useClickOutside<HTMLDivElement>(() => setOpen(false));
+  const btnRef = useRef<HTMLButtonElement>(null);
 
   const rows: Row[] = useMemo(() => {
     const customRows: Row[] = includeCustom
@@ -67,8 +67,9 @@ export default function ModelField({
     : [["all", "Tudo"], ["openrouter", "Openrouter"], ["local", "Local"]];
 
   return (
-    <div className="relative" ref={ref}>
+    <>
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={className || "flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none transition-colors hover:border-accent/50"}
@@ -78,7 +79,12 @@ export default function ModelField({
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1.5 w-[360px] max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl border border-border bg-surface shadow-menu animate-pop">
+        <AnchoredMenu
+          anchorRef={btnRef}
+          onClose={() => setOpen(false)}
+          align="left"
+          className="w-[360px] max-w-[calc(100vw-1.5rem)] overflow-hidden !rounded-2xl !p-0"
+        >
           <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
             <Search size={16} className="text-muted" />
             <input
@@ -136,8 +142,8 @@ export default function ModelField({
               </p>
             )}
           </div>
-        </div>
+        </AnchoredMenu>
       )}
-    </div>
+    </>
   );
 }

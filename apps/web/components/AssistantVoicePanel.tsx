@@ -7,8 +7,9 @@
 // ouve a palavra — é assim que o usuário sabe que funciona.
 
 import { useEffect, useRef, useState } from "react";
-import { Ear, Loader2, Check, Mic } from "lucide-react";
-import { startWakeWord, type WakeHandle } from "@/lib/wakeword";
+import { Ear, Loader2, Check, Mic, Download, Trash2 } from "lucide-react";
+import { startWakeWord, loadVoskModel, loadWhisperModel, type WakeHandle } from "@/lib/wakeword";
+import { api } from "@/lib/api";
 import type { WakeCreds } from "@/lib/types";
 
 // modelo pequeno de PT-BR hospedado pela vosk-browser (CORS liberado); serve de
@@ -18,15 +19,51 @@ const VOSK_DEFAULT =
 
 type TestState = "idle" | "loading" | "listening" | "heard" | "error";
 
-export default function AssistantVoicePanel({
-  value,
-  onChange,
-}: {
-  value: WakeCreds;
-  onChange: (v: WakeCreds) => void;
-}) {
-  const cfg = value ?? {};
-  const patch = (p: Partial<WakeCreds>) => onChange({ ...cfg, ...p });
+export default function AssistantVoicePanel() {
+  // Credenciais cifradas no servidor (UserSecret), buscadas/salvas por endpoint —
+  // NÃO ficam no profile (texto claro) nem vazam no dump de backup.
+  const [cfg, setCfg] = useState<WakeCreds>({});
+  const cfgRef = useRef<WakeCreds>({});           // espelho do cfg p/ o patch ler o valor atual
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    api.get<WakeCreds>("/voice/wake").then((d) => { cfgRef.current = d ?? {}; setCfg(d ?? {}); }).catch(() => {});
+  }, []);
+  // limpa o save pendente ao desmontar (não dispara PUT depois de sair da tela)
+  useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
+
+  // atualiza o estado e agenda o PUT (debounce) FORA do updater — sem efeito
+  // colateral dentro do setState (evita PUT duplicado no StrictMode).
+  const patch = (p: Partial<WakeCreds>) => {
+    const next = { ...cfgRef.current, ...p };
+    cfgRef.current = next;
+    setCfg(next);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      api.put("/voice/wake", {
+        picovoice_key: next.picovoice_key ?? "",
+        ppn_url: next.ppn_url ?? "",
+        vosk_model_url: next.vosk_model_url ?? "",
+      }).catch(() => {});
+    }, 600);
+  };
+
+  // Estado "instalado" dos modelos (marca no localStorage; Whisper também evita o
+  // cache do transformers.js). Vosk guarda a URL instalada → detecta "mudou o link".
+  const [whInstalled, setWhInstalled] = useState(false);
+  const [voskInstalledUrl, setVoskInstalledUrl] = useState<string | null>(null);
+  useEffect(() => {
+    try {
+      setWhInstalled(localStorage.getItem("aiw_wake_whisper") === "1");
+      setVoskInstalledUrl(localStorage.getItem("aiw_wake_vosk"));
+    } catch { /* localStorage indisponível */ }
+  }, []);
+  const evictTransformers = async () => {
+    try {
+      const ks = await caches.keys();
+      for (const k of ks) if (/transformers/i.test(k)) await caches.delete(k);
+    } catch { /* Cache API indisponível */ }
+  };
 
   // Modelo Vosk que efetivamente será usado (o do link, ou o padrão quando vazio),
   // e um nome curto derivado da URL para mostrar ao usuário qual está valendo.
@@ -38,7 +75,7 @@ export default function AssistantVoicePanel({
   };
 
   // --- Testar escuta ---
-  const [engine, setEngine] = useState<"porcupine" | "vosk">("porcupine");
+  const [engine, setEngine] = useState<"porcupine" | "vosk" | "whisper">("porcupine");
   const [word, setWord] = useState("Jarvis");
   const [state, setState] = useState<TestState>("idle");
   const [msg, setMsg] = useState("");
@@ -47,6 +84,55 @@ export default function AssistantVoicePanel({
   const handleRef = useRef<WakeHandle | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const meterRef = useRef<{ stop: () => void } | null>(null);
+
+  // --- Confirmar modelo Vosk (baixa/valida sem mic) ---
+  const [voskState, setVoskState] = useState<"idle" | "loading" | "ok" | "error">("idle");
+  const [voskMsg, setVoskMsg] = useState("");
+  const confirmVosk = async () => {
+    setVoskState("loading");
+    setVoskMsg(`Baixando o modelo "${voskName(effVoskUrl)}"…`);
+    try {
+      await loadVoskModel(effVoskUrl);
+      setVoskState("ok");
+      setVoskMsg(`✓ Modelo "${voskName(effVoskUrl)}" instalado.`);
+      try { localStorage.setItem("aiw_wake_vosk", effVoskUrl); } catch { /* noop */ }
+      setVoskInstalledUrl(effVoskUrl);
+    } catch (e) {
+      setVoskState("error");
+      setVoskMsg(`Falha ao carregar: ${e instanceof Error ? e.message : String(e)} — verifique a URL/CORS/formato.`);
+    }
+  };
+  const uninstallVosk = () => {
+    try { localStorage.removeItem("aiw_wake_vosk"); } catch { /* noop */ }
+    setVoskInstalledUrl(null);
+    setVoskState("idle");
+    setVoskMsg("Desinstalado (o navegador ainda pode manter o arquivo no cache HTTP).");
+  };
+
+  // --- Baixar modelo Whisper (on-device; ~150MB na 1ª vez) ---
+  const [whState, setWhState] = useState<"idle" | "loading" | "ok" | "error">("idle");
+  const [whMsg, setWhMsg] = useState("");
+  const downloadWhisper = async () => {
+    setWhState("loading");
+    setWhMsg("Baixando o Whisper (~150MB na 1ª vez; depois fica em cache)…");
+    try {
+      await loadWhisperModel();
+      setWhState("ok");
+      setWhMsg("✓ Whisper instalado (offline a partir de agora).");
+      try { localStorage.setItem("aiw_wake_whisper", "1"); } catch { /* noop */ }
+      setWhInstalled(true);
+    } catch (e) {
+      setWhState("error");
+      setWhMsg(`Falha ao baixar o Whisper: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  const uninstallWhisper = async () => {
+    await evictTransformers();
+    try { localStorage.removeItem("aiw_wake_whisper"); } catch { /* noop */ }
+    setWhInstalled(false);
+    setWhState("idle");
+    setWhMsg("Modelo Whisper removido do cache do navegador.");
+  };
 
   // Medidor de nível INDEPENDENTE do engine: prova que o mic está captando (mesmo
   // com Porcupine, que não transcreve). Stream próprio, encerrado no stopTest.
@@ -100,7 +186,9 @@ export default function AssistantVoicePanel({
     setState("loading");
     setMsg(
       engine === "vosk"
-        ? `Baixando/carregando o modelo "${voskName(effVoskUrl)}"… (~32MB na 1ª vez)`
+        ? `Carregando o modelo "${voskName(effVoskUrl)}"…`
+        : engine === "whisper"
+        ? "Carregando o Whisper… (baixa ~150MB na 1ª vez)"
         : "Preparando… (o navegador vai pedir o microfone)",
     );
     setHeard("");
@@ -147,10 +235,7 @@ export default function AssistantVoicePanel({
 
   return (
     <div className="space-y-5">
-      <p className="text-sm text-muted">
-        Chaves e modelos da <strong className="text-ink">wake word</strong> (&quot;hey nome&quot;). São suas,
-        compartilhadas por todos os modelos — cada modelo só escolhe o engine e a palavra.
-      </p>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Detecção de voz</h3>
 
       {/* Porcupine */}
       <div className="space-y-3 rounded-xl border border-border bg-surface2/40 p-4">
@@ -186,29 +271,88 @@ export default function AssistantVoicePanel({
         </label>
       </div>
 
+      {/* Whisper (on-device, melhor com nomes) */}
+      <div className="space-y-3 rounded-xl border border-border bg-surface2/40 p-4">
+        <div className="flex items-center gap-2 text-sm font-medium text-ink">
+          <Ear size={15} className="text-muted" /> Whisper
+        </div>
+        <p className="text-[11px] text-muted">
+          On-device, sem chave, reconhece <strong>nomes</strong> (&quot;akeno&quot;) muito melhor que o Vosk.
+          A palavra vem da <span className="text-ink-soft">Palavra de ativação</span> do modelo. O modelo (~150MB)
+          baixa 1x e fica em cache (offline depois).
+        </p>
+        <div className="flex items-center gap-2">
+          {whInstalled ? (
+            <button
+              onClick={uninstallWhisper}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-bg px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-red-500/10 hover:text-red-400"
+            >
+              <Trash2 size={13} /> Desinstalar
+            </button>
+          ) : (
+            <button
+              onClick={downloadWhisper}
+              disabled={whState === "loading"}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-bg px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-hover disabled:opacity-50"
+            >
+              {whState === "loading" ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+              Baixar modelo
+            </button>
+          )}
+          {whInstalled && <span className="flex items-center gap-1 text-[11px] text-green-400"><Check size={12} /> Instalado</span>}
+        </div>
+        {whMsg && (
+          <p className={`text-[11px] ${whState === "ok" ? "text-green-400" : whState === "error" ? "text-red-400" : "text-muted"}`}>
+            {whMsg}
+          </p>
+        )}
+      </div>
+
       {/* Vosk */}
       <div className="space-y-3 rounded-xl border border-border bg-surface2/40 p-4">
         <div className="flex items-center gap-2 text-sm font-medium text-ink">
-          <Ear size={15} className="text-muted" /> Vosk (open-source, sem chave)
+          <Ear size={15} className="text-muted" /> Vosk
         </div>
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-muted">URL do modelo (.tar.gz)</span>
+          <span className="mb-1 block text-xs font-medium text-muted">URL do modelo (.zip ou .tar.gz)</span>
           <input
             value={cfg.vosk_model_url ?? ""}
-            onChange={(e) => patch({ vosk_model_url: e.target.value })}
+            onChange={(e) => { patch({ vosk_model_url: e.target.value }); setVoskState("idle"); setVoskMsg(""); }}
             placeholder={VOSK_DEFAULT}
             className="w-full rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs text-ink outline-none focus:border-accent"
           />
           <span className="mt-1 block text-[11px]">
             <span className="text-muted">Em uso: </span>
             <span className="font-mono text-ink-soft">{voskName(effVoskUrl)}</span>
-            <span className="text-muted"> {usingDefaultVosk ? "(padrão PT-BR)" : "(seu link)"}</span>
-          </span>
-          <span className="mt-1 block text-[11px] text-muted">
-            Offline, sem chave, aceita qualquer palavra. Vazio = usa o modelo padrão acima. Precisa de CORS
-            liberado (o teste avisa se falhar). ~32MB baixados ao carregar.
+            <span className="text-muted"> {usingDefaultVosk ? "(padrão)" : "(seu link)"}</span>
           </span>
         </label>
+        <div className="flex items-center gap-2">
+          {/* instalado & mesma URL → Desinstalar; mudou a URL → Reinstalar; senão → Baixar */}
+          {voskInstalledUrl && voskInstalledUrl === effVoskUrl ? (
+            <button
+              onClick={uninstallVosk}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-bg px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-red-500/10 hover:text-red-400"
+            >
+              <Trash2 size={13} /> Desinstalar
+            </button>
+          ) : (
+            <button
+              onClick={confirmVosk}
+              disabled={voskState === "loading"}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-bg px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-hover disabled:opacity-50"
+            >
+              {voskState === "loading" ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+              {voskInstalledUrl && voskInstalledUrl !== effVoskUrl ? "Reinstalar (link mudou)" : "Baixar modelo"}
+            </button>
+          )}
+          {voskInstalledUrl === effVoskUrl && <span className="flex items-center gap-1 text-[11px] text-green-400"><Check size={12} /> Instalado</span>}
+        </div>
+        {voskMsg && (
+          <p className={`text-[11px] ${voskState === "ok" ? "text-green-400" : voskState === "error" ? "text-red-400" : "text-muted"}`}>
+            {voskMsg}
+          </p>
+        )}
       </div>
 
       {/* Testar escuta */}
@@ -221,11 +365,12 @@ export default function AssistantVoicePanel({
             <span className="mb-1 block text-[11px] font-medium text-muted">Engine</span>
             <select
               value={engine}
-              onChange={(e) => setEngine(e.target.value as "porcupine" | "vosk")}
+              onChange={(e) => setEngine(e.target.value as "porcupine" | "vosk" | "whisper")}
               disabled={testing}
               className="rounded-lg border border-border bg-bg px-2 py-2 text-sm text-ink outline-none focus:border-accent disabled:opacity-50"
             >
               <option value="porcupine">Porcupine</option>
+              <option value="whisper">Whisper</option>
               <option value="vosk">Vosk</option>
             </select>
           </label>
@@ -270,8 +415,8 @@ export default function AssistantVoicePanel({
                 />
               </div>
             </div>
-            {/* o que está sendo entendido (Vosk transcreve; Porcupine só detecta a palavra) */}
-            {engine === "vosk" ? (
+            {/* o que está sendo entendido (Vosk/Whisper transcrevem; Porcupine só detecta) */}
+            {engine !== "porcupine" ? (
               <p className="text-xs text-ink-soft">
                 Entendido: <span className="font-medium text-ink">{heard || "—"}</span>
               </p>

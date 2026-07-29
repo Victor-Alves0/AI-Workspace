@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import shutil
+import tarfile
 import tempfile
 import uuid
 from pathlib import Path
@@ -14,6 +15,7 @@ from datetime import datetime
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
@@ -23,6 +25,7 @@ from . import __version__, audit_service, network_config
 from .app_config import ALLOW_SIGNUPS, get_setting, set_setting
 from .auth.deps import require_admin
 from .config import get_settings
+from .crypto import BACKUP_MAGIC, BACKUP_MAGIC_V2, backup_decryptor, backup_encryptor
 from .db import get_db
 from .models import User
 
@@ -186,10 +189,12 @@ async def update_check(admin: User = Depends(require_admin)):
 # --------------------------------------------------------------------------- #
 # Backup completo / migração de sistema (pg_dump / pg_restore)
 #
-# O sistema INTEIRO vive no Postgres (usuários, chats, segredos cifrados,
-# imagens geradas, vetores do mem0), então um dump do banco = backup completo.
-# Para restaurar em outra máquina, o .env precisa do MESMO APP_SECRET — os
-# segredos são cifrados com chave derivada dele.
+# Quase tudo vive no Postgres (usuários, chats, segredos cifrados, imagens
+# geradas, vetores do mem0). A exceção são os ARQUIVOS do Codespace, que vivem
+# em disco (volume codespace_data) — por isso o backup é um BUNDLE: pg_dump +
+# a árvore do Codespace, num tar cifrado (AIWBK2). Para restaurar em outra
+# máquina, o .env precisa do MESMO APP_SECRET (os segredos são cifrados com
+# chave derivada dele, e o bundle inteiro também).
 # --------------------------------------------------------------------------- #
 def _pg_url() -> str:
     return get_settings().sync_database_url
@@ -220,6 +225,77 @@ def _known_revisions() -> set[str]:
         return set()
 
 
+def _codespace_root() -> Path:
+    return Path(get_settings().codespace_data_dir)
+
+
+def _build_backup_bundle(dump_path: str, tar_path: str) -> None:
+    """Empacota o dump do banco + os arquivos do Codespace num tar (bloqueante —
+    roda em threadpool). `database.dump` na raiz; a árvore de arquivos do Codespace
+    (que vive em disco, fora do banco) sob `codespace/`."""
+    cs = _codespace_root()
+    with tarfile.open(tar_path, "w") as tf:
+        tf.add(dump_path, arcname="database.dump")
+        if cs.is_dir():
+            tf.add(str(cs), arcname="codespace")
+
+
+def _extract_db_dump(tar_path: str, dump_path: str) -> None:
+    """Extrai só o `database.dump` de dentro do bundle para `dump_path`."""
+    with tarfile.open(tar_path) as tf:
+        src = tf.extractfile("database.dump")
+        if src is None:
+            raise RuntimeError("bundle de backup sem database.dump")
+        with src, open(dump_path, "wb") as df:
+            shutil.copyfileobj(src, df)
+
+
+def _restore_codespace(tar_path: str) -> int:
+    """Restaura a árvore `codespace/` do bundle para o diretório de dados do
+    Codespace (sobrescreve arquivo a arquivo). Ignora links e qualquer caminho
+    que escape da raiz (proteção contra path traversal). Retorna nº de arquivos."""
+    root = _codespace_root().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    n = 0
+    with tarfile.open(tar_path) as tf:
+        for m in tf.getmembers():
+            if not m.name.startswith("codespace/"):
+                continue
+            rel = m.name[len("codespace/"):].lstrip("/")
+            if not rel:
+                continue
+            dest = (root / rel).resolve()
+            try:
+                dest.relative_to(root)  # dentro da raiz?
+            except ValueError:
+                continue  # traversal — ignora
+            if m.isdir():
+                dest.mkdir(parents=True, exist_ok=True)
+            elif m.isfile():
+                src = tf.extractfile(m)
+                if src is None:
+                    continue
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                # remove o destino antes de escrever: objetos do git são 0444
+                # (read-only), então abrir em "wb" por cima daria PermissionError.
+                # O unlink depende da permissão do DIRETÓRIO (temos), não do arquivo.
+                if dest.exists() or dest.is_symlink():
+                    try:
+                        dest.unlink()
+                    except OSError:
+                        pass
+                with src, open(dest, "wb") as df:
+                    shutil.copyfileobj(src, df)
+                if m.mode:  # preserva o modo original (git deixa os objetos read-only)
+                    try:
+                        os.chmod(dest, m.mode)
+                    except OSError:
+                        pass
+                n += 1
+            # symlinks/hardlinks: ignorados por segurança
+    return n
+
+
 async def _dump_alembic_rev(path: str) -> str | None:
     """Revisão do alembic gravada DENTRO do dump (sem restaurar nada): extrai só a
     tabela alembic_version como SQL e lê o valor do COPY."""
@@ -237,25 +313,53 @@ async def _dump_alembic_rev(path: str) -> str | None:
 
 @router.get("/backup")
 async def export_backup(admin: User = Depends(require_admin)):
-    """Baixa um backup completo do sistema (formato custom do pg_dump)."""
+    """Baixa um backup completo do sistema: bundle cifrado (AIWBK2) com o dump do
+    banco (pg_dump custom) + os arquivos do Codespace (que vivem em disco). O
+    pg_dump vai para um arquivo temporário, o bundle é montado num tar e então
+    cifrado em streaming para o download."""
     _require_pg_tools()
-    proc = await asyncio.create_subprocess_exec(
-        "pg_dump", "--format=custom", "--no-owner", "--no-privileges",
-        f"--dbname={_pg_url()}",
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-    )
+    dump_f = tempfile.NamedTemporaryFile(suffix=".dump", delete=False)
+    dump_path = dump_f.name
+    dump_f.close()
+    tar_f = tempfile.NamedTemporaryFile(suffix=".tar", delete=False)
+    tar_path = tar_f.name
+    tar_f.close()
+    try:
+        # pg_dump direto para arquivo (erros viram HTTP ANTES de começar o stream)
+        proc = await asyncio.create_subprocess_exec(
+            "pg_dump", "--format=custom", "--no-owner", "--no-privileges",
+            f"--file={dump_path}", f"--dbname={_pg_url()}",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, err = await proc.communicate()
+        if proc.returncode != 0:
+            logger.error("pg_dump falhou: %s", err.decode(errors="replace")[-2000:])
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "pg_dump falhou ao gerar o backup.")
+        # empacota dump + arquivos do Codespace (tarfile é bloqueante → threadpool)
+        await run_in_threadpool(_build_backup_bundle, dump_path, tar_path)
+    except BaseException:
+        for p in (dump_path, tar_path):
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+        raise
 
     async def stream():
-        assert proc.stdout is not None
-        while True:
-            chunk = await proc.stdout.read(256 * 1024)
-            if not chunk:
-                break
-            yield chunk
-        err = (await proc.stderr.read()).decode(errors="replace") if proc.stderr else ""
-        if await proc.wait() != 0:
-            logger.error("pg_dump falhou: %s", err[-2000:])
-            raise RuntimeError("pg_dump falhou")  # aborta o download (arquivo incompleto)
+        try:
+            # cifra o bundle em repouso (AES-CTR keyed pelo APP_SECRET); header primeiro
+            header, enc = backup_encryptor(BACKUP_MAGIC_V2)
+            yield header
+            with open(tar_path, "rb") as f:
+                while chunk := f.read(256 * 1024):
+                    yield enc.update(chunk)
+            yield enc.finalize()
+        finally:
+            for p in (dump_path, tar_path):
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
 
     filename = f"aiworkspace-{datetime.now():%Y%m%d-%H%M}.backup"
     return StreamingResponse(
@@ -278,13 +382,61 @@ async def import_backup(
     podem exigir novo login (os usuários passam a ser os do backup)."""
     _require_pg_tools()
     tmp = tempfile.NamedTemporaryFile(suffix=".backup", delete=False)
+    dec_path: str | None = None    # payload decifrado (pg_dump OU tar do bundle)
+    dump_path: str | None = None   # database.dump extraído do bundle (V2)
+    bundle_path: str | None = None  # tar do bundle, p/ restaurar o Codespace depois
     try:
         while chunk := await file.read(1024 * 1024):
             tmp.write(chunk)
         tmp.close()
 
-        # valida que é um dump do pg_dump (formato custom começa com "PGDMP")
+        # Detecta o formato pelo header:
+        #   AIWBK2 → bundle cifrado (pg_dump + arquivos do Codespace)
+        #   AIWBK1 → pg_dump cifrado (formato anterior)
+        #   nenhum → backup legado em texto claro (compat retroativa)
+        src_path = tmp.name
         with open(tmp.name, "rb") as f:
+            head = f.read(len(BACKUP_MAGIC))
+        is_v1 = head == BACKUP_MAGIC
+        is_v2 = head == BACKUP_MAGIC_V2
+        if is_v1 or is_v2:
+            dec = tempfile.NamedTemporaryFile(suffix=".dec", delete=False)
+            dec_path = dec.name
+            try:
+                with open(tmp.name, "rb") as f:
+                    f.seek(len(head))
+                    nonce = f.read(16)
+                    d = backup_decryptor(nonce)
+                    while chunk := f.read(1024 * 1024):
+                        dec.write(d.update(chunk))
+                    dec.write(d.finalize())
+                dec.close()
+            except Exception:  # noqa: BLE001 — APP_SECRET errado, arquivo corrompido…
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    "Não consegui decifrar o backup — o APP_SECRET desta instalação "
+                    "precisa ser o mesmo de quando o backup foi gerado.",
+                ) from None
+            if is_v2:
+                # bundle (tar): extrai o database.dump p/ restaurar; a árvore
+                # codespace/ só é aplicada DEPOIS do pg_restore ter dado certo.
+                bundle_path = dec_path
+                dmp = tempfile.NamedTemporaryFile(suffix=".dump", delete=False)
+                dump_path = dmp.name
+                dmp.close()
+                try:
+                    await run_in_threadpool(_extract_db_dump, bundle_path, dump_path)
+                except Exception:  # noqa: BLE001
+                    raise HTTPException(
+                        status.HTTP_400_BAD_REQUEST,
+                        "Bundle de backup inválido (não contém o dump do banco).",
+                    ) from None
+                src_path = dump_path
+            else:
+                src_path = dec_path
+
+        # valida que é um dump do pg_dump (formato custom começa com "PGDMP")
+        with open(src_path, "rb") as f:
             if f.read(5) != b"PGDMP":
                 raise HTTPException(
                     status.HTTP_400_BAD_REQUEST,
@@ -294,7 +446,7 @@ async def import_backup(
         # backup de uma versão MAIS NOVA? A revisão do alembic no dump precisa ser
         # conhecida desta instalação — senão o restore "funciona" e o próximo boot
         # quebra no `alembic upgrade head` (Can't locate revision). Barra ANTES.
-        dump_rev = await _dump_alembic_rev(tmp.name)
+        dump_rev = await _dump_alembic_rev(src_path)
         known = _known_revisions()
         if dump_rev and known and dump_rev not in known:
             raise HTTPException(
@@ -313,7 +465,7 @@ async def import_backup(
 
         proc = await asyncio.create_subprocess_exec(
             "pg_restore", "--clean", "--if-exists", "--no-owner", "--no-privileges",
-            f"--dbname={_pg_url()}", tmp.name,
+            f"--dbname={_pg_url()}", src_path,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
         _, stderr = await proc.communicate()
@@ -339,6 +491,17 @@ async def import_backup(
                 " ATENÇÃO: as migrações pós-restore falharam — rode `alembic upgrade head` "
                 "manualmente antes de usar o sistema."
             )
+
+        # bundle V2: restaura os arquivos do Codespace (só depois do banco ok, p/ não
+        # sobrescrever o disco se o pg_restore tivesse falhado). Best-effort.
+        cs_note = ""
+        if is_v2 and bundle_path:
+            try:
+                n = await run_in_threadpool(_restore_codespace, bundle_path)
+                logger.info("pós-restore: %d arquivo(s) do Codespace restaurado(s)", n)
+            except Exception:  # noqa: BLE001 - não pode bloquear o restore do banco
+                logger.exception("pós-restore: falha ao restaurar arquivos do Codespace")
+                cs_note = " ATENÇÃO: os arquivos do Codespace não foram restaurados (veja os logs)."
 
         # a sessão do WhatsApp (Evolution) vive FORA deste backup — no banco
         # "evolution" (separado) e no volume evolution_instances (arquivos do
@@ -371,10 +534,13 @@ async def import_backup(
             "ok": True,
             "note": "Backup restaurado e migrações aplicadas. Se os usuários mudaram, faça "
                     "login novamente. Recomendado: reiniciar o server (docker compose "
-                    "restart server)." + migrate_note,
+                    "restart server)." + migrate_note + cs_note,
         }
     finally:
-        try:
-            os.unlink(tmp.name)
-        except OSError:
-            pass
+        # dec_path == bundle_path no V2 (o mesmo tar), então não repete
+        for p in (tmp.name, dec_path, dump_path):
+            if p:
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
