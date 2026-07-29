@@ -8,7 +8,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Ear, Loader2, Check, Mic, Download, Trash2 } from "lucide-react";
-import { startWakeWord, loadVoskModel, loadWhisperModel, type WakeHandle } from "@/lib/wakeword";
+import {
+  startWakeWord, loadVoskModel, loadWhisperModel, loadOwwModels,
+  OWW_MELSPEC_DEFAULT, OWW_EMBEDDING_DEFAULT, type WakeHandle,
+} from "@/lib/wakeword";
 import { api } from "@/lib/api";
 import type { WakeCreds } from "@/lib/types";
 
@@ -44,6 +47,9 @@ export default function AssistantVoicePanel() {
         picovoice_key: next.picovoice_key ?? "",
         ppn_url: next.ppn_url ?? "",
         vosk_model_url: next.vosk_model_url ?? "",
+        oww_model_url: next.oww_model_url ?? "",
+        oww_melspec_url: next.oww_melspec_url ?? "",
+        oww_embedding_url: next.oww_embedding_url ?? "",
       }).catch(() => {});
     }, 600);
   };
@@ -75,12 +81,13 @@ export default function AssistantVoicePanel() {
   };
 
   // --- Testar escuta ---
-  const [engine, setEngine] = useState<"porcupine" | "vosk" | "whisper">("porcupine");
+  const [engine, setEngine] = useState<"porcupine" | "vosk" | "whisper" | "openwakeword">("porcupine");
   const [word, setWord] = useState("Jarvis");
   const [state, setState] = useState<TestState>("idle");
   const [msg, setMsg] = useState("");
   const [level, setLevel] = useState(0);   // nível do mic 0..1 (medidor de captação)
-  const [heard, setHeard] = useState("");  // transcript ao vivo (Vosk)
+  const [heard, setHeard] = useState("");  // transcript ao vivo (Vosk/Whisper)
+  const [score, setScore] = useState(0);   // score ao vivo (OpenWakeWord)
   const handleRef = useRef<WakeHandle | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const meterRef = useRef<{ stop: () => void } | null>(null);
@@ -132,6 +139,26 @@ export default function AssistantVoicePanel() {
     setWhInstalled(false);
     setWhState("idle");
     setWhMsg("Modelo Whisper removido do cache do navegador.");
+  };
+
+  // --- Confirmar modelos OpenWakeWord (baixa/valida os 3 .onnx, sem mic) ---
+  const owwMelUrl = (cfg.oww_melspec_url || "").trim() || OWW_MELSPEC_DEFAULT;
+  const owwEmbUrl = (cfg.oww_embedding_url || "").trim() || OWW_EMBEDDING_DEFAULT;
+  const owwModelUrl = (cfg.oww_model_url || "").trim();
+  const [owwState, setOwwState] = useState<"idle" | "loading" | "ok" | "error">("idle");
+  const [owwMsg, setOwwMsg] = useState("");
+  const confirmOww = async () => {
+    if (!owwModelUrl) { setOwwState("error"); setOwwMsg("Informe a URL do seu modelo (.onnx) primeiro."); return; }
+    setOwwState("loading");
+    setOwwMsg("Baixando/validando os modelos ONNX (melspectrograma + embedding + o seu)…");
+    try {
+      await loadOwwModels(owwModelUrl, owwMelUrl, owwEmbUrl);
+      setOwwState("ok");
+      setOwwMsg("✓ Modelos OpenWakeWord carregados. Use o teste abaixo para calibrar a sensibilidade.");
+    } catch (e) {
+      setOwwState("error");
+      setOwwMsg(`Falha ao carregar: ${e instanceof Error ? e.message : String(e)} — verifique as URLs/CORS/formato .onnx.`);
+    }
   };
 
   // Medidor de nível INDEPENDENTE do engine: prova que o mic está captando (mesmo
@@ -189,9 +216,12 @@ export default function AssistantVoicePanel() {
         ? `Carregando o modelo "${voskName(effVoskUrl)}"…`
         : engine === "whisper"
         ? "Carregando o Whisper… (baixa ~150MB na 1ª vez)"
+        : engine === "openwakeword"
+        ? "Carregando os modelos ONNX (baixa na 1ª vez)…"
         : "Preparando… (o navegador vai pedir o microfone)",
     );
     setHeard("");
+    setScore(0);
     void startMeter();
     try {
       const handle = await startWakeWord(
@@ -201,20 +231,26 @@ export default function AssistantVoicePanel() {
           accessKey: cfg.picovoice_key,
           porcupineKeyword: engine === "porcupine" ? word : undefined,
           voskModelUrl: effVoskUrl,
+          owwModelUrl,
+          owwMelspecUrl: owwMelUrl,
+          owwEmbeddingUrl: owwEmbUrl,
           onReady: () => {
             setState("listening");
             setMsg(
-              engine === "vosk"
+              engine === "openwakeword"
+                ? "Escutando… diga a palavra do seu modelo (veja o score subir)."
+                : engine === "vosk"
                 ? `Modelo "${voskName(effVoskUrl)}" pronto. Escutando… diga "${word}".`
                 : `Escutando… diga "${word}".`,
             );
           },
           onError: (m) => { setState("error"); setMsg(m); },
           onPartial: (t) => setHeard(t),
+          onScore: (s) => setScore(s),
         },
         () => {
           setState("heard");
-          setMsg(`✓ Ouvi "${word}"! A wake word está funcionando.`);
+          setMsg(engine === "openwakeword" ? "✓ Detectado! O modelo disparou acima do limiar." : `✓ Ouvi "${word}"! A wake word está funcionando.`);
           void stopTest();
         },
       );
@@ -355,6 +391,66 @@ export default function AssistantVoicePanel() {
         )}
       </div>
 
+      {/* OpenWakeWord (modelo treinado pelo usuário, ONNX on-device) */}
+      <div className="space-y-3 rounded-xl border border-border bg-surface2/40 p-4">
+        <div className="flex items-center gap-2 text-sm font-medium text-ink">
+          <Ear size={15} className="text-muted" /> OpenWakeWord
+        </div>
+        <p className="text-[11px] text-muted">
+          Palavra/nome <strong>próprio</strong>, com um modelo que você treina (Colab do openWakeWord) e hospeda.
+          Roda on-device (ONNX). Precisa das 3 URLs com <span className="text-ink-soft">CORS liberado</span>.
+        </p>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-muted">URL do seu modelo (.onnx)</span>
+          <input
+            value={cfg.oww_model_url ?? ""}
+            onChange={(e) => { patch({ oww_model_url: e.target.value }); setOwwState("idle"); setOwwMsg(""); }}
+            placeholder="https://…/hey_max.onnx"
+            className="w-full rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs text-ink outline-none focus:border-accent"
+          />
+        </label>
+        <details className="text-[11px]">
+          <summary className="cursor-pointer text-muted hover:text-ink-soft">Modelos compartilhados (avançado)</summary>
+          <div className="mt-2 space-y-2">
+            <label className="block">
+              <span className="mb-1 block font-medium text-muted">Melspectrograma (.onnx)</span>
+              <input
+                value={cfg.oww_melspec_url ?? ""}
+                onChange={(e) => { patch({ oww_melspec_url: e.target.value }); setOwwState("idle"); setOwwMsg(""); }}
+                placeholder={OWW_MELSPEC_DEFAULT}
+                className="w-full rounded-lg border border-border bg-bg px-3 py-1.5 font-mono text-ink outline-none focus:border-accent"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block font-medium text-muted">Embedding (.onnx)</span>
+              <input
+                value={cfg.oww_embedding_url ?? ""}
+                onChange={(e) => { patch({ oww_embedding_url: e.target.value }); setOwwState("idle"); setOwwMsg(""); }}
+                placeholder={OWW_EMBEDDING_DEFAULT}
+                className="w-full rounded-lg border border-border bg-bg px-3 py-1.5 font-mono text-ink outline-none focus:border-accent"
+              />
+            </label>
+            <p className="text-muted">Vazio = usa os padrões públicos acima.</p>
+          </div>
+        </details>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={confirmOww}
+            disabled={owwState === "loading"}
+            className="flex items-center gap-1.5 rounded-lg border border-border bg-bg px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-hover disabled:opacity-50"
+          >
+            {owwState === "loading" ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+            Confirmar modelos
+          </button>
+          {owwState === "ok" && <span className="flex items-center gap-1 text-[11px] text-green-400"><Check size={12} /> Carregado</span>}
+        </div>
+        {owwMsg && (
+          <p className={`text-[11px] ${owwState === "ok" ? "text-green-400" : owwState === "error" ? "text-red-400" : "text-muted"}`}>
+            {owwMsg}
+          </p>
+        )}
+      </div>
+
       {/* Testar escuta */}
       <div className="space-y-3 rounded-xl border border-accent/30 bg-accent/5 p-4">
         <div className="flex items-center gap-2 text-sm font-medium text-ink">
@@ -365,13 +461,14 @@ export default function AssistantVoicePanel() {
             <span className="mb-1 block text-[11px] font-medium text-muted">Engine</span>
             <select
               value={engine}
-              onChange={(e) => setEngine(e.target.value as "porcupine" | "vosk" | "whisper")}
+              onChange={(e) => setEngine(e.target.value as "porcupine" | "vosk" | "whisper" | "openwakeword")}
               disabled={testing}
               className="rounded-lg border border-border bg-bg px-2 py-2 text-sm text-ink outline-none focus:border-accent disabled:opacity-50"
             >
               <option value="porcupine">Porcupine</option>
               <option value="whisper">Whisper</option>
               <option value="vosk">Vosk</option>
+              <option value="openwakeword">OpenWakeWord</option>
             </select>
           </label>
           <label className="block">
@@ -415,8 +512,22 @@ export default function AssistantVoicePanel() {
                 />
               </div>
             </div>
-            {/* o que está sendo entendido (Vosk/Whisper transcrevem; Porcupine só detecta) */}
-            {engine !== "porcupine" ? (
+            {/* OpenWakeWord: barra de score ao vivo (para calibrar o limiar) */}
+            {engine === "openwakeword" ? (
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="shrink-0 text-[11px] text-muted">Score</span>
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface2">
+                    <div
+                      className={`h-full rounded-full transition-[width] duration-75 ${score >= 0.5 ? "bg-green-400" : "bg-accent"}`}
+                      style={{ width: `${Math.round(score * 100)}%` }}
+                    />
+                  </div>
+                  <span className="w-10 shrink-0 text-right font-mono text-[11px] text-ink-soft">{score.toFixed(2)}</span>
+                </div>
+                <p className="text-[11px] text-muted">Diga sua palavra e veja o pico. Ajuste o limiar no modelo um pouco abaixo do pico.</p>
+              </div>
+            ) : engine !== "porcupine" ? (
               <p className="text-xs text-ink-soft">
                 Entendido: <span className="font-medium text-ink">{heard || "—"}</span>
               </p>

@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth.deps import require_approved
 from .db import get_db
-from .models import Skill, SkillProposal, User
+from .models import Chat, Skill, SkillProposal, User
 
 router = APIRouter(prefix="/skills", tags=["skills"])
 
@@ -145,10 +145,12 @@ async def delete_skill(
 class ProposalOut(BaseModel):
     id: uuid.UUID
     chat_id: uuid.UUID | None
+    chat_title: str | None = None   # título da conversa de origem (para "de onde veio")
     name: str
     slug: str
     description: str
     content: str
+    rationale: str = ""             # por que a IA sugeriu (o gatilho na conversa)
     tags: list[str]
     source: str
     created_at: datetime
@@ -166,12 +168,30 @@ async def _owned_proposal(db: AsyncSession, pid: uuid.UUID, user: User) -> Skill
 
 @router.get("/proposals", response_model=list[ProposalOut])
 async def list_proposals(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
-    rows = await db.scalars(
+    rows = list(await db.scalars(
         select(SkillProposal)
         .where(SkillProposal.user_id == user.id, SkillProposal.status == "pending")
         .order_by(SkillProposal.created_at.desc())
-    )
-    return list(rows)
+    ))
+    # títulos das conversas de origem (para "de qual conversa veio")
+    cids = [p.chat_id for p in rows if p.chat_id]
+    titles: dict[uuid.UUID, str] = {}
+    if cids:
+        titles = dict(
+            (cid, title)
+            for cid, title in (
+                await db.execute(select(Chat.id, Chat.title).where(Chat.id.in_(cids)))
+            ).all()
+        )
+    return [
+        ProposalOut(
+            id=p.id, chat_id=p.chat_id, chat_title=titles.get(p.chat_id) if p.chat_id else None,
+            name=p.name, slug=p.slug, description=p.description, content=p.content,
+            rationale=p.rationale or "", tags=list(p.tags or []), source=p.source,
+            created_at=p.created_at,
+        )
+        for p in rows
+    ]
 
 
 async def _unique_slug(db: AsyncSession, user: User, base: str) -> str:

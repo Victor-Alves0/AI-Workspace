@@ -367,6 +367,7 @@ async def model_detail(
     }
 
     name = key
+    base_model = ""   # id COMPLETO do modelo subjacente (ex.: deepseek/deepseek-chat-v3)
     provider = "openrouter"
     vendor = "api"
     tot = {"messages": 0, "tokens": 0, "prompt": 0, "completion": 0,
@@ -383,6 +384,8 @@ async def model_detail(
             continue
 
         name = (r.model_name or r.model or name).strip() or name
+        if r.model:
+            base_model = r.model
         provider = "ollama" if (r.model or "").startswith("ollama/") else (r.provider or "openrouter")
         vendor = "local" if provider == "ollama" else ((r.model or "").split("/")[0] or "api")
 
@@ -436,6 +439,7 @@ async def model_detail(
     return {
         "key": key,
         "model": name,
+        "base_model": base_model,
         "provider": provider,
         "vendor": "local" if provider == "ollama" else vendor,
         "range": range_key,

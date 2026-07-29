@@ -1470,8 +1470,12 @@ export default function ChatPage() {
   async function startWake() {
     const lc = (curCustom?.filter_config?.listen ?? {}) as ListenConfig;
     if (!lc.wake_enabled) { alert("Ative a wake word nas Configurações do modelo → Voz."); return; }
-    const engine = lc.wake_engine === "vosk" ? "vosk" : lc.wake_engine === "whisper" ? "whisper" : "porcupine";
-    // Whisper/Vosk não têm chave; só o Porcupine precisa das creds (cifradas no servidor).
+    const engine =
+      lc.wake_engine === "vosk" ? "vosk"
+      : lc.wake_engine === "whisper" ? "whisper"
+      : lc.wake_engine === "openwakeword" ? "openwakeword"
+      : "porcupine";
+    // Whisper não tem chave; os demais buscam creds (Porcupine=key, Vosk/OWW=URL) do servidor.
     let wake: WakeCreds = {};
     if (engine !== "whisper") {
       try { wake = (await api.get<WakeCreds>("/voice/wake")) ?? {}; } catch { /* segue com vazio → valida abaixo */ }
@@ -1486,7 +1490,11 @@ export default function ChatPage() {
     if (engine === "porcupine" && custom && !wake.ppn_url) {
       alert("Palavra 'Personalizada' selecionada, mas nenhum .ppn cadastrado em Conexões → Assistente de voz."); return;
     }
-    if (engine !== "porcupine" && !(lc.call_name || "").trim()) {
+    if (engine === "openwakeword" && !(wake.oww_model_url || "").trim()) {
+      alert("Cadastre a URL do seu modelo OpenWakeWord (.onnx) em Conexões → Assistente."); return;
+    }
+    // Vosk/Whisper casam a 'Palavra de ativação'; OpenWakeWord/Porcupine não precisam dela.
+    if ((engine === "vosk" || engine === "whisper") && !(lc.call_name || "").trim()) {
       alert("Defina a 'Palavra de ativação' nas Configurações do modelo → Assistente."); return;
     }
     setWakeStatus("starting");
@@ -1497,6 +1505,10 @@ export default function ChatPage() {
         accessKey: wake.picovoice_key,
         porcupineKeyword: kw,
         voskModelUrl: wake.vosk_model_url,
+        owwModelUrl: wake.oww_model_url,
+        owwMelspecUrl: wake.oww_melspec_url,
+        owwEmbeddingUrl: wake.oww_embedding_url,
+        owwThreshold: lc.oww_threshold,
         onError: () => setWakeStatus("error"),
       }, () => { void onWakeTriggered(); });
       wakeRef.current = { handle, on: true };

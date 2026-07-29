@@ -30,7 +30,7 @@ type Overview = {
 
 type ModelDay = { date: string; label: string; tokens: number; cost: number; messages: number };
 type ModelDetail = {
-  key: string; model: string; provider: string; vendor: string;
+  key: string; model: string; base_model?: string; provider: string; vendor: string;
   range: RangeKey; granularity: "day" | "week" | "month";
   per_day: ModelDay[];
   by_tool: { tool: string; tokens: number; calls: number }[];
@@ -341,7 +341,6 @@ function ActivityCard({ act }: { act: Activity }) {
 
 /* ---------------------------------- créditos -------------------------------- */
 function CreditsCard({ credits }: { credits: Credits | null }) {
-  const usedPct = credits && credits.total > 0 ? Math.min(100, (credits.usage / credits.total) * 100) : 0;
   return (
     <div className="rounded-2xl border border-border bg-surface p-4">
       <div className="mb-3 flex items-center gap-2">
@@ -351,12 +350,20 @@ function CreditsCard({ credits }: { credits: Credits | null }) {
       </div>
       {credits ? (
         <>
-          <p className="text-2xl font-bold text-ink">{fmtUSD(credits.remaining)}</p>
-          <p className="text-xs text-muted">restante de {fmtUSD(credits.total)}</p>
-          <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-surface2">
-            <div className="h-full rounded-full bg-accent" style={{ width: `${usedPct}%` }} />
+          {/* saldo atual em destaque — é o que o usuário realmente quer saber */}
+          <p className="text-3xl font-bold tracking-tight text-ink">{fmtUSD(credits.remaining)}</p>
+          <p className="text-xs text-muted">Saldo disponível na sua conta</p>
+          {/* histórico da conta (vitalício), claramente rotulado */}
+          <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border pt-3">
+            <div>
+              <p className="text-[11px] text-muted">Já adicionado</p>
+              <p className="text-sm font-semibold text-ink">{fmtUSD(credits.total)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] text-muted">Já gasto</p>
+              <p className="text-sm font-semibold text-ink">{fmtUSD(credits.usage)}</p>
+            </div>
           </div>
-          <p className="mt-1.5 text-[11px] text-muted">{fmtUSD(credits.usage)} usados</p>
         </>
       ) : (
         <p className="text-sm text-muted">Configure sua chave do OpenRouter em Configurações → Conexões para ver o saldo.</p>
@@ -446,6 +453,9 @@ function ModelDetail({ detail, loading }: { detail: ModelDetail | null; loading:
         <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-surface2 text-accent-hover"><Cpu size={17} /></span>
         <div className="min-w-0">
           <p className="truncate text-base font-semibold text-ink">{detail.model}</p>
+          {detail.base_model && detail.base_model !== detail.model && (
+            <p className="truncate font-mono text-[11px] text-muted" title={detail.base_model}>{detail.base_model}</p>
+          )}
           <p className="text-xs text-muted">
             <span className={`rounded px-1.5 py-0.5 ${detail.provider === "ollama" ? "bg-emerald-400/15 text-emerald-300" : "bg-surface2 text-muted"}`}>
               {detail.provider === "ollama" ? "local" : detail.vendor}

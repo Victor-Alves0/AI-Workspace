@@ -429,10 +429,12 @@ export interface Skill {
 export interface SkillSuggestion {
   id: string;
   chat_id: string | null;
+  chat_title?: string | null;   // conversa de origem ("de qual conversa veio")
   name: string;
   slug: string;
   description: string;
   content: string;
+  rationale?: string;           // por que a IA sugeriu (o gatilho na conversa)
   tags: string[];
   source: string;
   created_at: string;
@@ -481,9 +483,11 @@ export interface ListenConfig {
   // wake word ("hey nome") — escolhas POR-MODELO; as credenciais (chave/URL) são
   // do usuário e vivem em profile.wake (WakeCreds), não aqui.
   wake_enabled?: boolean;
-  wake_engine?: "porcupine" | "vosk" | "whisper";
+  wake_engine?: "porcupine" | "vosk" | "whisper" | "openwakeword";
   // Porcupine: nome da palavra embutida ("Jarvis"…) ou "__custom__" (usa o .ppn do usuário)
   porcupine_keyword?: string;
+  // OpenWakeWord: limiar de disparo do score (0..1; padrão 0.5)
+  oww_threshold?: number;
 }
 
 // Credenciais da wake word — DO USUÁRIO (profile.wake), como chave de API.
@@ -492,6 +496,11 @@ export interface WakeCreds {
   picovoice_key?: string;   // AccessKey grátis da Picovoice (usada no WASM do navegador)
   ppn_url?: string;         // .ppn custom (para "hey <nome>" no Porcupine)
   vosk_model_url?: string;  // URL do modelo Vosk (.tar.gz) — offline, sem chave
+  // OpenWakeWord (on-device, ONNX): modelo treinado pelo usuário + os 2 modelos
+  // compartilhados (melspectrograma + embedding). URLs precisam de CORS liberado.
+  oww_model_url?: string;
+  oww_melspec_url?: string;
+  oww_embedding_url?: string;
 }
 
 // resposta de POST /voice/session (chat que o modo voz usa)

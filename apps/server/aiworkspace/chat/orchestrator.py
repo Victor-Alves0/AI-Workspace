@@ -861,6 +861,7 @@ class _GatheredContext:
     kb_bases: list[str] = field(default_factory=list)
     kb_mode: str = "auto"
     kb_k: int = 6
+    kb_ks: dict[str, int] = field(default_factory=dict)  # k POR base (override do kb_k)
     kb_on: bool = False
     # bases separadas por MODO (override por base; cai no kb_mode como padrão)
     kb_bases_auto: list[str] = field(default_factory=list)
@@ -908,6 +909,8 @@ async def _gather_context(
     g.kb_bases = [str(b) for b in (kb.get("bases") or []) if b]
     g.kb_mode = (kb.get("mode") or "auto").lower()
     g.kb_k = int(kb.get("k") or 6)
+    # k POR base (override do padrão): {base_id: trechos}
+    g.kb_ks = {str(bk): int(v) for bk, v in (kb.get("ks") or {}).items() if v}
     g.kb_on = bool(g.kb_bases)
     # MODO por base (override); sem override, cai no g.kb_mode (padrão do modelo)
     kb_modes = {str(k): str(v).lower() for k, v in (kb.get("modes") or {}).items()}
@@ -917,7 +920,8 @@ async def _gather_context(
         yield {"type": "knowledge", "status": "start", "query": user_text[:120]}
         try:
             with tracing.span("knowledge:auto", kind="rag", bases=len(g.kb_bases_auto), k=g.kb_k):
-                auto_kres = await kb_retrieval.search(user_id, g.kb_bases_auto, user_text, g.kb_k)
+                # cada base traz o SEU número de trechos (g.kb_ks), com g.kb_k de padrão
+                auto_kres = await kb_retrieval.search_multi(user_id, g.kb_bases_auto, user_text, g.kb_ks, g.kb_k)
         except Exception as exc:  # noqa: BLE001
             logger.warning("busca na base de conhecimento falhou: %s", exc)
             auto_kres = []
@@ -1352,6 +1356,7 @@ class _ToolDispatcher:
     kb_tool_on: bool
     kb_bases: list[str]
     kb_k: int
+    kb_ks: dict[str, int]  # k POR base (override do kb_k) no modo ferramenta
     user_text: str
     brain_on: bool
     brain_write: bool
@@ -1461,16 +1466,22 @@ class _ToolDispatcher:
         if not self.kb_tool_on:
             self.result = {"error": "base de conhecimento não está ativa neste modelo"}
             return
-        # o MODELO decide quanto quer ver (o k do modelo é só o padrão); teto de 20
-        # para um `limit` alucinado não estourar o contexto do turno.
-        try:
-            k = int(args.get("limit") or self.kb_k)
-        except (TypeError, ValueError):
-            k = self.kb_k
-        k = max(1, min(k, 20))
+        # o MODELO pode forçar um `limit` (mesmo p/ todas as bases, teto 20); sem ele,
+        # cada base usa o SEU k (self.kb_ks), com self.kb_k de padrão.
+        limit_arg = args.get("limit")
         yield {"type": "knowledge", "status": "start", "query": query[:120]}
         try:
-            kres = await kb_retrieval.search(self.user_id, self.kb_bases, query, k)
+            if limit_arg:
+                k = max(1, min(int(limit_arg), 20))
+                kres = await kb_retrieval.search(self.user_id, self.kb_bases, query, k)
+            else:
+                kres = await kb_retrieval.search_multi(
+                    self.user_id, self.kb_bases, query, self.kb_ks, self.kb_k
+                )
+        except (TypeError, ValueError):
+            kres = await kb_retrieval.search_multi(
+                self.user_id, self.kb_bases, query, self.kb_ks, self.kb_k
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning("search_knowledge falhou: %s", exc)
             kres = []
@@ -1810,7 +1821,7 @@ async def run_turn(
     ref_chat_block = g.ref_chat_block
     auto_knowledge_event, ref_knowledge_event = g.auto_knowledge_event, g.ref_knowledge_event
     # o search_knowledge (modo "tool") busca SÓ nas bases marcadas como ferramenta
-    kb_bases, kb_k = g.kb_bases_tool, g.kb_k
+    kb_bases, kb_k, kb_ks = g.kb_bases_tool, g.kb_k, g.kb_ks
 
     # 2. montagem das tools anunciadas + seção de ferramentas do system prompt
     skills = skills or []
@@ -1837,7 +1848,7 @@ async def run_turn(
         skills=skills, skills_by_slug=skills_by_slug,
         genimage_on=genimage_on, genimage=genimage,
         input_images=[a["url"] for a in (_md.attachments or []) if a.get("type") == "image" and a.get("url")],
-        kb_tool_on=kb_tool_on, kb_bases=kb_bases, kb_k=kb_k, user_text=user_text,
+        kb_tool_on=kb_tool_on, kb_bases=kb_bases, kb_k=kb_k, kb_ks=kb_ks, user_text=user_text,
         brain_on=asm.brain_on, brain_write=asm.brain_write,
         brain_ids=[str(b) for b in _brain_cfg.get("brains") or []],
         brain_names=[str(n) for n in _brain_cfg.get("names") or []],

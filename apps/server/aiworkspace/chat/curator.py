@@ -48,7 +48,7 @@ _SYSTEM = (
     "Read the recent transcript and extract ONLY what is genuinely worth persisting. "
     "Reply with STRICT JSON (no prose, no code fences) of the shape: "
     '{"memories":[{"text":"...","scope":"global|model|chat"}],'
-    '"skills":[{"name":"...","description":"...","content":"...","tags":["..."]}]}\n'
+    '"skills":[{"name":"...","description":"...","content":"...","rationale":"...","tags":["..."]}]}\n'
     "Rules:\n"
     "- memories: durable facts/preferences ABOUT THE USER worth remembering across chats "
     "(their conventions, projects, preferences, recurring context). One short fact each. "
@@ -56,8 +56,9 @@ _SYSTEM = (
     "- skills: propose a skill ONLY when the conversation shows a REUSABLE workflow worth "
     "codifying — a multi-step tool workflow that worked, a correction the user made that "
     "should become a rule, or recovery from a non-obvious error. 'content' is a concise "
-    "how-to in markdown (the steps). Be conservative: NO skill for trivial one-step tasks. "
-    "Empty list if nothing is worth it.\n"
+    "how-to in markdown (the steps). 'rationale' is ONE sentence saying WHY this conversation "
+    "justifies the skill (the trigger — e.g. 'the user corrected the deploy steps twice'). "
+    "Be conservative: NO skill for trivial one-step tasks. Empty list if nothing is worth it.\n"
     "- Write in the user's language. Output ONLY the JSON object."
 )
 
@@ -125,6 +126,7 @@ def _parse_review(raw: str) -> dict[str, list]:
                 "name": str(s["name"]).strip()[:255],
                 "description": str(s.get("description") or "").strip()[:2000],
                 "content": str(s["content"]).strip()[:200_000],
+                "rationale": str(s.get("rationale") or "").strip()[:1000],
                 "tags": tags,
             })
     return {"memories": mems[:8], "skills": skills[:4]}
@@ -254,6 +256,7 @@ async def _review(
                     slug=_slugify(sk["name"]),
                     description=sk["description"],
                     content=sk["content"],
+                    rationale=sk.get("rationale", ""),
                     tags=sk["tags"],
                     source="curator",
                     status="pending",

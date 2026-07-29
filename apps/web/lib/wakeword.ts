@@ -12,7 +12,7 @@
 // Ambos processam o áudio LOCALMENTE — nada é enviado a servidor. O chamador
 // (chat/page) pausa a escuta enquanto o modo voz usa o mic e retoma depois.
 
-export type WakeEngine = "porcupine" | "vosk" | "whisper";
+export type WakeEngine = "porcupine" | "vosk" | "whisper" | "openwakeword";
 
 export interface WakeOptions {
   engine: WakeEngine;
@@ -28,11 +28,18 @@ export interface WakeOptions {
   porcupineModelPath?: string;
   /** Vosk: URL do modelo (.tar.gz/.zip) */
   voskModelUrl?: string;
+  /** OpenWakeWord: URL do modelo treinado (.onnx) + os 2 compartilhados + limiar */
+  owwModelUrl?: string;
+  owwMelspecUrl?: string;
+  owwEmbeddingUrl?: string;
+  owwThreshold?: number;
   onError?: (msg: string) => void;
   onReady?: () => void;
   /** Vosk: transcript reconhecido ao vivo (parcial/final), casando a palavra ou não.
    *  Serve para o "Testar escuta" mostrar o que foi entendido. Porcupine não transcreve. */
   onPartial?: (text: string) => void;
+  /** OpenWakeWord: score do modelo (0..1) a cada passo — para o teste mostrar/calibrar. */
+  onScore?: (score: number) => void;
 }
 
 export interface WakeHandle {
@@ -51,7 +58,24 @@ const normKw = (s: string) => s.replace(/[^a-z0-9]/gi, "").toLowerCase();
 export async function startWakeWord(opts: WakeOptions, onWake: () => void): Promise<WakeHandle> {
   if (opts.engine === "vosk") return startVosk(opts, onWake);
   if (opts.engine === "whisper") return startWhisper(opts, onWake);
+  if (opts.engine === "openwakeword") return startOpenWakeWord(opts, onWake);
   return startPorcupine(opts, onWake);
+}
+
+// URLs padrão dos 2 modelos COMPARTILHADOS do OpenWakeWord (melspectrograma +
+// embedding). Precisam de CORS liberado; o usuário pode trocar por um espelho
+// próprio se estas falharem. O modelo de wake em si é treinado pelo usuário.
+export const OWW_MELSPEC_DEFAULT =
+  "https://huggingface.co/onnx-community/openwakeword/resolve/main/melspectrogram.onnx";
+export const OWW_EMBEDDING_DEFAULT =
+  "https://huggingface.co/onnx-community/openwakeword/resolve/main/embedding_model.onnx";
+
+// Pré-carrega/valida os 3 modelos ONNX do OpenWakeWord (sem mic). Usado pelo
+// "Confirmar modelo" e reaproveitado pela escuta. Lança em erro (URL/CORS/formato).
+export async function loadOwwModels(
+  modelUrl: string, melspecUrl?: string, embeddingUrl?: string,
+): Promise<void> {
+  await getOwwSessions(modelUrl, melspecUrl || OWW_MELSPEC_DEFAULT, embeddingUrl || OWW_EMBEDDING_DEFAULT);
 }
 
 // Baixa e carrega um modelo Vosk só para CONFIRMAR que a URL funciona (CORS,
@@ -311,6 +335,190 @@ async function startWhisper(opts: WakeOptions, onWake: () => void): Promise<Wake
     try { ctx?.close(); } catch { /* noop */ }
     stream?.getTracks().forEach((t) => t.stop());
     node = null; ctx = null; stream = null; chunks = []; total = 0; speaking = false;
+  };
+
+  await startMic();
+
+  return {
+    pause: async () => { if (paused) return; paused = true; stopMic(); },
+    resume: async () => { if (!paused) return; paused = false; try { await startMic(); } catch (e) { opts.onError?.(String(e)); } },
+    stop: async () => { paused = true; stopMic(); },
+  };
+}
+
+// --------------------------------------------------------------------------- //
+// OpenWakeWord (onnxruntime-web) — wake word TREINADA pelo usuário, on-device.
+// Pipeline de 3 modelos ONNX: áudio → melspectrograma → embedding → modelo de
+// wake (score 0..1). Os 2 primeiros são compartilhados (padrão OWW_*_DEFAULT); o
+// 3º é o .onnx que o usuário treina (Colab do openWakeWord) e hospeda.
+//
+// Estratégia ROBUSTA: em vez de bookkeeping incremental de frames (frágil e não
+// verificável), a cada 80 ms recomputamos o pipeline sobre uma janela DESLIZANTE
+// de ~2 s e pegamos os últimos frames — o campo receptivo do modelo é ~2 s (16
+// embeddings × passo 8 × 76 mel-frames). Custa um pouco mais de CPU, mas é
+// simples e correto (STFT é local; pegar os últimos frames evita a borda inicial).
+// Constantes do openWakeWord: janela 76 mel-frames, passo 8, 16 embeddings.
+// --------------------------------------------------------------------------- //
+const OWW_MEL_WINDOW = 76;   // mel-frames por embedding
+const OWW_MEL_STEP = 8;      // passo entre janelas de embedding
+const OWW_N_EMB = 16;        // embeddings que o modelo de wake espera
+const OWW_MEL_NEEDED = OWW_MEL_WINDOW + (OWW_N_EMB - 1) * OWW_MEL_STEP; // 196
+const OWW_SR = 16000;
+const OWW_AUDIO_WINDOW = OWW_SR * 2; // ~2 s de áudio no buffer deslizante
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type OrtSession = any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _ort: any = null;
+const _owwCache = new Map<string, Promise<OrtSession>>();
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// versão pinada no package.json — usada no caminho do wasm do CDN
+const ORT_VERSION = "1.14.0";
+
+async function getOrt(): Promise<any> {
+  if (!_ort) {
+    _ort = await import("onnxruntime-web");
+    // wasm servido pelo CDN (evita ter que emitir os .wasm no build do Next). Sem
+    // CSP no app, o fetch cross-origin é permitido. Usa a versão detectada se houver,
+    // senão a pinada. Single-thread (sem SharedArrayBuffer/COOP-COEP no app).
+    try {
+      const v = _ort.env?.versions?.common || _ort.version || ORT_VERSION;
+      _ort.env.wasm.wasmPaths = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${v}/dist/`;
+      _ort.env.wasm.numThreads = 1;
+    } catch { /* usa o default do ort */ }
+  }
+  return _ort;
+}
+
+function _session(url: string): Promise<OrtSession> {
+  let p = _owwCache.get(url);
+  if (!p) {
+    p = (async () => {
+      const ort = await getOrt();
+      const buf = await fetch(url).then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status} ao baixar ${url}`);
+        return r.arrayBuffer();
+      });
+      return ort.InferenceSession.create(new Uint8Array(buf));
+    })();
+    _owwCache.set(url, p);
+  }
+  return p;
+}
+
+async function getOwwSessions(modelUrl: string, melspecUrl: string, embeddingUrl: string) {
+  if (!modelUrl) throw new Error("Informe a URL do seu modelo OpenWakeWord (.onnx).");
+  const [mel, emb, wake] = await Promise.all([
+    _session(melspecUrl), _session(embeddingUrl), _session(modelUrl),
+  ]);
+  return { mel, emb, wake };
+}
+
+async function startOpenWakeWord(opts: WakeOptions, onWake: () => void): Promise<WakeHandle> {
+  const ort = await getOrt();
+  const { mel, emb, wake } = await getOwwSessions(
+    opts.owwModelUrl || "",
+    opts.owwMelspecUrl || OWW_MELSPEC_DEFAULT,
+    opts.owwEmbeddingUrl || OWW_EMBEDDING_DEFAULT,
+  );
+  const threshold = typeof opts.owwThreshold === "number" ? opts.owwThreshold : 0.5;
+  const melIn = mel.inputNames[0], melOut = mel.outputNames[0];
+  const embIn = emb.inputNames[0], embOut = emb.outputNames[0];
+  const wakeIn = wake.inputNames[0], wakeOut = wake.outputNames[0];
+  opts.onReady?.();
+
+  let paused = false;
+  let ctx: AudioContext | null = null;
+  let stream: MediaStream | null = null;
+  let node: ScriptProcessorNode | null = null;
+  const ring = new Float32Array(OWW_AUDIO_WINDOW); // buffer deslizante (mono, -1..1)
+  let filled = 0;         // quantas amostras válidas já entraram (satura no tamanho)
+  let sinceRun = 0;       // amostras acumuladas desde a última inferência
+  let busy = false;
+  let cooldown = 0;       // ignora disparos por um tempo após acionar (anti-repetição)
+
+  const pushAudio = (data: Float32Array) => {
+    // desloca o ring e anexa as novas amostras no fim
+    if (data.length >= ring.length) {
+      ring.set(data.subarray(data.length - ring.length));
+    } else {
+      ring.copyWithin(0, data.length);
+      ring.set(data, ring.length - data.length);
+    }
+    filled = Math.min(ring.length, filled + data.length);
+  };
+
+  const infer = async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      // 1) melspectrograma sobre a janela de áudio (escala p/ int16, como o OWW)
+      const audio = new Float32Array(ring.length);
+      for (let i = 0; i < ring.length; i++) audio[i] = ring[i] * 32767;
+      const melRes = await mel.run({ [melIn]: new ort.Tensor("float32", audio, [1, audio.length]) });
+      const mt = melRes[melOut];                 // [1,1,F,32]
+      const F = mt.dims[mt.dims.length - 2] as number;
+      const B = mt.dims[mt.dims.length - 1] as number; // 32
+      const md = mt.data as Float32Array;
+      if (F < OWW_MEL_NEEDED) return;            // ainda sem 2 s de áudio
+      // pega os ÚLTIMOS OWW_MEL_NEEDED frames e aplica a normalização do OWW (/10+2)
+      const start = F - OWW_MEL_NEEDED;
+      // 2) monta as OWW_N_EMB janelas [76,32] → batch [16,76,32,1]
+      const batch = new Float32Array(OWW_N_EMB * OWW_MEL_WINDOW * B);
+      let o = 0;
+      for (let w = 0; w < OWW_N_EMB; w++) {
+        const base = (start + w * OWW_MEL_STEP) * B;
+        for (let k = 0; k < OWW_MEL_WINDOW * B; k++) batch[o++] = md[base + k] / 10 + 2;
+      }
+      const embRes = await emb.run({ [embIn]: new ort.Tensor("float32", batch, [OWW_N_EMB, OWW_MEL_WINDOW, B, 1]) });
+      const ed = embRes[embOut].data as Float32Array; // [16,1,1,96] → 16×96
+      const D = ed.length / OWW_N_EMB;                 // 96
+      // 3) modelo de wake sobre [1,16,96]
+      const wakeRes = await wake.run({ [wakeIn]: new ort.Tensor("float32", ed, [1, OWW_N_EMB, D]) });
+      const score = (wakeRes[wakeOut].data as Float32Array)[0] ?? 0;
+      opts.onScore?.(score);
+      if (!paused && cooldown <= 0 && score >= threshold) {
+        cooldown = Math.ceil(OWW_SR * 1.5); // ~1,5 s de silêncio antes de re-disparar
+        onWake();
+      }
+    } catch (e) {
+      opts.onError?.(String(e));
+    } finally {
+      busy = false;
+    }
+  };
+
+  const onFrame = (e: AudioProcessingEvent) => {
+    if (paused) return;
+    const data = e.inputBuffer.getChannelData(0);
+    pushAudio(new Float32Array(data)); // cópia: o inputBuffer é reusado
+    if (cooldown > 0) cooldown -= data.length;
+    sinceRun += data.length;
+    if (filled >= OWW_AUDIO_WINDOW && sinceRun >= 1280) { // a cada ~80 ms
+      sinceRun = 0;
+      void infer();
+    }
+  };
+
+  const startMic = async () => {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    ctx = new AC({ sampleRate: OWW_SR });
+    const src = ctx.createMediaStreamSource(stream);
+    // bufferSize precisa ser potência de 2; a cadência de ~80 ms vem do acumulador
+    // `sinceRun` (>=1280 amostras), não do tamanho do bloco.
+    node = ctx.createScriptProcessor(2048, 1, 1);
+    node.onaudioprocess = onFrame;
+    src.connect(node);
+    node.connect(ctx.destination); // dispara o processamento (saída muda)
+  };
+
+  const stopMic = () => {
+    try { node?.disconnect(); } catch { /* noop */ }
+    try { ctx?.close(); } catch { /* noop */ }
+    stream?.getTracks().forEach((t) => t.stop());
+    node = null; ctx = null; stream = null; filled = 0; sinceRun = 0; cooldown = 0;
   };
 
   await startMic();

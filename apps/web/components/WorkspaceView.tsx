@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, BarChart3, BookOpen, Box, Brain, Check, Code2, Copy, Download, FileText,
-  LayoutGrid, MoreHorizontal, Pencil, Plug, Plus, Search, Settings, Sparkles,
+  LayoutGrid, MessageSquare, MoreHorizontal, Pencil, Plug, Plus, Search, Settings, Sparkles,
   Terminal, Trash2, Upload, Waypoints, Wrench, X,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
@@ -99,28 +99,49 @@ function LibraryCard({ icon, name, desc, count, live, onClick }: {
   );
 }
 
-/* casca de uma seção: voltar + título + ações */
-function SectionShell({ title, count, onBack, actions, children }: {
-  title: string; count?: number; onBack: () => void; actions?: ReactNode; children: ReactNode;
+/* casca de uma seção — MESMA moldura do hub (max-w-6xl centrado): botão "voltar"
+   em pill, título e um slot de filtro/ações no topo direito (como o hub). */
+function SectionShell({ title, count, onBack, actions, filter, children }: {
+  title: string; count?: number; onBack: () => void; actions?: ReactNode; filter?: ReactNode; children: ReactNode;
 }) {
   return (
-    <div className="px-4 py-5 md:px-8 md:py-6">
-      {/* breadcrumb: Espaço de Trabalho › seção atual */}
-      <nav className="mb-4 flex items-center gap-1.5 text-sm">
-        <button onClick={onBack} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-muted transition-colors hover:bg-hover hover:text-ink">
-          <ArrowLeft size={16} /> Espaço de Trabalho
-        </button>
-        <span className="text-muted">/</span>
-        <span className="font-medium text-ink">{title}</span>
-      </nav>
-      {/* mobile: as ações quebram de linha inteiras (sem amassar os botões) */}
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2.5">
+    <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
+      <button
+        onClick={onBack}
+        className="mb-4 flex items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink"
+      >
+        <ArrowLeft size={16} /> Espaço de Trabalho
+      </button>
+      {/* mobile: filtro/ações quebram de linha inteiras (sem amassar os botões) */}
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-x-3 gap-y-2.5">
         <h1 className="text-2xl font-bold text-ink">
           {title}{count !== undefined && <span className="ml-2 font-semibold text-muted">{count}</span>}
         </h1>
-        {actions && <div className="flex flex-wrap items-center gap-2 text-sm">{actions}</div>}
+        {(filter || actions) && (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            {filter}
+            {actions}
+          </div>
+        )}
       </div>
       {children}
+    </div>
+  );
+}
+
+/* filtro "pill" — mesmo do hub (Search embutido, arredondado, compacto) */
+function FilterPill({ value, onChange, placeholder }: {
+  value: string; onChange: (v: string) => void; placeholder: string;
+}) {
+  return (
+    <div className="relative">
+      <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-56 rounded-full border border-border bg-surface py-1.5 pl-9 pr-3 text-sm text-ink outline-none transition-[border-color] focus:border-accent/50 placeholder:text-muted"
+      />
     </div>
   );
 }
@@ -160,7 +181,90 @@ function ComingSoon({ icon, title, desc }: { icon: ReactNode; title: string; des
   );
 }
 
-const CARD_ROW = "group relative flex items-center gap-3 rounded-2xl border border-border bg-surface p-3.5 transition-all duration-150 hover:border-accent/40 hover:bg-hover";
+const CARD_ROW = "group relative flex items-center gap-3.5 rounded-xl border border-border bg-surface px-4 py-4 transition-all duration-150 hover:-translate-y-0.5 hover:border-accent/40 hover:bg-hover";
+
+/* Modal das Sugestões da IA (Curator): lista as propostas com o PORQUÊ (rationale),
+   a conversa de ORIGEM (abre no chat) e o conteúdo proposto — aprova ou descarta. */
+function SuggestionsModal({ proposals, onApprove, onDismiss, onOpenChat, onClose }: {
+  proposals: SkillSuggestion[];
+  onApprove: (id: string) => void;
+  onDismiss: (id: string) => void;
+  onOpenChat?: (chatId: string) => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-black/50 p-4 md:p-8" onClick={onClose}>
+      <div className="w-full max-w-2xl rounded-2xl border border-border bg-bg shadow-menu" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 border-b border-border px-5 py-4">
+          <Sparkles size={18} className="text-accent-hover" />
+          <h2 className="text-base font-semibold text-ink">Sugestões da IA</h2>
+          {proposals.length > 0 && <span className="rounded-full bg-accent/20 px-2 py-0.5 text-xs text-accent-hover">{proposals.length}</span>}
+          <button onClick={onClose} className="ml-auto rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink"><X size={18} /></button>
+        </div>
+        <div className="max-h-[70vh] space-y-3 overflow-y-auto p-5">
+          <p className="text-xs text-muted">O Aprendizado Proativo notou estes padrões nas suas conversas e propôs skills. Reveja o motivo e a origem antes de aprovar.</p>
+          {proposals.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-12 text-center">
+              <Sparkles size={26} className="text-muted" />
+              <p className="text-sm text-muted">Nenhuma sugestão no momento.</p>
+              <p className="max-w-xs text-xs text-muted">Quando a IA identificar um fluxo reutilizável nas conversas, ele aparece aqui para sua aprovação.</p>
+            </div>
+          ) : proposals.map((p) => (
+            <div key={p.id} className="rounded-xl border border-border bg-surface p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-semibold text-ink">{p.name}</p>
+                <span className="font-mono text-[11px] text-muted">${p.slug}</span>
+                {(p.tags ?? []).slice(0, 4).map((t) => (
+                  <span key={t} className="rounded-full bg-surface2 px-2 py-0.5 text-[10px] text-muted">{t}</span>
+                ))}
+              </div>
+              {p.description && <p className="mt-1 text-xs text-muted">{p.description}</p>}
+
+              {/* por que a IA sugeriu */}
+              {p.rationale && (
+                <div className="mt-3 rounded-lg border border-accent/25 bg-accent/5 px-3 py-2">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-accent-hover">Por que sugeriu</p>
+                  <p className="mt-0.5 text-xs text-ink-soft">{p.rationale}</p>
+                </div>
+              )}
+
+              {/* conteúdo proposto (a "cara" da skill) */}
+              <details className="mt-3 text-xs">
+                <summary className="cursor-pointer text-muted hover:text-ink-soft">Ver conteúdo proposto</summary>
+                <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-bg p-3 font-mono text-[11px] leading-relaxed text-ink-soft">{p.content || "(vazio)"}</pre>
+              </details>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {p.chat_id && (
+                  <button
+                    onClick={() => onOpenChat?.(p.chat_id as string)}
+                    className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-muted transition-colors hover:text-ink"
+                    title="Abrir a conversa que originou esta sugestão"
+                  >
+                    <MessageSquare size={13} /> {p.chat_title ? `De: ${p.chat_title}` : "Ver conversa de origem"}
+                  </button>
+                )}
+                <div className="ml-auto flex items-center gap-2">
+                  <button onClick={() => onDismiss(p.id)} className="flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs text-muted transition-colors hover:text-ink">
+                    <X size={13} /> Descartar
+                  </button>
+                  <button onClick={() => onApprove(p.id)} className="flex items-center gap-1 rounded-full bg-accent px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-accent-hover">
+                    <Check size={13} /> Aprovar
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function WorkspaceView({
   onClose,
@@ -206,6 +310,7 @@ export default function WorkspaceView({
   const [editingModel, setEditingModel] = useState<ModelConfig | null | undefined>(initialEditModel ?? undefined);
   const [editingPrompt, setEditingPrompt] = useState<Prompt | null | undefined>(undefined);
   const [editingSkill, setEditingSkill] = useState<Skill | null | undefined>(undefined);
+  const [suggestOpen, setSuggestOpen] = useState(false); // modal de Sugestões da IA (Skills)
 
   const loadModels = () =>
     api
@@ -449,7 +554,7 @@ export default function WorkspaceView({
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
               <h1 className="text-2xl font-bold text-ink">Espaço de Trabalho</h1>
-              <p className="mt-1 text-sm text-muted">Tudo que personaliza sua IA, num só lugar.</p>
+              <p className="mt-1 text-sm text-muted">Tudo que você precisa, num só lugar.</p>
             </div>
             <div className="flex items-center gap-2">
               <div className="relative">
@@ -517,6 +622,7 @@ export default function WorkspaceView({
           title="Modelos"
           count={models.length}
           onBack={backHome}
+          filter={<FilterPill value={q} onChange={setQ} placeholder="Filtrar modelos…" />}
           actions={
             <>
               <button className={BTN_GHOST} onClick={() => alert("Importar: em breve")}><Upload size={14} className="mr-1.5 inline" />Importar</button>
@@ -525,24 +631,20 @@ export default function WorkspaceView({
             </>
           }
         >
-          <SearchBar value={q} onChange={setQ} placeholder="Pesquisar modelos" />
-          <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             {filteredModels.map((m) => (
               <div key={m.id} className={CARD_ROW}>
                 {m.avatar_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={m.avatar_url} alt="" className="h-10 w-10 rounded-full object-cover" />
+                  <img src={m.avatar_url} alt="" className="h-11 w-11 shrink-0 rounded-full object-cover" />
                 ) : (
-                  <span className="flex h-10 w-10 items-center justify-center rounded-full bg-surface2 text-ink">
-                    <Box size={17} />
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-surface2 text-ink">
+                    <Box size={18} />
                   </span>
                 )}
                 <button onClick={() => setEditingModel(m)} className="min-w-0 flex-1 text-left">
-                  <p className="flex items-center gap-2 truncate text-sm font-medium text-ink">
-                    <span className="truncate">{m.name}</span>
-                    <span className="shrink-0 font-mono text-xs text-muted">{m.base_model}</span>
-                  </p>
-                  <p className="truncate text-xs text-muted">{m.description || "Sem descrição"}</p>
+                  <p className="truncate text-sm font-semibold text-ink">{m.name}</p>
+                  <p className="truncate text-xs text-muted">{m.description || m.base_model}</p>
                 </button>
                 <div className="relative">
                   <button ref={menu === m.id ? menuBtnRef : undefined} onClick={() => setMenu(menu === m.id ? null : m.id)} className={`rounded p-1 text-muted hover:text-ink ${menu === m.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
@@ -703,43 +805,16 @@ export default function WorkspaceView({
           actions={
             <>
               <button className={BTN_GHOST} onClick={exportSkills}><Download size={14} className="mr-1.5 inline" />Exportar</button>
+              <button className={`${BTN_GHOST} relative`} onClick={() => setSuggestOpen(true)}>
+                <Sparkles size={14} className="mr-1.5 inline" />Sugestões
+                {proposals.length > 0 && (
+                  <span className="ml-1.5 rounded-full bg-accent/20 px-1.5 py-0.5 text-[10px] font-semibold text-accent-hover">{proposals.length}</span>
+                )}
+              </button>
               <button className={BTN_PRIMARY} onClick={() => setEditingSkill(null)}><Plus size={15} />Nova Skill</button>
             </>
           }
         >
-          {proposals.length > 0 && (
-            <div className="mb-4 rounded-2xl border border-accent/30 bg-accent/5 p-3">
-              <p className="mb-2 flex items-center gap-1.5 px-1 text-sm font-medium text-ink">
-                <Sparkles size={15} className="text-accent-hover" />
-                Sugeridas pela IA
-                <span className="rounded-full bg-accent/20 px-2 py-0.5 text-[11px] text-accent-hover">{proposals.length}</span>
-              </p>
-              <p className="mb-2.5 px-1 text-xs text-muted">O Aprendizado Proativo notou estes padrões nas suas conversas. Aprove para virar uma skill.</p>
-              <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
-                {proposals.map((p) => (
-                  <div key={p.id} className="flex flex-col gap-2 rounded-xl border border-border bg-surface p-3">
-                    <div className="min-w-0">
-                      <p className="flex items-center gap-2 text-sm font-medium text-ink">
-                        <span className="truncate">{p.name}</span>
-                        {(p.tags ?? []).slice(0, 3).map((tag) => (
-                          <span key={tag} className="shrink-0 rounded-full bg-surface2 px-2 py-0.5 text-[10px] font-normal text-muted">{tag}</span>
-                        ))}
-                      </p>
-                      <p className="mt-0.5 line-clamp-2 text-xs text-muted">{p.description || "Sem descrição"}</p>
-                    </div>
-                    <div className="flex items-center justify-end gap-2">
-                      <button onClick={() => dismissProposal(p.id)} className="flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs text-muted transition-colors hover:text-ink">
-                        <X size={13} /> Descartar
-                      </button>
-                      <button onClick={() => approveProposal(p.id)} className="flex items-center gap-1 rounded-full bg-accent px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-accent-hover">
-                        <Check size={13} /> Aprovar
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
           <SearchBar value={q} onChange={setQ} placeholder="Pesquisar skills" />
           <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
             {filteredSkills.map((s) => (
@@ -815,6 +890,15 @@ export default function WorkspaceView({
       )}
       {valvesTool && (
         <ValvesModal tool={valvesTool} onClose={() => setValvesTool(null)} onSaved={loadTools} />
+      )}
+      {suggestOpen && (
+        <SuggestionsModal
+          proposals={proposals}
+          onApprove={approveProposal}
+          onDismiss={dismissProposal}
+          onOpenChat={(cid) => { onOpenChat?.(cid); onClose(); }}
+          onClose={() => setSuggestOpen(false)}
+        />
       )}
     </div>
   );

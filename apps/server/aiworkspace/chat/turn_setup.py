@@ -448,7 +448,7 @@ def _resolve_knowledge(chat: Chat | None, model_config: ModelConfig | None, user
     chat_cfg = (chat.knowledge_config or {}) if chat is not None else {}
     merged = {**prof, **mc, **chat_cfg}
     if merged.get("enabled") is False:
-        return {"bases": [], "mode": "auto", "modes": {}, "k": 6}
+        return {"bases": [], "mode": "auto", "modes": {}, "ks": {}, "k": 6}
     bases: list[str] = []
     for src in (prof, mc, chat_cfg):
         for b in src.get("bases") or []:
@@ -460,9 +460,17 @@ def _resolve_knowledge(chat: Chat | None, model_config: ModelConfig | None, user
         for k, v in (src.get("modes") or {}).items():
             if str(v).lower() in ("auto", "tool"):
                 modes[str(k)] = str(v).lower()
+    # override de K (trechos por busca) por base; a camada mais específica vence
+    ks: dict[str, int] = {}
+    for src in (prof, mc, chat_cfg):
+        for bid, v in (src.get("ks") or {}).items():
+            try:
+                ks[str(bid)] = max(1, min(20, int(v)))
+            except (TypeError, ValueError):
+                continue
     return {
         "bases": bases, "mode": (merged.get("mode") or "auto"),
-        "modes": modes, "k": int(merged.get("k") or 6),
+        "modes": modes, "ks": ks, "k": int(merged.get("k") or 6),
     }
 
 

@@ -591,7 +591,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       { key: "web", icon: <Globe size={22} />, name: "Web", desc: "Acesso a internet" },
                       { key: "ollama", icon: <SiOllama size={22} />, name: "Ollama", desc: "Utilize modelos locais" },
                       { key: "voice", icon: <AudioLines size={22} />, name: "Voz Local", desc: "Kokoro / clonagem de voz" },
-                      { key: "assistant-voice", icon: <Ear size={22} />, name: "Assistente", desc: "Detecção de voz (Porcupine / Whisper / Vosk)" },
+                      { key: "assistant-voice", icon: <Ear size={22} />, name: "Assistente", desc: "Detecção de voz (Porcupine / Whisper / Vosk / OpenWakeWord)" },
                       { key: "elevenlabs", icon: <Mic size={22} />, name: "ElevenLabs", desc: "Voz premium + áudio" },
                     ]}
                     onOpen={setConnView}

@@ -323,8 +323,9 @@ const MEM_CFG_DEFAULT: Required<MemoryCfg> = {
 };
 
 // Base de Conhecimento por-modelo (capabilities.knowledge). bases vazio = desligado.
-// `mode` = padrão; `modes` = override POR base (auto|tool). k = trechos (global).
-type KnowledgeCfg = { bases?: string[]; mode?: "auto" | "tool"; modes?: Record<string, "auto" | "tool">; k?: number };
+// `mode` = padrão; `modes` = override POR base (auto|tool). `k` = trechos padrão;
+// `ks` = trechos POR base (override do k).
+type KnowledgeCfg = { bases?: string[]; mode?: "auto" | "tool"; modes?: Record<string, "auto" | "tool">; k?: number; ks?: Record<string, number> };
 
 // Cérebro por-modelo (capabilities.brain). brains vazio = desligado.
 type BrainCfg = { brains?: string[]; write?: boolean; k?: number };
@@ -713,9 +714,12 @@ export default function ModelEditor({
   const kbNameOf = (id: string) => kbBases.find((b) => b.id === id)?.name ?? id;
   const kbAttached = kb.bases ?? [];
   const kbModeOf = (id: string): "auto" | "tool" => (kb.modes?.[id] ?? kb.mode ?? "auto");
+  const kbKOf = (id: string): number => kb.ks?.[id] ?? kb.k ?? 6;
   const setKbBasesSel = (ids: string[]) => setKb({ ...kb, bases: ids });
   const setKbModeOf = (id: string, mode: "auto" | "tool") =>
     setKb({ ...kb, modes: { ...(kb.modes ?? {}), [id]: mode } });
+  const setKbKOf = (id: string, k: number) =>
+    setKb({ ...kb, ks: { ...(kb.ks ?? {}), [id]: Math.max(1, Math.min(20, k || 6)) } });
 
   async function save() {
     setErr(null);
@@ -744,12 +748,17 @@ export default function ModelEditor({
     if (mem) capabilities.memory = mem;
     // base de conhecimento por-modelo: só grava quando há base(s) acoplada(s)
     if (kb.bases && kb.bases.length > 0) {
-      // `modes` só guarda overrides das bases ainda acopladas (não vaza base removida)
+      // `modes`/`ks` só guardam overrides das bases ainda acopladas (não vaza base removida)
       const modes: Record<string, "auto" | "tool"> = {};
-      for (const id of kb.bases) if (kb.modes?.[id]) modes[id] = kb.modes[id];
+      const ks: Record<string, number> = {};
+      for (const id of kb.bases) {
+        if (kb.modes?.[id]) modes[id] = kb.modes[id];
+        if (kb.ks?.[id]) ks[id] = Math.max(1, Math.min(20, Number(kb.ks[id]) || 6));
+      }
       capabilities.knowledge = {
         bases: kb.bases, mode: kb.mode || "auto", k: Number(kb.k) || 6,
         ...(Object.keys(modes).length ? { modes } : {}),
+        ...(Object.keys(ks).length ? { ks } : {}),
       };
     }
     // cérebro por-modelo: só grava quando há cérebro(s) acoplado(s)
@@ -794,8 +803,13 @@ export default function ModelEditor({
         follow_up_secs: Math.max(2, Math.min(30, Number(lc.follow_up_secs) || 8)),
         // wake word — só as escolhas do modelo; chaves/URL ficam cifradas no servidor (/voice/wake)
         wake_enabled: !!lc.wake_enabled,
-        wake_engine: lc.wake_engine === "vosk" ? "vosk" : lc.wake_engine === "whisper" ? "whisper" : "porcupine",
+        wake_engine:
+          lc.wake_engine === "vosk" ? "vosk"
+          : lc.wake_engine === "whisper" ? "whisper"
+          : lc.wake_engine === "openwakeword" ? "openwakeword"
+          : "porcupine",
         porcupine_keyword: String(lc.porcupine_keyword ?? "Jarvis").slice(0, 120),
+        oww_threshold: Math.max(0.05, Math.min(0.95, Number(lc.oww_threshold) || 0.5)),
       };
     }
 
@@ -1087,11 +1101,11 @@ export default function ModelEditor({
                       <div>
                         <span className="mb-1 block text-xs font-medium text-muted">Provedor</span>
                         <div className="flex rounded-lg border border-border bg-surface2 p-0.5">
-                          {([["porcupine", "Porcupine"], ["whisper", "Whisper"], ["vosk", "Vosk"]] as [string, string][]).map(([val, lbl]) => (
+                          {([["porcupine", "Porcupine"], ["whisper", "Whisper"], ["vosk", "Vosk"], ["openwakeword", "OpenWakeWord"]] as [string, string][]).map(([val, lbl]) => (
                             <button
                               key={val}
                               onClick={() => setListenCfg({ wake_engine: val })}
-                              className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-colors ${(listenCfg.wake_engine ?? "porcupine") === val ? "bg-accent text-white" : "text-ink-soft hover:bg-hover"}`}
+                              className={`flex-1 rounded-md py-1.5 text-[11px] font-medium transition-colors ${(listenCfg.wake_engine ?? "porcupine") === val ? "bg-accent text-white" : "text-ink-soft hover:bg-hover"}`}
                             >
                               {lbl}
                             </button>
@@ -1115,6 +1129,23 @@ export default function ModelEditor({
                         </label>
                       ) : (listenCfg.wake_engine ?? "porcupine") === "whisper" ? (
                         <p className="text-[11px] text-muted">Reconhece a <strong>Palavra de ativação</strong> acima — inclusive nomes (&quot;akeno&quot;). On-device, sem chave; o modelo (~150MB) baixa na 1ª vez e fica em cache. Confirme/baixe em Conexões → Assistente de voz.</p>
+                      ) : (listenCfg.wake_engine ?? "porcupine") === "openwakeword" ? (
+                        <>
+                          <p className="text-[11px] text-muted">Modelo que <strong>você treina</strong> (Colab do openWakeWord) para uma palavra/nome próprio, rodando on-device (ONNX). Cadastre a URL do seu <span className="text-ink-soft">.onnx</span> em Conexões → Assistente. Não usa a &quot;Palavra de ativação&quot; acima.</p>
+                          <label className="block">
+                            <span className="mb-1 block text-xs font-medium text-muted">Sensibilidade (limiar {(listenCfg.oww_threshold ?? 0.5).toFixed(2)})</span>
+                            <input
+                              type="range"
+                              min={0.05}
+                              max={0.95}
+                              step={0.05}
+                              value={listenCfg.oww_threshold ?? 0.5}
+                              onChange={(e) => setListenCfg({ oww_threshold: Number(e.target.value) })}
+                              className="w-full accent-accent"
+                            />
+                            <span className="mt-1 block text-[11px] text-muted">Menor = dispara mais fácil (mais falsos positivos); maior = mais exigente. Calibre no teste em Conexões.</span>
+                          </label>
+                        </>
                       ) : (
                         <p className="text-[11px] text-muted">O Vosk reconhece a <strong>Palavra de ativação</strong> acima. Offline, sem chave — ruim com nomes; para nomes prefira Whisper. URL do modelo nas Conexões (ou o padrão).</p>
                       )}
@@ -1458,7 +1489,7 @@ export default function ModelEditor({
                   manageIcon={<BookOpen size={13} />}
                   items={kbAttached}
                   labelOf={kbNameOf}
-                  badgeOf={(id) => (kbModeOf(id) === "tool" ? "Ferramenta" : "Auto")}
+                  badgeOf={(id) => `${kbModeOf(id) === "tool" ? "Ferramenta" : "Auto"} · ${kbKOf(id)} trechos`}
                   leadingOf={() => <BookOpen size={13} className="shrink-0 text-accent-hover" />}
                   hasConfig={() => true}
                   onConfig={(id) => setKbCfgBase(id)}
@@ -1467,19 +1498,8 @@ export default function ModelEditor({
                   searchPlaceholder="Buscar bases acopladas…"
                   searchFrom={2}
                   empty="Nenhuma base acoplada. Clique em Gerenciar para acoplar."
-                  hint="Bases acopladas a este modelo (consultadas nas conversas). A engrenagem de cada base define o MODO dela — Automático (injeta + cita) ou Ferramenta (a IA busca com search_knowledge). Crie bases em Espaço → Conhecimento."
+                  hint="Bases acopladas a este modelo (consultadas nas conversas). A engrenagem de cada base define o MODO (Automático/Ferramenta) e os TRECHOS por busca dela. Crie bases em Espaço → Conhecimento."
                 />
-                {kbAttached.length > 0 && (
-                  <label className="flex items-center gap-2 text-xs text-muted">
-                    Trechos por busca
-                    <input
-                      type="number" min={1} max={20} value={kb.k ?? 6}
-                      onChange={(e) => setKb({ ...kb, k: Math.max(1, Math.min(20, Number(e.target.value) || 6)) })}
-                      className="w-16 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-right text-sm text-ink outline-none focus:border-accent"
-                    />
-                    <InfoHint text="Quantos trechos relevantes cada busca traz (vale para todas as bases)." />
-                  </label>
-                )}
               </div>
             )}
           </div>
@@ -1904,7 +1924,8 @@ export default function ModelEditor({
         />
       )}
       {kbCfgBase && (
-        <CfgModal title={`Modo — ${kbNameOf(kbCfgBase)}`} onClose={() => setKbCfgBase(null)}>
+        <CfgModal title={`Configurar — ${kbNameOf(kbCfgBase)}`} onClose={() => setKbCfgBase(null)}>
+          <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted">Modo</p>
           <p className="mb-3 text-xs text-muted">Como esta base é consultada nas conversas deste modelo.</p>
           <div className="space-y-2">
             {([
@@ -1915,7 +1936,7 @@ export default function ModelEditor({
               return (
                 <button
                   key={val}
-                  onClick={() => { setKbModeOf(kbCfgBase, val); setKbCfgBase(null); }}
+                  onClick={() => setKbModeOf(kbCfgBase, val)}
                   className={`flex w-full items-start gap-2 rounded-xl border px-3 py-2.5 text-left transition-colors ${on ? "border-accent/50 bg-accent/10" : "border-border hover:bg-hover"}`}
                 >
                   <span className={`mt-0.5 shrink-0 ${on ? "text-accent-hover" : "text-transparent"}`}><Check size={15} /></span>
@@ -1926,6 +1947,20 @@ export default function ModelEditor({
                 </button>
               );
             })}
+          </div>
+          {/* Trechos por busca — POR base (cada uma tem o seu valor) */}
+          <div className="mt-5 border-t border-border pt-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-ink">Trechos por busca</p>
+                <p className="text-[11px] text-muted">Quantos trechos relevantes desta base cada consulta traz.</p>
+              </div>
+              <input
+                type="number" min={1} max={20} value={kbKOf(kbCfgBase)}
+                onChange={(e) => setKbKOf(kbCfgBase, Number(e.target.value))}
+                className="w-16 shrink-0 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-right text-sm text-ink outline-none focus:border-accent"
+              />
+            </div>
           </div>
         </CfgModal>
       )}

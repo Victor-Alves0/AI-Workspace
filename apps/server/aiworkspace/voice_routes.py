@@ -232,22 +232,26 @@ class WakeConfigIn(BaseModel):
     picovoice_key: str = Field(default="", max_length=400)
     ppn_url: str = Field(default="", max_length=600)
     vosk_model_url: str = Field(default="", max_length=600)
+    # OpenWakeWord: modelo treinado do usuário (.onnx) + os 2 compartilhados
+    oww_model_url: str = Field(default="", max_length=600)
+    oww_melspec_url: str = Field(default="", max_length=600)
+    oww_embedding_url: str = Field(default="", max_length=600)
 
 
 @router.get("/wake")
 async def get_wake(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
     raw = await get_secret(db, user.id, WAKE_CONFIG_KEY)
-    if not raw:
-        return {"picovoice_key": "", "ppn_url": "", "vosk_model_url": ""}
-    try:
-        data = json.loads(raw)
-    except ValueError:
-        data = {}
-    return {
-        "picovoice_key": str(data.get("picovoice_key") or ""),
-        "ppn_url": str(data.get("ppn_url") or ""),
-        "vosk_model_url": str(data.get("vosk_model_url") or ""),
-    }
+    data: dict = {}
+    if raw:
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            data = {}
+    keys = (
+        "picovoice_key", "ppn_url", "vosk_model_url",
+        "oww_model_url", "oww_melspec_url", "oww_embedding_url",
+    )
+    return {k: str(data.get(k) or "") for k in keys}
 
 
 @router.put("/wake")

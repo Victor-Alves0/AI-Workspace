@@ -51,6 +51,32 @@ def _uuids(ids: list[str]) -> list[uuid.UUID]:
     return out
 
 
+async def _embed_query(query: str):
+    """Embed da consulta → literal pgvector, ou None (consulta vazia / erro)."""
+    q = (query or "").strip()
+    if not q:
+        return None
+    try:
+        vec = await run_in_threadpool(embeddings.embed_query, q)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("knowledge embed_query falhou: %s", exc)
+        return None
+    return embeddings.to_pgvector(vec)
+
+
+def _row_to_hit(r) -> dict:
+    dist = float(r["dist"]) if r["dist"] is not None else 1.0
+    return {
+        "chunk_id": str(r["chunk_id"]),
+        "doc_id": str(r["doc_id"]),
+        "filename": r["filename"] or "documento",
+        "mime": r["mime"] or "",
+        "ordinal": int(r["ordinal"]),
+        "text": r["text"] or "",
+        "score": round(max(0.0, 1.0 - dist), 4),
+    }
+
+
 async def search(
     user_id, base_ids: list[str], query: str, k: int = 6,
     doc_ids: list[str] | None = None,
@@ -70,12 +96,9 @@ async def search(
         uid = user_id if isinstance(user_id, uuid.UUID) else uuid.UUID(str(user_id))
     except (ValueError, TypeError):
         return []
-    try:
-        vec = await run_in_threadpool(embeddings.embed_query, q)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("knowledge embed_query falhou: %s", exc)
+    lit = await _embed_query(q)
+    if lit is None:
         return []
-    lit = embeddings.to_pgvector(vec)
     dids = _uuids(doc_ids or [])
     try:
         async with SessionLocal() as db:
@@ -92,18 +115,37 @@ async def search(
     except Exception as exc:  # noqa: BLE001
         logger.warning("knowledge search falhou: %s", exc)
         return []
+    return [_row_to_hit(r) for r in rows]
+
+
+async def search_multi(
+    user_id, base_ids: list[str], query: str,
+    ks: dict[str, int] | None = None, default_k: int = 6,
+) -> list[dict]:
+    """Como `search`, mas com k POR BASE (`ks`: {base_id: k}). Cada base traz o
+    seu próprio número de trechos; o resultado é a UNIÃO, ordenada por score
+    (maior = mais parecido). Embed da consulta uma única vez."""
+    ks = ks or {}
+    bids = _uuids(base_ids)
+    q = (query or "").strip()
+    if not bids or not q:
+        return []
+    try:
+        uid = user_id if isinstance(user_id, uuid.UUID) else uuid.UUID(str(user_id))
+    except (ValueError, TypeError):
+        return []
+    lit = await _embed_query(q)
+    if lit is None:
+        return []
     out: list[dict] = []
-    for r in rows:
-        dist = float(r["dist"]) if r["dist"] is not None else 1.0
-        out.append(
-            {
-                "chunk_id": str(r["chunk_id"]),
-                "doc_id": str(r["doc_id"]),
-                "filename": r["filename"] or "documento",
-                "mime": r["mime"] or "",
-                "ordinal": int(r["ordinal"]),
-                "text": r["text"] or "",
-                "score": round(max(0.0, 1.0 - dist), 4),
-            }
-        )
+    try:
+        async with SessionLocal() as db:
+            for b in bids:
+                k = max(1, int(ks.get(str(b), default_k) or default_k))
+                res = await db.execute(_SEARCH, {"emb": lit, "uid": uid, "bids": [b], "k": k})
+                out.extend(_row_to_hit(r) for r in res.mappings().all())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("knowledge search_multi falhou: %s", exc)
+        return []
+    out.sort(key=lambda h: h["score"], reverse=True)
     return out
