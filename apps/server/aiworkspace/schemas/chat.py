@@ -43,6 +43,9 @@ class ChatUpdate(BaseModel):
     mode: str | None = None
     participants: list[dict[str, Any]] | None = None
     roundtable_config: dict[str, Any] | None = None
+    # visualização única: o chat é apagado quando o usuário abre e sai (mesa
+    # temporária). O front zera isto ao "salvar" a conversa.
+    view_once: bool | None = None
 
 
 class MessageOut(BaseModel):

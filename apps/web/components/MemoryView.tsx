@@ -11,22 +11,6 @@ import { useConfirm } from "@/components/ConfirmDialog";
 
 type Tab = "global" | "model" | "chat" | "project" | "bank";
 
-const WRITE_LABEL: Record<string, string> = {
-  global: "Global", model: "Do modelo", chat: "Do chat", off: "Não salvar",
-};
-
-function Toggle({ on, onClick, disabled }: { on: boolean; onClick: () => void; disabled?: boolean }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-40 ${on ? "bg-accent" : "bg-surface2"}`}
-    >
-      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${on ? "left-[18px]" : "left-0.5"}`} />
-    </button>
-  );
-}
-
 /** Controlador de Memória (mem0): configurações + visão por escopo (Global / Por
  *  modelo / Por chat) com editar, adicionar e excluir. Fica em Espaço → Memória. */
 export default function MemoryView() {
@@ -95,12 +79,6 @@ export default function MemoryView() {
   }, [tab, activeModelId, activeChatId, activeProjectId, activeBankId, q]);
 
   useEffect(() => { loadItems(); }, [loadItems]);
-
-  async function saveSettings(patch: Partial<MemoryConfig>) {
-    const next = { ...(settings ?? {}), ...patch };
-    setSettings(next);
-    await api.put("/memory/settings", next).catch(() => {});
-  }
 
   async function saveEdit(id: string) {
     if (!editText.trim()) return;
@@ -193,64 +171,15 @@ export default function MemoryView() {
   }
 
   const enabled = settings?.enabled !== false;
-  const read = settings?.read ?? { global: true, model: true, chat: true };
 
   return (
     <div className="space-y-5">
-      {/* Configurações (padrões p/ novos chats) */}
-      <div className="rounded-2xl border border-border bg-surface p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold text-ink">Configurações da memória</p>
-            <p className="text-xs text-muted">Padrões para novos chats — cada chat pode sobrescrever.</p>
-          </div>
-        </div>
-        {!enabled ? (
-          <p className="mt-3 border-t border-border pt-3 text-xs text-muted">
-            A memória está <span className="text-ink-soft">desativada</span>. Ative em{" "}
-            <span className="text-ink-soft">Configurações → Controle de Dados → Memória</span> para escolher os padrões.
-          </p>
-        ) : (
-          <div className="mt-4 grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
-            <div>
-              <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">Salvar novas memórias em</p>
-              <select
-                value={settings?.write ?? "global"}
-                onChange={(e) => saveSettings({ write: e.target.value as MemoryConfig["write"] })}
-                className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
-              >
-                {["global", "model", "chat", "off"].map((v) => (
-                  <option key={v} value={v}>{WRITE_LABEL[v]}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">Ler memórias de (união)</p>
-              <div className="flex flex-wrap gap-1.5">
-                {(["global", "model", "chat"] as const).map((k) => {
-                  const on = read[k] !== false;
-                  return (
-                    <button
-                      key={k}
-                      onClick={() => saveSettings({ read: { ...read, [k]: !on } })}
-                      className={`rounded-full border px-3 py-1 text-xs transition-colors ${on ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border bg-surface2 text-muted hover:text-ink"}`}
-                    >
-                      {WRITE_LABEL[k]}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <div className="flex items-center justify-between sm:col-span-2">
-              <div>
-                <p className="text-sm text-ink">Revisar antes de salvar</p>
-                <p className="text-xs text-muted">Novas memórias ficam pendentes até você aprovar.</p>
-              </div>
-              <Toggle on={settings?.review === true} onClick={() => saveSettings({ review: !(settings?.review === true) })} />
-            </div>
-          </div>
-        )}
-      </div>
+      {!enabled && (
+        <p className="rounded-2xl border border-border bg-surface p-4 text-xs text-muted">
+          A memória está <span className="text-ink-soft">desativada</span>. Ative e ajuste os padrões em{" "}
+          <span className="text-ink-soft">Configurações → Controle de Dados → Memória</span> (engrenagem).
+        </p>
+      )}
 
       {/* Fila de revisão (pendentes) */}
       {pending.length > 0 && (

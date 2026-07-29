@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth.deps import require_admin, require_approved
 from .config import get_settings
 from .db import get_db
-from .integrations import elevenlabs_service, github_service, google_service, notion_service, ollama_service, slack_service, tuya_service
+from .integrations import elevenlabs_service, github_service, google_service, notion_service, ollama_service, slack_service, spotify_service, tuya_service, vercel_service
 from .models import GithubAccount, GoogleAccount, NotionAccount, SlackAccount, User
 from .tools import sift_service
 
@@ -764,6 +764,87 @@ async def elevenlabs_test(
     if result.get("ok"):
         return {"ok": True}
     return {"ok": False, "error": result.get("error") or "Não foi possível conectar à ElevenLabs."}
+
+
+# --------------------------------------------------------------------------- #
+# Vercel — Personal Access Token por-usuário (projetos/deployments).
+# --------------------------------------------------------------------------- #
+@router.get("/vercel")
+async def vercel_status(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    return {"connected": await vercel_service.is_configured(db, str(user.id))}
+
+
+class VercelIn(BaseModel):
+    token: str | None = None  # vazio = mantém o atual
+
+
+@router.put("/vercel")
+async def vercel_set(
+    body: VercelIn, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    if not (body.token or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Token é obrigatório")
+    await vercel_service.set_token(db, str(user.id), body.token)
+    return {"connected": True}
+
+
+@router.delete("/vercel")
+async def vercel_disconnect(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    await vercel_service.delete(db, str(user.id))
+    return {"ok": True}
+
+
+@router.post("/vercel/test")
+async def vercel_test(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    tok = await vercel_service.get_token(db, str(user.id))
+    if not tok:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Vercel não configurada.")
+    return await vercel_service.test_connection(tok)
+
+
+# --------------------------------------------------------------------------- #
+# Spotify — Client Credentials por-usuário (busca no catálogo).
+# --------------------------------------------------------------------------- #
+@router.get("/spotify")
+async def spotify_status(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    return {"connected": await spotify_service.is_configured(db, str(user.id))}
+
+
+class SpotifyIn(BaseModel):
+    client_id: str | None = None
+    client_secret: str | None = None  # vazio + já configurado = mantém
+
+
+@router.put("/spotify")
+async def spotify_set(
+    body: SpotifyIn, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    cid = (body.client_id or "").strip()
+    sec = (body.client_secret or "").strip()
+    if not cid or not sec:
+        # permite atualizar só um campo se já havia credenciais
+        cur = await spotify_service.get_creds(db, str(user.id))
+        if cur:
+            cid = cid or cur[0]
+            sec = sec or cur[1]
+    if not cid or not sec:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Client ID e Client Secret são obrigatórios")
+    await spotify_service.set_creds(db, str(user.id), cid, sec)
+    return {"connected": True}
+
+
+@router.delete("/spotify")
+async def spotify_disconnect(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    await spotify_service.delete(db, str(user.id))
+    return {"ok": True}
+
+
+@router.post("/spotify/test")
+async def spotify_test(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
+    creds = await spotify_service.get_creds(db, str(user.id))
+    if not creds:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Spotify não configurado.")
+    return await spotify_service.test_connection(creds[0], creds[1])
 
 
 # --------------------------------------------------------------------------- #

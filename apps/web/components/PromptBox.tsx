@@ -869,8 +869,13 @@ export default function PromptBox({
                       icon={<Database size={16} />}
                       onClick={() => {
                         setPlusOpen(false);
-                        if (!refEntries.length) return;
-                        // insere "#" no fim p/ abrir o menu de referências
+                        if (!refEntries.length) {
+                          alert("Nenhum documento disponível para referenciar. Acople uma Base de Conhecimento a este modelo (Editor do modelo → Conhecimento) e envie documentos em Espaço → Conhecimento.");
+                          return;
+                        }
+                        // insere "#" no fim p/ abrir o menu de referências (garante que
+                        // não fique "dismissed" de um uso anterior)
+                        setDismissed(false);
                         const base = value.endsWith(" ") || !value ? value : value + " ";
                         onChange(base + "#");
                         requestAnimationFrame(() => {
@@ -970,15 +975,6 @@ export default function PromptBox({
             >
               <Mic size={18} />
             </button>
-            {onVoiceMode && (
-              <button
-                onClick={onVoiceMode}
-                title="Modo voz (assistente)"
-                className="rounded-full p-2 text-ink-soft transition-colors hover:bg-hover hover:text-ink"
-              >
-                <AudioLines size={18} />
-              </button>
-            )}
             {sending && onStop ? (
               <button
                 onClick={onStop}
@@ -996,9 +992,17 @@ export default function PromptBox({
               >
                 <Send size={16} />
               </button>
-            ) : (
-              <button title="Modo de voz" className="rounded-full bg-accent p-2 text-ink transition-colors hover:bg-accent-hover">
+            ) : onVoiceMode ? (
+              <button
+                onClick={onVoiceMode}
+                title="Modo voz (assistente)"
+                className="rounded-full bg-accent p-2 text-ink transition-colors hover:bg-accent-hover"
+              >
                 <AudioLines size={16} />
+              </button>
+            ) : (
+              <button disabled title="Enviar" className="rounded-full bg-accent p-2 text-ink opacity-50">
+                <Send size={16} />
               </button>
             )}
           </div>

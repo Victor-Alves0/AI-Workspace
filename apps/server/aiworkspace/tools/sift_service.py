@@ -185,6 +185,23 @@ class ElevenLabsConfig:
 
 
 @dataclass
+class VercelConfig:
+    """Config da tool Vercel (consulta de projetos/deployments). `conn` = {token}
+    decifrado do UserSecret — como a Higgsfield/ElevenLabs, o token VIAJA na config: a
+    tool fala com a API da Vercel direto. Conexão por-usuário, somente leitura."""
+    conn: dict = field(default_factory=dict)
+
+
+@dataclass
+class SpotifyConfig:
+    """Config da tool Spotify (busca no catálogo). `conn` = {id, secret} (Client
+    Credentials) decifrado do UserSecret — as credenciais VIAJAM na config: a tool
+    pega o token de app e fala com a API do Spotify direto. Conexão por-usuário,
+    somente catálogo (playback exige OAuth de usuário, fora de escopo)."""
+    conn: dict = field(default_factory=dict)
+
+
+@dataclass
 class MessagingConfig:
     """Config por-modelo da tool de mensagens (agir nas conexões de chat do usuário:
     WhatsApp/Telegram/Discord). Nada de token/instância aqui — resolvidos ao vivo por
@@ -292,6 +309,16 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # qualquer texto e efeitos sonoros; o áudio é guardado e tocado no chat.
     {"path": "elevenlabs.audio.generate", "name": "ElevenLabs (Áudio)", "description": "Gera fala premium (TTS) de qualquer texto e efeitos sonoros com a ElevenLabs; o áudio aparece no chat.",
      "model_desc": "Generate premium speech (TTS) from any text and sound effects via ElevenLabs; the audio is shown in the chat."},
+    # Vercel (requer conexão em Configurações → Integrações via Personal Access Token).
+    # Somente leitura: lista os projetos e os deployments recentes (estado + url) para
+    # o usuário acompanhar o que está no ar e o status dos deploys.
+    {"path": "vercel.projects.manage", "name": "Vercel", "description": "Consulta a conta Vercel do usuário: listar projetos e ver os deployments recentes (estado, url) de um projeto.",
+     "model_desc": "Query the user's Vercel account: list projects and inspect recent deployments (state, url) — read-only, useful to check what is live and deploy status."},
+    # Spotify (requer conexão em Configurações → Integrações via Client ID + Secret,
+    # fluxo Client Credentials). Busca no catálogo público: faixas, artistas, álbuns e
+    # playlists (nome, artista, link). Sem controle de playback (exige login do usuário).
+    {"path": "spotify.music.search", "name": "Spotify", "description": "Busca no catálogo do Spotify: encontrar faixas, artistas, álbuns ou playlists (nome, artista e link).",
+     "model_desc": "Search the Spotify catalog: find tracks, artists, albums or playlists (name, artist, link). Read-only — no playback control."},
     # Codespace (grafo de código — GraphCodeMap): só funciona em chats vinculados a
     # um projeto (Espaço de Trabalho → Codespace). Query estrutural (símbolos, quem
     # chama quem, blast radius) em vez de grep — menos rodadas de leitura, mais
@@ -356,6 +383,8 @@ _INTEGRATION_PREFIXES: dict[str, str] = {
     "messaging.": "Mensagens",
     "higgsfield.": "Higgsfield",
     "elevenlabs.": "ElevenLabs",
+    "vercel.": "Vercel",
+    "spotify.": "Spotify",
 }
 
 
@@ -668,6 +697,8 @@ def _register_builtins(
     notion_cfg: "NotionConfig | None" = None,
     slack_cfg: "SlackConfig | None" = None,
     elevenlabs_cfg: "ElevenLabsConfig | None" = None,
+    vercel_cfg: "VercelConfig | None" = None,
+    spotify_cfg: "SpotifyConfig | None" = None,
 ) -> None:
     """Registra as ferramentas de sistema. `allowed=None` = todas; caso contrário
     apenas os paths presentes no conjunto."""
@@ -2307,6 +2338,92 @@ def _register_builtins(
                 return {"error": "audio generated but failed to store it"}
             return {"kind": "audio", "url": image_gen.sign_image_url(iid), "prompt": text[:200]}
 
+    # ------------------------------ Vercel ------------------------------------ #
+    if want("vercel.projects.manage"):
+        vc_token = (vercel_cfg.conn.get("token") if vercel_cfg else "") or ""
+
+        @sift.tool(
+            "vercel.projects.manage",
+            description=(
+                "Query the user's Vercel account (read-only). "
+                "`action`: 'projects' (list the user's projects — id, name, framework), "
+                "'deployments' (list recent deployments with state and url; pass `project` "
+                "to filter to one project by name or id). Use to check what is deployed and "
+                "the status of recent deploys."
+            ),
+            params={
+                "action": "string:n::projects | deployments",
+                "project": "string:o::deployments: a project name or id (prj_...) to filter; omit for all",
+                "limit": "number:o::how many rows to return (1-100, default 20)",
+            },
+            returns=["projects", "deployments", "action", "error"],
+            examples=["list my vercel projects",
+                      "quais projetos eu tenho na vercel?",
+                      "what's the status of my last vercel deployment?",
+                      "show recent deployments for my-site on vercel"],
+        )
+        def _vercel(action: str = "", project: str = "", limit: Any = None) -> dict[str, Any]:
+            act = (action or "").strip().lower()
+            if act not in ("projects", "deployments"):
+                return {"error": f"unknown action '{action}' (use projects/deployments)"}
+            if not vc_token:
+                return {"error": "Vercel não conectada. Conecte em Configurações → Integrações."}
+            try:
+                lim = int(limit) if limit not in (None, "") else 20
+            except (TypeError, ValueError):
+                lim = 20
+            from ..integrations import vercel_service as vs
+            try:
+                if act == "projects":
+                    return {"action": "projects", "projects": asyncio.run(vs.list_projects(vc_token, lim))}
+                return {"action": "deployments",
+                        "deployments": asyncio.run(vs.list_deployments(vc_token, (project or "").strip(), lim))}
+            except Exception as exc:  # noqa: BLE001
+                return {"error": str(exc)}
+
+    # ------------------------------ Spotify ----------------------------------- #
+    if want("spotify.music.search"):
+        sp_conn = spotify_cfg.conn if spotify_cfg else {}
+
+        @sift.tool(
+            "spotify.music.search",
+            description=(
+                "Search the Spotify catalog (read-only). Find music by name and get a "
+                "shareable link. `query`: what to search for. `kind`: 'track' (default), "
+                "'artist', 'album' or 'playlist'. Returns name, artist(s) and the Spotify "
+                "url. No playback control."
+            ),
+            params={
+                "query": "string:n::what to search for (song, artist, album or playlist name)",
+                "kind": "string:o::track | artist | album | playlist (default track)",
+                "limit": "number:o::how many results to return (1-50, default 10)",
+            },
+            returns=["results", "kind", "query", "error"],
+            examples=["find the song bohemian rhapsody on spotify",
+                      "procure o álbum Random Access Memories no spotify",
+                      "search spotify for playlists about focus",
+                      "what's the spotify link for Daft Punk?"],
+        )
+        def _spotify(query: str = "", kind: str = "", limit: Any = None) -> dict[str, Any]:
+            q = (query or "").strip()
+            if not q:
+                return {"error": "`query` is required"}
+            cid, sec = sp_conn.get("id") or "", sp_conn.get("secret") or ""
+            if not (cid and sec):
+                return {"error": "Spotify não conectado. Conecte em Configurações → Integrações."}
+            try:
+                lim = int(limit) if limit not in (None, "") else 10
+            except (TypeError, ValueError):
+                lim = 10
+            k = (kind or "track").strip().lower()
+            from ..integrations import spotify_service as sp
+            try:
+                results = asyncio.run(sp.search(cid, sec, q, k, lim))
+            except Exception as exc:  # noqa: BLE001
+                return {"error": str(exc)}
+            return {"query": q, "kind": k if k in ("track", "artist", "album", "playlist") else "track",
+                    "results": results}
+
     # ------------------------------ GitHub ------------------------------------ #
     if want("higgsfield.media.generate"):
         hf_conn = higgsfield_cfg.conn if higgsfield_cfg else {}
@@ -3132,6 +3249,8 @@ def _signature(
     notion_cfg: "NotionConfig | None" = None,
     slack_cfg: "SlackConfig | None" = None,
     elevenlabs_cfg: "ElevenLabsConfig | None" = None,
+    vercel_cfg: "VercelConfig | None" = None,
+    spotify_cfg: "SpotifyConfig | None" = None,
 ) -> tuple:
     rows = tuple(
         sorted(
@@ -3201,6 +3320,11 @@ def _signature(
          elevenlabs_cfg.conn.get("default_voice", ""))
         if elevenlabs_cfg else ()
     )
+    # config Vercel: o token identifica a conexão (conectou/desconectou/trocou → rebuild).
+    vlc = ((vercel_cfg.conn.get("token", ""),) if vercel_cfg else ())
+    # config Spotify: o client_id identifica a conexão; o secret entra só como bool.
+    spc = ((spotify_cfg.conn.get("id", ""), bool(spotify_cfg.conn.get("secret")))
+           if spotify_cfg else ())
     return (
         rows,
         search_cfg.provider,
@@ -3227,6 +3351,8 @@ def _signature(
         ntc,
         slc,
         elc,
+        vlc,
+        spc,
     )
 
 
@@ -3278,6 +3404,8 @@ def build_user_sift(
     notion_cfg: "NotionConfig | None" = None,
     slack_cfg: "SlackConfig | None" = None,
     elevenlabs_cfg: "ElevenLabsConfig | None" = None,
+    vercel_cfg: "VercelConfig | None" = None,
+    spotify_cfg: "SpotifyConfig | None" = None,
 ) -> Sift | None:
     """Constrói a instância SIFT completa do usuário (builtins + tools dele).
 
@@ -3302,7 +3430,7 @@ def build_user_sift(
             on_result=_record_call,
             index_cache=_index_cache_path(user_id),
         )
-        _register_builtins(sift, search_cfg, None, finance_cfg, deep_cfg, user_id, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg)
+        _register_builtins(sift, search_cfg, None, finance_cfg, deep_cfg, user_id, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg)
         for t in tool_rows:
             if not t.enabled:
                 continue
@@ -3342,12 +3470,14 @@ def get_user_sift(
     notion_cfg: "NotionConfig | None" = None,
     slack_cfg: "SlackConfig | None" = None,
     elevenlabs_cfg: "ElevenLabsConfig | None" = None,
+    vercel_cfg: "VercelConfig | None" = None,
+    spotify_cfg: "SpotifyConfig | None" = None,
 ) -> Sift | None:
-    sig = _signature(tool_rows, search_cfg, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg)
+    sig = _signature(tool_rows, search_cfg, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg)
     cached = _cache.get(user_id)
     if cached is not None and cached[0] == sig:
         return cached[1]
-    sift = build_user_sift(tool_rows, search_cfg, user_id, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg)
+    sift = build_user_sift(tool_rows, search_cfg, user_id, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg)
     _cache[user_id] = (sig, sift)
     return sift
 
@@ -3503,6 +3633,22 @@ def elevenlabs_config_from_secrets(conn: dict | None) -> "ElevenLabsConfig | Non
     if not conn or not conn.get("api_key"):
         return None
     return ElevenLabsConfig(conn=conn)
+
+
+def vercel_config_from_secrets(token: str | None) -> "VercelConfig | None":
+    """Config da tool Vercel. `token` = Personal Access Token decifrado do UserSecret;
+    None/vazio → a tool existe mas responde 'não conectada'."""
+    if not token:
+        return None
+    return VercelConfig(conn={"token": token})
+
+
+def spotify_config_from_secrets(creds: tuple[str, str] | None) -> "SpotifyConfig | None":
+    """Config da tool Spotify. `creds` = (client_id, client_secret) decifrados do
+    UserSecret; None → a tool existe mas responde 'não conectado'."""
+    if not creds or not creds[0] or not creds[1]:
+        return None
+    return SpotifyConfig(conn={"id": creds[0], "secret": creds[1]})
 
 
 def github_config_from_secrets(

@@ -5,8 +5,12 @@ import { useRouter } from "next/navigation";
 import {
   Blocks,
   AppWindow,
+  Bot,
   Cable,
   Check,
+  Eye,
+  EyeOff,
+  GripVertical,
   ChevronDown,
   Clapperboard,
   Crown,
@@ -14,7 +18,6 @@ import {
   Activity,
   Database,
   AudioLines,
-  Ear,
   Mic,
   Globe,
   Home,
@@ -39,8 +42,10 @@ import {
   SiGoogledrive,
   SiNotion,
   SiOllama,
+  SiSpotify,
   SiTelegram,
   SiTrello,
+  SiVercel,
   SiWhatsapp,
 } from "react-icons/si";
 import { api, ApiError } from "@/lib/api";
@@ -50,7 +55,7 @@ import {
   SHORTCUT_GROUPS, SHORTCUTS, resolveBinding, prettyCombo, eventToCombo, comboHasModifier,
   type ShortcutMap, type ShortcutBinding,
 } from "@/lib/shortcuts";
-import type { Model, User } from "@/lib/types";
+import type { MemoryConfig, Model, User } from "@/lib/types";
 import ArchivedModal from "./ArchivedModal";
 import SharedChatsModal from "./SharedChatsModal";
 import ModelField from "./ModelField";
@@ -64,6 +69,8 @@ import NotionPanel from "./NotionPanel";
 import SlackPanel from "./SlackPanel";
 import SlackChannelPanel from "./SlackChannelPanel";
 import ElevenLabsPanel from "./ElevenLabsPanel";
+import VercelPanel from "./VercelPanel";
+import SpotifyPanel from "./SpotifyPanel";
 import HiggsfieldPanel from "./HiggsfieldPanel";
 import SubscriptionsPanel from "./SubscriptionsPanel";
 import OllamaPanel from "./OllamaPanel";
@@ -231,6 +238,11 @@ function InfoDot({ text }: { text: string }) {
     </span>
   );
 }
+
+// rótulos dos escopos de memória (Controle de Dados → engrenagem da Memória)
+const MEM_WRITE_LABEL: Record<string, string> = {
+  global: "Global", model: "Do modelo", chat: "Do chat", off: "Não salvar",
+};
 
 function Row({ label, sub, info, children }: { label: string; sub?: string; info?: string; children?: React.ReactNode }) {
   return (
@@ -567,8 +579,6 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                 <DetailView title="Assistente" onBack={() => setConnView(null)}>
                   <AssistantVoicePanel />
                 </DetailView>
-              ) : connView === "elevenlabs" ? (
-                <ElevenLabsPanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
               ) : connView === "subscriptions" ? (
                 <SubscriptionsPanel onBack={() => setConnView(null)} />
               ) : connView === "web" ? (
@@ -591,8 +601,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       { key: "web", icon: <Globe size={22} />, name: "Web", desc: "Acesso a internet" },
                       { key: "ollama", icon: <SiOllama size={22} />, name: "Ollama", desc: "Utilize modelos locais" },
                       { key: "voice", icon: <AudioLines size={22} />, name: "Voz Local", desc: "Kokoro / clonagem de voz" },
-                      { key: "assistant-voice", icon: <Ear size={22} />, name: "Assistente", desc: "Detecção de voz (Porcupine / Whisper / Vosk / OpenWakeWord)" },
-                      { key: "elevenlabs", icon: <Mic size={22} />, name: "ElevenLabs", desc: "Voz premium + áudio" },
+                      { key: "assistant-voice", icon: <Bot size={22} />, name: "Assistente", desc: "Usabilidade de agentes" },
                     ]}
                     onOpen={setConnView}
                   />
@@ -620,6 +629,12 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                 <SlackPanel onBack={() => setIntegView(null)} onOpenChannel={() => setIntegView("slack_channel")} />
               ) : integView === "slack_channel" ? (
                 <SlackChannelPanel onBack={() => setIntegView("slack")} />
+              ) : integView === "elevenlabs" ? (
+                <ElevenLabsPanel onBack={() => setIntegView(null)} onChanged={onConnectionsChanged} />
+              ) : integView === "vercel" ? (
+                <VercelPanel onBack={() => setIntegView(null)} />
+              ) : integView === "spotify" ? (
+                <SpotifyPanel onBack={() => setIntegView(null)} />
               ) : (
                 <div>
                   <Heading>Integrações</Heading>
@@ -713,6 +728,36 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       </span>
                       <span className="text-sm font-medium text-ink">Slack</span>
                       <span className="text-xs leading-4 text-muted">Canais e mensagens</span>
+                    </button>
+                    <button
+                      onClick={() => setIntegView("elevenlabs")}
+                      className="group flex flex-col items-center gap-2.5 rounded-2xl border border-border bg-surface px-4 py-7 text-center transition-all duration-150 hover:border-accent/40 hover:bg-hover"
+                    >
+                      <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
+                        <Mic size={22} />
+                      </span>
+                      <span className="text-sm font-medium text-ink">ElevenLabs</span>
+                      <span className="text-xs leading-4 text-muted">Voz e geração de audio</span>
+                    </button>
+                    <button
+                      onClick={() => setIntegView("vercel")}
+                      className="group flex flex-col items-center gap-2.5 rounded-2xl border border-border bg-surface px-4 py-7 text-center transition-all duration-150 hover:border-accent/40 hover:bg-hover"
+                    >
+                      <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
+                        <SiVercel size={22} />
+                      </span>
+                      <span className="text-sm font-medium text-ink">Vercel</span>
+                      <span className="text-xs leading-4 text-muted">Projetos e deployments</span>
+                    </button>
+                    <button
+                      onClick={() => setIntegView("spotify")}
+                      className="group flex flex-col items-center gap-2.5 rounded-2xl border border-border bg-surface px-4 py-7 text-center transition-all duration-150 hover:border-accent/40 hover:bg-hover"
+                    >
+                      <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
+                        <SiSpotify size={22} />
+                      </span>
+                      <span className="text-sm font-medium text-ink">Spotify</span>
+                      <span className="text-xs leading-4 text-muted">Música: buscar e tocar</span>
                     </button>
                     {[
                       { name: "Google Drive", icon: <SiGoogledrive size={22} /> },
@@ -864,6 +909,7 @@ function SidebarSettings({ profile, set, onBack }: { profile: Record<string, any
   const autoTitle = !!iface.auto_title;
   return (
     <DetailView title="Barra Lateral" onBack={onBack}>
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted/70">Chats</p>
       <div className="rounded-xl border border-border bg-surface px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <span className="text-sm text-ink">Gerar título de novos chats</span>
@@ -913,9 +959,16 @@ function SidebarSettings({ profile, set, onBack }: { profile: Record<string, any
         )}
       </div>
 
-      <p className="mb-2 mt-5 text-xs font-semibold uppercase tracking-wider text-muted/70">Itens visíveis</p>
+      <div className="mt-6 flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted/70">Itens visíveis</p>
+        <button onClick={() => setIface("sidebar_order", SIDEBAR_ITEMS.map((i) => i.key))} className="text-[11px] text-muted transition-colors hover:text-ink">Ordem padrão</button>
+      </div>
+      <p className="mb-2.5 text-[11px] text-muted">Arraste para reordenar a barra lateral; o olho mostra/oculta cada item.</p>
+      <SidebarItemsEditor iface={iface} setIface={setIface} />
+
+      <p className="mb-2 mt-6 text-xs font-semibold uppercase tracking-wider text-muted/70">No menu do usuário</p>
       <div className="space-y-2.5">
-        {SIDEBAR_ITEMS.map((it) => {
+        {USERMENU_ITEMS.map((it) => {
           const on = iface[it.key] !== false; // padrão: visível
           return (
             <ToggleCard key={it.key} label={it.label} on={on} onToggle={() => setIface(it.key, !on)} />
@@ -926,17 +979,75 @@ function SidebarSettings({ profile, set, onBack }: { profile: Record<string, any
   );
 }
 
-// itens da barra lateral que podem ser ocultados (a chave vive em profile.interface,
-// padrão visível). Os identificadores são lidos pela Sidebar/UserMenu.
+// composição da BARRA LATERAL (reordenável + ocultável): a chave vive em
+// profile.interface (padrão visível); a ordem em profile.interface.sidebar_order.
+// Lidos pela Sidebar. "Biblioteca" é o rótulo da seção; "Chats" é a lista.
 const SIDEBAR_ITEMS: { key: string; label: string }[] = [
-  { key: "sb_models", label: "Mostrar Modelos" },
-  { key: "sb_automations", label: "Mostrar Automações" },
-  { key: "sb_codespace", label: "Mostrar Codespace" },
-  { key: "sb_workspace", label: "Mostrar Espaço de Trabalho" },
-  { key: "sb_analytics", label: "Mostrar Analítica" },
-  { key: "sb_playground", label: "Mostrar Playground" },
-  { key: "sb_archived", label: "Mostrar Chats Arquivados" },
+  { key: "sb_new_chat", label: "Novo Chat" },
+  { key: "sb_conversations", label: "Conversas" },
+  { key: "sb_automations", label: "Automações" },
+  { key: "sb_codespace", label: "Codespace" },
+  { key: "sb_workspace", label: "Espaço de Trabalho" },
+  { key: "sb_library", label: "Biblioteca (rótulo)" },
+  { key: "sb_models", label: "Modelos" },
+  { key: "sb_folders", label: "Pastas" },
+  { key: "sb_chats", label: "Chats" },
 ];
+export const SIDEBAR_ORDER_DEFAULT = SIDEBAR_ITEMS.map((i) => i.key);
+// itens do MENU DO USUÁRIO (rodapé) que podem ser ocultados
+const USERMENU_ITEMS: { key: string; label: string }[] = [
+  { key: "sb_analytics", label: "Analítica" },
+  { key: "sb_playground", label: "Playground" },
+  { key: "sb_archived", label: "Chats Arquivados" },
+];
+
+/* lista reordenável (drag & drop nativo) com olho de mostrar/ocultar por item */
+function SidebarItemsEditor({ iface, setIface }: { iface: Record<string, any>; setIface: (k: string, v: any) => void }) {
+  const order = useMemo(() => {
+    const saved = Array.isArray(iface.sidebar_order)
+      ? (iface.sidebar_order as string[]).filter((k) => SIDEBAR_ITEMS.some((i) => i.key === k))
+      : [];
+    const missing = SIDEBAR_ITEMS.map((i) => i.key).filter((k) => !saved.includes(k));
+    return [...saved, ...missing];
+  }, [iface.sidebar_order]);
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const labelOf = (k: string) => SIDEBAR_ITEMS.find((i) => i.key === k)?.label ?? k;
+  const move = (from: number, to: number) => {
+    if (from < 0 || to < 0 || from === to) return;
+    const a = [...order];
+    const [x] = a.splice(from, 1);
+    a.splice(to, 0, x);
+    setIface("sidebar_order", a);
+  };
+  return (
+    <div className="space-y-1.5">
+      {order.map((k, i) => {
+        const on = iface[k] !== false;
+        return (
+          <div
+            key={k}
+            draggable
+            onDragStart={() => setDragKey(k)}
+            onDragEnd={() => setDragKey(null)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => { e.preventDefault(); if (dragKey) move(order.indexOf(dragKey), i); setDragKey(null); }}
+            className={`flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 transition-opacity ${dragKey === k ? "opacity-40" : ""} ${on ? "" : "opacity-60"}`}
+          >
+            <GripVertical size={15} className="shrink-0 cursor-grab text-muted" />
+            <span className="flex-1 truncate text-sm text-ink">{labelOf(k)}</span>
+            <button
+              onClick={() => setIface(k, !on)}
+              title={on ? "Ocultar" : "Mostrar"}
+              className={`rounded-lg p-1.5 transition-colors ${on ? "text-ink-soft hover:bg-hover hover:text-ink" : "text-muted hover:bg-hover hover:text-ink"}`}
+            >
+              {on ? <Eye size={16} /> : <EyeOff size={16} />}
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 /* ---------------------------------- Sobre --------------------------------- */
 interface AboutInfo { version: string; latest_version: string | null; update_available: boolean; repo_url: string | null }
@@ -1796,13 +1907,15 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
   const [busy, setBusy] = useState(false);
   const confirm = useConfirm();
   const prompt = usePrompt();
-  // Memória da IA: liga/desliga geral (o controle de dados da memória mora aqui;
-  // os detalhes por escopo ficam em Espaço → Memória).
-  const [mem, setMem] = useState<{ enabled?: boolean } | null>(null);
-  useEffect(() => { api.get<{ enabled?: boolean }>("/memory/settings").then(setMem).catch(() => {}); }, []);
+  // Memória da IA: liga/desliga geral + as CONFIGURAÇÕES (escopos de escrita/leitura,
+  // revisar antes de salvar) — reveladas pela engrenagem ao lado do toggle.
+  const [mem, setMem] = useState<MemoryConfig | null>(null);
+  const [memCfgOpen, setMemCfgOpen] = useState(false);
+  useEffect(() => { api.get<MemoryConfig>("/memory/settings").then(setMem).catch(() => {}); }, []);
   const memOn = mem?.enabled === true;
-  async function toggleMem() {
-    const next = { ...(mem ?? {}), enabled: !memOn };
+  const memRead = mem?.read ?? { global: true, model: true, chat: true };
+  async function saveMem(patch: Partial<MemoryConfig>) {
+    const next = { ...(mem ?? {}), ...patch };
     setMem(next);
     await api.put("/memory/settings", next).catch(() => {});
   }
@@ -1908,8 +2021,60 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
 
       <Heading>Memória da IA</Heading>
       <Row label="Memória" info="Permita a IA lembrar de fatos entre as conversas">
-        <Toggle on={memOn} onClick={toggleMem} />
+        <div className="flex items-center gap-1.5">
+          {memOn && (
+            <button
+              onClick={() => setMemCfgOpen((v) => !v)}
+              title="Configurações da memória"
+              className={`rounded-lg p-1.5 transition-colors ${memCfgOpen ? "bg-hover text-ink" : "text-muted hover:bg-hover hover:text-ink"}`}
+            >
+              <Settings size={16} />
+            </button>
+          )}
+          <Toggle on={memOn} onClick={() => saveMem({ enabled: !memOn })} />
+        </div>
       </Row>
+      {memOn && memCfgOpen && (
+        <div className="mb-1 grid gap-4 rounded-xl border border-border bg-surface2/40 p-4 sm:grid-cols-2">
+          <p className="text-xs text-muted sm:col-span-2">Padrões para novos chats — cada chat pode sobrescrever em Controles.</p>
+          <div>
+            <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">Salvar novas memórias em</p>
+            <select
+              value={mem?.write ?? "global"}
+              onChange={(e) => saveMem({ write: e.target.value as MemoryConfig["write"] })}
+              className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent"
+            >
+              {(["global", "model", "chat", "off"] as const).map((v) => (
+                <option key={v} value={v}>{MEM_WRITE_LABEL[v]}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">Ler memórias de (união)</p>
+            <div className="flex flex-wrap gap-1.5">
+              {(["global", "model", "chat"] as const).map((k) => {
+                const on = memRead[k] !== false;
+                return (
+                  <button
+                    key={k}
+                    onClick={() => saveMem({ read: { ...memRead, [k]: !on } })}
+                    className={`rounded-full border px-3 py-1 text-xs transition-colors ${on ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border bg-bg text-muted hover:text-ink"}`}
+                  >
+                    {MEM_WRITE_LABEL[k]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="flex items-center justify-between sm:col-span-2">
+            <div>
+              <p className="text-sm text-ink">Revisar antes de salvar</p>
+              <p className="text-xs text-muted">Novas memórias ficam pendentes até você aprovar (em Espaço → Memória).</p>
+            </div>
+            <Toggle on={mem?.review === true} onClick={() => saveMem({ review: !(mem?.review === true) })} />
+          </div>
+        </div>
+      )}
       <Row label="Aprendizado proativo" info="A IA revisa as conversas de vez em quando e sugere skills e memórias — sempre com a sua aprovação">
         <Toggle on={learnOn} onClick={toggleLearn} />
       </Row>

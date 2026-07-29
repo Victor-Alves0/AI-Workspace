@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft, BarChart3, BookOpen, Box, Brain, Check, Code2, Copy, Download, FileText,
-  LayoutGrid, MessageSquare, MoreHorizontal, Pencil, Plug, Plus, Search, Settings, Sparkles,
+  ArrowLeft, BarChart3, BookOpen, Box, Brain, CalendarClock, Check, Code2, Copy, Download, FileText,
+  FlaskConical, LayoutGrid, MessageSquare, MoreHorizontal, Pencil, Plug, Plus, Search, Settings, Sparkles,
   Terminal, Trash2, Upload, Waypoints, Wrench, X,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
@@ -22,10 +22,13 @@ import MemoryView from "./MemoryView";
 import KnowledgeView from "./KnowledgePanel";
 import CodespacePanel from "./CodespacePanel";
 import ApiView from "./ApiView";
+import AutomationsView from "./AutomationsView";
+import PlaygroundView from "./PlaygroundView";
 
 export type Section =
   | "Modelos" | "Conhecimento" | "Cerebros" | "Prompts" | "Skills"
-  | "Ferramentas" | "Apps" | "Codespace" | "Memoria" | "Analítica" | "API";
+  | "Ferramentas" | "Apps" | "Codespace" | "Memoria" | "Analítica" | "API"
+  | "Automacoes" | "Playground";
 
 // meta dos cards da grade inicial (a contagem é injetada em runtime).
 // `admin: true` só aparece para administradores (filtrado em runtime).
@@ -38,6 +41,8 @@ const CARD_META: { key: Section; name: string; desc: string; icon: ReactNode; li
   { key: "Cerebros", name: "Cérebros", desc: "Notas interligadas da IA", icon: <Waypoints size={22} />, live: true },
   { key: "Apps", name: "Apps", desc: "Mini-aplicações e automações", icon: <LayoutGrid size={22} />, live: false },
   { key: "Codespace", name: "Codespace", desc: "Programe com IA", icon: <Code2 size={22} />, live: true },
+  { key: "Automacoes", name: "Automações", desc: "Tarefas agendadas e monitores", icon: <CalendarClock size={22} />, live: true },
+  { key: "Playground", name: "Playground", desc: "Benchmarks, comparações e debug", icon: <FlaskConical size={22} />, live: true },
   { key: "Memoria", name: "Memória", desc: "O que a IA lembra de você", icon: <Brain size={22} />, live: true },
   { key: "Analítica", name: "Analítica", desc: "Uso, custos e desempenho", icon: <BarChart3 size={22} />, live: true },
   { key: "API", name: "API", desc: "Use modelos em qualquer app", icon: <Terminal size={22} />, live: true },
@@ -872,6 +877,12 @@ export default function WorkspaceView({
         <div className="px-4 py-5 md:px-8 md:py-6">
           <CodespacePanel onBack={backHome} onOpenChat={(chatId, prefill) => { onOpenChat?.(chatId, prefill); onClose(); }} />
         </div>
+      )}
+      {section === "Automacoes" && (
+        <AutomationsView onBack={backHome} onOpenChat={(cid) => { onOpenChat?.(cid); onClose(); }} />
+      )}
+      {section === "Playground" && (
+        <PlaygroundView onClose={backHome} />
       )}
       {section === "Memoria" && (
         <SectionShell title="Memória" onBack={backHome}>

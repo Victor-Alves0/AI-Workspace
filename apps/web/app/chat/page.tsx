@@ -36,8 +36,6 @@ import CompactionHistory from "@/components/CompactionHistory";
 import PromptBox, { type ReasoningEffort, type RefDoc } from "@/components/PromptBox";
 import MessageItem from "@/components/MessageItem";
 import WorkspaceView, { type Section as WorkspaceSection } from "@/components/WorkspaceView";
-import AutomationsView from "@/components/AutomationsView";
-import PlaygroundView from "@/components/PlaygroundView";
 import type { ChatActions } from "@/components/ChatItem";
 import { SHORTCUTS, eventToCombo, resolveBinding, comboHasModifier, type ShortcutMap } from "@/lib/shortcuts";
 import { useGeneration } from "./useGeneration";
@@ -170,11 +168,6 @@ export default function ChatPage() {
   // WorkspaceView (via key) para SEMPRE voltar à grade inicial, mesmo se o usuário
   // estava dentro de um editor (modelo/skill) ou seção.
   const [workspaceKey, setWorkspaceKey] = useState(0);
-  // tela de Automações embutida (mantém a barra lateral visível)
-  const [automationsOpen, setAutomationsOpen] = useState(false);
-  // tela de Playground embutida (benchmarks / comparações / debug de tools)
-  const [playgroundOpen, setPlaygroundOpen] = useState(false);
-  const [playgroundKey, setPlaygroundKey] = useState(0);
   // quando != null, o Espaço de Trabalho abre direto no editor deste modelo
   const [editModelTarget, setEditModelTarget] = useState<ModelConfig | null>(null);
   // quando != null, o Espaço de Trabalho abre direto nesta seção (ex.: Analítica)
@@ -550,7 +543,7 @@ export default function ChatPage() {
   // ?v=automations abre a tela de Automações (rota antiga /automations redireciona)
   useEffect(() => {
     const qs = new URLSearchParams(window.location.search);
-    if (qs.get("v") === "automations") setAutomationsOpen(true);
+    if (qs.get("v") === "automations") { setWorkspaceSection("Automacoes"); setWorkspaceOpen(true); }
     if (qs.get("v") === "analytics") { setWorkspaceSection("Analítica"); setWorkspaceOpen(true); }
     const cid = qs.get("c");
     if (cid) {
@@ -675,11 +668,20 @@ export default function ChatPage() {
     if (active) return active;
     if (!draftRt) return null;
     if (!curModel) { alert("Selecione um modelo primeiro."); return null; }
+    // mesa iniciada no modo TEMPORÁRIO → chat view_once (apagado ao sair), a
+    // versão "não salva" possível p/ a mesa (que exige um chat persistido).
+    const viewOnce = temporary;
     const chat = await api.post<Chat>("/chats", { title: "Mesa-redonda", model: curModel, model_config_id: curCustomId });
-    const full = { ...chat, mode: "roundtable" as const, participants: draftRt.participants, roundtable_config: draftRt.config };
+    const full = { ...chat, mode: "roundtable" as const, participants: draftRt.participants, roundtable_config: draftRt.config, view_once: viewOnce };
     setActive(full);
     setDraftRt(null);
-    try { await api.patch(`/chats/${chat.id}`, { mode: "roundtable", participants: draftRt.participants, roundtable_config: draftRt.config }); } catch { /* ignore */ }
+    if (viewOnce) setTemporary(false); // agora é uma mesa view_once (persistida até sair)
+    try {
+      await api.patch(`/chats/${chat.id}`, {
+        mode: "roundtable", participants: draftRt.participants, roundtable_config: draftRt.config,
+        ...(viewOnce ? { view_once: true } : {}),
+      });
+    } catch { /* ignore */ }
     refreshChats();
     return full;
   }
@@ -825,8 +827,16 @@ export default function ChatPage() {
     setLiveArtifact(null);
     setSuggestions(pickSuggestions(3));
     setWorkspaceOpen(false);
-    setAutomationsOpen(false);
-    setPlaygroundOpen(false);
+  }
+
+  // abre o Espaço de Trabalho numa seção (Automações/Playground/Codespace/… viram
+  // seções do Espaço; o "voltar" delas cai no hub). Remonta p/ resetar a subtela.
+  function openWorkspace(section: WorkspaceSection | null) {
+    setEditModelTarget(null);
+    setWorkspaceSection(section);
+    setWorkspaceKey((k) => k + 1);
+    setWorkspaceOpen(true);
+    setMobileNav(false);
   }
 
   const reloadMessages = useCallback(async (chatId: string) => {
@@ -863,8 +873,6 @@ export default function ChatPage() {
   async function selectChat(id: string) {
     setTemporary(false);
     setWorkspaceOpen(false);
-    setAutomationsOpen(false);
-    setPlaygroundOpen(false);
     leaveViewOnce(id);
     setDraftRt(null);
     const detail = await api.get<Chat & { messages: Message[] }>(`/chats/${id}`);
@@ -915,7 +923,7 @@ export default function ChatPage() {
   async function newChat() {
     setTemporary(false);
     // já está na tela de novo chat: não recarrega nem re-sorteia o "Sugerido"
-    if (!active && messages.length === 0 && !streaming && !workspaceOpen && !automationsOpen) return;
+    if (!active && messages.length === 0 && !streaming && !workspaceOpen) return;
     goHome();
   }
 
@@ -1652,9 +1660,9 @@ export default function ChatPage() {
     command_palette: () => setShowPalette(true),
     toggle_sidebar: () => toggleCollapse(),
     toggle_controls: () => setShowControls((v) => !v),
-    workspace: () => { setWorkspaceSection(null); setWorkspaceOpen(true); setAutomationsOpen(false); setPlaygroundOpen(false); },
-    automations: () => { setAutomationsOpen(true); setWorkspaceOpen(false); setPlaygroundOpen(false); },
-    playground: () => { setPlaygroundKey((k) => k + 1); setPlaygroundOpen(true); setWorkspaceOpen(false); setAutomationsOpen(false); },
+    workspace: () => openWorkspace(null),
+    automations: () => openWorkspace("Automacoes"),
+    playground: () => openWorkspace("Playground"),
     settings: () => setShowSettings(true),
     archived: () => setShowArchived(true),
     dictate: () => toggleMic(),
@@ -1702,9 +1710,9 @@ export default function ChatPage() {
     { id: "act-new", group: "Ações", label: "Novo chat", keywords: "conversa nova", icon: <MessageSquareDashed size={16} />, run: () => newChat() },
     { id: "act-temp", group: "Ações", label: "Chat temporário", keywords: "privado incógnito não salvar", icon: <MessageSquareDashed size={16} />, run: () => { if (!temporary) toggleTemporary(); } },
     { id: "act-round", group: "Ações", label: "Mesa-redonda", keywords: "multi modelo debate", icon: <Users size={16} />, run: () => enterRoundtable() },
-    { id: "act-ws", group: "Ações", label: "Espaço de Trabalho", keywords: "modelos ferramentas prompts skills", icon: <Wrench size={16} />, run: () => { setWorkspaceSection(null); setWorkspaceOpen(true); setAutomationsOpen(false); } },
-    { id: "act-auto", group: "Ações", label: "Automações", keywords: "agendar monitor", icon: <Bell size={16} />, run: () => { setAutomationsOpen(true); setWorkspaceOpen(false); setPlaygroundOpen(false); } },
-    { id: "act-play", group: "Ações", label: "Playground", keywords: "benchmark comparar modelos debug ferramentas tools", icon: <FlaskConical size={16} />, run: () => { setPlaygroundKey((k) => k + 1); setPlaygroundOpen(true); setWorkspaceOpen(false); setAutomationsOpen(false); } },
+    { id: "act-ws", group: "Ações", label: "Espaço de Trabalho", keywords: "modelos ferramentas prompts skills", icon: <Wrench size={16} />, run: () => openWorkspace(null) },
+    { id: "act-auto", group: "Ações", label: "Automações", keywords: "agendar monitor", icon: <Bell size={16} />, run: () => openWorkspace("Automacoes") },
+    { id: "act-play", group: "Ações", label: "Playground", keywords: "benchmark comparar modelos debug ferramentas tools", icon: <FlaskConical size={16} />, run: () => openWorkspace("Playground") },
     { id: "act-archived", group: "Ações", label: "Chats arquivados", keywords: "arquivo", icon: <Search size={16} />, run: () => setShowArchived(true) },
     ...(user.role === "admin" ? [{ id: "act-admin", group: "Ações", label: "Painel do Admin", keywords: "usuarios rede backup", icon: <ShieldAlert size={16} />, run: () => router.push("/admin") } as PaletteItem] : []),
     { id: "act-logout", group: "Ações", label: "Sair", keywords: "logout desconectar sair", icon: <X size={16} />, run: () => logout() },
@@ -1759,13 +1767,13 @@ export default function ChatPage() {
       >
         <Sidebar
           activeView={
-            automationsOpen ? "automations"
-              : playgroundOpen ? "playground"
-              : workspaceOpen
-                ? (workspaceSection === "Codespace" ? "codespace"
-                  : workspaceSection === "Analítica" ? "analytics"
-                  : "workspace")
-                : "chat"
+            workspaceOpen
+              ? (workspaceSection === "Codespace" ? "codespace"
+                : workspaceSection === "Analítica" ? "analytics"
+                : workspaceSection === "Automacoes" ? "automations"
+                : workspaceSection === "Playground" ? "playground"
+                : "workspace")
+              : "chat"
           }
           user={user}
           chats={chats}
@@ -1785,11 +1793,11 @@ export default function ChatPage() {
           onMoveChat={moveChat}
           onOpenSettings={() => { setShowSettings(true); setMobileNav(false); }}
           onShowArchived={() => { setShowArchived(true); setMobileNav(false); }}
-          onOpenWorkspace={() => { setEditModelTarget(null); setWorkspaceSection(null); setWorkspaceKey((k) => k + 1); setWorkspaceOpen(true); setAutomationsOpen(false); setPlaygroundOpen(false); setMobileNav(false); }}
-          onOpenAutomations={() => { setAutomationsOpen(true); setWorkspaceOpen(false); setPlaygroundOpen(false); setMobileNav(false); }}
-          onOpenCodespace={() => { setEditModelTarget(null); setWorkspaceSection("Codespace"); setWorkspaceKey((k) => k + 1); setWorkspaceOpen(true); setAutomationsOpen(false); setPlaygroundOpen(false); setMobileNav(false); }}
-          onOpenPlayground={() => { setPlaygroundKey((k) => k + 1); setPlaygroundOpen(true); setWorkspaceOpen(false); setAutomationsOpen(false); setMobileNav(false); }}
-          onOpenAnalytics={() => { setEditModelTarget(null); setWorkspaceSection("Analítica"); setWorkspaceKey((k) => k + 1); setWorkspaceOpen(true); setAutomationsOpen(false); setPlaygroundOpen(false); setMobileNav(false); }}
+          onOpenWorkspace={() => openWorkspace(null)}
+          onOpenAutomations={() => openWorkspace("Automacoes")}
+          onOpenCodespace={() => openWorkspace("Codespace")}
+          onOpenPlayground={() => openWorkspace("Playground")}
+          onOpenAnalytics={() => openWorkspace("Analítica")}
           onLogout={logout}
         />
       </div>
@@ -1804,13 +1812,6 @@ export default function ChatPage() {
             onClose={() => { setWorkspaceOpen(false); setEditModelTarget(null); setWorkspaceSection(null); refreshModels(); }}
             onOpenChat={(cid, prefill) => { selectChat(cid).then(() => { if (prefill) setInput(prefill); }).catch(() => {}); }}
           />
-        ) : automationsOpen ? (
-          <AutomationsView
-            onOpenChat={(cid) => { setAutomationsOpen(false); selectChat(cid).catch(() => {}); }}
-            onBack={() => setAutomationsOpen(false)}
-          />
-        ) : playgroundOpen ? (
-          <PlaygroundView key={playgroundKey} onClose={() => setPlaygroundOpen(false)} />
         ) : (
         <>
         {/* barra superior */}
@@ -1821,15 +1822,15 @@ export default function ChatPage() {
                 <Menu size={20} />
               </button>
               {picker}
-              {!temporary && (
-                <button
-                  onClick={() => { if (isRoundtable) setRtBarOpen((v) => !v); else { enterRoundtable(); setRtBarOpen(true); } }}
-                  title={isRoundtable ? (rtBarOpen ? "Ocultar a mesa" : "Mostrar a mesa") : "Mesa-redonda: fazer os modelos conversarem entre si"}
-                  className={`rounded-lg p-1.5 transition-colors ${isRoundtable && rtBarOpen ? "bg-accent/15 text-accent-hover" : isRoundtable ? "text-accent-hover hover:bg-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
-                >
-                  <Users size={18} />
-                </button>
-              )}
+              {/* Mesa-redonda — disponível também no modo temporário (vira uma mesa
+                  view_once, apagada ao sair). */}
+              <button
+                onClick={() => { if (isRoundtable) setRtBarOpen((v) => !v); else { enterRoundtable(); setRtBarOpen(true); } }}
+                title={isRoundtable ? (rtBarOpen ? "Ocultar a mesa" : "Mostrar a mesa") : temporary ? "Mesa-redonda temporária (não será salva)" : "Mesa-redonda: fazer os modelos conversarem entre si"}
+                className={`rounded-lg p-1.5 transition-colors ${isRoundtable && rtBarOpen ? "bg-accent/15 text-accent-hover" : isRoundtable ? "text-accent-hover hover:bg-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
+              >
+                <Users size={18} />
+              </button>
             </div>
             {!active && !temporary && curModel && (
               <button onClick={setAsDefault} className="pl-2 text-left text-xs text-muted transition-colors hover:text-ink">

@@ -194,15 +194,16 @@ export default function AutomationsView({
     <div className="flex h-full flex-1 flex-col bg-bg">
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-5xl px-3 py-6 sm:px-6">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="mb-4 flex items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink"
+            >
+              <ArrowLeft size={16} /> Espaço de Trabalho
+            </button>
+          )}
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              {onBack && (
-                <button onClick={onBack} title="Voltar" className="-ml-1.5 rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
-                  <ArrowLeft size={18} />
-                </button>
-              )}
-              <h1 className="text-2xl font-bold text-ink">Automações</h1>
-            </div>
+            <h1 className="text-2xl font-bold text-ink">Automações</h1>
             <button
               onClick={() => setCreating(true)}
               className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"

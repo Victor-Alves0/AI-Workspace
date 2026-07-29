@@ -26,6 +26,10 @@ IMAGEGEN_KEY = "imagegen_api_key"
 # A AccessKey do Picovoice é chave de cliente (vai ao navegador), mas fica cifrada
 # em repouso — sai do profile (texto claro) e não vaza no dump de backup.
 WAKE_CONFIG_KEY = "wake_config"
+# Vercel: Personal Access Token (projetos/deployments).
+VERCEL_TOKEN = "vercel_token"
+# Spotify: app do usuário (Client Credentials — busca/catálogo). JSON {id, secret}.
+SPOTIFY_CREDS = "spotify_creds"
 
 
 async def set_secret(db: AsyncSession, user_id: uuid.UUID, name: str, value: str) -> None:

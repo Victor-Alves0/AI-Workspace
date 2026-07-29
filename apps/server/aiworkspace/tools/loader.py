@@ -274,7 +274,19 @@ async def _assemble_configs(db: AsyncSession, user_id: uuid.UUID, model_config: 
         from ..integrations import elevenlabs_service
         el_conn = await elevenlabs_service.get_config(db, str(user_id))
         elevenlabs_cfg = sift_service.elevenlabs_config_from_secrets(el_conn)
-    return cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg
+    # Vercel (projetos/deployments): conexão por-usuário (token) — só busca se equipou a tool.
+    vercel_cfg = None
+    if any(tid == f"{_BUILTIN_PREFIX}vercel.projects.manage" for tid in tool_ids):
+        from ..integrations import vercel_service
+        vc_token = await vercel_service.get_token(db, str(user_id))
+        vercel_cfg = sift_service.vercel_config_from_secrets(vc_token)
+    # Spotify (busca no catálogo): conexão por-usuário (Client ID+Secret) — só busca se equipou.
+    spotify_cfg = None
+    if any(tid == f"{_BUILTIN_PREFIX}spotify.music.search" for tid in tool_ids):
+        from ..integrations import spotify_service
+        sp_creds = await spotify_service.get_creds(db, str(user_id))
+        spotify_cfg = sift_service.spotify_config_from_secrets(sp_creds)
+    return cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg
 
 
 async def build_full_sift_for_user(db: AsyncSession, user_id: uuid.UUID):
@@ -282,9 +294,9 @@ async def build_full_sift_for_user(db: AsyncSession, user_id: uuid.UUID):
     Debug de Tools chamar qualquer ferramenta direto (`sift.execute_tool(path, params)`).
     Usa as configs globais do usuário (sem gating por-modelo). None se a SIFT falhar."""
     rows = list(await db.scalars(select(Tool).where(Tool.user_id == user_id)))
-    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg = await _assemble_configs(db, user_id, None, [])
+    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg = await _assemble_configs(db, user_id, None, [])
     return await run_in_threadpool(
-        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg
+        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg
     )
 
 
@@ -315,11 +327,11 @@ async def get_sift_for_user(
     if not allow:
         return None
 
-    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg = await _assemble_configs(
+    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg = await _assemble_configs(
         db, user_id, model_config, tool_ids
     )
     full = await run_in_threadpool(
-        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg
+        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg
     )
     if full is None:
         return None

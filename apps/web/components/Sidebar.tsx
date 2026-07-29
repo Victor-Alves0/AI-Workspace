@@ -26,6 +26,13 @@ import { SHORTCUTS, resolveBinding, prettyCombo, type ShortcutMap } from "@/lib/
 import ChatItem, { ChatActions, ProjectNamesContext } from "./ChatItem";
 import UserMenu from "./UserMenu";
 
+// ordem PADRÃO da composição da barra (deve casar com SIDEBAR_ITEMS do
+// SettingsModal). A ordem/visibilidade efetiva vem de profile.interface.
+const SB_ORDER_DEFAULT = [
+  "sb_new_chat", "sb_conversations", "sb_automations", "sb_codespace",
+  "sb_workspace", "sb_library", "sb_models", "sb_folders", "sb_chats",
+];
+
 /** teclas de um atalho renderizadas como <kbd> (ex.: ⌘ ⇧ O) */
 function Kbd({ combo }: { combo: string }) {
   return (
@@ -297,6 +304,139 @@ export default function Sidebar({
     );
   }
 
+  // composição da barra (ordem + visibilidade em profile.interface; ver
+  // SettingsModal → Barra Lateral). Ordem salva primeiro, faltantes ao fim.
+  const sbOrder: string[] = (() => {
+    const saved = Array.isArray(iface.sidebar_order)
+      ? (iface.sidebar_order as string[]).filter((k) => SB_ORDER_DEFAULT.includes(k))
+      : [];
+    return [...saved, ...SB_ORDER_DEFAULT.filter((k) => !saved.includes(k))];
+  })();
+
+  function renderModule(key: string): React.ReactNode {
+    if (!show(key)) return null;
+    switch (key) {
+      case "sb_new_chat":
+        return <NavButton key={key} icon={<SquarePen size={17} />} label="Novo Chat" collapsed={false} onClick={onNewChat} trailing={newChatCombo ? <Kbd combo={newChatCombo} /> : undefined} />;
+      case "sb_conversations":
+        return <NavButton key={key} icon={<MessagesSquare size={17} />} label="Conversas" collapsed={false} onClick={onOpenConversations} />;
+      case "sb_automations":
+        return (
+          <button
+            key={key}
+            onClick={onOpenAutomations}
+            aria-current={activeView === "automations" ? "page" : undefined}
+            className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-medium transition-colors ${activeView === "automations" ? "bg-surface2 text-ink" : "text-ink hover:bg-hover"}`}
+          >
+            <span className={`shrink-0 ${activeView === "automations" ? "text-accent-hover" : "text-ink-soft"}`}><CalendarClock size={17} /></span>
+            <span className="truncate">Automações</span>
+            {unread > 0 && <span className="ml-auto rounded-full bg-accent px-1.5 text-[11px] font-medium text-white">{unread}</span>}
+          </button>
+        );
+      case "sb_codespace":
+        return <NavButton key={key} icon={<Code2 size={17} />} label="Codespace" collapsed={false} onClick={onOpenCodespace} active={activeView === "codespace"} />;
+      case "sb_workspace":
+        return <NavButton key={key} icon={<LayoutGrid size={17} />} label="Espaço de Trabalho" collapsed={false} onClick={onOpenWorkspace} active={activeView === "workspace"} />;
+      case "sb_library":
+        return <p key={key} className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted/70">Biblioteca</p>;
+      case "sb_models":
+        return (
+          <div key={key}>
+            <SectionHeader
+              label="Modelos"
+              icon={<LayoutGrid size={16} />}
+              onToggle={() => toggle("models")}
+              action={
+                <button onClick={onOpenWorkspace} title="Gerenciar" className="text-muted transition-colors hover:text-ink-soft">
+                  <Wrench size={14} />
+                </button>
+              }
+            />
+            {sections.models && (
+              <div className="mt-1 space-y-0.5">
+                {pinnedModels.map((m) => (
+                  <button
+                    key={m.key}
+                    onClick={() => onPickPinned(m)}
+                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink transition-colors hover:bg-hover"
+                  >
+                    {m.avatar ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={m.avatar} alt="" className="h-5 w-5 shrink-0 rounded-md object-cover" />
+                    ) : (
+                      <Box size={15} className="shrink-0 text-muted" />
+                    )}
+                    <span className="truncate">{m.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      case "sb_folders":
+        return (
+          <div key={key}>
+            <SectionHeader
+              label="Pastas"
+              icon={<FolderIcon size={16} />}
+              onToggle={() => toggle("folders")}
+              action={
+                <button onClick={onCreateFolder} title="Nova pasta" className="text-muted transition-colors hover:text-ink-soft">
+                  <FolderPlus size={14} />
+                </button>
+              }
+            />
+            {sections.folders && (
+              <div className="mt-1 space-y-0.5">
+                {rootFolders.map((f) => (
+                  <FolderRow
+                    key={f.id}
+                    folder={f}
+                    chats={chatsByFolder[f.id] ?? []}
+                    subfolders={foldersByParent[f.id] ?? []}
+                    foldersByParent={foldersByParent}
+                    chatsByFolder={chatsByFolder}
+                    activeId={activeId}
+                    actions={chatActions}
+                    onRename={onRenameFolder}
+                    onDelete={onDeleteFolder}
+                    onMoveChat={onMoveChat}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      case "sb_chats":
+        return (
+          <div key={key}>
+            <SectionHeader label="Chats" icon={<FileText size={16} />} onToggle={() => toggle("chats")} />
+            {sections.chats && (
+              <div
+                className="mt-1"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  const id = e.dataTransfer.getData("text/chat-id");
+                  if (id) onMoveChat(id, null);
+                }}
+              >
+                {groups.map((g) => (
+                  <div key={g.label} className="mb-2">
+                    <p className="px-2 py-1 text-[11px] uppercase tracking-wide text-muted">{g.label}</p>
+                    {g.chats.map((c) => (
+                      <ChatItem key={c.id} chat={c} active={c.id === activeId} actions={chatActions} />
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      default:
+        return null;
+    }
+  }
+
   return (
    <ProjectNamesContext.Provider value={projectNames}>
     <aside className="pt-safe pb-safe group/side flex w-64 shrink-0 flex-col overflow-hidden border-r border-transparent bg-sidebar transition-[width] duration-300 ease-in-out hover:border-border">
@@ -317,126 +457,9 @@ export default function Sidebar({
         </div>
       </div>
 
-      {/* nav principal */}
-      <div className="space-y-0.5 px-2">
-        <NavButton
-          icon={<SquarePen size={17} />}
-          label="Novo Chat"
-          collapsed={false}
-          onClick={onNewChat}
-          trailing={newChatCombo ? <Kbd combo={newChatCombo} /> : undefined}
-        />
-        <NavButton icon={<MessagesSquare size={17} />} label="Conversas" collapsed={false} onClick={onOpenConversations} />
-        {show("sb_automations") && (
-          <button
-            onClick={onOpenAutomations}
-            aria-current={activeView === "automations" ? "page" : undefined}
-            className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-medium transition-colors ${
-              activeView === "automations" ? "bg-surface2 text-ink" : "text-ink hover:bg-hover"
-            }`}
-          >
-            <span className={`shrink-0 ${activeView === "automations" ? "text-accent-hover" : "text-ink-soft"}`}><CalendarClock size={17} /></span>
-            <span className="truncate">Automações</span>
-            {unread > 0 && <span className="ml-auto rounded-full bg-accent px-1.5 text-[11px] font-medium text-white">{unread}</span>}
-          </button>
-        )}
-        {show("sb_codespace") && (
-          <NavButton icon={<Code2 size={17} />} label="Codespace" collapsed={false} onClick={onOpenCodespace} active={activeView === "codespace"} />
-        )}
-        {show("sb_workspace") && (
-          <NavButton icon={<LayoutGrid size={17} />} label="Espaço de Trabalho" collapsed={false} onClick={onOpenWorkspace} active={activeView === "workspace"} />
-        )}
-      </div>
-
-      <div className="mt-2 flex-1 overflow-y-auto px-2 pb-2">
-        <p className="px-2 pb-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wider text-muted/70">Biblioteca</p>
-        {/* Modelos */}
-        {show("sb_models") && (
-        <>
-        <SectionHeader
-          label="Modelos"
-          icon={<LayoutGrid size={16} />}
-          onToggle={() => toggle("models")}
-          action={
-            <button onClick={onOpenWorkspace} title="Gerenciar" className="text-muted transition-colors hover:text-ink-soft">
-              <Wrench size={14} />
-            </button>
-          }
-        />
-        {sections.models && (
-          <div className="mt-1 space-y-0.5">
-            {pinnedModels.map((m) => (
-              <button
-                key={m.key}
-                onClick={() => onPickPinned(m)}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink transition-colors hover:bg-hover"
-              >
-                {m.avatar ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={m.avatar} alt="" className="h-5 w-5 shrink-0 rounded-md object-cover" />
-                ) : (
-                  <Box size={15} className="shrink-0 text-muted" />
-                )}
-                <span className="truncate">{m.name}</span>
-              </button>
-            ))}
-          </div>
-        )}
-        </>
-        )}
-
-        {/* Pastas */}
-        <SectionHeader
-          label="Pastas"
-          icon={<FolderIcon size={16} />}
-          onToggle={() => toggle("folders")}
-          action={
-            <button onClick={onCreateFolder} title="Nova pasta" className="text-muted transition-colors hover:text-ink-soft">
-              <FolderPlus size={14} />
-            </button>
-          }
-        />
-        {sections.folders && (
-          <div className="mt-1 space-y-0.5">
-            {rootFolders.map((f) => (
-              <FolderRow
-                key={f.id}
-                folder={f}
-                chats={chatsByFolder[f.id] ?? []}
-                subfolders={foldersByParent[f.id] ?? []}
-                foldersByParent={foldersByParent}
-                chatsByFolder={chatsByFolder}
-                activeId={activeId}
-                actions={chatActions}
-                onRename={onRenameFolder}
-                onDelete={onDeleteFolder}
-                onMoveChat={onMoveChat}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Chats */}
-        <SectionHeader label="Chats" icon={<FileText size={16} />} onToggle={() => toggle("chats")} />
-        {sections.chats && (
-          <div
-            className="mt-1"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => {
-              const id = e.dataTransfer.getData("text/chat-id");
-              if (id) onMoveChat(id, null);
-            }}
-          >
-            {groups.map((g) => (
-              <div key={g.label} className="mb-2">
-                <p className="px-2 py-1 text-[11px] uppercase tracking-wide text-muted">{g.label}</p>
-                {g.chats.map((c) => (
-                  <ChatItem key={c.id} chat={c} active={c.id === activeId} actions={chatActions} />
-                ))}
-              </div>
-            ))}
-          </div>
-        )}
+      {/* módulos na ORDEM custom (Configurações → Barra Lateral) */}
+      <div className="mt-1 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2">
+        {sbOrder.map((k) => renderModule(k))}
       </div>
 
       {/* rodapé: usuário */}

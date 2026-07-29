@@ -63,7 +63,7 @@ export default function PlaygroundView({ onClose }: { onClose: () => void }) {
               <p className="mt-1 text-sm text-muted">Experimente, meça e depure seus modelos e ferramentas.</p>
             </div>
             <button onClick={onClose} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">
-              <ArrowLeft size={16} /> Voltar ao chat
+              <ArrowLeft size={16} /> Espaço de Trabalho
             </button>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
