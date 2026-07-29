@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { AlertTriangle, ArrowLeft, Bell, BellOff, BellRing, CalendarClock, Check, Clock, Eye, History, Loader2, Minus, Pause, Play, Plus, Search, Trash2, X, Zap } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { AlertTriangle, Bell, BellOff, BellRing, CalendarClock, Check, ChevronLeft, Clock, Eye, History, Loader2, Minus, Pause, Play, Plus, Search, Trash2, X, Zap } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { AppNotification, Automation, AutomationRun } from "@/lib/types";
 import { disablePush, enablePush, pushEnabled, pushSupported } from "@/lib/push";
@@ -18,6 +18,12 @@ function fmtWhen(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
   return d.toLocaleString(undefined, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+// tempo decorrido "m:ss" desde o início da execução (para o chip "Em execução").
+function fmtElapsed(startISO: string): string {
+  const s = Math.max(0, Math.floor((Date.now() - new Date(startISO).getTime()) / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
 // tipo pela cor do tile: agendada=violeta, monitor=azul, lembrete=âmbar.
@@ -81,6 +87,13 @@ export default function AutomationsView({
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [historyFor, setHistoryFor] = useState<Automation | null>(null);
+  // execuções em curso (verdade do servidor): id -> início. Alimenta o chip
+  // "Em execução" com tempo decorrido e sobrevive a navegar/atualizar a página.
+  const [running, setRunning] = useState<Record<string, string>>({});
+  const [liveRun, setLiveRun] = useState<Automation | null>(null);
+  const [, setTick] = useState(0); // 1s tick só p/ o tempo decorrido animar
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState("all");
   const [pushOn, setPushOn] = useState(false);
@@ -109,10 +122,44 @@ export default function AutomationsView({
     return () => clearInterval(t);
   }, [reload]);
 
-  // some com o aviso sozinho (menos o "Executando…", que fica até terminar). Uma
-  // instrução longa — com um endereço a digitar — não se lê em 3,5s: fica mais tempo.
+  // acompanha o que está rodando AGORA (inclui disparos do agendador, não só o
+  // "Testar"). Quando uma automação sai da lista de execução, ela acabou de
+  // terminar → recarrega (atualiza "rodou"/próx.) e avisa.
   useEffect(() => {
-    if (!toast || toast === "Executando…") return;
+    let alive = true;
+    const poll = async () => {
+      try {
+        const r = await api.get<{ running: { id: string; started_at: string | null }[] }>("/automations/running");
+        if (!alive) return;
+        const next: Record<string, string> = {};
+        for (const x of r.running) next[x.id] = x.started_at || new Date().toISOString();
+        setRunning((prev) => {
+          const finished = Object.keys(prev).filter((id) => !(id in next));
+          if (finished.length) {
+            reload();
+            const done = itemsRef.current.find((it) => it.id === finished[0]);
+            setToast(done ? `“${done.title}” concluída.` : "Automação concluída.");
+          }
+          return next;
+        });
+      } catch { /* silencioso */ }
+    };
+    poll();
+    const t = setInterval(poll, 3000);
+    return () => { alive = false; clearInterval(t); };
+  }, [reload]);
+
+  // relógio de 1s só enquanto algo roda (para o tempo decorrido subir na tela)
+  useEffect(() => {
+    if (!Object.keys(running).length) return;
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [running]);
+
+  // some com o aviso sozinho. Uma instrução longa — com um endereço a digitar —
+  // não se lê em 3,5s: fica mais tempo.
+  useEffect(() => {
+    if (!toast) return;
     const t = setTimeout(() => setToast(null), toast.length > 80 ? 12000 : 3500);
     return () => clearTimeout(t);
   }, [toast]);
@@ -134,31 +181,20 @@ export default function AutomationsView({
   }
   async function runNow(a: Automation) {
     setBusy(a.id);
-    setToast("Executando…");
     try {
-      const r = await api.post<{
-        ok: boolean;
-        error?: string;
-        result?: { chat_id?: string; skipped?: string; changed?: boolean };
-      }>(`/automations/${a.id}/run`);
-      if (!r.ok) {
-        setToast(`Falha: ${r.error}`);
-        return;
-      }
-      const res = r.result ?? {};
-      // torna a execução VISÍVEL: abre a conversa gerada (fecha esta tela)
-      if (res.chat_id) {
-        onOpenChat(res.chat_id);
-        return;
-      }
-      if (res.skipped === "already_running") setToast("Já está em execução.");
-      else if (res.changed === false) setToast("Executada — sem novidades no monitor.");
-      else setToast("Automação executada.");
+      // dispara em segundo plano: volta na hora, sem travar. O acompanhamento é
+      // pelo chip "Em execução" (poll de /running) e pela janela ao vivo.
+      const r = await api.post<{ ok: boolean; started?: boolean; already_running?: boolean; error?: string }>(
+        `/automations/${a.id}/run`,
+      );
+      if (r.already_running) setToast("Já está em execução.");
+      else setToast(`“${a.title}” iniciada.`);
+      setRunning((prev) => ({ ...prev, [a.id]: prev[a.id] || new Date().toISOString() }));
+      setLiveRun(a); // abre a janela: dá pra ver o processo em tempo real
     } catch (e) {
       setToast(e instanceof ApiError ? e.message : "Falha ao executar");
     } finally {
       setBusy(null);
-      reload();
     }
   }
   async function openNote(n: AppNotification) {
@@ -194,16 +230,20 @@ export default function AutomationsView({
     <div className="flex h-full flex-1 flex-col bg-bg">
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-5xl px-3 py-6 sm:px-6">
-          {onBack && (
-            <button
-              onClick={onBack}
-              className="mb-4 flex items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink"
-            >
-              <ArrowLeft size={16} /> Espaço de Trabalho
-            </button>
-          )}
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-            <h1 className="text-2xl font-bold text-ink">Automações</h1>
+            <div className="flex min-w-0 items-center gap-3">
+              {onBack && (
+                <button
+                  onClick={onBack}
+                  title="Espaço de Trabalho"
+                  aria-label="Voltar ao Espaço de Trabalho"
+                  className="flex h-8 w-8 flex-none items-center justify-center rounded-xl border border-transparent bg-surface text-ink-soft transition-colors hover:border-border hover:bg-surface2 hover:text-ink"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+              )}
+              <h1 className="truncate text-2xl font-bold text-ink">Automações</h1>
+            </div>
             <button
               onClick={() => setCreating(true)}
               className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
@@ -289,9 +329,20 @@ export default function AutomationsView({
                       </div>
                     </button>
                     <div className="flex shrink-0 items-center gap-1">
-                      <button onClick={() => runNow(a)} disabled={busy === a.id} title="Testar agora" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink disabled:opacity-50">
-                        {busy === a.id ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />}
-                      </button>
+                      {running[a.id] ? (
+                        <button
+                          onClick={() => setLiveRun(a)}
+                          title="Em execução — clique para ver o processo"
+                          className="flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 text-xs font-medium text-accent-hover transition-colors hover:bg-accent/25"
+                        >
+                          <Loader2 size={13} className="animate-spin" />
+                          <span className="font-mono tabular-nums">{fmtElapsed(running[a.id])}</span>
+                        </button>
+                      ) : (
+                        <button onClick={() => runNow(a)} disabled={busy === a.id} title="Testar agora" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink disabled:opacity-50">
+                          {busy === a.id ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />}
+                        </button>
+                      )}
                       <button onClick={() => setHistoryFor(a)} title="Histórico de execuções" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
                         <History size={15} />
                       </button>
@@ -380,6 +431,92 @@ export default function AutomationsView({
           onClose={() => setHistoryFor(null)}
         />
       )}
+
+      {liveRun && (
+        <RunProgressModal
+          automation={liveRun}
+          isRunning={!!running[liveRun.id]}
+          startedAt={running[liveRun.id] ?? null}
+          onOpenChat={(id) => { setLiveRun(null); onOpenChat(id); }}
+          onClose={() => setLiveRun(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Acompanhamento ao vivo de um disparo: tempo decorrido enquanto roda e, ao
+ *  terminar, o resultado (status + texto) com atalho para a conversa gerada. */
+function RunProgressModal({
+  automation, isRunning, startedAt, onOpenChat, onClose,
+}: {
+  automation: Automation;
+  isRunning: boolean;
+  startedAt: string | null;
+  onOpenChat: (chatId: string) => void;
+  onClose: () => void;
+}) {
+  const [result, setResult] = useState<AutomationRun | null>(null);
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!isRunning) return;
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [isRunning]);
+
+  // parou de rodar → busca a execução mais recente para exibir o resultado
+  useEffect(() => {
+    if (isRunning) { setResult(null); return; }
+    let alive = true;
+    api.get<AutomationRun[]>(`/automations/${automation.id}/runs`)
+      .then((rs) => { if (alive) setResult(rs[0] ?? null); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [isRunning, automation.id]);
+
+  const s = result ? (RUN_STATUS[result.status] ?? RUN_STATUS.ok) : null;
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} className="flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <span className="flex items-center gap-2 text-sm font-semibold text-ink">
+            {isRunning ? <Loader2 size={16} className="animate-spin text-accent-hover" /> : <Zap size={16} className="text-muted" />}
+            {automation.title}
+          </span>
+          <button onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={16} /></button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {isRunning ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-10 text-center">
+              <Loader2 size={26} className="animate-spin text-accent-hover" />
+              <p className="text-sm font-medium text-ink">Trabalhando em segundo plano…</p>
+              <p className="font-mono text-3xl tabular-nums text-ink">{startedAt ? fmtElapsed(startedAt) : "0:00"}</p>
+              <p className="max-w-xs text-xs text-muted">Pode fechar esta janela — a execução continua e você é avisado quando terminar.</p>
+            </div>
+          ) : result ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                {s && <span className={`flex items-center gap-1 text-sm font-medium ${s.cls}`}>{s.icon} {s.label}</span>}
+                <span className="ml-auto text-xs text-muted">{fmtWhen(result.created_at)}</span>
+              </div>
+              {(result.error || result.text) && (
+                <div className={`max-h-64 overflow-y-auto whitespace-pre-wrap rounded-xl border border-border bg-bg p-3 text-xs leading-5 ${result.error ? "text-rose-400" : "text-ink-soft"}`}>
+                  {result.error || result.text}
+                </div>
+              )}
+              {result.chat_id && (
+                <button onClick={() => onOpenChat(result.chat_id!)} className="w-full rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover">
+                  Abrir conversa
+                </button>
+              )}
+            </div>
+          ) : (
+            <p className="flex items-center justify-center gap-2 py-10 text-sm text-muted"><Loader2 size={14} className="animate-spin" /> carregando…</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

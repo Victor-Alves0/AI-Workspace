@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft, BarChart3, BookOpen, Box, Brain, CalendarClock, Check, Code2, Copy, Download, FileText,
+  ArrowLeft, BarChart3, BookOpen, Box, Brain, CalendarClock, Check, ChevronLeft, Code2, Copy, Download, FileText,
   FlaskConical, LayoutGrid, MessageSquare, MoreHorizontal, Pencil, Plug, Plus, Search, Settings, Sparkles,
   Terminal, Trash2, Upload, Waypoints, Wrench, X,
 } from "lucide-react";
@@ -106,22 +106,31 @@ function LibraryCard({ icon, name, desc, count, live, onClick }: {
 
 /* casca de uma seção — MESMA moldura do hub (max-w-6xl centrado): botão "voltar"
    em pill, título e um slot de filtro/ações no topo direito (como o hub). */
+/* botão "voltar" — seta ao lado do título (padrão master-detail), o mesmo em todas
+   as seções do Espaço de Trabalho. Rótulo vai no title/aria (o ícone carrega a ação). */
+const BACK_BTN = "flex h-8 w-8 flex-none items-center justify-center rounded-xl border border-transparent bg-surface text-ink-soft transition-colors hover:border-border hover:bg-surface2 hover:text-ink";
+
+function BackToWorkspace({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick} title="Espaço de Trabalho" aria-label="Voltar ao Espaço de Trabalho" className={BACK_BTN}>
+      <ChevronLeft size={18} />
+    </button>
+  );
+}
+
 function SectionShell({ title, count, onBack, actions, filter, children }: {
   title: string; count?: number; onBack: () => void; actions?: ReactNode; filter?: ReactNode; children: ReactNode;
 }) {
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
-      <button
-        onClick={onBack}
-        className="mb-4 flex items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink"
-      >
-        <ArrowLeft size={16} /> Espaço de Trabalho
-      </button>
       {/* mobile: filtro/ações quebram de linha inteiras (sem amassar os botões) */}
       <div className="mb-6 flex flex-wrap items-center justify-between gap-x-3 gap-y-2.5">
-        <h1 className="text-2xl font-bold text-ink">
-          {title}{count !== undefined && <span className="ml-2 font-semibold text-muted">{count}</span>}
-        </h1>
+        <div className="flex min-w-0 items-center gap-3">
+          <BackToWorkspace onClick={onBack} />
+          <h1 className="truncate text-2xl font-bold text-ink">
+            {title}{count !== undefined && <span className="ml-2 font-semibold text-muted">{count}</span>}
+          </h1>
+        </div>
         {(filter || actions) && (
           <div className="flex flex-wrap items-center gap-2 text-sm">
             {filter}

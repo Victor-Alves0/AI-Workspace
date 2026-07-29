@@ -44,11 +44,19 @@ logger = logging.getLogger(__name__)
 
 # guard em memória contra execuções sobrepostas da MESMA automação — compartilhado
 # entre o scheduler e o disparo manual (/run). "deny wins": se já roda, pula.
-_running: set = set()
+# Agora um dict automation_id -> {started_at, trigger}: além de servir de trava,
+# alimenta o indicador "Em execução" (com tempo decorrido) na UI, que sobrevive à
+# navegação/refresh porque é verdade do servidor, não estado local do componente.
+_running: dict = {}
 
 
 def is_running(automation_id) -> bool:
     return automation_id in _running
+
+
+def running_snapshot() -> dict:
+    """Cópia rasa {automation_id: {started_at, trigger}} das execuções em curso."""
+    return dict(_running)
 
 
 def _effective_model_config(automation: Automation, mc: ModelConfig | None) -> Any:
@@ -447,7 +455,7 @@ async def run_automation(automation_id: uuid.UUID, *, trigger: str = "scheduled"
     agendado do manual ("Testar") no histórico."""
     if automation_id in _running:
         return {"skipped": "already_running"}
-    _running.add(automation_id)
+    _running[automation_id] = {"started_at": datetime.now(timezone.utc), "trigger": trigger}
     # o `discard` mora AQUI, no mesmo escopo do `add`: se qualquer coisa entre a
     # marcação e o corpo falhasse, a automação ficaria marcada como "rodando" para
     # sempre e seria silenciosamente pulada em todos os disparos seguintes.
@@ -456,7 +464,7 @@ async def run_automation(automation_id: uuid.UUID, *, trigger: str = "scheduled"
                                  path=f"automation/{trigger}"):
             return await _run_automation_body(automation_id, trigger)
     finally:
-        _running.discard(automation_id)
+        _running.pop(automation_id, None)
 
 
 async def _run_automation_body(automation_id: uuid.UUID, trigger: str) -> dict[str, Any]:
@@ -510,7 +518,7 @@ async def _run_automation_body(automation_id: uuid.UUID, trigger: str) -> dict[s
                     asyncio.create_task(send_to_user(user.id, automation.title, result["text"], "/"))
             return result
     finally:
-        # libera assim que o corpo termina; `run_automation` repete o discard como
-        # rede de segurança (é idempotente num set — ao contrário do contador de
-        # vagas da API, onde liberar duas vezes seria bug).
-        _running.discard(automation_id)
+        # libera assim que o corpo termina; `run_automation` repete o pop como
+        # rede de segurança (pop com default é idempotente — ao contrário do contador
+        # de vagas da API, onde liberar duas vezes seria bug).
+        _running.pop(automation_id, None)

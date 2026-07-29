@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  ArrowLeft, Brain, Check, CheckCircle2, Copy, FolderOpen, GitBranch, GitMerge, Globe, HardDrive,
+  ArrowLeft, Brain, Check, CheckCircle2, ChevronLeft, Copy, FolderOpen, GitBranch, GitMerge, Globe, HardDrive,
   KeyRound, Loader2, MessageSquare, MoreVertical, Pencil, Plus, RefreshCw, Search, Sparkles,
   Terminal, Trash2, Waypoints, X, XCircle,
 } from "lucide-react";
@@ -1063,17 +1063,15 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
 
   return (
     <div>
-      {onBack && (
-        <nav className="mb-4 flex items-center gap-1.5 text-sm">
-          <button onClick={onBack} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-muted transition-colors hover:bg-hover hover:text-ink">
-            <ArrowLeft size={16} /> Espaço de Trabalho
-          </button>
-          <span className="text-muted">/</span>
-          <span className="font-medium text-ink">Codespace</span>
-        </nav>
-      )}
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold text-ink">Codespace</h1>
+        <div className="flex min-w-0 items-center gap-3">
+          {onBack && (
+            <button onClick={onBack} title="Espaço de Trabalho" aria-label="Voltar ao Espaço de Trabalho" className="flex h-8 w-8 flex-none items-center justify-center rounded-xl border border-transparent bg-surface text-ink-soft transition-colors hover:border-border hover:bg-surface2 hover:text-ink">
+              <ChevronLeft size={18} />
+            </button>
+          )}
+          <h1 className="truncate text-2xl font-bold text-ink">Codespace</h1>
+        </div>
         <button onClick={() => setShowNew(true)}
           className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover">
           <Plus size={15} /> Novo projeto

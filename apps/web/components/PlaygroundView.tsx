@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { ReactNode } from "react";
-import { ArrowLeft, BarChart3, Columns2, FlaskConical, Wrench } from "lucide-react";
+import { ArrowLeft, BarChart3, ChevronLeft, Columns2, FlaskConical, Wrench } from "lucide-react";
 import BenchmarkView from "./BenchmarkView";
 import CompareView from "./CompareView";
 import ToolDebugView from "./ToolDebugView";
@@ -56,15 +56,17 @@ export default function PlaygroundView({ onClose }: { onClose: () => void }) {
       {section === null && (
         <div className="mx-auto max-w-5xl px-4 py-6 md:px-8 md:py-8">
           <div className="mb-6 flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <h1 className="flex items-center gap-2 text-2xl font-bold text-ink">
-                <FlaskConical size={22} className="text-accent-hover" /> Playground
-              </h1>
-              <p className="mt-1 text-sm text-muted">Experimente, meça e depure seus modelos e ferramentas.</p>
+            <div className="flex min-w-0 items-center gap-3">
+              <button onClick={onClose} title="Espaço de Trabalho" aria-label="Voltar ao Espaço de Trabalho" className="flex h-8 w-8 flex-none items-center justify-center rounded-xl border border-transparent bg-surface text-ink-soft transition-colors hover:border-border hover:bg-surface2 hover:text-ink">
+                <ChevronLeft size={18} />
+              </button>
+              <div className="min-w-0">
+                <h1 className="flex items-center gap-2 text-2xl font-bold text-ink">
+                  <FlaskConical size={22} className="text-accent-hover" /> Playground
+                </h1>
+                <p className="mt-1 text-sm text-muted">Experimente, meça e depure seus modelos e ferramentas.</p>
+              </div>
             </div>
-            <button onClick={onClose} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">
-              <ArrowLeft size={16} /> Espaço de Trabalho
-            </button>
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {CARDS.map((c) => (

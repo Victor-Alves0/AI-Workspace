@@ -11,13 +11,21 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import asyncio
+import logging
+
 from .auth.deps import require_approved
-from .automation import scheduler
+from .automation import runner, scheduler
 from .automation.runner import run_automation
 from .db import get_db
 from .models import Automation, AutomationRun, Notification, User
 
 router = APIRouter(tags=["automations"])
+logger = logging.getLogger(__name__)
+
+# guarda referências dos disparos manuais em background para o asyncio não coletar
+# a task antes de terminar (create_task só guarda uma referência fraca).
+_run_tasks: set[asyncio.Task] = set()
 
 
 # --------------------------------------------------------------------------- #
@@ -204,20 +212,58 @@ async def toggle_automation(
     return a
 
 
+async def _run_in_background(automation_id: uuid.UUID) -> None:
+    """Executa o disparo manual fora do ciclo da request. Erros já são gravados no
+    histórico dentro de run_automation; aqui só evitamos que a task morra calada."""
+    try:
+        await run_automation(automation_id, trigger="manual")
+    except Exception:  # noqa: BLE001
+        logger.exception("disparo manual da automação %s falhou", automation_id)
+
+
 @router.post("/automations/{automation_id}/run")
 async def run_now(
     automation_id: uuid.UUID,
     user: User = Depends(require_approved),
     db: AsyncSession = Depends(get_db),
 ):
-    """Dispara a automação na hora (para testar). Roda de forma síncrona e devolve
-    o resultado ou o erro."""
+    """Dispara a automação AGORA (testar), sem bloquear: a execução roda em segundo
+    plano e a request volta na hora. A UI acompanha por GET /automations/running (com
+    o tempo decorrido) e vê o resultado no histórico/na conversa gerada ao terminar."""
     await _owned(db, automation_id, user)  # valida posse
-    try:
-        result = await run_automation(automation_id, trigger="manual")
-        return {"ok": True, "result": result}
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    if runner.is_running(automation_id):
+        return {"ok": True, "started": False, "already_running": True}
+    task = asyncio.create_task(_run_in_background(automation_id))
+    _run_tasks.add(task)
+    task.add_done_callback(_run_tasks.discard)
+    return {"ok": True, "started": True}
+
+
+@router.get("/automations/running")
+async def running_automations(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Automações do usuário em execução AGORA, com o instante de início (para a UI
+    mostrar 'Em execução' com o tempo decorrido). Verdade do servidor — sobrevive a
+    navegar/atualizar a página."""
+    snap = runner.running_snapshot()
+    if not snap:
+        return {"running": []}
+    owned = await db.scalars(
+        select(Automation.id).where(
+            Automation.user_id == user.id, Automation.id.in_(list(snap.keys()))
+        )
+    )
+    out = []
+    for aid in owned:
+        info = snap.get(aid) or {}
+        started = info.get("started_at")
+        out.append({
+            "id": str(aid),
+            "trigger": info.get("trigger") or "manual",
+            "started_at": started.isoformat() if started else None,
+        })
+    return {"running": out}
 
 
 @router.get("/automations/{automation_id}/runs", response_model=list[AutomationRunOut])
