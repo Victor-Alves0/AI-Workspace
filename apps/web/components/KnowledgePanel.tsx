@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, BookOpen, Brain, Check, ChevronRight, Download, Eye, FilePlus2, FileText,
   Film as FilmIcon, Folder, FolderInput, FolderPlus, Home, Image as ImageIcon, Loader2, Pencil, Plus,
-  RotateCcw, Search, Tag, Trash2, Upload, Waypoints, X,
+  RotateCcw, Search, Sparkles, Tag, Trash2, Upload, Waypoints, X,
 } from "lucide-react";
 import { api, API_URL } from "@/lib/api";
 import type { KnowledgeBase, KnowledgeDoc, KnowledgeDocMeta, KnowledgeFolder } from "@/lib/types";
@@ -12,6 +12,7 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import { AnchoredMenu, MenuDivider, MenuItem, TagInput } from "./ui";
 import NoteEditor from "./NoteEditor";
 import BrainGraph from "./BrainGraph";
+import EnrichModal from "./EnrichModal";
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -19,6 +20,8 @@ function fmtSize(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+const ACCEPT = ".pdf,.docx,.txt,.md,.markdown,.csv,.json,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.avif,.mp4,.webm,.mov,.m4v,.ogv,.mkv";
+const ACCEPT_EXTS = ACCEPT.split(",");
 const TEXT_RE = /\.(txt|md|markdown|csv|json|log|ya?ml)$/i;
 const IMAGE_RE = /\.(png|jpe?g|gif|webp|bmp|svg|avif)$/i;
 const VIDEO_RE = /\.(mp4|webm|mov|m4v|ogv|mkv)$/i;
@@ -129,12 +132,14 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const folderRef = useRef<HTMLInputElement | null>(null);
   const [newFolder, setNewFolder] = useState(false);
   const [folderName, setFolderName] = useState("");
   // editor de arquivo de texto: {docId?, filename, content}
   const [editor, setEditor] = useState<{ docId?: string; filename: string; content: string } | null>(null);
   const [saving, setSaving] = useState(false);
   const [metaDoc, setMetaDoc] = useState<KnowledgeDoc | null>(null);
+  const [enrichOpen, setEnrichOpen] = useState(false);
   const [viewDoc, setViewDoc] = useState<KnowledgeDoc | null>(null); // visualizador de arquivo
   // busca dentro da base (itens) + filtro por tipo; e busca no nível de bases
   const [query, setQuery] = useState("");
@@ -206,6 +211,86 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
     }
+  }
+
+  // arrastar PASTAS: sobe cada arquivo com o caminho relativo (ex.: "Fotos/gatos/a.jpg")
+  // recriando a árvore de pastas dentro da base (funde em pastas de mesmo nome que já
+  // existam). `tree` = [{ path, file }] onde path inclui as pastas.
+  async function uploadTree(tree: { path: string; file: File }[]) {
+    const items = tree.filter((t) => ACCEPT_EXTS.some((e) => t.file.name.toLowerCase().endsWith(e)) && t.file.size > 0);
+    if (!sel || items.length === 0) return;
+    setUploading(true);
+    try {
+      const cache = new Map<string, string | null>([["", cwd]]); // "" = pasta atual
+      const ensureFolder = async (dirPath: string): Promise<string | null> => {
+        if (cache.has(dirPath)) return cache.get(dirPath)!;
+        const parts = dirPath.split("/").filter(Boolean);
+        const name = parts[parts.length - 1];
+        const parentId = await ensureFolder(parts.slice(0, -1).join("/"));
+        const existing = folders.find((f) => f.name === name && (f.parent_id ?? null) === (parentId ?? null));
+        const id = existing
+          ? existing.id
+          : (await api.post<KnowledgeFolder>(`/knowledge/bases/${sel}/folders`, { name, parent_id: parentId })).id;
+        cache.set(dirPath, id);
+        return id;
+      };
+      // agrupa por pasta (um POST multipart por pasta)
+      const byDir = new Map<string, File[]>();
+      for (const { path, file } of items) {
+        const dir = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+        (byDir.get(dir) ?? byDir.set(dir, []).get(dir)!).push(file);
+      }
+      for (const [dir, files] of byDir) {
+        const folderId = await ensureFolder(dir);
+        const fd = new FormData();
+        for (const f of files) fd.append("files", f);
+        const url = `${API_URL}/knowledge/bases/${sel}/docs${folderId ? `?folder_id=${folderId}` : ""}`;
+        await fetch(url, { method: "POST", credentials: "include", body: fd });
+      }
+      await loadFolders(sel); await loadDocs(sel); loadBases();
+    } catch {} finally {
+      setUploading(false);
+      if (folderRef.current) folderRef.current.value = "";
+    }
+  }
+
+  // lê recursivamente um FileSystemEntry (arrastar pasta) → [{ path, file }]
+  async function readEntry(entry: any, prefix: string): Promise<{ path: string; file: File }[]> {
+    if (!entry) return [];
+    if (entry.isFile) {
+      const file: File = await new Promise((res, rej) => entry.file(res, rej));
+      return [{ path: prefix + file.name, file }];
+    }
+    if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const readBatch = (): Promise<any[]> => new Promise((res, rej) => reader.readEntries(res, rej));
+      const out: { path: string; file: File }[] = [];
+      let batch = await readBatch();
+      while (batch.length) {
+        for (const child of batch) out.push(...(await readEntry(child, `${prefix}${entry.name}/`)));
+        batch = await readBatch();
+      }
+      return out;
+    }
+    return [];
+  }
+
+  // drop: se veio ao menos uma PASTA, recria a árvore; senão, arquivos soltos (antigo)
+  async function handleDrop(entries: any[], files: FileList) {
+    const hasDir = entries.some((e) => e && e.isDirectory);
+    if (!hasDir) { uploadFiles(files); return; }
+    const tree: { path: string; file: File }[] = [];
+    for (const e of entries) tree.push(...(await readEntry(e, "")));
+    await uploadTree(tree);
+  }
+
+  // input <webkitdirectory>: os File têm webkitRelativePath ("Fotos/gatos/a.jpg")
+  function uploadFolderInput(files: FileList) {
+    const tree = Array.from(files).map((f) => ({
+      path: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name,
+      file: f,
+    }));
+    uploadTree(tree);
   }
 
   async function createFolder() {
@@ -390,8 +475,20 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
           <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-ink transition-colors hover:bg-hover">
             <Upload size={15} /> Enviar arquivos
           </button>
+          <button onClick={() => folderRef.current?.click()} title="Enviar uma pasta inteira (mantém a estrutura)" className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-ink transition-colors hover:bg-hover">
+            <FolderInput size={15} /> Enviar pasta
+          </button>
+          {!isBrain && (
+            <button onClick={() => setEnrichOpen(true)} title="Gerar tags e descrições com IA" className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-accent-hover transition-colors hover:bg-hover">
+              <Sparkles size={15} /> Enriquecer
+            </button>
+          )}
           {uploading && <span className="flex items-center gap-1.5 text-xs text-amber-500"><Loader2 size={12} className="animate-spin" /> enviando…</span>}
-          <input ref={fileRef} type="file" multiple hidden accept=".pdf,.docx,.txt,.md,.markdown,.csv,.json,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.avif,.mp4,.webm,.mov,.m4v,.ogv,.mkv" onChange={(e) => e.target.files && uploadFiles(e.target.files)} />
+          <input ref={fileRef} type="file" multiple hidden accept={ACCEPT} onChange={(e) => e.target.files && uploadFiles(e.target.files)} />
+          <input
+            ref={(el) => { folderRef.current = el; if (el) { el.setAttribute("webkitdirectory", ""); el.setAttribute("directory", ""); } }}
+            type="file" multiple hidden onChange={(e) => e.target.files && uploadFolderInput(e.target.files)}
+          />
         </div>
 
         {newFolder && (
@@ -437,12 +534,19 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
         <div
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => { e.preventDefault(); setDragOver(false); uploadFiles(e.dataTransfer.files); }}
+          onDrop={(e) => {
+            e.preventDefault(); setDragOver(false);
+            // webkitGetAsEntry() DEVE ser lido de forma síncrona no evento (a lista some
+            // depois); só então passamos as entries à função assíncrona.
+            const its = e.dataTransfer.items;
+            const entries = its ? Array.from(its).map((i) => (i as unknown as { webkitGetAsEntry?: () => unknown }).webkitGetAsEntry?.() ?? null) : [];
+            handleDrop(entries, e.dataTransfer.files);
+          }}
           className={`min-h-[120px] rounded-2xl border ${dragOver ? "border-accent border-dashed bg-accent/5" : "border-border"}`}
         >
           {shownFolders.length === 0 && shownDocs.length === 0 ? (
             <p className="py-14 text-center text-sm text-muted">
-              {searching ? "Nenhum resultado para esta busca." : isBrain ? "Nenhuma nota aqui. Crie uma nota — ou peça à IA para anotar algo no cérebro." : "Pasta vazia. Arraste arquivos aqui, crie uma subpasta ou um arquivo de texto."}
+              {searching ? "Nenhum resultado para esta busca." : isBrain ? "Nenhuma nota aqui. Crie uma nota — ou peça à IA para anotar algo no cérebro." : "Pasta vazia. Arraste arquivos ou uma pasta inteira aqui, crie uma subpasta ou um arquivo de texto."}
             </p>
           ) : (
             <ul className="flex flex-col gap-1 p-2">
@@ -544,6 +648,15 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
           <MetaModal doc={metaDoc} saving={saving} onSave={saveMeta} onClose={() => setMetaDoc(null)} />
         )}
         {viewDoc && <DocViewerModal doc={viewDoc} onClose={() => setViewDoc(null)} />}
+        {enrichOpen && current && (
+          <EnrichModal
+            baseId={current.id}
+            folderId={cwd}
+            folderName={cwd ? folderById[cwd]?.name : undefined}
+            onClose={() => setEnrichOpen(false)}
+            onApplied={() => loadDocs(current.id)}
+          />
+        )}
       </div>
     );
   }

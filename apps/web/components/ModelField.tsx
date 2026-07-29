@@ -12,6 +12,7 @@ interface Row {
   external: boolean;
   modelId: string;
   local?: boolean;
+  provider?: string;
   custom?: ModelConfig;
 }
 
@@ -36,7 +37,7 @@ export default function ModelField({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<"all" | "openrouter" | "custom" | "local">("all");
+  const [tab, setTab] = useState<"all" | "providers" | "custom" | "local">("all");
   const [q, setQ] = useState("");
   const btnRef = useRef<HTMLButtonElement>(null);
 
@@ -44,16 +45,17 @@ export default function ModelField({
     const customRows: Row[] = includeCustom
       ? custom.map((c) => ({ key: `custom:${c.id}`, name: c.name, avatar: c.avatar_url, external: false, modelId: c.base_model, custom: c }))
       : [];
-    const extRows: Row[] = models.filter((m) => !m.local).map((m) => ({ key: m.id, name: m.name, external: true, modelId: m.id }));
-    const localRows: Row[] = models.filter((m) => m.local).map((m) => ({ key: m.id, name: m.name, external: true, local: true, modelId: m.id }));
+    const extRows: Row[] = models.filter((m) => !m.local).map((m) => ({ key: m.id, name: m.name, external: true, modelId: m.id, provider: m.provider }))
+      .sort((a, b) => (a.provider === "OpenRouter" ? 1 : 0) - (b.provider === "OpenRouter" ? 1 : 0));
+    const localRows: Row[] = models.filter((m) => m.local).map((m) => ({ key: m.id, name: m.name, external: true, local: true, modelId: m.id, provider: m.provider }));
     const all = [...customRows, ...extRows, ...localRows];
     const base =
-      tab === "openrouter" ? extRows
+      tab === "providers" ? extRows
       : tab === "custom" ? customRows
       : tab === "local" ? localRows
       : all;
     const f = q.trim().toLowerCase();
-    return f ? base.filter((r) => r.name.toLowerCase().includes(f)) : base;
+    return f ? base.filter((r) => r.name.toLowerCase().includes(f) || (r.provider ?? "").toLowerCase().includes(f)) : base;
   }, [custom, models, tab, q, includeCustom]);
 
   const label = useMemo(() => {
@@ -63,8 +65,8 @@ export default function ModelField({
   }, [value, models, custom]);
 
   const tabs: [typeof tab, string][] = includeCustom
-    ? [["all", "Tudo"], ["openrouter", "Openrouter"], ["custom", "Custom"], ["local", "Local"]]
-    : [["all", "Tudo"], ["openrouter", "Openrouter"], ["local", "Local"]];
+    ? [["all", "Tudo"], ["providers", "Providers"], ["custom", "Custom"], ["local", "Local"]]
+    : [["all", "Tudo"], ["providers", "Providers"], ["local", "Local"]];
 
   return (
     <>
@@ -128,6 +130,9 @@ export default function ModelField({
                   </span>
                 )}
                 <span className="flex-1 truncate text-sm text-ink">{r.name}</span>
+                {r.provider && (
+                  <span className="shrink-0 rounded bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">{r.provider}</span>
+                )}
                 {r.local ? (
                   <Cpu size={13} className="shrink-0 text-accent-hover" />
                 ) : r.external ? (

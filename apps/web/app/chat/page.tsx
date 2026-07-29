@@ -352,15 +352,17 @@ export default function ChatPage() {
   }, []);
   const refreshFolders = useCallback(() => api.get<Folder[]>("/folders").then(setFolders).catch(() => {}), []);
   const refreshModels = useCallback(() => api.get<ModelConfig[]>("/models").then(setCustomModels).catch(() => {}), []);
-  // modelos externos = OpenRouter + locais do Ollama (mesclados no seletor). Cada
-  // fetch é independente: sem chave OpenRouter ainda mostra os locais, e vice-versa.
+  // modelos externos = OpenRouter + provedores customizados + locais do Ollama +
+  // assinaturas (mesclados no seletor). Cada fetch é independente: sem chave OpenRouter
+  // ainda mostra os locais/provedores, e vice-versa.
   const refreshExtModels = useCallback(async () => {
-    const [ext, local, subs] = await Promise.all([
+    const [ext, providers, local, subs] = await Promise.all([
       api.get<Model[]>("/settings/models").catch(() => [] as Model[]),
+      api.get<Model[]>("/integrations/providers/models").catch(() => [] as Model[]),
       api.get<Model[]>("/integrations/ollama/models").catch(() => [] as Model[]),
       api.get<Model[]>("/integrations/subscriptions/chatgpt/models").catch(() => [] as Model[]),
     ]);
-    setExtModels([...ext, ...local, ...subs]);
+    setExtModels([...ext, ...providers, ...local, ...subs]);
   }, []);
 
   function applyDefaultModel(u: User, customs: ModelConfig[]) {

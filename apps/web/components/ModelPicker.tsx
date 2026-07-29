@@ -25,6 +25,7 @@ interface Row {
   external: boolean;
   modelId: string;
   local?: boolean; // modelo local do Ollama
+  provider?: string; // nome do provedor de origem (OpenRouter, Kie.ai, …)
   custom?: ModelConfig;
 }
 
@@ -60,7 +61,7 @@ export default function ModelPicker({
   onEditModel?: (mc: ModelConfig) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [tab, setTab] = useState<"favorites" | "all" | "openrouter" | "custom" | "local">("all");
+  const [tab, setTab] = useState<"favorites" | "all" | "providers" | "custom" | "local">("all");
   const [q, setQ] = useState("");
   const [itemMenu, setItemMenu] = useState<string | null>(null);
   const itemBtnRef = useRef<HTMLButtonElement>(null);
@@ -81,17 +82,20 @@ export default function ModelPicker({
       modelId: c.base_model,
       custom: c,
     }));
+    // provedores próprios do usuário (kie.ai, LiteLLM, …) vêm ANTES do OpenRouter
+    // (catálogo gigante) p/ não ficarem soterrados; sort estável preserva a ordem interna.
     const extRows: Row[] = models
       .filter((m) => !m.local)
-      .map((m) => ({ key: `ext:${m.id}`, name: m.name, external: true, modelId: m.id }));
+      .map((m) => ({ key: `ext:${m.id}`, name: m.name, external: true, modelId: m.id, provider: m.provider }))
+      .sort((a, b) => (a.provider === "OpenRouter" ? 1 : 0) - (b.provider === "OpenRouter" ? 1 : 0));
     const localRows: Row[] = models
       .filter((m) => m.local)
-      .map((m) => ({ key: `ext:${m.id}`, name: m.name, external: true, local: true, modelId: m.id }));
+      .map((m) => ({ key: `ext:${m.id}`, name: m.name, external: true, local: true, modelId: m.id, provider: m.provider }));
     const all = [...customRows, ...extRows, ...localRows];
     const base =
       tab === "favorites"
         ? all.filter((r) => favSet.has(r.key))
-        : tab === "openrouter"
+        : tab === "providers"
           ? extRows
           : tab === "custom"
             ? customRows
@@ -99,7 +103,7 @@ export default function ModelPicker({
               ? localRows
               : all;
     const f = q.trim().toLowerCase();
-    return f ? base.filter((r) => r.name.toLowerCase().includes(f)) : base;
+    return f ? base.filter((r) => r.name.toLowerCase().includes(f) || (r.provider ?? "").toLowerCase().includes(f)) : base;
   }, [custom, models, tab, q, favSet]);
 
   function isSelected(r: Row) {
@@ -144,7 +148,7 @@ export default function ModelPicker({
             >
               <Star size={15} className={tab === "favorites" ? "fill-accent-hover" : ""} />
             </button>
-            {([["all", "Tudo"], ["openrouter", "Openrouter"], ["custom", "Custom"], ["local", "Local"]] as const).map(([key, lbl]) => (
+            {([["all", "Tudo"], ["providers", "Providers"], ["custom", "Custom"], ["local", "Local"]] as const).map(([key, lbl]) => (
               <button
                 key={key}
                 onClick={() => setTab(key)}
@@ -178,6 +182,9 @@ export default function ModelPicker({
                     </span>
                   )}
                   <span className="truncate text-sm text-ink">{r.name}</span>
+                  {r.provider && (
+                    <span className="shrink-0 rounded bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">{r.provider}</span>
+                  )}
                   {favSet.has(r.key) && <Star size={12} className="shrink-0 fill-accent-hover text-accent-hover" />}
                   {pinSet.has(r.key) && <Pin size={11} className="shrink-0 text-muted" />}
                   {r.local ? (

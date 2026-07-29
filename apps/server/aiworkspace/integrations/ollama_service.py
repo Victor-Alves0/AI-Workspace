@@ -86,6 +86,7 @@ async def list_models(base_url: str) -> list[dict[str, Any]]:
             "id": f"{MODEL_PREFIX}{name}",
             "name": name,
             "local": True,
+            "provider": "Ollama",
             "size": m.get("size"),
             "family": details.get("family"),
             "parameter_size": details.get("parameter_size"),

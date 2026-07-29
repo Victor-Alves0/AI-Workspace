@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth.deps import require_admin, require_approved
 from .config import get_settings
 from .db import get_db
-from .integrations import elevenlabs_service, github_service, google_service, notion_service, ollama_service, slack_service, spotify_service, tuya_service, vercel_service
+from .integrations import elevenlabs_service, github_service, google_service, notion_service, ollama_service, providers_service, slack_service, spotify_service, tuya_service, vercel_service
 from .models import GithubAccount, GoogleAccount, NotionAccount, SlackAccount, User
 from .tools import sift_service
 
@@ -898,6 +898,76 @@ async def ollama_models(
 
 
 # --------------------------------------------------------------------------- #
+# Provedores customizados OpenAI-compatíveis (kie.ai, LiteLLM, …) — POR-USUÁRIO.
+# Cada provedor tem nome + base URL + chave (cifrada); os modelos entram nos
+# seletores prefixados com `@<slug>/<id>`. Só provedores com chave listam modelos.
+# --------------------------------------------------------------------------- #
+class ProviderIn(BaseModel):
+    name: str | None = None
+    base_url: str | None = None
+    models: list[str] | None = None
+    enabled: bool | None = None
+    api_key: str | None = None
+
+
+class ProviderTestIn(BaseModel):
+    base_url: str
+    api_key: str
+    models: list[str] | None = None
+
+
+@router.get("/providers")
+async def providers_list(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Provedores do usuário (sem chave em claro) + presets p/ pré-preencher a UI."""
+    return {
+        "items": await providers_service.list_configs(db, user.id),
+        "presets": providers_service.PRESETS,
+    }
+
+
+@router.put("/providers/{slug}")
+async def providers_upsert(
+    slug: str,
+    body: ProviderIn,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    return await providers_service.upsert(
+        db, user.id, slug=slug, name=body.name, base_url=body.base_url,
+        models=body.models, enabled=body.enabled, api_key=body.api_key,
+    )
+
+
+@router.delete("/providers/{slug}")
+async def providers_delete(
+    slug: str,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    await providers_service.delete(db, user.id, slug)
+    return {"ok": True}
+
+
+@router.post("/providers/test")
+async def providers_test(
+    body: ProviderTestIn,
+    user: User = Depends(require_approved),
+):
+    """Sonda a conexão sem tocar na config salva (via /models ou completion mínima)."""
+    return await providers_service.test_connection(body.base_url, body.api_key, body.models)
+
+
+@router.get("/providers/models")
+async def providers_models(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Modelos de todos os provedores do usuário, no formato dos seletores (best-effort → [])."""
+    return await providers_service.list_user_models(db, user.id)
+
+
+# --------------------------------------------------------------------------- #
 # Tuya / Smart Life — conexão POR-USUÁRIO (creds + catálogo de dispositivos).
 # Cada usuário liga a própria casa (self-hosted compartilhado com família/amigos).
 # --------------------------------------------------------------------------- #
@@ -1001,7 +1071,7 @@ async def chatgpt_models(
     if not cfg.get("connected"):
         return []
     return [
-        {"id": m, "name": f"{m.removeprefix(chatgpt_service.MODEL_PREFIX)} (ChatGPT)"}
+        {"id": m, "name": f"{m.removeprefix(chatgpt_service.MODEL_PREFIX)} (ChatGPT)", "provider": "ChatGPT"}
         for m in cfg.get("models") or []
     ]
 

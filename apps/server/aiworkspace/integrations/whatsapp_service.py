@@ -565,9 +565,13 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
         extra_parts = [
             f"You are replying on WhatsApp (connection '{conn.label or conn.phone}') to "
             f"{who}. Answer as a WhatsApp message: concise, plain text (WhatsApp only "
-            f"renders *bold*, _italic_ and ```code```; never use headings, tables or links "
-            f"in markdown syntax). Charts and generated images ARE delivered to the contact "
-            f"as real media, so you may use them. Match the contact's language."
+            f"renders *bold*, _italic_ and ```code```; do NOT use headings, tables, or "
+            f"markdown links [text](url)). "
+            f"EXCEPTION — media: when a tool gives you an image/video to show, or a "
+            f"knowledge-base result says to 'paste exactly ![name](url)', include that "
+            f"![...](...) markdown EXACTLY as given — do not shorten, rewrite or drop the "
+            f"URL. It is delivered to the contact as a real photo/video, NOT as a link; "
+            f"charts and generated images are delivered the same way. Match the contact's language."
         ]
         # prompt adicional configurado para ESTE número conectado
         if (conn.system_prompt or "").strip():
@@ -630,17 +634,18 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
         except Exception as exc:  # noqa: BLE001
             error = _err_text(exc)
 
-        # gráfico/imagem que o turno produziu → mídia de verdade (o front do chat
-        # desenharia; aqui os bytes são entregues no WhatsApp)
-        media = await channel_media.collect(tool_events)
-        # imagem da Base de Conhecimento colada como markdown na resposta -> midia
-        # (no canal o link local seria inutil); o texto segue sem o markdown
-        out_text, kb_media = await channel_media.extract_content_images(content)
-        media.extend(kb_media)
+        # gráfico/imagem GERADA pelo turno (tool_events) → mídia; sem posição no texto,
+        # vão no fim.
+        tool_media = await channel_media.collect(tool_events)
+        # resposta dividida em segmentos ORDENADOS (texto/imagem da KB): entrega
+        # "mensagem, imagem, mensagem" na ordem em que a mídia aparece — em vez de todo
+        # o texto e só depois as imagens (no chat o front renderia o markdown inline).
+        segments = await channel_media.split_content_media(content)
+        seg_media = [s for s in segments if s["type"] == "media"]
 
         # uma resposta SÓ com imagem é legítima ("me faz um gráfico disso"): não é
         # "resposta vazia" — só não tem texto.
-        if error or not (content or media):
+        if error or not (content or tool_media or seg_media):
             conn.state = {**(conn.state or {}), "last_error": error or "Resposta vazia"}
             await db.commit()
             logger.warning("whatsapp: turno falhou (%s): %s", conn.id, error)
@@ -659,22 +664,33 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
             db.add(ev_row)
         thread.last_message_at = datetime.now(timezone.utc)
 
+        # mídia só pela Evolution: a Cloud API oficial exige subir o arquivo antes
+        # (upload → media_id) e isso ainda não está implementado
+        can_media = conn.provider == "evolution"
         try:
             # o BANCO guarda a resposta crua (o chat do app renderiza markdown); o
             # WhatsApp recebe a versão que ele sabe desenhar — tabelas/headings/links
-            # viram texto legível em vez de canos e cerquilhas cruas.
-            if out_text:
-                await _deliver(conn, m["jid"], wa_format.to_whatsapp(out_text))
-            # mídia só pela Evolution: a Cloud API oficial exige subir o arquivo antes
-            # (upload → media_id) e isso ainda não está implementado
-            if media and conn.provider != "evolution":
-                logger.info("whatsapp: %d mídia(s) não enviadas (provider oficial)", len(media))
-            elif media:
-                for item in media:
+            # viram texto legível. Entrega na ORDEM dos segmentos: texto, imagem, texto.
+            for seg in segments:
+                if seg["type"] == "text":
+                    t = wa_format.to_whatsapp(seg["text"])
+                    if t.strip():
+                        await _deliver(conn, m["jid"], t)
+                elif can_media:
+                    await evolution.send_media(
+                        conn.instance, m["jid"], seg["data"], seg["mime"],
+                        seg["filename"], seg.get("caption", ""),
+                    )
+            # gráficos/imagens geradas: no fim (não têm posição no texto)
+            if tool_media and can_media:
+                for item in tool_media:
                     await evolution.send_media(
                         conn.instance, m["jid"], item["data"], item["mime"],
                         item["filename"], item["caption"],
                     )
+            skipped = (len(seg_media) + len(tool_media)) if not can_media else 0
+            if skipped:
+                logger.info("whatsapp: %d mídia(s) não enviadas (provider oficial)", skipped)
             conn.state = {**(conn.state or {}), "last_error": None,
                           "last_event_at": datetime.now(timezone.utc).isoformat()}
         except Exception as exc:  # noqa: BLE001 - resposta gerada mas não entregue

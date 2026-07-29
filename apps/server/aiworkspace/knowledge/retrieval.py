@@ -19,11 +19,15 @@ from . import embeddings
 
 logger = logging.getLogger(__name__)
 
+# o LEFT JOIN em knowledge_folders traz o NOME DA PASTA de cada doc (null = raiz):
+# sem isso o modelo só via o filename e não conseguia achar/citar itens por pasta
+# ("me manda a foto da pasta Gatos" era impossível — ele não sabia que pastas existem).
 _SEARCH = sql_text(
-    "SELECT c.id AS chunk_id, c.doc_id, c.ordinal, c.text, d.filename, d.mime, "
+    "SELECT c.id AS chunk_id, c.doc_id, c.ordinal, c.text, d.filename, d.mime, f.name AS folder, "
     "       c.embedding <=> CAST(:emb AS vector) AS dist "
     "FROM knowledge_chunks c "
     "JOIN knowledge_docs d ON d.id = c.doc_id "
+    "LEFT JOIN knowledge_folders f ON f.id = d.folder_id "
     "WHERE c.user_id = :uid AND c.base_id = ANY(:bids) "
     "ORDER BY c.embedding <=> CAST(:emb AS vector) "
     "LIMIT :k"
@@ -31,10 +35,11 @@ _SEARCH = sql_text(
 
 # variante com filtro por documento (usada pela referência "#" a arquivos grandes)
 _SEARCH_DOCS = sql_text(
-    "SELECT c.id AS chunk_id, c.doc_id, c.ordinal, c.text, d.filename, d.mime, "
+    "SELECT c.id AS chunk_id, c.doc_id, c.ordinal, c.text, d.filename, d.mime, f.name AS folder, "
     "       c.embedding <=> CAST(:emb AS vector) AS dist "
     "FROM knowledge_chunks c "
     "JOIN knowledge_docs d ON d.id = c.doc_id "
+    "LEFT JOIN knowledge_folders f ON f.id = d.folder_id "
     "WHERE c.user_id = :uid AND c.base_id = ANY(:bids) AND c.doc_id = ANY(:dids) "
     "ORDER BY c.embedding <=> CAST(:emb AS vector) "
     "LIMIT :k"
@@ -70,6 +75,7 @@ def _row_to_hit(r) -> dict:
         "chunk_id": str(r["chunk_id"]),
         "doc_id": str(r["doc_id"]),
         "filename": r["filename"] or "documento",
+        "folder": (r["folder"] if "folder" in r.keys() else None) or "",  # "" = raiz da base
         "mime": r["mime"] or "",
         "ordinal": int(r["ordinal"]),
         "text": r["text"] or "",
@@ -148,4 +154,52 @@ async def search_multi(
         logger.warning("knowledge search_multi falhou: %s", exc)
         return []
     out.sort(key=lambda h: h["score"], reverse=True)
+    return out
+
+
+_LIST = sql_text(
+    "SELECT d.id AS doc_id, d.filename, d.mime, f.name AS folder "
+    "FROM knowledge_docs d "
+    "LEFT JOIN knowledge_folders f ON f.id = d.folder_id "
+    "WHERE d.user_id = :uid AND d.base_id = ANY(:bids) AND d.status = 'ready' "
+    "ORDER BY f.name NULLS FIRST, d.filename "
+    "LIMIT :k"
+)
+
+
+async def list_index(
+    user_id, base_ids: list[str], folder: str | None = None, limit: int = 200,
+) -> list[dict]:
+    """Lista os arquivos das bases (navegação/browse), com pasta e tipo — sem embedding.
+
+    Usado pela ação 'list' do search_knowledge: deixa o modelo VER o que existe
+    (pastas + arquivos) em vez de só adivinhar por busca semântica. Com `folder`,
+    filtra por nome de pasta (case-insensitive). Cada item vem como um hit no mesmo
+    shape de `_row_to_hit` (sem chunk/score), p/ reusar o formatador de bloco."""
+    bids = _uuids(base_ids)
+    if not bids:
+        return []
+    try:
+        uid = user_id if isinstance(user_id, uuid.UUID) else uuid.UUID(str(user_id))
+    except (ValueError, TypeError):
+        return []
+    want = (folder or "").strip().lower()
+    try:
+        async with SessionLocal() as db:
+            res = await db.execute(_LIST, {"uid": uid, "bids": bids, "k": max(1, min(int(limit), 500))})
+            rows = res.mappings().all()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("knowledge list_index falhou: %s", exc)
+        return []
+    out: list[dict] = []
+    for r in rows:
+        fol = (r["folder"] or "")
+        if want and want != fol.lower():
+            continue
+        out.append({
+            "chunk_id": "", "doc_id": str(r["doc_id"]),
+            "filename": r["filename"] or "documento", "folder": fol,
+            "mime": r["mime"] or "", "ordinal": 0,
+            "text": "", "score": 1.0,
+        })
     return out

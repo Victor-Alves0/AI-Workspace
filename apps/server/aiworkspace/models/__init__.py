@@ -24,6 +24,7 @@ from .push import PushSubscription
 from .artifact import Artifact, ArtifactVersion
 from .memory_bank import MemoryBank
 from .knowledge import KnowledgeBase, KnowledgeFolder, KnowledgeDoc, KnowledgeChunk
+from .knowledge_enrichment import KnowledgeEnrichment
 from .benchmark import Benchmark, BenchmarkRun
 from .codespace_project import CodespaceProject
 from .codespace_task import CodespaceTask
@@ -44,6 +45,7 @@ __all__ = [
     "Prompt",
     "Skill",
     "SkillProposal",
+    "KnowledgeEnrichment",
     "AppSetting",
     "Automation",
     "Notification",

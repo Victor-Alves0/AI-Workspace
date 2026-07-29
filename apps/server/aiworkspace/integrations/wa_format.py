@@ -18,6 +18,11 @@ _BOLD_ALT = re.compile(r"__(.+?)__", re.S)
 _ITALIC_MD = re.compile(r"(?<![\*\w])\*(?!\s)([^\*\n]+?)(?<!\s)\*(?![\*\w])")
 _LINK = re.compile(r"\[([^\]]+)\]\((https?://[^\s\)]+)\)")
 _IMAGE = re.compile(r"!\[([^\]]*)\]\((https?://[^\s\)]+)\)")
+# rede final: markdown de imagem/link ÓRFÃO (url relativa, placeholder, token quebrado)
+# que escapou das regras acima. Sem isto, um `[bunny](link)` que o modelo escreveu no
+# lugar da imagem vazava cru pro contato. Vira só o rótulo — nada de canos/parênteses.
+_IMAGE_ANY = re.compile(r"!\[([^\]\n]*)\]\([^)\n]*\)")
+_LINK_ANY = re.compile(r"\[([^\]\n]+)\]\([^)\n]*\)")
 _BULLET = re.compile(r"(?m)^\s*[-*+]\s+")
 _HRULE = re.compile(r"(?m)^\s*([-*_])\s*\1\s*\1[\s\-*_]*$")
 _ROW = re.compile(r"^\s*\|(.+)\|\s*$")
@@ -67,8 +72,10 @@ def to_whatsapp(text: str) -> str:
     chunks = (text or "").split("```")
     for i in range(0, len(chunks), 2):  # só os índices PARES estão fora do código
         s = chunks[i]
-        s = _IMAGE.sub(r"\2", s)                  # imagem markdown → a própria URL
-        s = _LINK.sub(r"\1: \2", s)               # [texto](url) → texto: url
+        s = _IMAGE.sub(r"\2", s)                  # imagem markdown (url http) → a própria URL
+        s = _LINK.sub(r"\1: \2", s)               # [texto](url http) → texto: url
+        s = _IMAGE_ANY.sub(r"\1", s)              # imagem órfã/relativa → só o rótulo
+        s = _LINK_ANY.sub(r"\1", s)               # link órfão/relativo → só o texto
         # ITÁLICO ANTES do negrito: negrito vira `*x*`, que é exatamente a cara do
         # itálico em markdown — invertendo a ordem, todo negrito viraria itálico. A
         # lookbehind do regex já o impede de casar os asteriscos internos de `**x**`.

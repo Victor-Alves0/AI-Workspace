@@ -66,3 +66,12 @@ async def has_secret(db: AsyncSession, user_id: uuid.UUID, name: str) -> bool:
         )
     )
     return row is not None
+
+
+async def delete_secret(db: AsyncSession, user_id: uuid.UUID, name: str) -> None:
+    row = await db.scalar(
+        select(UserSecret).where(UserSecret.user_id == user_id, UserSecret.name == name)
+    )
+    if row is not None:
+        await db.delete(row)
+        await db.commit()

@@ -399,27 +399,36 @@ def _search_knowledge_tool() -> dict[str, Any]:
         "function": {
             "name": "search_knowledge",
             "description": (
-                "Search the user's knowledge base (their uploaded documents AND images/photos/videos) "
-                "for items relevant to a question. Use whenever the answer may depend on the "
-                "user's own files — including when they ask you to show/send a photo, image or video "
-                "stored there. Returns numbered passages (cite the source used with [n]); image and "
-                "video results include ready-to-paste markdown that DISPLAYS/PLAYS the media in the chat. "
-                "Call it again with different words (or a bigger `limit`) if the first search misses — "
-                "do not conclude the user has no such file after a single query."
+                "Access the user's knowledge base (their uploaded documents AND images/photos/videos). "
+                "Two actions: 'search' (default) finds items relevant to `query` by meaning; 'list' BROWSES "
+                "what exists — the folders and files, optionally inside one `folder` — so you can see the "
+                "user's files instead of guessing. Use whenever the answer may depend on the user's own "
+                "files, including when they ask you to show/send a photo, image or video, or to look in a "
+                "named folder. Results are numbered and note each item's location (in: folder/filename); "
+                "image and video items include ready-to-paste markdown that DISPLAYS/PLAYS the media. "
+                "You choose how many to pull via `limit`. If a search misses, retry with different words, "
+                "a bigger `limit`, or action 'list' to see the folders — never conclude the file is absent "
+                "after a single query."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "what to look up, in the document's language"},
+                    "action": {
+                        "type": "string",
+                        "enum": ["search", "list"],
+                        "description": "'search' (semantic, default) or 'list' (browse folders/files).",
+                    },
+                    "query": {"type": "string", "description": "search: what to look up, in the document's language"},
+                    "folder": {"type": "string", "description": "list: only files in this folder name (omit for all)"},
                     "limit": {
                         "type": "integer",
                         "description": (
-                            "how many passages/files to retrieve (1-20). Raise it to browse "
-                            "what exists (e.g. listing the user's photos); lower it to save context."
+                            "how many items to retrieve (search 1-30; list up to 200). Raise it to browse "
+                            "more of what exists; lower it to save context. You decide."
                         ),
                     },
                 },
-                "required": ["query"],
+                "required": [],
             },
         },
     }
@@ -530,10 +539,15 @@ def _knowledge_block_and_sources(results: list[dict]) -> tuple[str, list[dict[st
         if did not in idx:
             idx[did] = len(sources) + 1
             sources.append({"title": r.get("filename") or "documento", "url": sign_doc_url(did)})
+        # localização (pasta/arquivo) p/ o modelo saber ONDE o item vive e poder
+        # atender pedidos por pasta ("a foto da pasta Gatos").
+        folder = (r.get("folder") or "").strip()
+        where = f"{folder}/{r.get('filename') or ''}" if folder else (r.get("filename") or "")
+        loc = f" (in: {where})" if where else ""
         if (r.get("mime") or "").startswith("image/"):
             name = r.get("filename") or "imagem"
             lines.append(
-                f"[{idx[did]}] IMAGE — {r.get('text') or name}. "
+                f"[{idx[did]}] IMAGE{loc} — {r.get('text') or name}. "
                 f"To SHOW this image in your reply, paste exactly: ![{name}]({sources[idx[did]-1]['url']})"
             )
         elif (r.get("mime") or "").startswith("video/"):
@@ -541,11 +555,11 @@ def _knowledge_block_and_sources(results: list[dict]) -> tuple[str, list[dict[st
             # extensão de vídeo — por isso mantenha o nome do arquivo (com extensão).
             name = r.get("filename") or "video.mp4"
             lines.append(
-                f"[{idx[did]}] VIDEO — {r.get('text') or name}. "
+                f"[{idx[did]}] VIDEO{loc} — {r.get('text') or name}. "
                 f"To SHOW/PLAY this video in your reply, paste exactly: ![{name}]({sources[idx[did]-1]['url']})"
             )
         else:
-            lines.append(f"[{idx[did]}] {r.get('text') or ''}")
+            lines.append(f"[{idx[did]}]{loc} {r.get('text') or ''}")
     return "\n\n".join(lines), sources
 
 
@@ -1030,6 +1044,7 @@ def _assemble_tools_and_prompt(
     skill_learning: bool | None,
     subagents: list[dict[str, Any]],
     run_subagent: Any | None,
+    kb_present: bool = False,
 ) -> _AssembledTools:
     """Fase 2 — monta a lista de tools anunciadas ao modelo e a seção de
     ferramentas do system prompt (SIFT + skills + genimage + KB-tool + delegate)."""
@@ -1101,9 +1116,12 @@ def _assemble_tools_and_prompt(
         a.tools = list(a.tools) + [_generate_image_tool()]
         native_names.append("generate_image")
 
-    # Base de Conhecimento no modo "ferramenta": o modelo ganha `search_knowledge`
-    # (independe da SIFT), buscando os documentos sob demanda.
-    a.kb_tool_on = kb_tool_on
+    # Base de Conhecimento: o modelo ganha `search_knowledge` (independe da SIFT) para
+    # buscar/navegar os documentos sob demanda. Sai no modo "ferramenta" SEMPRE; e
+    # também quando há bases só em modo automático, DESDE QUE o turno já exponha tools
+    # (`a.tools` não-vazio) — injetar uma tool num modelo sem tool-calling quebraria a
+    # request, então bases auto num modelo sem tools mantêm só a injeção automática.
+    a.kb_tool_on = kb_tool_on or (kb_present and bool(a.tools))
     if a.kb_tool_on:
         a.tools = list(a.tools) + [_search_knowledge_tool()]
         native_names.append("search_knowledge")
@@ -1460,19 +1478,52 @@ class _ToolDispatcher:
             self.result = {"error": f"não foi possível gerar a imagem: {exc}"}
 
     async def _search_knowledge(self, args: dict) -> AsyncGenerator[dict[str, Any], None]:
-        # Base de Conhecimento (modo ferramenta): busca os documentos e devolve os
-        # trechos numerados; a UI mostra as fontes (via kind:"knowledge").
-        query = str(args.get("query") or "").strip() or self.user_text
+        # Base de Conhecimento (modo ferramenta): 'search' busca trechos por
+        # similaridade; 'list' folheia pastas/arquivos. A UI mostra as fontes.
         if not self.kb_tool_on:
             self.result = {"error": "base de conhecimento não está ativa neste modelo"}
             return
-        # o MODELO pode forçar um `limit` (mesmo p/ todas as bases, teto 20); sem ele,
-        # cada base usa o SEU k (self.kb_ks), com self.kb_k de padrão.
+        action = str(args.get("action") or "search").strip().lower()
         limit_arg = args.get("limit")
+
+        # ---- navegação: lista os arquivos (com pasta/tipo) p/ o modelo escolher ----
+        if action == "list":
+            folder = str(args.get("folder") or "").strip() or None
+            try:
+                lim = max(1, min(int(limit_arg), 200)) if limit_arg else 200
+            except (TypeError, ValueError):
+                lim = 200
+            label = f"lista {folder}" if folder else "lista de arquivos"
+            yield {"type": "knowledge", "status": "start", "query": label[:120]}
+            try:
+                lres = await kb_retrieval.list_index(self.user_id, self.kb_bases, folder, lim)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("search_knowledge(list) falhou: %s", exc)
+                lres = []
+            _blk, lsrc = _knowledge_block_and_sources(lres)
+            model_txt = (
+                "Files in the user's knowledge base"
+                + (f" (folder '{folder}')" if folder else "")
+                + " — each item notes its location (in: folder/filename); image/video items include "
+                + "ready-to-paste markdown to show them:\n\n" + _blk
+                if lres else
+                (f"No files in folder '{folder}'." if folder else "No files match.")
+                + " Try action 'list' without a folder to see everything, or 'search' by meaning."
+            )
+            self.result = {
+                "kind": "knowledge", "query": label[:200],
+                "sources": lsrc, "count": len(lres), "_model": model_txt,
+            }
+            return
+
+        # ---- busca semântica (padrão) ----
+        query = str(args.get("query") or "").strip() or self.user_text
+        # o MODELO pode forçar um `limit` (mesmo p/ todas as bases, teto 30); sem ele,
+        # cada base usa o SEU k (self.kb_ks), com self.kb_k de padrão.
         yield {"type": "knowledge", "status": "start", "query": query[:120]}
         try:
             if limit_arg:
-                k = max(1, min(int(limit_arg), 20))
+                k = max(1, min(int(limit_arg), 30))
                 kres = await kb_retrieval.search(self.user_id, self.kb_bases, query, k)
             else:
                 kres = await kb_retrieval.search_multi(
@@ -1494,7 +1545,8 @@ class _ToolDispatcher:
             if kres else
             "No passage matched THIS query. That does not mean the file is absent — "
             "retry with different wording (synonyms, the file's own language, a broader "
-            "term) or a larger `limit` before telling the user it doesn't exist."
+            "term), a larger `limit`, or action 'list' to browse the folders, before "
+            "telling the user it doesn't exist."
         )
         self.result = {
             "kind": "knowledge", "query": query[:200],
@@ -1820,15 +1872,17 @@ async def run_turn(
     knowledge_block, ref_block = g.knowledge_block, g.ref_block
     ref_chat_block = g.ref_chat_block
     auto_knowledge_event, ref_knowledge_event = g.auto_knowledge_event, g.ref_knowledge_event
-    # o search_knowledge (modo "tool") busca SÓ nas bases marcadas como ferramenta
-    kb_bases, kb_k, kb_ks = g.kb_bases_tool, g.kb_k, g.kb_ks
+    # o search_knowledge busca em TODAS as bases acopladas (auto + tool): mesmo com
+    # uma base em modo automático, o modelo pode puxar MAIS trechos / navegar sob
+    # demanda — a injeção automática é só a linha de base, não o teto.
+    kb_bases, kb_k, kb_ks = g.kb_bases, g.kb_k, g.kb_ks
 
     # 2. montagem das tools anunciadas + seção de ferramentas do system prompt
     skills = skills or []
     subagents = subagents or []
     asm = _assemble_tools_and_prompt(
         sift=sift, use_tools=use_tools, code_mode=code_mode, skills=skills,
-        genimage=genimage, kb_tool_on=bool(g.kb_bases_tool),
+        genimage=genimage, kb_tool_on=bool(g.kb_bases_tool), kb_present=bool(g.kb_bases),
         brain=brain, skill_learning=skill_learning,
         subagents=subagents, run_subagent=run_subagent,
     )

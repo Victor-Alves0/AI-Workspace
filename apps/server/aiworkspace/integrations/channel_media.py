@@ -145,34 +145,70 @@ def _id_from_url(url: str) -> uuid.UUID | None:
 # Imagem da Base de Conhecimento embutida na resposta como markdown
 # (`![nome](/knowledge/docs/<id>/raw?t=<token>)`). No chat o front renderiza; no
 # canal o contato receberia um LINK local inútil — aqui ela vira mídia de verdade.
+# O `!` é OPCIONAL: modelos às vezes degradam o `![img](url)` para um link `[img](url)`
+# (o prompt do canal proíbe links) — sem tolerar isso, a imagem sumia e o `[img](link)`
+# vazava como texto. Aceitamos ambos e sempre entregamos a mídia.
 _KB_IMG_RE = re.compile(
-    r"!\[[^\]\n]*\]\((?:https?://[^/\s)]+)?/knowledge/docs/([0-9a-fA-F-]{36})/raw\?t=([^\s)]+)\)"
+    r"!?\[[^\]\n]*\]\((?:https?://[^/\s)]+)?/knowledge/docs/([0-9a-fA-F-]{36})/raw\?t=([^\s)]+)\)"
 )
+
+
+async def _kb_doc_media(doc_id: str, token: str) -> dict[str, Any] | None:
+    """Valida o token assinado (a resposta do modelo não é confiável) e devolve
+    {data, mime, filename, caption} da imagem/vídeo da KB, ou None."""
+    from ..knowledge.links import verify_doc_token
+    if not verify_doc_token(doc_id, token):
+        return None
+    try:
+        async with SessionLocal() as db:
+            d = await db.get(KnowledgeDoc, uuid.UUID(doc_id))
+            if d is None or not d.data:
+                return None
+            mime = d.mime or ""
+            if not (mime.startswith("image/") or mime.startswith("video/")):
+                return None
+            return {"data": bytes(d.data), "mime": mime,
+                    "filename": d.filename or "arquivo", "caption": ""}
+    except Exception as exc:  # noqa: BLE001 - o texto segue mesmo sem a mídia
+        logger.warning("canal: falha ao carregar mídia da KB (%s): %s", doc_id, exc)
+        return None
 
 
 async def extract_content_images(text: str) -> tuple[str, list[dict[str, Any]]]:
     """Extrai as imagens da KB do texto da resposta → (texto sem os markdowns,
-    [{data, mime, filename, caption}]). Valida o token assinado de cada URL (a
-    resposta do modelo não é confiável) e lê os bytes direto do banco."""
-    from ..knowledge.links import verify_doc_token
-
+    [{data, mime, filename, caption}]). Para canais que entregam texto e mídia em
+    blocos separados (o WhatsApp usa `split_content_media`, que preserva a ordem)."""
     media: list[dict[str, Any]] = []
     out = text or ""
     for m in _KB_IMG_RE.finditer(text or ""):
-        doc_id, token = m.group(1), m.group(2)
-        if not verify_doc_token(doc_id, token):
+        item = await _kb_doc_media(m.group(1), m.group(2))
+        if item is None:
             continue
-        try:
-            async with SessionLocal() as db:
-                d = await db.get(KnowledgeDoc, uuid.UUID(doc_id))
-                if d is None or not d.data or not (d.mime or "").startswith("image/"):
-                    continue
-                media.append({
-                    "data": bytes(d.data), "mime": d.mime,
-                    "filename": d.filename or "imagem", "caption": "",
-                })
-        except Exception as exc:  # noqa: BLE001 - o texto segue mesmo sem a imagem
-            logger.warning("canal: falha ao carregar imagem da KB (%s): %s", doc_id, exc)
-            continue
+        media.append(item)
         out = out.replace(m.group(0), "")
     return (re.sub(r"\n{3,}", "\n\n", out).strip(), media) if media else (text or "", media)
+
+
+async def split_content_media(text: str) -> list[dict[str, Any]]:
+    """Divide a resposta em segmentos ORDENADOS para entregar "texto, imagem, texto"
+    na ordem em que a mídia aparece — em vez de todo o texto e depois toda a mídia.
+
+    Retorna uma lista de `{"type":"text","text":...}` e
+    `{"type":"media","data","mime","filename","caption"}`. Markdown de imagem da KB
+    inválido/não resolvido fica no texto (o `wa_format` depois limpa o resíduo)."""
+    src = text or ""
+    segs: list[dict[str, Any]] = []
+    pos = 0
+    for m in _KB_IMG_RE.finditer(src):
+        item = await _kb_doc_media(m.group(1), m.group(2))
+        if item is None:
+            continue  # não resolveu → deixa o markdown no texto, não corta
+        before = src[pos:m.start()]
+        if before.strip():
+            segs.append({"type": "text", "text": before})
+        segs.append({"type": "media", **item})
+        pos = m.end()
+    tail = src[pos:]
+    if tail.strip() or not segs:
+        segs.append({"type": "text", "text": tail})
+    return segs

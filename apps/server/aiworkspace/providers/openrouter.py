@@ -99,10 +99,17 @@ def invalidate_catalog() -> None:
 
 
 def _compat_model(model: str, base_url: str | None) -> str:
-    """Modelo enviado à API: para provedores OpenAI-compatíveis (base_url setado, ex.:
-    Ollama), remove o prefixo `ollama/` — o servidor local conhece só o nome puro."""
+    """Modelo enviado à API: provedores OpenAI-compatíveis (base_url setado) recebem o
+    id SEM o prefixo interno de roteamento. Ollama = `ollama/<nome>`; provedores
+    customizados = `@<slug>/<id>` (o id real pode conter `/`, ex.: `@kie/google/veo-3`
+    → `google/veo-3`). O OpenRouter (base_url=None) recebe o id como está."""
+    if not base_url:
+        return model
+    if model.startswith("@"):
+        parts = model.split("/", 1)
+        return parts[1] if len(parts) == 2 else model
     from ..integrations.ollama_service import MODEL_PREFIX
-    if base_url and model.startswith(MODEL_PREFIX):
+    if model.startswith(MODEL_PREFIX):
         return model[len(MODEL_PREFIX):]
     return model
 

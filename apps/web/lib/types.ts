@@ -25,6 +25,8 @@ export interface Model {
   /** modelo local do Ollama (id = "ollama/<nome>") — usa o servidor local do usuário */
   local?: boolean;
   parameter_size?: string;
+  /** nome do provedor de origem (OpenRouter, Ollama, ChatGPT, ou um provedor customizado) */
+  provider?: string;
 }
 
 export interface Chat {

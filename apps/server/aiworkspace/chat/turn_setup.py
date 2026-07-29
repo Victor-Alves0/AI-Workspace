@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import extraction
 from ..config import get_settings
 from ..db import SessionLocal
-from ..integrations import chatgpt_service, ollama_service
+from ..integrations import chatgpt_service, ollama_service, providers_service
 from ..models import Artifact, Chat, KnowledgeBase, KnowledgeDoc, Message, ModelConfig, Skill, User
 from ..secrets_service import IMAGEGEN_KEY, OPENROUTER_KEY, VOICE_KEY, get_secret
 from ..tools.loader import get_sift_for_user, tool_config
@@ -198,6 +198,16 @@ async def _resolve_provider(db: AsyncSession, user: User, model: str) -> tuple[s
                 "ChatGPT não conectado. Conecte em Configurações → Conexões → Assinaturas, ou escolha outro modelo.",
             )
         return f"codex:{user.id}", None
+    if (model or "").startswith(providers_service.MODEL_PREFIX):
+        prov = await providers_service.resolve_for_model(db, user.id, model)
+        if not prov:
+            slug = providers_service.slug_from_model(model) or "?"
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Provedor '{slug}' não configurado (falta chave/URL ou está desligado). "
+                "Ajuste em Configurações → Conexões → Provedores, ou escolha outro modelo.",
+            )
+        return prov["api_key"], prov["base_url"]
     api_key = await get_secret(db, user.id, OPENROUTER_KEY)
     if not api_key:
         raise HTTPException(

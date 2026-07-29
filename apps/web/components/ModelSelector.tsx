@@ -55,10 +55,10 @@ export default function ModelSelector({
           ))}
         </optgroup>
       )}
-      <optgroup label="OpenRouter">
+      <optgroup label="Providers">
         {models.map((m) => (
           <option key={m.id} value={m.id}>
-            {m.name}
+            {m.name}{m.provider ? ` · ${m.provider}` : ""}
           </option>
         ))}
       </optgroup>

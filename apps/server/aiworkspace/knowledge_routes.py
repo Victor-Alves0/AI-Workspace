@@ -7,6 +7,8 @@ e o status do doc caminha pending → indexing → ready/error.
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, status
@@ -16,17 +18,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth.deps import require_approved
 from .db import get_db
-from .knowledge import ingest
+from .knowledge import enrich, ingest
 from .knowledge.links import sign_doc_url, verify_doc_token
 from .models import (
     Chat,
     KnowledgeBase,
     KnowledgeChunk,
     KnowledgeDoc,
+    KnowledgeEnrichment,
     KnowledgeFolder,
     ModelConfig,
     User,
 )
+
+logger = logging.getLogger(__name__)
+# refs dos jobs de enriquecimento em background (o create_task só guarda ref fraca)
+_enrich_tasks: set[asyncio.Task] = set()
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -625,3 +632,198 @@ async def get_doc_raw(
         media_type=mime,
         headers={"Content-Disposition": disp, "Accept-Ranges": "bytes"},
     )
+
+
+# --------------------------------------------------------------------------- #
+# Enriquecedor com IA: gera título/descrição/tags (proposta) → aprovar/descartar
+# --------------------------------------------------------------------------- #
+class EnrichIn(BaseModel):
+    model_config = {"protected_namespaces": ()}
+    doc_ids: list[str] | None = None   # itens específicos
+    folder_id: str | None = None       # ou uma pasta inteira
+    all: bool = False                  # ou a base inteira
+    model: str = ""                    # id do modelo (OpenRouter/ollama/codex) que gera
+    extra_prompt: str = ""             # instrução extra ("põe tag amarelo em quem tem carro")
+
+
+class EnrichmentOut(BaseModel):
+    id: str
+    doc_id: str
+    filename: str
+    mime: str
+    folder: str | None
+    status: str
+    title: str
+    description: str
+    tags: list
+    error: str | None
+
+
+def _enrichment_out(e: KnowledgeEnrichment, doc: KnowledgeDoc | None, folder_name: str | None) -> EnrichmentOut:
+    return EnrichmentOut(
+        id=str(e.id), doc_id=str(e.doc_id),
+        filename=(doc.filename if doc else "") or "documento",
+        mime=(doc.mime if doc else "") or "",
+        folder=folder_name,
+        status=e.status, title=e.title, description=e.description,
+        tags=e.tags or [], error=e.error,
+    )
+
+
+@router.post("/bases/{base_id}/enrich")
+async def enrich_docs(
+    base_id: uuid.UUID, body: EnrichIn,
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    """Enfileira o enriquecimento (proposta de tags/descrição/título) dos docs
+    escolhidos — uma seleção, uma pasta ou a base toda — e roda em segundo plano.
+    A UI acompanha por GET .../enrichments e aprova/descarta cada proposta."""
+    await _owned_base(db, user, base_id)
+    if not (body.model or "").strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Escolha um modelo para gerar.")
+    # resolve alvo: doc_ids explícitos | pasta | base inteira (só docs com conteúdo)
+    q = select(KnowledgeDoc).where(
+        KnowledgeDoc.base_id == base_id, KnowledgeDoc.user_id == user.id,
+        KnowledgeDoc.data.isnot(None),
+    )
+    if body.doc_ids:
+        ids = [uuid.UUID(x) for x in body.doc_ids]
+        q = q.where(KnowledgeDoc.id.in_(ids))
+    elif body.folder_id:
+        q = q.where(KnowledgeDoc.folder_id == uuid.UUID(body.folder_id))
+    docs = list(await db.scalars(q))
+    if not docs:
+        return {"queued": 0}
+    # provedor (chave/base_url) a partir do id do modelo escolhido
+    from .chat.turn_setup import _resolve_provider
+    api_key, base_url = await _resolve_provider(db, user, body.model)
+    # não reenfileira docs que já têm uma proposta pendente/pronta em aberto
+    open_rows = await db.scalars(
+        select(KnowledgeEnrichment.doc_id).where(
+            KnowledgeEnrichment.base_id == base_id,
+            KnowledgeEnrichment.status.in_(("pending", "ready")),
+        )
+    )
+    open_docs = {str(x) for x in open_rows}
+    enr_ids: list[uuid.UUID] = []
+    for d in docs:
+        if str(d.id) in open_docs:
+            continue
+        e = KnowledgeEnrichment(
+            user_id=user.id, base_id=base_id, doc_id=d.id, status="pending",
+            model=body.model, extra_prompt=(body.extra_prompt or "")[:2000],
+        )
+        db.add(e)
+        await db.flush()
+        enr_ids.append(e.id)
+    await db.commit()
+    if enr_ids:
+        task = asyncio.create_task(enrich.run_job(enr_ids, body.model, api_key, base_url))
+        _enrich_tasks.add(task)
+        task.add_done_callback(_enrich_tasks.discard)
+    return {"queued": len(enr_ids)}
+
+
+@router.get("/bases/{base_id}/enrichments", response_model=list[EnrichmentOut])
+async def list_enrichments(
+    base_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    """Propostas em aberto desta base (pending/gerando, ready/pronta, error)."""
+    await _owned_base(db, user, base_id)
+    rows = list(await db.scalars(
+        select(KnowledgeEnrichment)
+        .where(KnowledgeEnrichment.base_id == base_id)
+        .order_by(KnowledgeEnrichment.created_at.asc())
+    ))
+    if not rows:
+        return []
+    docs = {d.id: d for d in await db.scalars(
+        select(KnowledgeDoc).where(KnowledgeDoc.id.in_([r.doc_id for r in rows]))
+    )}
+    fol_ids = {d.folder_id for d in docs.values() if d.folder_id}
+    folders = {f.id: f.name for f in await db.scalars(
+        select(KnowledgeFolder).where(KnowledgeFolder.id.in_(fol_ids))
+    )} if fol_ids else {}
+    out = []
+    for r in rows:
+        doc = docs.get(r.doc_id)
+        fname = folders.get(doc.folder_id) if (doc and doc.folder_id) else None
+        out.append(_enrichment_out(r, doc, fname))
+    return out
+
+
+async def _owned_enrichment(db: AsyncSession, user: User, enr_id: uuid.UUID) -> KnowledgeEnrichment:
+    e = await db.get(KnowledgeEnrichment, enr_id)
+    if e is None or e.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Proposta não encontrada")
+    return e
+
+
+@router.post("/enrichments/{enr_id}/approve", response_model=DocOut)
+async def approve_enrichment(
+    enr_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    """Aplica a proposta ao doc (funde no meta) e reindexa; some da lista."""
+    e = await _owned_enrichment(db, user, enr_id)
+    if e.status != "ready":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Proposta ainda não está pronta")
+    doc = await db.get(KnowledgeDoc, e.doc_id)
+    if doc is None:
+        await db.delete(e)
+        await db.commit()
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Documento não existe mais")
+    await enrich.apply_to_doc(db, doc, e)
+    await db.delete(e)
+    await db.commit()
+    await db.refresh(doc)
+    if doc.data:
+        _spawn_index(doc.id)
+    return _doc_out(doc)
+
+
+@router.delete("/enrichments/{enr_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def dismiss_enrichment(
+    enr_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    """Descarta uma proposta (não altera o doc)."""
+    e = await _owned_enrichment(db, user, enr_id)
+    await db.delete(e)
+    await db.commit()
+
+
+@router.post("/bases/{base_id}/enrichments/approve-all")
+async def approve_all_enrichments(
+    base_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    """Aprova todas as propostas PRONTAS da base de uma vez."""
+    await _owned_base(db, user, base_id)
+    rows = list(await db.scalars(
+        select(KnowledgeEnrichment).where(
+            KnowledgeEnrichment.base_id == base_id, KnowledgeEnrichment.status == "ready",
+        )
+    ))
+    reindex: list[uuid.UUID] = []
+    for e in rows:
+        doc = await db.get(KnowledgeDoc, e.doc_id)
+        if doc is not None:
+            await enrich.apply_to_doc(db, doc, e)
+            if doc.data:
+                reindex.append(doc.id)
+        await db.delete(e)
+    await db.commit()  # persiste o meta ANTES de reindexar (index_doc lê em sessão própria)
+    for did in reindex:
+        _spawn_index(did)
+    return {"approved": len(reindex)}
+
+
+@router.delete("/bases/{base_id}/enrichments")
+async def dismiss_all_enrichments(
+    base_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    """Descarta TODAS as propostas em aberto da base (limpa a lista)."""
+    await _owned_base(db, user, base_id)
+    res = await db.execute(
+        delete(KnowledgeEnrichment).where(KnowledgeEnrichment.base_id == base_id)
+    )
+    await db.commit()
+    return {"dismissed": res.rowcount}

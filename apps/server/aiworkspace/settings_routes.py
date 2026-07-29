@@ -147,6 +147,7 @@ async def list_models(
             "name": m.get("name", m.get("id")),
             "context_length": m.get("context_length"),
             "pricing": m.get("pricing"),
+            "provider": "OpenRouter",
         }
         for m in models
     ]
