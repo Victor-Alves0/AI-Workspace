@@ -51,6 +51,113 @@ _MARKER_ONLY_RE = re.compile(
     r"^(?:\s|\[\[(?:canvas|diagram|chart|quote|stock|research|image|email)\]\])*$", re.IGNORECASE
 )
 
+# --------------------------------------------------------------------------- #
+# Resgate de tool_calls VAZADAS como texto
+# --------------------------------------------------------------------------- #
+# Alguns modelos às vezes emitem a sintaxe de chamada de tool como CONTEÚDO em vez do
+# campo estruturado `tool_calls` — quando o provedor (OpenRouter/upstream) não parseia
+# o formato nativo daquele modelo. O resultado é um bloco de texto aparecendo como
+# resposta. Detectamos o bloco, suprimimos do texto transmitido e o convertemos de
+# volta em tool_calls reais. Formatos cobertos (os mais comuns entre os modelos):
+#   - DeepSeek: `<｜｜…｜｜invoke name="X"><｜｜…｜｜parameter name="p" string="…">v</…>`
+#     (`｜` = U+FF5C, barra de token especial) — e a variante estilo-XML (Anthropic-like)
+#     `<invoke name="X"><parameter name="p">v</parameter>`.
+#   - Hermes/Qwen: `<tool_call>{"name":"X","arguments":{…}}</tool_call>`.
+#   - Mistral: `[TOOL_CALLS][{"name":"X","arguments":{…}}]`.
+# Marcadores de ALTA confiança (praticamente nunca aparecem em prosa legítima) —
+# ainda assim o resgate só liga quando tools foram oferecidas neste turno.
+_LEAK_START_RE = re.compile(r"<｜|｜｜|<\s*invoke\s+name=|<\s*tool_call\s*>|\[TOOL_CALLS\]|<\|tool")
+_INVOKE_RE = re.compile(r"invoke\s+name=\"([^\"]+)\"(.*?)(?=invoke\s+name=\"|</[^>]*tool_calls|\Z)", re.DOTALL)
+_PARAM_RE = re.compile(r"parameter\s+name=\"([^\"]+)\"([^>]*)>(.*?)</[^>]*?parameter", re.DOTALL)
+_TOOLCALL_TAG_RE = re.compile(r"<\s*tool_call\s*>(.*?)</\s*tool_call\s*>", re.DOTALL)
+_MISTRAL_RE = re.compile(r"\[TOOL_CALLS\]\s*(\[.*\]|\{.*\})", re.DOTALL)
+
+
+def _mk_call(name: str, arguments: Any) -> dict:
+    """Monta um tool_call no formato OpenAI (arguments sempre string JSON)."""
+    if not isinstance(arguments, str):
+        arguments = json.dumps(arguments if arguments is not None else {}, ensure_ascii=False)
+    return {"id": f"salvage_{uuid.uuid4().hex[:8]}", "type": "function",
+            "function": {"name": str(name).strip(), "arguments": arguments}}
+
+
+def _coerce(val: str, hint: str) -> Any:
+    """`string="false"` sinaliza valor não-textual → coage número/bool; senão string."""
+    if 'string="false"' not in hint and "string='false'" not in hint:
+        return val
+    low = val.lower()
+    if low in ("true", "false"):
+        return low == "true"
+    for cast in (int, float):
+        try:
+            return cast(val)
+        except ValueError:
+            continue
+    return val
+
+
+def _calls_from_json_items(raw: str) -> list[dict]:
+    """Extrai [{name, arguments}] de um JSON (item ou lista) → tool_calls."""
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return []
+    items = data if isinstance(data, list) else [data]
+    out: list[dict] = []
+    for it in items:
+        if isinstance(it, dict) and it.get("name"):
+            fn = it.get("function") if isinstance(it.get("function"), dict) else it
+            out.append(_mk_call(fn.get("name", it["name"]), fn.get("arguments", it.get("arguments", {}))))
+    return out
+
+
+def _salvage_leaked_tool_calls(text: str) -> list[dict]:
+    """Reconstrói tool_calls (formato OpenAI) de um bloco de texto vazado, tentando os
+    formatos conhecidos em ordem. Devolve [] se nada for aproveitável — o chamador então
+    re-emite o texto intacto (um falso-positivo nunca perde conteúdo)."""
+    text = text or ""
+    # 1) XML invoke/parameter (DeepSeek DSML + estilo Anthropic)
+    out: list[dict] = []
+    for name, body in _INVOKE_RE.findall(text):
+        args = {p: _coerce(v.strip(), hint) for p, hint, v in _PARAM_RE.findall(body)}
+        out.append(_mk_call(name, args))
+    if out:
+        return out
+    # 2) Hermes/Qwen: um ou mais <tool_call>{json}</tool_call>
+    for blob in _TOOLCALL_TAG_RE.findall(text):
+        out.extend(_calls_from_json_items(blob.strip()))
+    if out:
+        return out
+    # 3) Mistral: [TOOL_CALLS] seguido de array/objeto JSON
+    m = _MISTRAL_RE.search(text)
+    if m:
+        out.extend(_calls_from_json_items(m.group(1)))
+    return out
+
+
+def _strip_leaked_markup(text: str) -> str:
+    """Remove um bloco de tool-call vazado (do 1º marcador em diante). Usado p/ higienizar
+    o HISTÓRICO enviado ao modelo: se ele vê a própria sintaxe vazada como contexto,
+    tende a repeti-la (reforço). Sem marcador, devolve o texto intacto."""
+    if not text:
+        return text
+    m = _LEAK_START_RE.search(text)
+    return text[:m.start()].rstrip() if m else text
+
+
+def _sanitize_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Higieniza o conteúdo de assistant no histórico (remove markup de tool-call vazado)
+    para o modelo não imitar o formato quebrado. Mensagens sem vazamento passam intactas."""
+    out: list[dict[str, Any]] = []
+    for m in history:
+        c = m.get("content")
+        if m.get("role") == "assistant" and isinstance(c, str):
+            cleaned = _strip_leaked_markup(c)
+            out.append(m if cleaned == c else {**m, "content": cleaned})
+        else:
+            out.append(m)
+    return out
+
 # Tarefas em background (fora do caminho crítico da resposta). Guardamos as refs
 # para o asyncio não coletá-las antes de terminarem.
 _bg_tasks: set[asyncio.Task] = set()
@@ -570,12 +677,52 @@ def _knowledge_block_and_sources(results: list[dict]) -> tuple[str, list[dict[st
 # na resposta final: o doc_id (mais curto/robusto) é o que importa; o token é gerado
 # fresco aqui, então a imagem sempre carrega — mesmo que o modelo tenha estragado o dele.
 _KB_IMG_RE = re.compile(r"/knowledge/docs/([0-9a-fA-F-]{36})/raw(?:\?t=[^)\s\"'<>]*)?")
+# imagem markdown INTEIRA (`![alt](url)`) apontando p/ um doc da KB — para remover por
+# completo as imagens ALUCINADAS (senão sobra `![alt]()` quebrado ou o link no canal).
+_KB_IMG_MD_RE = re.compile(
+    r"!\[[^\]]*\]\(\s*/knowledge/docs/([0-9a-fA-F-]{36})/raw(?:\?t=[^)\s\"'<>]*)?\s*\)"
+)
 
 
-def _resign_kb_images(text: str) -> str:
+async def _existing_kb_doc_ids(ids: set[str]) -> set[str]:
+    """Subconjunto dos doc_ids que EXISTEM e têm bytes. Ids malformados ou inexistentes
+    (imagens que o modelo alucinou) ficam de fora — não devem virar link assinado."""
+    from sqlalchemy import func
+
+    from ..models import KnowledgeDoc
+    parsed: list[uuid.UUID] = []
+    for i in ids:
+        try:
+            parsed.append(uuid.UUID(i))
+        except ValueError:
+            continue
+    if not parsed:
+        return set()
+    async with SessionLocal() as db:
+        rows = await db.execute(
+            select(KnowledgeDoc.id).where(
+                KnowledgeDoc.id.in_(parsed), func.octet_length(KnowledgeDoc.data) > 0
+            )
+        )
+        return {str(r) for r in rows.scalars()}
+
+
+async def _resign_kb_images(text: str) -> str:
+    """Reassina (token fresco) as URLs de imagem da KB na resposta — MAS só as que
+    apontam p/ um doc REAL. O `sign_doc_url` assina qualquer id, então sem esta checagem
+    um doc_id ALUCINADO pelo modelo vira um link com token válido que dá 404 ao abrir.
+    Imagens de docs inexistentes são REMOVIDAS inteiras (site não mostra bloco quebrado,
+    canal não vaza o markdown como texto)."""
     if not text or "/knowledge/docs/" not in text:
         return text
-    return _KB_IMG_RE.sub(lambda m: sign_doc_url(m.group(1)), text)
+    ids = set(_KB_IMG_RE.findall(text))
+    if not ids:
+        return text
+    valid = await _existing_kb_doc_ids(ids)
+    # 1) remove o markdown inteiro das imagens alucinadas (doc inexistente)
+    text = _KB_IMG_MD_RE.sub(lambda m: m.group(0) if m.group(1) in valid else "", text)
+    # 2) reassina as URLs válidas restantes; apaga URLs órfãs de doc inexistente
+    return _KB_IMG_RE.sub(lambda m: sign_doc_url(m.group(1)) if m.group(1) in valid else "", text)
 
 
 async def _save_generated_image(
@@ -1941,7 +2088,7 @@ async def run_turn(
     # capacidade "Contexto do Chat": quando desligada, o modelo NÃO recebe o
     # histórico (turno stateless — só system + mensagem atual).
     if use_context:
-        messages.extend(history)
+        messages.extend(_sanitize_history(history))
 
     # 3. mensagem do usuário + anexos (arquivos, áudio, imagens) — Fase 3
     _att: dict[str, int] = {"attach_chars": 0}
@@ -2049,6 +2196,11 @@ async def run_turn(
         finish_reason: str | None = None
         usage: dict | None = None
         got_chunk = False
+        # supressão de tool_calls vazadas como texto (ver _salvage_leaked_tool_calls):
+        # ao detectar o início do bloco, paramos de transmitir/acumular como resposta e
+        # desviamos o resto para `leaked_text`, resgatado após o stream.
+        suppressing_leak = False
+        leaked_text = ""
 
         # span da chamada ao provedor (kind=llm): tempo de parede da geração, nº de
         # tokens (preenchido ao fim) e a iteração do loop agêntico. Enter/exit manual
@@ -2081,11 +2233,29 @@ async def run_turn(
                         reasoning_text += delta["reasoning"]
                         yield {"type": "reasoning", "text": delta["reasoning"]}
                     if delta.get("content"):
-                        if reasoning_started is not None:
-                            reasoning_seconds += time.monotonic() - reasoning_started
-                            reasoning_started = None
-                        assistant_text += delta["content"]
-                        yield {"type": "token", "text": delta["content"]}
+                        c = delta["content"]
+                        if suppressing_leak:
+                            leaked_text += c  # dentro de um bloco vazado: não transmite
+                        else:
+                            # detecta o início de tool_calls vazadas como texto; só quando
+                            # tools foram oferecidas (senão é conteúdo legítimo do modelo)
+                            hit = _LEAK_START_RE.search(c) if tools is not None else None
+                            if hit is not None:
+                                clean = c[:hit.start()]
+                                if clean:
+                                    if reasoning_started is not None:
+                                        reasoning_seconds += time.monotonic() - reasoning_started
+                                        reasoning_started = None
+                                    assistant_text += clean
+                                    yield {"type": "token", "text": clean}
+                                leaked_text = c[hit.start():]
+                                suppressing_leak = True
+                            else:
+                                if reasoning_started is not None:
+                                    reasoning_seconds += time.monotonic() - reasoning_started
+                                    reasoning_started = None
+                                assistant_text += c
+                                yield {"type": "token", "text": c}
                     if delta.get("tool_calls"):
                         _accumulate_tool_calls(tool_buffer, delta["tool_calls"])
                     # imagem nativa: pode chegar no delta ou na mensagem final do chunk
@@ -2148,18 +2318,40 @@ async def run_turn(
             reasoning_seconds += time.monotonic() - reasoning_started
             reasoning_started = None
 
+        # resgate: o modelo vazou tool_calls como texto (suprimidas em `leaked_text`).
+        # Sem tool_calls estruturadas, tentamos reconstruí-las e seguir o loop como se
+        # tivessem chegado no campo certo. Se nada aproveitável, re-emitimos o texto
+        # (falso-positivo não perde conteúdo).
+        if leaked_text and not tool_buffer:
+            salvaged = _salvage_leaked_tool_calls(leaked_text)
+            if salvaged:
+                logger.info("Resgatadas %d tool_call(s) vazadas como texto (modelo %s)", len(salvaged), model)
+                for i, tc in enumerate(salvaged):
+                    tool_buffer[i] = tc
+                finish_reason = "tool_calls"
+            else:
+                assistant_text += leaked_text
+                yield {"type": "token", "text": leaked_text}
+            leaked_text = ""
+
         if finish_reason != "tool_calls" or not tool_buffer:
-            if tool_events and not nudged and _MARKER_ONLY_RE.match(assistant_text or ""):
+            # Resposta vazia / só-marcadores: cutuca UMA vez p/ o modelo escrever a
+            # resposta final. Cobre dois casos frágeis: (a) o modelo rodou tools e não
+            # redigiu o texto; (b) o modelo devolveu SÓ o raciocínio (campo reasoning),
+            # sem conteúdo. Sem isto o usuário via uma bolha vazia.
+            answer_empty = _MARKER_ONLY_RE.match(assistant_text or "") is not None
+            if not nudged and answer_empty and (tool_events or reasoning_text.strip()):
                 nudged = True
                 if assistant_text.strip():
                     messages.append({"role": "assistant", "content": assistant_text})
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "Now write your final answer to the user's request in plain text, "
-                        "based on the tool results above. Do not call any tools."
-                    ),
-                })
+                nudge = (
+                    "Now write your final answer to the user's request in plain text, "
+                    "based on the tool results above. Do not call any tools."
+                    if tool_events else
+                    "You returned only your internal reasoning, with no answer to the user. "
+                    "Now write your final answer in plain text."
+                )
+                messages.append({"role": "user", "content": nudge})
                 tools = None
                 continue
             break
@@ -2306,7 +2498,7 @@ async def run_turn(
     has_usage = total_usage["total_tokens"] > 0 or total_usage["cost"] > 0
     # reassina URLs de imagem da KB antes de emitir/persistir (token pode ter sido
     # adulterado pelo modelo) — garante que a imagem carregue no chat
-    assistant_text = _resign_kb_images(assistant_text)
+    assistant_text = await _resign_kb_images(assistant_text)
     yield {
         "type": "done",
         "content": assistant_text,

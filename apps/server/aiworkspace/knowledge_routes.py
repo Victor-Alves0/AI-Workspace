@@ -599,6 +599,15 @@ def _parse_range(header: str, size: int) -> tuple[int, int] | None:
     return start, end
 
 
+def _content_disposition(filename: str) -> str:
+    """Content-Disposition robusto a nomes com acento/unicode (ex.: "Galvão", CJK,
+    emoji). Cabeçalhos HTTP são latin-1: um nome fora disso quebraria o download. Damos
+    um fallback ASCII + o nome real via RFC 5987 (`filename*=UTF-8''…`)."""
+    from urllib.parse import quote
+    ascii_name = (filename.encode("ascii", "ignore").decode("ascii") or "documento").replace('"', "")
+    return f"inline; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
+
+
 @router.get("/docs/{doc_id}/raw")
 async def get_doc_raw(
     doc_id: uuid.UUID, request: Request, t: str = "", db: AsyncSession = Depends(get_db)
@@ -613,7 +622,7 @@ async def get_doc_raw(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Documento não encontrado")
     blob = bytes(d.data)
     mime = d.mime or "application/octet-stream"
-    disp = f'inline; filename="{d.filename or "documento"}"'
+    disp = _content_disposition(d.filename or "documento")
     rng = _parse_range(request.headers.get("range", ""), len(blob))
     if rng is not None:
         start, end = rng
