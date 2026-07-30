@@ -67,6 +67,12 @@ _MARKER_ONLY_RE = re.compile(
 # Marcadores de ALTA confiança (praticamente nunca aparecem em prosa legítima) —
 # ainda assim o resgate só liga quando tools foram oferecidas neste turno.
 _LEAK_START_RE = re.compile(r"<｜|｜｜|<\s*invoke\s+name=|<\s*tool_call\s*>|\[TOOL_CALLS\]|<\|tool")
+# subconjunto de ALTÍSSIMA confiança: tokens especiais do DeepSeek (barra U+FF5C). Nunca
+# aparecem em prosa legítima → suprimimos SEMPRE (mesmo na iteração de resposta final,
+# tools=None). Os marcadores "soft" (`<tool_call>`, `[TOOL_CALLS]`, `<invoke name=`) podem
+# surgir num texto legítimo (ex.: relatório de segurança citando tools), então só contam
+# quando tools estão ativas — para não engolir a resposta final por engano.
+_LEAK_HARD_RE = re.compile(r"<｜|｜｜|<\|tool")
 _INVOKE_RE = re.compile(r"invoke\s+name=\"([^\"]+)\"(.*?)(?=invoke\s+name=\"|</[^>]*tool_calls|\Z)", re.DOTALL)
 _PARAM_RE = re.compile(r"parameter\s+name=\"([^\"]+)\"([^>]*)>(.*?)</[^>]*?parameter", re.DOTALL)
 _TOOLCALL_TAG_RE = re.compile(r"<\s*tool_call\s*>(.*?)</\s*tool_call\s*>", re.DOTALL)
@@ -158,6 +164,32 @@ def _sanitize_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
             out.append(m)
     return out
 
+
+# Trim de contexto no loop agêntico longo (Codespace). Mantém intactos os últimos N
+# resultados de tool; os anteriores, se grandes, são encolhidos — no loop de código
+# uma leitura de arquivo de 10 iterações atrás é reenviada a cada volta, inflando o
+# input. Preserva role+tool_call_id (o pareamento com o tool_call NÃO quebra).
+_TRIM_KEEP_LAST = 6
+_TRIM_MAX_CHARS = 2000
+_TRIM_MARKER = (
+    "\n\n…[resultado antigo truncado para poupar contexto — chame a ferramenta de novo "
+    "se precisar do conteúdo completo]"
+)
+
+
+def _trim_tool_results(messages: list[dict[str, Any]]) -> None:
+    """Encolhe IN-PLACE o conteúdo de mensagens role=tool ANTIGAS e grandes (mantém as
+    últimas `_TRIM_KEEP_LAST` intactas). Só muda o que vai ao modelo neste turno — o
+    histórico persistido (tool_events) não é afetado. Idempotente."""
+    tool_idxs = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+    if len(tool_idxs) <= _TRIM_KEEP_LAST:
+        return
+    for i in tool_idxs[:-_TRIM_KEEP_LAST]:
+        c = messages[i].get("content")
+        if isinstance(c, str) and len(c) > _TRIM_MAX_CHARS and not c.endswith(_TRIM_MARKER):
+            messages[i] = {**messages[i], "content": c[:_TRIM_MAX_CHARS] + _TRIM_MARKER}
+
+
 # Tarefas em background (fora do caminho crítico da resposta). Guardamos as refs
 # para o asyncio não coletá-las antes de terminarem.
 _bg_tasks: set[asyncio.Task] = set()
@@ -221,6 +253,38 @@ TOOL_ACTION_GUARD = (
     "confirming. If you haven't located a suitable tool yet, call search_tools FIRST — "
     "acting without a tool is impossible. NEVER say an action was done, sent or scheduled "
     "unless a tool actually returned success; if no tool covers it, say you can't do it."
+)
+
+# Codespace: o chat está acoplado a um PROJETO real com um sandbox de execução real.
+# Sem esta diretiva o modelo (a) responde com um "plano" e pede permissão em prosa em
+# vez de executar e (b) FABRICA resultados ("✅ instalado", "build rodando", "testes
+# passaram") sem chamar tool nenhuma — os dois modos de falha observados no chat do
+# Jenkins (kimi-k3, 30/07). É a mesma postura de um Codex/Claude Code: agir com as tools
+# e NUNCA inventar que agiu. Injetada no system prompt sempre que o escopo é codespace.
+CODESPACE_AGENT_DIRECTIVE = (
+    "CODESPACE — you are an autonomous coding agent working inside a REAL project with a "
+    "REAL execution sandbox, exactly like Codex or Claude Code. Your code tools ACTUALLY "
+    "run: code.files.browse / code.graph.query / code.flow.analyze (read the project), "
+    "code.files.write (edit — prefer action=patch with a unified diff), code.exec.run (run "
+    "shell: build, test, lint, install), and code.task.manage.\n"
+    "ACT, DON'T ASK: when the user tells you to install, build, run, test or fix something, "
+    "DO IT NOW by calling code.exec.run. Do NOT reply with a plan followed by 'tell me to "
+    "proceed' — you were already told to proceed. Keep calling tools across as many steps as "
+    "needed until the task is actually done or genuinely blocked by a real error in a tool's "
+    "output.\n"
+    "TOOLCHAINS ON DEMAND: if a language or tool is missing (java, mvn, node, go, python…), "
+    "install it via mise inside code.exec.run — e.g. `mise use -g java@21 maven` — then run "
+    "the real build/test. Installs persist across calls.\n"
+    "CONFIRMATION IS THE CARD, NOT PROSE: install/download/destructive commands automatically "
+    "show the user a Confirm/Cancel card — that IS how you ask permission. Just call "
+    "code.exec.run; after the user confirms, re-issue the SAME command with confirm=true. "
+    "Never ask for install permission in plain text.\n"
+    "NEVER FABRICATE EXECUTION: you may state that a command ran, a tool was installed, a "
+    "build started or finished, or tests passed ONLY if you called code.exec.run in THIS turn "
+    "and are looking at its real output. Never write '✅ installed', 'build running', 'tests "
+    "passed' from intention, memory, or a plan. If you have not executed it yet, do not report "
+    "it as done — call the tool. Long builds are fine: run the command and read the ACTUAL "
+    "output (including a real timeout) instead of guessing the result."
 )
 
 # Modo Código: tools longas promovidas a specs de 1ª classe ao lado do run_code
@@ -422,7 +486,10 @@ def _view_skill_tool() -> dict[str, Any]:
                 "Carrega o conteúdo completo (instruções passo a passo) de uma skill "
                 "equipada, pelo seu identificador (slug). Chame ANTES de responder "
                 "sempre que uma skill listada em '## Skills disponíveis' for útil para "
-                "a tarefa — você recebe só nome+descrição até chamar esta ferramenta."
+                "a tarefa — você recebe só nome+descrição até chamar esta ferramenta. "
+                "Se a skill listar arquivos de referência, chame de novo com `file` "
+                "para carregar um deles (ex.: file='references/palette.md') só quando "
+                "precisar — assim o contexto fica barato."
             ),
             "parameters": {
                 "type": "object",
@@ -430,7 +497,15 @@ def _view_skill_tool() -> dict[str, Any]:
                     "slug": {
                         "type": "string",
                         "description": "identificador da skill, ex.: revisao_de_codigo",
-                    }
+                    },
+                    "file": {
+                        "type": "string",
+                        "description": (
+                            "opcional: nome de um arquivo de referência da skill a "
+                            "carregar (ex.: references/palette.md). Omita para receber "
+                            "o conteúdo principal + a lista de arquivos disponíveis."
+                        ),
+                    },
                 },
                 "required": ["slug"],
             },
@@ -1237,6 +1312,10 @@ def _assemble_tools_and_prompt(
         meta = "run_code" if code_mode else "execute_tool"
         custom = (sift_meta.get("sift_prompt") or "").strip() or DEFAULT_TOOL_PROMPT
         a.sift_prompt = _compose_tool_prompt(a.sift_prompt, catalog, mode, custom, meta)
+        # Codespace: postura de agente de código (agir com as tools, nunca fabricar
+        # execução). scope.meta["codespace"] é montado pelo loader p/ chats de projeto.
+        if sift_meta.get("codespace"):
+            a.sift_prompt += "\n\n" + CODESPACE_AGENT_DIRECTIVE
 
     # Tools NATIVAS (fora do índice SIFT) anunciadas ao modelo no fim da montagem:
     # elas já estão no array de tools, mas o prompt do SIFT ensina que o caminho para
@@ -1583,7 +1662,29 @@ class _ToolDispatcher:
         if sk is None:
             known = ", ".join(sorted({s["slug"] for s in self.skills})) or "(nenhuma)"
             return {"error": f"skill '{slug}' não encontrada. Disponíveis: {known}"}
-        return {"slug": sk["slug"], "name": sk["name"], "content": sk.get("content") or ""}
+        files = list(sk.get("files") or [])
+        # pediu um arquivo de referência específico → devolve só ele
+        want = str(args.get("file") or "").strip()
+        if want:
+            wl = want.lower().lstrip("/")
+            match = next(
+                (f for f in files if str(f.get("name", "")).lower().lstrip("/") == wl),
+                None,
+            )
+            if match is None:
+                names = ", ".join(str(f.get("name", "")) for f in files) or "(nenhum)"
+                return {"error": f"arquivo '{want}' não existe na skill '{slug}'. Disponíveis: {names}"}
+            return {"slug": sk["slug"], "name": sk["name"],
+                    "file": match.get("name"), "content": match.get("content") or ""}
+        # conteúdo principal + manifesto dos arquivos de referência (nomes, sob demanda)
+        out: dict[str, Any] = {"slug": sk["slug"], "name": sk["name"], "content": sk.get("content") or ""}
+        if files:
+            out["files"] = [str(f.get("name", "")) for f in files if f.get("name")]
+            out["files_note"] = (
+                "Esta skill tem arquivos de referência. Carregue um chamando "
+                "view_skill de novo com file=<nome> só quando precisar."
+            )
+        return out
 
     async def _generate_image(self, args: dict) -> AsyncGenerator[dict[str, Any], None]:
         # GenImage Router: gera a imagem, guarda os bytes e devolve uma URL assinada
@@ -2184,14 +2285,28 @@ async def run_turn(
     # resposta. Uma única volta extra, sem tools, força a redação final.
     nudged = False
 
-    # 3-4. loop de tool calling
-    for _iter in range(settings.max_tool_iterations):
-        # última rodada permitida (quando há mais de uma): retira as tools para
-        # OBRIGAR uma resposta final. Sem isto, um modelo que continua chamando tools
-        # até o teto encerra o loop com texto vazio — o usuário veria os cards das
-        # tools e nenhuma resposta.
-        if _iter > 0 and _iter == settings.max_tool_iterations - 1:
+    # Teto de iterações do loop agêntico. Num chat de Codespace (loop escreve → testa
+    # → corrige) usamos um teto bem maior, como os agentes de código do mercado; nos
+    # demais, o teto normal. O flag vem do scope.meta["codespace"] montado no loader.
+    _in_codespace = bool(session.codespace_project_id) or bool(
+        getattr(sift, "meta", {}).get("codespace") if sift is not None else False
+    )
+    max_iters = (
+        settings.codespace_max_tool_iterations if _in_codespace
+        else settings.max_tool_iterations
+    )
+
+    # 3-4. loop de tool calling. O +1 dá uma rodada de GRAÇA só-texto: se o modelo, na
+    # rodada final sem tools, ainda vazar chamadas em vez de redigir (DeepSeek preso no
+    # formato), a cutucada tem uma iteração real para produzir a resposta.
+    for _iter in range(max_iters + 1):
+        # últimas rodadas: retira as tools para OBRIGAR uma resposta final. Sem isto, um
+        # modelo que continua chamando tools até o teto encerra o loop com texto vazio.
+        if _iter > 0 and _iter >= max_iters - 1:
             tools = None
+        # loop longo de código: encolhe leituras de arquivo obsoletas antes de reenviar
+        if _in_codespace and _iter > 0:
+            _trim_tool_results(messages)
         tool_buffer: dict[int, dict] = {}
         finish_reason: str | None = None
         usage: dict | None = None
@@ -2237,9 +2352,12 @@ async def run_turn(
                         if suppressing_leak:
                             leaked_text += c  # dentro de um bloco vazado: não transmite
                         else:
-                            # detecta o início de tool_calls vazadas como texto; só quando
-                            # tools foram oferecidas (senão é conteúdo legítimo do modelo)
-                            hit = _LEAK_START_RE.search(c) if tools is not None else None
+                            # tokens especiais do DeepSeek: sempre vazamento (mesmo na
+                            # iteração final, tools=None). Marcadores "soft" só contam com
+                            # tools ativas (podem ser texto legítimo na resposta final).
+                            hit = _LEAK_HARD_RE.search(c)
+                            if hit is None and tools is not None:
+                                hit = _LEAK_START_RE.search(c)
                             if hit is not None:
                                 clean = c[:hit.start()]
                                 if clean:
@@ -2323,13 +2441,17 @@ async def run_turn(
         # tivessem chegado no campo certo. Se nada aproveitável, re-emitimos o texto
         # (falso-positivo não perde conteúdo).
         if leaked_text and not tool_buffer:
-            salvaged = _salvage_leaked_tool_calls(leaked_text)
+            # com tools ativas: reconstrói as chamadas e segue o loop. Na fase de resposta
+            # final (tools=None) NÃO executamos mais nem re-emitimos — o modelo vazou tool
+            # calls quando pedimos TEXTO; descartamos (a cutucada/fallback abaixo cuidam).
+            salvaged = _salvage_leaked_tool_calls(leaked_text) if tools is not None else []
             if salvaged:
                 logger.info("Resgatadas %d tool_call(s) vazadas como texto (modelo %s)", len(salvaged), model)
                 for i, tc in enumerate(salvaged):
                     tool_buffer[i] = tc
                 finish_reason = "tool_calls"
-            else:
+            elif tools is not None:
+                # falso-positivo real (tools ativas, nada parseável): re-emite (não perde texto)
                 assistant_text += leaked_text
                 yield {"type": "token", "text": leaked_text}
             leaked_text = ""
@@ -2496,6 +2618,17 @@ async def run_turn(
     sift_service.tool_calls_log.reset(calls_token)
 
     has_usage = total_usage["total_tokens"] > 0 or total_usage["cost"] > 0
+
+    # fallback honesto: rodou tools mas terminou SEM texto (o modelo insistiu em vazar
+    # chamadas em vez de redigir, mesmo na rodada de graça). Melhor uma nota clara do que
+    # bolha vazia OU o markup cru. Só quando houve trabalho (tool_events).
+    if not (assistant_text or "").strip() and tool_events:
+        assistant_text = (
+            "_As ferramentas foram executadas, mas o modelo não redigiu a resposta final "
+            "(ficou emitindo chamadas de ferramenta em vez de texto). Tente **Regenerar** "
+            "ou usar outro modelo — os resultados das ferramentas estão acima._"
+        )
+
     # reassina URLs de imagem da KB antes de emitir/persistir (token pode ter sido
     # adulterado pelo modelo) — garante que a imagem carregue no chat
     assistant_text = await _resign_kb_images(assistant_text)

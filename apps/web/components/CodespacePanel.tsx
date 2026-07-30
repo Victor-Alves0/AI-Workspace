@@ -402,7 +402,7 @@ function ProjectChatsTab({ project, onOpenChat }: { project: CodespaceProject; o
           <p className="text-sm text-muted">{chats.length ? "Nada encontrado." : "Nenhum chat ainda."}</p>
         </div>
       ) : (
-        <div className="space-y-1.5">
+        <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((c) => (
             <ChatRow
               key={c.id} chat={c} onOpen={() => onOpenChat(c.id)}

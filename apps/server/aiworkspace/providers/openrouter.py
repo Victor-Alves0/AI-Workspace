@@ -51,6 +51,56 @@ def _lower_effort(payload: dict[str, Any], body: str) -> str | None:
     return "off"
 
 
+_CACHE_CONTROL = {"type": "ephemeral"}
+
+
+def _mark_content_cache(content: Any) -> Any:
+    """Devolve o `content` com cache_control no último bloco de texto. String vira
+    `[{"type":"text","text":...,"cache_control":...}]`; lista ganha o marcador no
+    último item (cópia rasa, sem mutar o original). Conteúdo vazio passa intacto."""
+    if isinstance(content, str):
+        if not content:
+            return content
+        return [{"type": "text", "text": content, "cache_control": _CACHE_CONTROL}]
+    if isinstance(content, list) and content and isinstance(content[-1], dict):
+        new = list(content)
+        new[-1] = {**new[-1], "cache_control": _CACHE_CONTROL}
+        return new
+    return content
+
+
+def _apply_prompt_cache(
+    messages: list[dict[str, Any]], tools: list[dict] | None
+) -> tuple[list[dict[str, Any]], list[dict] | None]:
+    """Marca breakpoints de prompt caching (via OpenRouter → Anthropic/Gemini/DeepSeek):
+    a 1ª `system`, o bloco de `tools` e o FIM do histórico (breakpoint rolante — o
+    prefixo estável do loop agêntico é reusado a cada iteração). Não muta os dicts
+    originais; devolve novas listas onde tocou. Modelos sem suporte ignoram os marcadores
+    no OpenRouter (Anthropic aceita até 4 breakpoints; usamos no máximo 3)."""
+    msgs = list(messages)
+    marked: set[int] = set()
+    # 1) primeira mensagem system (maior bloco estável: prompt + skills + conhecimento)
+    for i, m in enumerate(msgs):
+        if m.get("role") == "system" and m.get("content"):
+            msgs[i] = {**m, "content": _mark_content_cache(m["content"])}
+            marked.add(i)
+            break
+    # 2) fim do histórico: última mensagem com conteúdo textual (não re-marca a system)
+    for i in range(len(msgs) - 1, -1, -1):
+        if i in marked:
+            break
+        c = msgs[i].get("content")
+        if (isinstance(c, str) and c) or (isinstance(c, list) and c):
+            msgs[i] = {**msgs[i], "content": _mark_content_cache(c)}
+            break
+    # 3) bloco de tools: o marcador vai no ÚLTIMO tool (Anthropic cacheia o bloco todo)
+    new_tools = tools
+    if tools:
+        new_tools = list(tools)
+        new_tools[-1] = {**new_tools[-1], "cache_control": _CACHE_CONTROL}
+    return msgs, new_tools
+
+
 def _headers(api_key: str) -> dict[str, str]:
     settings = get_settings()
     return {
@@ -251,6 +301,11 @@ async def stream_chat(
     safe_params = {k: v for k, v in (params or {}).items() if k not in _RESERVED}
     if compat:
         safe_params.pop("reasoning", None)  # não é padrão OpenAI
+    # Prompt caching: só no OpenRouter (compat/Ollama pode rejeitar conteúdo em blocos).
+    # Marca o prefixo estável (system + tools + fim do histórico) — o maior ganho está
+    # no loop agêntico, onde esse prefixo se repete a cada iteração.
+    if not compat and settings.prompt_cache_enabled:
+        messages, tools = _apply_prompt_cache(messages, tools)
     payload: dict[str, Any] = {
         "model": _compat_model(model, base_url),
         "messages": messages,

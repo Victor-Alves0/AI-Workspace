@@ -352,6 +352,9 @@ export default function ChatPage() {
   }, []);
   const refreshFolders = useCallback(() => api.get<Folder[]>("/folders").then(setFolders).catch(() => {}), []);
   const refreshModels = useCallback(() => api.get<ModelConfig[]>("/models").then(setCustomModels).catch(() => {}), []);
+  // skills alimentam o seletor "$" do compositor; refetch p/ não ficar defasado
+  // depois que o usuário cria/importa/edita uma skill no Espaço de Trabalho.
+  const refreshSkills = useCallback(() => api.get<Skill[]>("/skills").then(setSkills).catch(() => {}), []);
   // modelos externos = OpenRouter + provedores customizados + locais do Ollama +
   // assinaturas (mesclados no seletor). Cada fetch é independente: sem chave OpenRouter
   // ainda mostra os locais/provedores, e vice-versa.
@@ -405,12 +408,12 @@ export default function ChatPage() {
         api.get<Prompt[]>("/prompts")
           .then((ps) => setPrompts([...ps, LEARN_BUILTIN]))
           .catch(() => setPrompts([LEARN_BUILTIN]));
-        api.get<Skill[]>("/skills").then(setSkills).catch(() => {});
+        refreshSkills();
       })
       .catch((e) => {
         if (e instanceof ApiError && e.status === 401) router.replace("/login");
       });
-  }, [router, refreshChats, refreshFolders, refreshExtModels]);
+  }, [router, refreshChats, refreshFolders, refreshExtModels, refreshSkills]);
 
   // preserva o estado expandido/encolhido da sidebar entre sessões
   useEffect(() => {
@@ -419,10 +422,10 @@ export default function ChatPage() {
 
   // recarrega os modelos custom ao focar a janela (pega avatar/edições recentes)
   useEffect(() => {
-    const onFocus = () => refreshModels();
+    const onFocus = () => { refreshModels(); refreshSkills(); };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [refreshModels]);
+  }, [refreshModels, refreshSkills]);
 
   function toggleCollapse() {
     setCollapsed((v) => {
@@ -1626,11 +1629,17 @@ export default function ChatPage() {
     return extModels.find((m) => m.id === baseId)?.context_length ?? 0;
   }, [curCustom, curModel, extModels]);
   const contextTokens = useMemo(() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const u = messages[i].usage;
+    // Só o que REALMENTE vai ao modelo: mensagens EM contexto (não-compactadas). Sem
+    // isto, após compactar o medidor continuava lendo a usage do último turno PRÉ-
+    // compactação (contexto grande) e o "dot" não caía, embora a conversa já estivesse
+    // resumida. Compactar não gera um turno novo com usage menor — só marca compacted —,
+    // então caímos na estimativa por chars do que sobrou em contexto (resumo + recentes).
+    const inCtx = messages.filter((m) => !m.compacted);
+    for (let i = inCtx.length - 1; i >= 0; i--) {
+      const u = inCtx[i].usage;
       if (u?.total_tokens) return (u.prompt_tokens || 0) + (u.completion_tokens || 0);
     }
-    const chars = messages.reduce((a, m) => a + (m.content?.length ?? 0), 0);
+    const chars = inCtx.reduce((a, m) => a + (m.content?.length ?? 0), 0);
     return Math.round(chars / 4);
   }, [messages]);
 
@@ -1811,7 +1820,7 @@ export default function ChatPage() {
             initialEditModel={editModelTarget}
             initialSection={workspaceSection}
             onModelsChanged={setCustomModels}
-            onClose={() => { setWorkspaceOpen(false); setEditModelTarget(null); setWorkspaceSection(null); refreshModels(); }}
+            onClose={() => { setWorkspaceOpen(false); setEditModelTarget(null); setWorkspaceSection(null); refreshModels(); refreshSkills(); }}
             onOpenChat={(cid, prefill) => { selectChat(cid).then(() => { if (prefill) setInput(prefill); }).catch(() => {}); }}
           />
         ) : (
@@ -2126,6 +2135,7 @@ export default function ChatPage() {
                       reasoningLive={!streaming}
                       toolEvents={toolEvents.length ? toolEvents : undefined}
                       toolsLive={sending}
+                      status={statusFor({ sending, streaming, streamingReasoning, generatingImage, consultingKnowledge, transcribingAudio, toolEvents })}
                       footer={generatingImage ? <GeneratingImage /> : consultingKnowledge ? <ConsultingKnowledge /> : transcribingAudio ? <TranscribingAudio /> : undefined}
                     />
                   ) : (
@@ -2364,6 +2374,44 @@ export default function ChatPage() {
   );
 }
 
+/** Nome amigável (pt-BR) de uma ferramenta p/ a linha de status ao vivo. */
+function prettyTool(name: string): string {
+  const map: Record<string, string> = {
+    code__files__browse: "lendo arquivos do projeto",
+    code__files__write: "editando arquivos do projeto",
+    code__graph__query: "consultando o grafo de código",
+    code__flow__analyze: "analisando o fluxo do código",
+    code__exec__run: "rodando comandos no projeto",
+    code__task__manage: "organizando tarefas do projeto",
+    web__search__query: "buscando na web",
+    web__page__read: "lendo uma página da web",
+    web__browser__use: "navegando no navegador",
+    research__deep__run: "fazendo uma pesquisa profunda",
+    media__video__transcribe: "transcrevendo o vídeo",
+    search_tools: "procurando a ferramenta certa",
+    execute_tool: "preparando uma ferramenta",
+  };
+  return map[name] ?? name.replace(/__/g, ".").replace(/_/g, " ");
+}
+
+/** "O que a IA está fazendo agora" — uma linha de status estável durante a geração,
+ *  para que pausas/transições nunca pareçam travamento. Retorna null quando um
+ *  indicador dedicado (rodapé de imagem/conhecimento/áudio, caret do texto, bloco de
+ *  raciocínio) já cobre a fase. */
+function statusFor(f: {
+  sending: boolean; streaming: string; streamingReasoning: string;
+  generatingImage: boolean; consultingKnowledge: boolean; transcribingAudio: boolean;
+  toolEvents: ToolEvent[];
+}): string | null {
+  if (!f.sending) return null;
+  if (f.generatingImage || f.consultingKnowledge || f.transcribingAudio) return null;
+  const last = f.toolEvents.length ? f.toolEvents[f.toolEvents.length - 1] : null;
+  if (last && last.kind === "call") return `Executando — ${prettyTool(last.name)}…`;
+  if (f.streaming) return null;          // o texto visível já flui (caret indica)
+  if (f.streamingReasoning) return null; // o bloco de raciocínio já diz "Pensando…"
+  return "Trabalhando…";                 // pausa entre etapas: sinaliza que segue ativo
+}
+
 function MessageBubble({
   role,
   content,
@@ -2378,6 +2426,7 @@ function MessageBubble({
   reasoningLive = false,
   toolEvents,
   toolsLive = false,
+  status = null,
   footer,
 }: {
   role: string;
@@ -2394,6 +2443,8 @@ function MessageBubble({
   toolEvents?: ToolEvent[];
   /** geração em andamento: mostra o painel de tools já aberto + spinner na tool ativa */
   toolsLive?: boolean;
+  /** linha de atividade ("o que a IA está fazendo agora") durante a geração */
+  status?: string | null;
   footer?: React.ReactNode;
 }) {
   const [showTools, setShowTools] = useState(false);
@@ -2441,6 +2492,12 @@ function MessageBubble({
                 <Wrench size={15} />
               </button>
             )}
+          </p>
+        )}
+        {status && (
+          <p className="mb-2 flex items-center gap-2 text-sm text-ink-soft">
+            <Loader2 size={14} className="shrink-0 animate-spin text-accent-hover" />
+            <span>{status}</span>
           </p>
         )}
         {reasoning?.text && (

@@ -1222,6 +1222,80 @@ def edit_file(user_id: str, project_id: str, scope: dict | None, path: str,
     return out
 
 
+def _paths_from_diff(diff: str) -> set[str]:
+    """Extrai os arquivos afetados de um diff unificado (linhas '--- a/'/'+++ b/'),
+    tirando o prefixo a/ b/, /dev/null e timestamp pós-tab — p/ validar escopo."""
+    paths: set[str] = set()
+    for line in diff.splitlines():
+        if not (line.startswith("+++ ") or line.startswith("--- ")):
+            continue
+        p = line[4:].split("\t")[0].strip()
+        if not p or p == "/dev/null":
+            continue
+        if p[:2] in ("a/", "b/"):
+            p = p[2:]
+        if p:
+            paths.add(p)
+    return paths
+
+
+def apply_patch(user_id: str, project_id: str, scope: dict | None, diff: str,
+                message: str = "", root: Path | None = None, reindex: bool = True) -> dict:
+    """Aplica um DIFF unificado (formato `git diff`) ao projeto — várias mudanças e
+    arquivos numa só chamada, mais robusto e barato em tokens que N edits SEARCH/REPLACE.
+    Usa `git apply` (valida com --check antes; tenta --3way se o contexto deslocou).
+    `root`/`reindex`: ver write_file."""
+    import os
+    import tempfile
+
+    root = root or working_copy_path(user_id, project_id)
+    if not root.exists():
+        return {"error": "projeto ainda não clonado"}
+    diff = diff or ""
+    if not diff.strip():
+        return {"error": "`diff` vazio — passe um diff unificado no formato `git diff`"}
+    if not diff.endswith("\n"):
+        diff += "\n"
+    if len(diff.encode("utf-8", "replace")) > _MAX_FILE_BYTES:
+        return {"error": f"diff grande demais (máx {_MAX_FILE_BYTES} bytes) — divida em partes"}
+    paths = _paths_from_diff(diff)
+    if not paths:
+        return {"error": "não identifiquei arquivos no diff — inclua cabeçalhos '--- a/<path>' e '+++ b/<path>'"}
+    for p in paths:
+        if not is_allowed(root, safe_path(root, p), scope):
+            return {"error": f"caminho fora do escopo liberado deste projeto: {p}"}
+    fd, patch_path = tempfile.mkstemp(suffix=".patch")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(diff)
+        chk = _git(root, "apply", "--check", "--whitespace=nowarn", patch_path)
+        three_way = False
+        if chk.returncode != 0:
+            # contexto deslocado? tenta 3-way (usa os objetos do git p/ casar)
+            if _git(root, "apply", "--check", "--3way", "--whitespace=nowarn", patch_path).returncode != 0:
+                return {"error": "o diff não aplica limpo: "
+                                 + (chk.stderr or chk.stdout or "").strip()[:400]
+                                 + " — releia o arquivo com code.files.browse e gere o diff a partir do conteúdo ATUAL"}
+            three_way = True
+        args = ["apply", "--whitespace=nowarn", patch_path]
+        if three_way:
+            args.insert(1, "--3way")
+        ap = _git(root, *args)
+        if ap.returncode != 0:
+            return {"error": "falha ao aplicar o diff: " + (ap.stderr or ap.stdout or "").strip()[:400]}
+    finally:
+        try:
+            os.unlink(patch_path)
+        except OSError:
+            pass
+    commit = _git_commit(root, message.strip() or f"AI: aplica patch ({len(paths)} arquivo(s))")
+    changes = _reindex_after_write(user_id, project_id) if reindex else None
+    out = {"ok": True, "paths": sorted(paths), "commit": commit}
+    if changes:
+        out["symbol_changes"] = changes
+    return out
+
+
 _MAX_FIND_RESULTS = 200
 
 

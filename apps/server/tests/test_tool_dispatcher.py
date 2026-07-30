@@ -23,7 +23,7 @@ def _mk(**over):
     base = dict(
         sift=FakeSift({}), code_mode=False, api_key="k", user_id="u", chat_id="c",
         skills=[], skills_by_slug={}, genimage_on=False, genimage=None,
-        kb_tool_on=False, kb_bases=[], kb_k=6, user_text="oi",
+        kb_tool_on=False, kb_bases=[], kb_k=6, kb_ks={}, user_text="oi",
         brain_on=False, brain_write=False, brain_ids=[], brain_names=[], brain_k=6,
         skill_learning_on=True,
         subagents_on=False, subagents_by_key={}, subagent_max_calls=4,
@@ -51,6 +51,30 @@ async def test_view_skill_not_found_lists_known():
     _, result = await _drain(d, "view_skill", {"slug": "xyz"})
     assert "não encontrada" in result["error"]
     assert "sql" in result["error"]  # lista as disponíveis
+
+
+async def test_view_skill_manifest_lists_reference_files():
+    """Sem `file`: devolve o conteúdo principal + os NOMES dos arquivos de referência."""
+    d = _mk(skills=[{"slug": "viz"}], skills_by_slug={"viz": {
+        "slug": "viz", "name": "Viz", "content": "# main",
+        "files": [{"name": "references/palette.md", "content": "PALETTE"}],
+    }})
+    _, result = await _drain(d, "view_skill", {"slug": "viz"})
+    assert result["content"] == "# main"
+    assert result["files"] == ["references/palette.md"]
+    assert "content" not in result.get("files", [])  # só nomes, não o corpo
+
+
+async def test_view_skill_loads_specific_reference_file():
+    """Com `file`: devolve o corpo daquele arquivo; nome inexistente vira erro."""
+    d = _mk(skills=[{"slug": "viz"}], skills_by_slug={"viz": {
+        "slug": "viz", "name": "Viz", "content": "# main",
+        "files": [{"name": "references/palette.md", "content": "PALETTE BODY"}],
+    }})
+    _, ok = await _drain(d, "view_skill", {"slug": "viz", "file": "references/palette.md"})
+    assert ok["file"] == "references/palette.md" and ok["content"] == "PALETTE BODY"
+    _, miss = await _drain(d, "view_skill", {"slug": "viz", "file": "nope.md"})
+    assert "não existe" in miss["error"]
 
 
 async def test_run_code_gate_when_not_code_mode():
@@ -228,7 +252,9 @@ async def test_brain_search_reuses_knowledge_shape(monkeypatch):
     d = _mk(brain_on=True, brain_ids=["b1"], brain_k=3)
     events, result = await _drain(d, "brain", {"action": "search", "query": "x"})
     assert result["kind"] == "knowledge" and result["count"] == 1
-    assert "[1] trecho" in result["_model"]
+    # a passagem é citável ([n]) e traz o texto + a origem (in: <arquivo>)
+    assert result["_model"].startswith("Passages from the second brain")
+    assert "[1]" in result["_model"] and "trecho" in result["_model"] and "N.md" in result["_model"]
     assert any(e.get("type") == "knowledge" for e in events)
 
 

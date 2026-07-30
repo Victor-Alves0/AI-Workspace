@@ -123,8 +123,9 @@ class SendMessageIn(BaseModel):
     content: str = Field(default="", max_length=100_000)
     # skills invocadas ad-hoc via "$" no promptbox (além das equipadas no modelo)
     skill_ids: list[uuid.UUID] = Field(default_factory=list)
-    # anexos (imagens/arquivos) — máx. 6, processados conforme as capacidades do modelo
-    attachments: list[Attachment] = Field(default_factory=list, max_length=6)
+    # anexos (imagens/arquivos) — máx. 50 (bate com MAX_ATTACHMENTS no PromptBox),
+    # processados conforme as capacidades do modelo
+    attachments: list[Attachment] = Field(default_factory=list, max_length=50)
     # "@" no promptbox: roteia SÓ ESTE turno a outro agente (ModelConfig), sem mudar
     # o modelo padrão do chat. None = usa o modelo do chat.
     agent_model_config_id: uuid.UUID | None = None

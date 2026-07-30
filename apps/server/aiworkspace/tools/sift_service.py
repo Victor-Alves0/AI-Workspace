@@ -371,6 +371,29 @@ def normalize_sift_path(path: str) -> str:
     return ".".join(parts)
 
 
+# code.exec.run: comandos que MUDAM o ambiente — instalam, baixam da rede ou apagam —
+# pedem confirmação do usuário por padrão (independente do toggle global), o "quer que
+# eu instale e execute?" dos agentes de código (Codex/Claude). Testes/build/lint rodam
+# direto (fluidez). Casa o verbo no início do comando ou após ; & | (comando encadeado).
+_RISKY_EXEC_RE = re.compile(
+    r"(?:^|[;&|]|\s)(?:"
+    r"sudo|apt|apt-get|dpkg|yum|dnf|apk|brew|"
+    r"mise\s+(?:install|use|plugin)|asdf\s+install|sdk\s+install|"
+    r"pip3?\s+install|pipx\s+install|poetry\s+add|uv\s+(?:pip\s+install|add)|"
+    r"npm\s+(?:i|install|ci|add)|pnpm\s+(?:i|install|add)|yarn\s+(?:add|install)|bun\s+(?:i|install|add)|"
+    r"gem\s+install|cargo\s+install|go\s+install|"
+    r"curl|wget|git\s+clone|"
+    r"rm\s+-\w*[rf]|rmdir|mkfs|dd\s|chmod\s+-R|chown\s+-R"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _is_risky_exec(command: str) -> bool:
+    """True se o comando instala/baixa/apaga (→ pede confirmação por padrão)."""
+    return bool(_RISKY_EXEC_RE.search(command or ""))
+
+
 # Nome da integração por PREFIXO de path — uma regra, não uma flag por entrada.
 # Tools de integração dependem de uma conta/conexão externa; as "code.*" só
 # funcionam num chat de projeto (Codespace); o resto é nativo do app.
@@ -970,8 +993,9 @@ def _register_builtins(
                 "The user's SKILL library (reusable procedure documents invoked with $slug). "
                 "Actions: 'list' (their skills: slug, name, description), 'read' (full content "
                 "of one skill by `slug`), 'import' (download a skill from `url` — a SKILL.md "
-                "file, a GitHub folder/repo, or any page — and propose it), 'create' (propose "
-                "one you wrote yourself from `name`/`description`/`content`). "
+                "file, or a GitHub folder/repo which also pulls its reference files like "
+                "references/*, or any page — and propose it), 'create' (propose one you wrote "
+                "yourself from `name`/`description`/`content`). "
                 "IMPORTANT: 'import' and 'create' only PROPOSE — the user reviews an editable "
                 "card and approves; nothing is written automatically, so tell the user to "
                 "approve the card rather than claiming the skill was saved."
@@ -985,7 +1009,7 @@ def _register_builtins(
                 "content": "string:o::for 'create': HOW to do it, full markdown instructions",
             },
             returns=["ok", "kind", "proposal_id", "skills", "count", "slug", "name",
-                     "description", "content", "tags", "source_url", "aux_count",
+                     "description", "content", "files", "tags", "source_url", "aux_count",
                      "note", "error"],
         )
         def _skills_manage(
@@ -1017,6 +1041,7 @@ def _register_builtins(
                     "kind": "skill_proposal", "proposal_id": str(_uuid.uuid4()),
                     "slug": got["slug"], "name": got["name"],
                     "description": got["description"], "content": got["content"],
+                    "files": got.get("files", []),
                     "tags": [], "source_url": got["source_url"],
                     "aux_count": got.get("aux_count", 0),
                     "note": "Proposal shown to the user for approval — NOT saved yet.",
@@ -1346,22 +1371,25 @@ def _register_builtins(
             "code.files.write",
             description=(
                 "Write/edit/delete files in the project attached to this chat, and push commits to "
-                "the remote. Every write/edit/delete AUTO-COMMITS locally (reversible, no extra step "
-                "needed) — provide `message` describing WHY, it becomes the commit message. "
-                "`action`: 'write' (full file content — creates the file/folders if needed), 'edit' "
-                "(SEARCH/REPLACE: `search` must match EXACTLY and be UNIQUE in the file — copy it "
-                "verbatim from a prior 'read'; if unsure, use 'write' with the full new content "
-                "instead), 'delete' (removes a file — asks for confirmation unless confirm=true), "
-                "'push' (sends local commits to the remote — asks for confirmation unless "
-                "confirm=true). Read the file with code.files.browse BEFORE editing it."
+                "the remote. Every write/edit/delete/patch AUTO-COMMITS locally (reversible, no extra "
+                "step needed) — provide `message` describing WHY, it becomes the commit message. "
+                "`action`: 'patch' (PREFERRED for changing existing files — apply a unified `git diff` "
+                "in `diff`, covering several hunks/files at once; more reliable and token-cheap than "
+                "repeated edits), 'write' (full file content — creates the file/folders if needed), "
+                "'edit' (single SEARCH/REPLACE: `search` must match EXACTLY and be UNIQUE in the file — "
+                "copy it verbatim from a prior 'read'; if unsure, use 'write' with the full new content), "
+                "'delete' (removes a file — asks for confirmation unless confirm=true), 'push' (sends "
+                "local commits to the remote — asks for confirmation unless confirm=true). Read the file "
+                "with code.files.browse BEFORE editing/patching it, and build the diff from its CURRENT content."
             ),
             params={
-                "action": "string:r::write | edit | delete | push",
+                "action": "string:r::patch | write | edit | delete | push",
                 "path": "string:o::write/edit/delete: path relative to the project root",
                 "content": "string:o::write: the FULL new content of the file",
+                "diff": "string:o::patch: a unified `git diff` (with '--- a/<path>' and '+++ b/<path>' headers) to apply — can span multiple files/hunks",
                 "search": "string:o::edit: exact text to find (must be unique in the file)",
                 "replace": "string:o::edit: text to replace it with",
-                "message": "string:o::write/edit/delete: commit message describing WHY (optional, a generic one is used otherwise)",
+                "message": "string:o::commit message describing WHY (optional, a generic one is used otherwise)",
                 "confirm": "boolean:o::set true only after the user confirmed delete/push",
             },
             returns=["ok", "path", "created", "commit", "branch", "error",
@@ -1374,7 +1402,8 @@ def _register_builtins(
                       "delete the old config.json", "push my changes"],
         )
         def _code_files_write(action: str = "", path: str = "", content: str = "", search: str = "",
-                               replace: str = "", message: str = "", confirm: Any = None) -> dict[str, Any]:
+                               replace: str = "", message: str = "", confirm: Any = None,
+                               diff: str = "") -> dict[str, Any]:
             proj, confirm_on, err = _cs_project_ctx()
             if err:
                 return err
@@ -1392,12 +1421,17 @@ def _register_builtins(
             act = (action or "").strip().lower()
             if not (path or "").strip() and act in ("write", "edit", "delete"):
                 return {"error": "provide 'path'"}
+            if act == "patch" and not (diff or "").strip():
+                return {"error": "provide 'diff' (a unified git diff)"}
             # Tarefa isolada ativa? Então escreve no WORKTREE (branch própria, sem
             # reindex do grafo do projeto, sem push — o push acontece no merge).
             wt = toolctx.current_codespace_worktree.get()
             wt_root = graph_service.wt_dir(uid, pid, wt) if wt else None
             reindex = wt_root is None
             try:
+                if act == "patch":
+                    return graph_service.apply_patch(uid, pid, scope, diff, message=message,
+                                                     root=wt_root, reindex=reindex)
                 if act == "write":
                     return graph_service.write_file(uid, pid, scope, path.strip(), content, message=message,
                                                     root=wt_root, reindex=reindex)
@@ -1418,7 +1452,7 @@ def _register_builtins(
                     if block:
                         return block
                     return asyncio.run(graph_service.push(uid, pid))
-                return {"error": f"unknown action '{act}' (use write/edit/delete/push)"}
+                return {"error": f"unknown action '{act}' (use patch/write/edit/delete/push)"}
             except ValueError as exc:
                 return {"error": str(exc)}
             except Exception as exc:  # noqa: BLE001 - erro de escrita não quebra o turno
@@ -1435,8 +1469,14 @@ def _register_builtins(
                 "the active task's worktree) as working directory; returns combined stdout+stderr, "
                 "the exit code and duration. Leave `command` empty to run the project's configured "
                 "test_command. Set `setup=true` to run the project's setup_command first (e.g. install "
-                "deps) — do this once before the first test run. Requires the project owner to have "
-                "enabled execution; a bad exit code means the command failed — read the output and fix."
+                "deps) — do this once before the first test run. "
+                "TOOLCHAINS: the sandbox has git/curl/build tools and `mise` (rootless version manager) "
+                "— install what a project needs on demand and it PERSISTS across runs, e.g. "
+                "`mise use -g java@17 maven` then `mvn -q test`, or `mise use -g node@20` then `npm test`. "
+                "Prefer asking the user before installing/downloading (those commands prompt for "
+                "confirmation automatically; tests/build run directly). "
+                "Requires the project owner to have enabled execution; a bad exit code means the command "
+                "failed — read the output and fix."
             ),
             params={
                 "command": "string:o::the shell command to run (empty = the project's test_command)",
@@ -1466,9 +1506,15 @@ def _register_builtins(
             cmd = (command or "").strip() or (proj.test_command or "").strip()
             if not cmd:
                 return {"error": "informe 'command' — nenhum test_command configurado no projeto"}
-            block = _cs_confirm_guard(confirm_on, f"Rodar no projeto '{proj.name}':\n`{cmd[:200]}`", confirm)
-            if block:
-                return block
+            # instala/baixa/apaga → confirma por padrão (o "quer que eu instale e execute?");
+            # testes/build rodam direto, a menos que o toggle global de confirmação esteja on.
+            risky = _is_risky_exec(cmd)
+            if risky or confirm_on:
+                summary = (f"Instalar/baixar e rodar no projeto '{proj.name}'?" if risky
+                           else f"Rodar no projeto '{proj.name}':") + f"\n`{cmd[:200]}`"
+                block = _cs_confirm_guard(True, summary, confirm)
+                if block:
+                    return block
 
             def _truthy(v: Any) -> bool:
                 return v is True or (isinstance(v, str) and v.strip().lower() in ("true", "1", "yes", "sim", "on"))

@@ -910,6 +910,7 @@ function SidebarSettings({ profile, set, onBack }: { profile: Record<string, any
   const iface: Record<string, any> = profile.interface ?? {};
   const setIface = (k: string, v: any) => set("interface", { ...iface, [k]: v });
   const [cfgOpen, setCfgOpen] = useState(false);
+  const [compactCfgOpen, setCompactCfgOpen] = useState(false);
   const [models, setModels] = useState<Model[]>([]);
   useEffect(() => { api.get<Model[]>("/settings/models").then(setModels).catch(() => {}); }, []);
   const autoTitle = !!iface.auto_title;
@@ -961,6 +962,43 @@ function SidebarSettings({ profile, set, onBack }: { profile: Record<string, any
               />
               <span className="mt-1 block text-xs text-muted">O título é limitado a {MAX_CHAT_TITLE} caracteres (já informado à IA). Vazio = padrão.</span>
             </label>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3 rounded-xl border border-border bg-surface px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <span className="text-sm text-ink">Resumo de contexto (compactação)</span>
+            <span className="mt-0.5 block text-xs text-muted">Tarefa auxiliar — dá pra usar um modelo mais barato.</span>
+          </div>
+          <button
+            onClick={() => setCompactCfgOpen((v) => !v)}
+            title="Configurar"
+            className={`shrink-0 rounded-lg p-1.5 transition-colors ${compactCfgOpen ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
+          >
+            <Settings size={16} />
+          </button>
+        </div>
+        {compactCfgOpen && (
+          <div className="mt-3 space-y-2 border-t border-border pt-3">
+            {iface.compact_model && (
+              <div className="flex justify-end">
+                <LinkBtn onClick={() => setIface("compact_model", "")}>Redefinir para o padrão</LinkBtn>
+              </div>
+            )}
+            <div className="text-sm">
+              <span className="text-ink-soft">Modelo</span>
+              <div className="mt-1">
+                <ModelField
+                  models={models}
+                  value={iface.compact_model ?? ""}
+                  onChange={(v) => setIface("compact_model", v)}
+                  placeholder="Modelo do chat (padrão)"
+                />
+              </div>
+              <span className="mt-1 block text-xs text-muted">Vazio = modelo do chat.</span>
+            </div>
           </div>
         )}
       </div>

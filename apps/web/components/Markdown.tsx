@@ -112,6 +112,26 @@ function MdImage({ src, alt }: { src: string; alt: string }) {
 const CLAMP_LIMIT = 8000;
 
 /**
+ * Estabiliza markdown PARCIAL durante o streaming: enquanto os tokens chegam, uma
+ * crase/cerca de código aberta faz TODO o texto seguinte "virar código" até a de
+ * fechamento chegar — e volta no próximo flush. Esse flip-flop é o "piscar" que o
+ * usuário via. Fechamos/removemos os delimitadores abertos só p/ renderizar (o texto
+ * real não muda): cerca ``` ímpar → fecha; crase inline solta na última linha → remove.
+ */
+function stabilizeStream(md: string): string {
+  const fences = (md.match(/^ {0,3}```/gm) || []).length;
+  if (fences % 2 === 1) return `${md}\n\`\`\``; // fecha o bloco de código aberto
+  const nl = md.lastIndexOf("\n");
+  const lastLine = md.slice(nl + 1);
+  // NÃO mexer numa linha de cerca (``` de fechamento tem 3 crases, nº ímpar) — só
+  // numa crase INLINE órfã (ex.: "... o `patternScan" ainda sem a de fechamento).
+  if (!/^ {0,3}```/.test(lastLine) && ((lastLine.match(/`/g) || []).length) % 2 === 1) {
+    return md.slice(0, md.lastIndexOf("`"));
+  }
+  return md;
+}
+
+/**
  * Markdown das mensagens do assistente: GFM (tabelas, listas de tarefas,
  * links automáticos) + realce de sintaxe. Tipografia via classe `.md`.
  * `clamp` evita travar em mensagens gigantes: mostra um prefixo + "Mostrar tudo".
@@ -133,12 +153,14 @@ function Markdown({
   const [expanded, setExpanded] = useState(false);
   const isLong = clamp && !expanded && content.length > CLAMP_LIMIT;
   // corta num limite de parágrafo p/ não deixar uma cerca de código aberta
-  const shown = isLong
+  const clamped = isLong
     ? (() => {
         const cut = content.lastIndexOf("\n\n", CLAMP_LIMIT);
         return content.slice(0, cut > CLAMP_LIMIT / 2 ? cut : CLAMP_LIMIT);
       })()
     : content;
+  // no streaming (`fast`), fecha delimitadores abertos p/ o texto não "piscar"
+  const shown = fast ? stabilizeStream(clamped) : clamped;
   return (
     <div className={`md ${className}`}>
       <ReactMarkdown

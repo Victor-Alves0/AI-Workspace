@@ -30,6 +30,9 @@ class SkillProposal(Base):
     slug: Mapped[str] = mapped_column(String(64), default="")
     description: Mapped[str] = mapped_column(Text, default="")
     content: Mapped[str] = mapped_column(Text, default="")
+    # arquivos de referência da proposta (import de pasta traz references/*) —
+    # [{"name","content"}]; viram Skill.files ao aprovar.
+    files: Mapped[list] = mapped_column(JSONB, default=list)
     # por que a IA sugeriu isto (o gatilho na conversa) — mostrado na UI de Sugestões
     rationale: Mapped[str] = mapped_column(Text, default="")
     tags: Mapped[list] = mapped_column(JSONB, default=list)

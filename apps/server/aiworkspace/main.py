@@ -130,6 +130,14 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        # PRIMEIRO no encerramento (loop e banco ainda vivos): salva o parcial de
+        # qualquer geração em andamento — senão um deploy/restart perde o turno
+        # inteiro (texto + logs de tools). Ver chat/generation.shutdown.
+        try:
+            from .chat import generation
+            await generation.shutdown()
+        except Exception:  # noqa: BLE001 - best-effort; não trava o encerramento
+            logger.warning("Não foi possível salvar parciais das gerações no encerramento")
         if _wt_reaper_task is not None:
             _wt_reaper_task.cancel()
         await automation_scheduler.stop()

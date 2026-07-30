@@ -31,5 +31,8 @@ class Skill(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     # conteúdo completo: carregado sob demanda via view_skill (o "como fazer")
     content: Mapped[str] = mapped_column(Text, default="")
+    # arquivos de referência: [{"name": "references/x.md", "content": "…"}] — carregados
+    # sob demanda via view_skill(slug, file=...). O SKILL.md acima é o índice.
+    files: Mapped[list] = mapped_column(JSONB, default=list)
     tags: Mapped[list] = mapped_column(JSONB, default=list)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)

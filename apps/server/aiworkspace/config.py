@@ -146,8 +146,19 @@ class Settings(BaseSettings):
     transcribe_cookies_dir: str = ""
     transcribe_cookie_cooldown_seconds: int = 1800
 
-    # Limite de iterações de tool-calling por turno
+    # Prompt caching (OpenRouter → Anthropic/Gemini/DeepSeek): marca breakpoints de
+    # cache_control no system, no bloco de tools e no fim do histórico, para o prefixo
+    # ESTÁVEL (que se repete a cada iteração do loop agêntico) ser cobrado a fração do
+    # preço. Modelos que não suportam ignoram os marcadores. Desligue se algum provedor
+    # reclamar do formato de conteúdo em blocos.
+    prompt_cache_enabled: bool = True
+
+    # Limite de iterações de tool-calling por turno. O padrão (8) cobre um chat
+    # normal; um chat de Codespace roda o loop agêntico de código (escreve → testa
+    # → corrige), que precisa de dezenas de passos como Codex/Claude Code/opencode —
+    # por isso tem um teto próprio, bem mais alto, aplicado só nesses chats.
     max_tool_iterations: int = 8
+    codespace_max_tool_iterations: int = 40
 
     # Cache do índice SIFT (.npz por usuário) — string vazia desabilita.
     # A SIFT valida por hash de conteúdo+modelo, então cache velho é ignorado.

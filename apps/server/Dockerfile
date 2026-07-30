@@ -35,6 +35,14 @@ RUN install -d /usr/share/postgresql-common/pgdg \
     && apt-get install -y --no-install-recommends postgresql-client-16 \
     && rm -rf /var/lib/apt/lists/*
 
+# mise: gerenciador de versões ROOTLESS (JDK/Maven/Node/Python/Go/…) para o sandbox
+# de execução do Codespace. A IA instala toolchains sob demanda (ex.: `mise use -g
+# java@17 maven`) sem root; ficam num cache PERSISTENTE dentro do volume codespace_data
+# (ver MISE_DATA_DIR abaixo), sobrevivendo a rebuild/restart. É o que permite "baixar,
+# instalar e usar" um JDK como Codex/Claude fazem, mas isolado do resto do server.
+RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh \
+    && chmod 0755 /usr/local/bin/mise
+
 COPY pyproject.toml ./
 # instala só as DEPENDÊNCIAS numa camada própria, chaveada apenas pelo pyproject.
 # Um stub do pacote (só __init__.py) faz o setuptools resolver; assim as deps
@@ -59,10 +67,22 @@ RUN useradd --create-home --uid 10001 app \
     && mkdir -p /home/app/.cache /data/codespace \
     && chown -R app:app /home/app /data/codespace
 USER app
+# HOME/caches de modelos (fastembed→/tmp por padrão; redirecionados p/ o volume mlcache).
+# mise: dirs no volume codespace_data (persistem os toolchains instalados); MISE_YES
+# instala sem prompt; os shims entram no PATH p/ os binários resolverem a versão
+# escolhida (ex.: `java` → o JDK do `mise use`). O `mise` fica em /usr/local/bin. O
+# sandbox de exec herda este env (o env limpo só remove segredos, preserva PATH/MISE_*).
+# NOTA: nada de comentário DENTRO deste ENV — comentário no meio de continuação `\`
+# quebra a instrução no BuildKit.
 ENV HOME=/home/app \
-    # caches de modelos dentro do volume mlcache (fastembed baixa p/ /tmp por padrão)
     FASTEMBED_CACHE_PATH=/home/app/.cache/fastembed \
-    HF_HOME=/home/app/.cache/huggingface
+    HF_HOME=/home/app/.cache/huggingface \
+    MISE_DATA_DIR=/data/codespace/.mise/data \
+    MISE_CONFIG_DIR=/data/codespace/.mise/config \
+    MISE_CACHE_DIR=/data/codespace/.mise/cache \
+    MISE_STATE_DIR=/data/codespace/.mise/state \
+    MISE_YES=1 \
+    PATH=/data/codespace/.mise/data/shims:/home/app/.local/bin:/usr/local/bin:${PATH}
 
 EXPOSE 8000
 CMD ["./entrypoint.sh"]

@@ -171,6 +171,7 @@ async def _load_skills(
             "name": s.name,
             "description": s.description or "",
             "content": s.content or "",
+            "files": list(s.files or []),
         }
         for s in rows
         if s.enabled
@@ -985,6 +986,9 @@ def _make_subagent_runner(
 
 # teto de tamanho total dos anexos por turno (defesa; o schema já limita por item)
 _MAX_ATTACH_TOTAL = 20 * 1024 * 1024
+# teto de QUANTIDADE de anexos por turno — bate com o schema SendMessageIn (max_length)
+# e com MAX_ATTACHMENTS no PromptBox (front). O _MAX_ATTACH_TOTAL ainda limita o total.
+_MAX_ATTACH_COUNT = 50
 
 
 def _clean_attachments(raw: Any) -> list[dict]:
@@ -995,7 +999,7 @@ def _clean_attachments(raw: Any) -> list[dict]:
         return []
     out: list[dict] = []
     total = 0
-    for a in raw[:6]:
+    for a in raw[:_MAX_ATTACH_COUNT]:
         if not isinstance(a, dict):
             continue
         t = a.get("type")
@@ -1023,7 +1027,7 @@ async def _prepare_attachments(raw: Any, model_config: ModelConfig | None) -> li
     ex_cfg = tool_config(model_config).get("text_extraction") or {}
     out: list[dict] = []
     total = 0
-    for a in raw[:6]:
+    for a in raw[:_MAX_ATTACH_COUNT]:
         if not isinstance(a, dict):
             continue
         t = a.get("type")

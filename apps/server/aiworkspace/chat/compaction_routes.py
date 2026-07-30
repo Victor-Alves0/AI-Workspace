@@ -57,7 +57,11 @@ async def compact_chat(
     chat = await _get_owned_chat(db, chat_id, user)
     if not chat.model:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chat sem modelo definido")
-    api_key, base_url = await _resolve_provider(db, user, chat.model)
+    # Resumir é uma tarefa auxiliar barata: se o usuário escolheu um modelo dedicado
+    # (Configurações → Barra Lateral → Chats), usa ele; senão, o modelo da conversa.
+    iface = (user.profile or {}).get("interface") or {}
+    summary_model = (iface.get("compact_model") or "").strip() or chat.model
+    api_key, base_url = await _resolve_provider(db, user, summary_model)
 
     rows = await _ordered_messages(db, chat_id)
     # só o que ainda está no contexto (não-compactado) entra no resumo — o divisor
@@ -81,7 +85,7 @@ async def compact_chat(
     summary = ""
     try:
         async for chunk in openrouter.stream_chat(
-            api_key, chat.model, messages, tools=None, params={}, base_url=base_url
+            api_key, summary_model, messages, tools=None, params={}, base_url=base_url
         ):
             for choice in chunk.get("choices", []):
                 delta = choice.get("delta", {})
@@ -97,11 +101,32 @@ async def compact_chat(
     # registra o checkpoint no histórico (timeline) com o SNAPSHOT das mensagens
     # atuais — assim é possível RESTAURAR exatamente este ponto depois.
     # parent_id = checkpoint ativo agora → forma a ÁRVORE de contexto (ramificação).
+    original_snapshot = [_serialize_message(m) for m in rows]
     parent_id = await db.scalar(
         select(ChatCompaction.id).where(
             ChatCompaction.chat_id == chat_id, ChatCompaction.pinned.is_(True)
         )
     )
+    # PRIMEIRA compactação deste chat? Antes de compactar, salva um checkpoint
+    # "Estado original" (snapshot ÍNTEGRO, sem resumo) — um ponto permanente e
+    # rotulado para SEMPRE poder voltar à conversa inteira, independente da cadeia
+    # de compactações. A compactação abaixo descende dele.
+    prior = await db.scalar(
+        select(ChatCompaction.id).where(ChatCompaction.chat_id == chat_id).limit(1)
+    )
+    if prior is None:
+        original = ChatCompaction(
+            chat_id=chat_id,
+            summary="",  # sem resumo: representa o chat inteiro, não uma compactação
+            message_count=len(convo),
+            pinned=False,
+            parent_id=None,
+            snapshot=original_snapshot,
+            name="Estado original",
+        )
+        db.add(original)
+        await db.flush()  # gera o id p/ ancorar a compactação nele
+        parent_id = original.id
     await db.execute(
         update(ChatCompaction).where(ChatCompaction.chat_id == chat_id).values(pinned=False)
     )
@@ -111,7 +136,7 @@ async def compact_chat(
         message_count=len(convo),
         pinned=True,
         parent_id=parent_id,
-        snapshot=[_serialize_message(m) for m in rows],
+        snapshot=original_snapshot,
     )
     db.add(checkpoint)
 

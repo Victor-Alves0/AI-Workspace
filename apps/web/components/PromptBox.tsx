@@ -55,6 +55,8 @@ import { toolCategoryIcon, toolCategoryTitle } from "./toolCategory";
 const DOC_RE = /\.(pdf|docx|xlsx|xlsm|pptx|csv)$/i;
 // arquivos de texto lidos direto no cliente
 const TEXT_RE = /\.(txt|md|markdown|json|ya?ml|log|tsv|xml|html?|py|js|ts|tsx|jsx|css|sh)$/i;
+// teto generoso de anexos por mensagem (evita payloads absurdos, mas não atrapalha o uso)
+const MAX_ATTACHMENTS = 50;
 
 // Indicador circular do uso de contexto: verde → âmbar → vermelho conforme enche.
 // Clicar abre um menu: Compactar (direto) ou Histórico (timeline + fixar).
@@ -339,6 +341,7 @@ export default function PromptBox({
   const [chatQuery, setChatQuery] = useState("");
   const chatPickRef = useClickOutside<HTMLDivElement>(() => setChatPickOpen(false));
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [attachErr, setAttachErr] = useState<string | null>(null);
 
@@ -353,7 +356,7 @@ export default function PromptBox({
     if (!files.length) return;
     const next: Attachment[] = [...attachments];
     for (const f of files) {
-      if (next.length >= 6) { setAttachErr("Máximo de 6 anexos."); break; }
+      if (next.length >= MAX_ATTACHMENTS) { setAttachErr(`Máximo de ${MAX_ATTACHMENTS} anexos.`); break; }
       try {
         if (f.type.startsWith("image/")) {
           if (!canVision) { setAttachErr("Este modelo não tem Visão nem Vision Router — habilite em Capacidades/Filtros."); continue; }
@@ -374,7 +377,7 @@ export default function PromptBox({
         setAttachErr(err instanceof Error ? err.message : "Falha ao ler o anexo");
       }
     }
-    onAttachmentsChange?.(next.slice(0, 6));
+    onAttachmentsChange?.(next.slice(0, MAX_ATTACHMENTS));
   }
   async function pickFiles(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -543,26 +546,76 @@ export default function PromptBox({
     requestAnimationFrame(() => taRef.current?.focus());
   }
   function pickSkill(s: Skill) {
-    // remove só o token "$query" do texto (mantém o resto da mensagem); a skill
-    // vira um chip acima do campo.
+    // troca o "$query" pelo token "$slug " — que FICA na mensagem (o usuário se
+    // refere à skill na frase, ex.: "use a skill $revisao para X"). O token vira
+    // um chip inline via realce, e os ids seguem por skill_ids (derivados do texto).
+    const token = `$${s.slug} `;
     if (dollarToken) {
       const pos = dollarToken.start;
-      onChange(value.slice(0, pos) + value.slice(caret));
+      const newVal = value.slice(0, pos) + token + value.slice(caret);
+      const np = pos + token.length;
+      onChange(newVal);
       requestAnimationFrame(() => {
         const ta = taRef.current;
-        if (ta) { ta.focus(); ta.setSelectionRange(pos, pos); }
-        setCaret(pos);
+        if (ta) { ta.focus(); ta.setSelectionRange(np, np); }
+        setCaret(np);
       });
     } else {
-      onChange("");
+      const newVal = value ? `${value.replace(/\s*$/, "")} ${token}` : token;
+      onChange(newVal);
       requestAnimationFrame(() => taRef.current?.focus());
     }
-    onAttachedSkillIdsChange?.([...attachedSkillIds, s.id]);
   }
-  const attachedSkills = useMemo(
-    () => attachedSkillIds.map((id) => skills.find((s) => s.id === id)).filter((s): s is Skill => !!s),
-    [attachedSkillIds, skills],
-  );
+
+  // skills habilitadas indexadas por slug (p/ casar os tokens "$slug" do texto)
+  const skillBySlug = useMemo(() => {
+    const m = new Map<string, Skill>();
+    for (const s of skills) if (s.enabled) m.set(s.slug.toLowerCase(), s);
+    return m;
+  }, [skills]);
+
+  // acha os tokens "$slug" (no início ou após espaço) que casam com uma skill
+  function eachSkillToken(text: string, cb: (start: number, end: number, s: Skill) => void) {
+    const re = /\$(\w+)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text))) {
+      const boundaryOk = m.index === 0 || /\s/.test(text[m.index - 1]);
+      const s = boundaryOk ? skillBySlug.get(m[1].toLowerCase()) : undefined;
+      if (s) cb(m.index, m.index + m[0].length, s);
+    }
+  }
+
+  // nós de realce: texto comum (transparente, só ocupa espaço) + tokens como "chip"
+  const highlightNodes = useMemo(() => {
+    const nodes: React.ReactNode[] = [];
+    let last = 0;
+    let k = 0;
+    eachSkillToken(value, (start, end) => {
+      if (start > last) nodes.push(value.slice(last, start));
+      nodes.push(
+        <span
+          key={k++}
+          style={{ padding: "0 3px", margin: "0 -3px" }}
+          className="rounded bg-accent/20 ring-1 ring-inset ring-accent/40"
+        >
+          {value.slice(start, end)}
+        </span>,
+      );
+      last = end;
+    });
+    nodes.push(value.slice(last));
+    return nodes;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, skillBySlug]);
+
+  // sincroniza os ids anexados (enviados ao backend) com os tokens presentes no texto
+  useEffect(() => {
+    const ids: string[] = [];
+    eachSkillToken(value, (_s, _e, s) => { if (!ids.includes(s.id)) ids.push(s.id); });
+    const same = ids.length === attachedSkillIds.length && ids.every((id) => attachedSkillIds.includes(id));
+    if (!same) onAttachedSkillIdsChange?.(ids);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, skillBySlug]);
 
   return (
     <div className="px-4 pb-5 pt-2">
@@ -724,21 +777,8 @@ export default function PromptBox({
             </span>
           </div>
         )}
-        {attachedSkills.length > 0 && (
-          <div className="mb-1.5 flex flex-wrap gap-1.5 px-1">
-            {attachedSkills.map((s) => (
-              <span key={s.id} className="flex items-center gap-1 rounded-full bg-accent/15 px-2.5 py-0.5 text-xs text-accent-hover">
-                <Sparkles size={11} /> ${s.slug}
-                <button
-                  onClick={() => onAttachedSkillIdsChange?.(attachedSkillIds.filter((id) => id !== s.id))}
-                  className="text-accent-hover/70 transition-colors hover:text-accent-hover"
-                >
-                  <X size={11} />
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
+        {/* skills anexadas aparecem INLINE no compositor como chips ($slug), via
+            camada de realce atrás do textarea — não há mais uma linha separada aqui */}
         {/* input escondido para upload de imagens/arquivos */}
         <input
           ref={fileRef}
@@ -751,7 +791,9 @@ export default function PromptBox({
         {(attachments.length > 0 || attachErr) && (
           <div className="mb-1.5 space-y-1 px-1">
             {attachments.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
+              /* teto de ~3 linhas + scroll: com muitos anexos (até 50) a lista não
+                 pode empurrar o textarea e os botões p/ fora da tela */
+              <div className="flex max-h-[7.5rem] flex-wrap gap-1.5 overflow-y-auto pr-0.5">
                 {attachments.map((a, i) =>
                   a.type === "image" ? (
                     <span key={i} className="group/att relative">
@@ -779,13 +821,27 @@ export default function PromptBox({
             {attachErr && <p className="text-[11px] text-red-400">{attachErr}</p>}
           </div>
         )}
-        <textarea
-          ref={taRef}
-          data-prompt-input
-          rows={1}
-          value={value}
-          onChange={(e) => { onChange(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length); }}
-          onSelect={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
+        {/* compositor: uma camada de realce (chips $slug) atrás de um textarea de
+            fundo transparente — mesma métrica de fonte/padding/altura de linha, então
+            os glifos alinham e o cursor cai no lugar certo (o "chip" usa padding com
+            margem negativa: o avanço do texto não muda, só o fundo/borda transborda) */}
+        <div className="relative">
+          <div
+            ref={backdropRef}
+            aria-hidden
+            className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-2 py-1.5 text-[15px] leading-6 text-transparent"
+            style={{ maxHeight: MAX_HEIGHT }}
+          >
+            {highlightNodes}
+          </div>
+          <textarea
+            ref={taRef}
+            data-prompt-input
+            rows={1}
+            value={value}
+            onChange={(e) => { onChange(e.target.value); setCaret(e.target.selectionStart ?? e.target.value.length); }}
+            onSelect={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
+            onScroll={(e) => { if (backdropRef.current) backdropRef.current.scrollTop = (e.target as HTMLTextAreaElement).scrollTop; }}
           onPaste={canAttach ? onPaste : undefined}
           onKeyDown={(e) => {
             // menu ativo: prompts ("/"), skills ("$"), agentes ("@") ou refs ("#") — nunca juntos
@@ -815,15 +871,11 @@ export default function PromptBox({
                 return;
               }
             }
-            // Backspace com campo vazio remove o agente ou a última skill anexada
+            // Backspace com campo vazio remove o agente (as skills agora são tokens
+            // inline "$slug" — apagam-se editando o texto normalmente)
             if (e.key === "Backspace" && !value && attachedAgent) {
               e.preventDefault();
               onAgentChange?.(null);
-              return;
-            }
-            if (e.key === "Backspace" && !value && attachedSkills.length) {
-              e.preventDefault();
-              onAttachedSkillIdsChange?.(attachedSkillIds.slice(0, -1));
               return;
             }
             if (e.key === "Backspace" && !value && refDocs.length) {
@@ -837,9 +889,10 @@ export default function PromptBox({
             }
           }}
           placeholder={placeholder}
-          className="w-full resize-none overflow-y-auto bg-transparent px-2 py-1.5 text-[15px] text-ink outline-none placeholder:text-muted"
+          className="relative z-[1] w-full resize-none overflow-y-auto bg-transparent px-2 py-1.5 text-[15px] leading-6 text-ink outline-none placeholder:text-muted"
           style={{ maxHeight: MAX_HEIGHT }}
-        />
+          />
+        </div>
         <div className="flex items-center justify-between px-1 pt-1">
           <div className="flex items-center gap-1">
             <div className="relative" ref={plusRef}>

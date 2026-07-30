@@ -151,12 +151,20 @@ export interface BrainGraphData {
 }
 
 /** proposta de skill do /learn (card editável; aprovar = POST /skills) */
+/** arquivo de referência de uma skill (references/*, snippets) — carregado sob
+ *  demanda pelo modelo via view_skill(slug, file=...). */
+export interface SkillFile {
+  name: string;
+  content: string;
+}
+
 export interface SkillProposal {
   proposal_id: string;
   slug: string;
   name: string;
   description: string;
   content: string;
+  files?: SkillFile[];
   tags: string[];
 }
 
@@ -419,6 +427,7 @@ export interface Skill {
   name: string;
   description: string;
   content: string;
+  files?: SkillFile[];
   tags: string[];
   enabled: boolean;
   created_at: string;

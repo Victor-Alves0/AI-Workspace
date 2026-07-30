@@ -1,57 +1,60 @@
 """Codespace: exposição das tools de código num chat vinculado a um projeto.
 
-Num chat de projeto as tools de LEITURA de código entram no escopo mesmo sem
-estarem marcadas no modelo (vincular o chat ao projeto é o consentimento), e as
-de código que estão no escopo são FIXADAS (specs de 1ª classe, sem discovery).
-A de ESCRITA nunca é auto-liberada — continua opt-in por-modelo.
+Num chat de projeto TODAS as tools de código entram no escopo (mesmo sem estarem
+marcadas no modelo) e são FIXADAS (specs de 1ª classe, sem discovery) — vincular o
+chat ao projeto É o consentimento de trabalhar naquele código, como Codex/Claude
+Code/opencode. A segurança fica nas camadas certas: `code.exec.run` ainda depende do
+`exec_enabled` por-projeto na hora de rodar, e a escrita é local/reversível (push é
+ação separada com confirmação).
 """
 from __future__ import annotations
 
 from aiworkspace.tools.loader import codespace_allow, codespace_pins
 
+_ALL = {
+    "code.graph.query", "code.files.browse", "code.flow.analyze",
+    "code.files.write", "code.exec.run", "code.task.manage",
+}
+
 
 # --------------------------------- allow ----------------------------------- #
-def test_read_tools_are_auto_allowed():
-    """Modelo sem NENHUMA tool de código marcada ainda navega o projeto."""
+def test_all_code_tools_are_auto_allowed():
+    """Modelo sem NENHUMA tool de código marcada ainda navega, escreve e roda."""
     allow = codespace_allow(["utils.time.now"])
-    assert "code.graph.query" in allow
-    assert "code.files.browse" in allow
-    assert "code.flow.analyze" in allow  # análise de fluxo também é leitura
+    assert _ALL <= set(allow)  # leitura + escrita + execução + tarefas
     assert "utils.time.now" in allow  # não perde o que o modelo já tinha
-
-
-def test_write_tool_is_never_auto_allowed():
-    """Escrita cria/apaga arquivos e faz push: exige permissão explícita."""
-    assert "code.files.write" not in codespace_allow(["utils.time.now"])
-    assert "code.files.write" not in codespace_allow([])
 
 
 def test_allow_is_idempotent_when_model_already_has_them():
     allow = codespace_allow(["code.graph.query", "code.files.browse", "code.files.write"])
     assert allow.count("code.graph.query") == 1
-    assert "code.files.write" in allow  # marcada no modelo => permanece
+    assert allow.count("code.files.write") == 1
+    assert _ALL <= set(allow)
 
 
 # ---------------------------------- pins ----------------------------------- #
-def test_code_tools_in_scope_get_pinned():
+def test_all_code_tools_in_scope_get_pinned():
+    """Num chat de projeto, todas as tools de código viram specs de 1ª classe."""
     allow = codespace_allow([])
     pins = codespace_pins([], allow)
-    assert set(pins) == {"code.graph.query", "code.files.browse", "code.flow.analyze"}
+    assert set(pins) == _ALL
 
 
-def test_write_is_pinned_only_when_model_equipped_it():
-    # sem a de escrita no escopo: não é fixada (nem existe pro modelo)
-    assert "code.files.write" not in codespace_pins([], codespace_allow([]))
-    # com ela equipada: entra no escopo E é fixada
-    allow = codespace_allow(["code.files.write"])
-    assert "code.files.write" in codespace_pins([], allow)
+def test_exec_and_write_are_pinned_without_model_equipping_them():
+    """O que muda vs. o comportamento antigo: escrita/execução NÃO exigem mais
+    opt-in por-modelo — o vínculo com o projeto já as libera e fixa."""
+    allow = codespace_allow([])
+    pins = codespace_pins([], allow)
+    assert "code.files.write" in pins
+    assert "code.exec.run" in pins
+    assert "code.task.manage" in pins
 
 
 def test_existing_pins_are_preserved():
     """Os pins escolhidos à mão no modelo não são substituídos pelos do Codespace."""
     pins = codespace_pins(["web.search.query"], codespace_allow([]))
     assert "web.search.query" in pins
-    assert "code.graph.query" in pins
+    assert _ALL <= set(pins)
 
 
 def test_pins_do_not_duplicate_when_already_pinned():

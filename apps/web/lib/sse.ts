@@ -27,11 +27,24 @@ async function authedFetch(path: string, init: RequestInit): Promise<Response> {
   return res;
 }
 
+/** Normaliza o `detail` de um erro do FastAPI para texto legível. Um 422 devolve uma
+ *  LISTA de objetos {loc,msg,type} — jogá-la crua num Error vira "[object Object]". */
+function errDetail(d: unknown, fallback: string): string {
+  if (typeof d === "string") return d || fallback;
+  if (Array.isArray(d)) {
+    const parts = d.map((e) => (typeof e === "string" ? e : (e as { msg?: string })?.msg || JSON.stringify(e)));
+    return parts.join("; ") || fallback;
+  }
+  if (d && typeof d === "object") return (d as { msg?: string }).msg || JSON.stringify(d);
+  return fallback;
+}
+
 async function readSSE(res: Response, onEvent: (e: ChatEvent) => void): Promise<void> {
   if (!res.ok || !res.body) {
     let detail = res.statusText;
     try {
-      detail = (await res.json()).detail ?? detail;
+      const body = await res.json();
+      detail = errDetail(body?.detail ?? body?.message, res.statusText);
     } catch {
       /* ignore */
     }

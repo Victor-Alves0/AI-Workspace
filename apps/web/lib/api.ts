@@ -78,7 +78,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!res.ok) {
     let detail = res.statusText;
     try {
-      detail = (await res.json()).detail ?? detail;
+      const body = await res.json();
+      const d = body?.detail ?? body?.message;
+      // um 422 do FastAPI devolve uma LISTA de erros {loc,msg,type}; sem tratar,
+      // vira "[object Object]" na mensagem do Error
+      if (typeof d === "string") detail = d || detail;
+      else if (Array.isArray(d)) detail = d.map((e) => (typeof e === "string" ? e : e?.msg || JSON.stringify(e))).join("; ") || detail;
+      else if (d && typeof d === "object") detail = d.msg || JSON.stringify(d);
     } catch {
       /* ignore */
     }

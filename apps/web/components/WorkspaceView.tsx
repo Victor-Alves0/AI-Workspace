@@ -8,7 +8,7 @@ import {
   FlaskConical, LayoutGrid, MessageSquare, MoreHorizontal, Pencil, Plug, Plus, Search, Settings, Sparkles,
   Terminal, Trash2, Upload, Waypoints, Wrench, X,
 } from "lucide-react";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, API_URL } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import type { ModelConfig, Prompt, Skill, SkillSuggestion, Tool, User } from "@/lib/types";
 import { AnchoredMenu, MenuItem } from "@/components/ui";
@@ -318,6 +318,8 @@ export default function WorkspaceView({
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const skillFileRef = useRef<HTMLInputElement>(null);
+  const [toast, setToast] = useState<string | null>(null);
   // editingTool: undefined = não editando; null = nova; Tool = editar. valvesTool: engrenagem
   const [editingTool, setEditingTool] = useState<Tool | null | undefined>(undefined);
   const [valvesTool, setValvesTool] = useState<Tool | null>(null);
@@ -347,6 +349,12 @@ export default function WorkspaceView({
     loadProposals();
     api.get<{ id: string; name: string }[]>("/codespace/projects").then(setProjects).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   async function approveProposal(id: string) {
     await api.post(`/skills/proposals/${id}/approve`).catch(() => {});
@@ -459,7 +467,7 @@ export default function WorkspaceView({
     loadSkills();
   }
   function exportSkills() {
-    const data = skills.map((s) => ({ slug: s.slug, name: s.name, description: s.description, content: s.content, tags: s.tags ?? [] }));
+    const data = skills.map((s) => ({ slug: s.slug, name: s.name, description: s.description, content: s.content, files: s.files ?? [], tags: s.tags ?? [] }));
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -467,6 +475,30 @@ export default function WorkspaceView({
     a.download = "skills.json";
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function importSkillFile(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    let ok = 0;
+    let failed = "";
+    for (const f of Array.from(files)) {
+      const fd = new FormData();
+      fd.append("file", f);
+      try {
+        const res = await fetch(`${API_URL}/skills/import`, { method: "POST", credentials: "include", body: fd });
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          throw new Error(body?.detail || String(res.status));
+        }
+        const created: Skill[] = await res.json();
+        ok += created.length;
+      } catch (e) {
+        failed = e instanceof Error ? e.message : "falha";
+      }
+    }
+    if (skillFileRef.current) skillFileRef.current.value = "";
+    loadSkills();
+    setToast(failed ? `Importação falhou: ${failed}` : `${ok} skill${ok === 1 ? "" : "s"} importada${ok === 1 ? "" : "s"}.`);
   }
   function exportPrompts() {
     const data = prompts.map((p) => ({ command: p.command, title: p.title, content: p.content }));
@@ -818,6 +850,15 @@ export default function WorkspaceView({
           onBack={backHome}
           actions={
             <>
+              <input
+                ref={skillFileRef}
+                type="file"
+                accept=".skill,.zip,.md,.markdown,.txt,.json"
+                multiple
+                className="hidden"
+                onChange={(e) => importSkillFile(e.target.files)}
+              />
+              <button className={BTN_GHOST} onClick={() => skillFileRef.current?.click()}><Upload size={14} className="mr-1.5 inline" />Importar</button>
               <button className={BTN_GHOST} onClick={exportSkills}><Download size={14} className="mr-1.5 inline" />Exportar</button>
               <button className={`${BTN_GHOST} relative`} onClick={() => setSuggestOpen(true)}>
                 <Sparkles size={14} className="mr-1.5 inline" />Sugestões
@@ -919,6 +960,12 @@ export default function WorkspaceView({
           onOpenChat={(cid) => { onOpenChat?.(cid); onClose(); }}
           onClose={() => setSuggestOpen(false)}
         />
+      )}
+
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full border border-border bg-surface px-4 py-2 text-sm text-ink shadow-lg">
+          {toast}
+        </div>
       )}
     </div>
   );

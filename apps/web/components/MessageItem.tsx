@@ -395,6 +395,7 @@ function SkillProposalCard({ proposal }: { proposal: SkillProposal }) {
   const [description, setDescription] = useState(proposal.description || "");
   const [content, setContent] = useState(proposal.content || "");
   const [tags, setTags] = useState((proposal.tags || []).join(", "));
+  const files = proposal.files || [];
   const [open, setOpen] = useState(false);
   const [err, setErr] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "saved" | "dismissed">(() => {
@@ -414,6 +415,7 @@ function SkillProposalCard({ proposal }: { proposal: SkillProposal }) {
         name: name.trim(),
         description: description.trim(),
         content,
+        files,
         tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
         enabled: true,
       });
@@ -484,6 +486,20 @@ function SkillProposalCard({ proposal }: { proposal: SkillProposal }) {
             />
           )}
         </div>
+        {files.length > 0 && (
+          <div className="px-4 py-2">
+            <p className="mb-1 text-xs text-muted">
+              {files.length} arquivo{files.length > 1 ? "s" : ""} de referência (incluídos ao aprovar):
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {files.map((f, i) => (
+                <span key={i} className="rounded-md bg-bg px-2 py-0.5 font-mono text-[11px] text-ink-soft" title={`${f.content.length} chars`}>
+                  {f.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-3 border-t border-border px-4 py-2">
         {err && <span className="truncate text-xs text-red-400">{err}</span>}
@@ -969,7 +985,10 @@ export function ReasoningBlock({
   seconds?: number;
   live?: boolean;
 }) {
-  const [open, setOpen] = useState(live);
+  // Colapsado por padrão MESMO ao vivo (estilo ChatGPT/Claude): o raciocínio bruto do
+  // modelo (chain-of-thought sem formatação) vira um "muro" que embola a tela durante a
+  // geração. Mostramos só "Pensando…" (pulsando); quem quiser ver os detalhes, expande.
+  const [open, setOpen] = useState(false);
   const label = live
     ? "Pensando…"
     : seconds && seconds > 0

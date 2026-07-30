@@ -45,6 +45,9 @@ class Generation:
         self.done = False
         self.task: asyncio.Task | None = None
         self.started_at = time.monotonic()
+        # preenchido quando a geração é cancelada por SHUTDOWN do servidor (≠ do
+        # "Parar" do usuário): vira uma nota no parcial salvo ("interrompida porque…").
+        self.interrupted_reason: str | None = None
         self._cond = asyncio.Condition()
 
     async def _append(self, ev: dict) -> None:
@@ -114,6 +117,9 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish) -> Gen
             # capturados incrementalmente para SOBREVIVER a um erro no meio do stream
             # (quando o `done` nunca chega): senão a resposta parcial/raciocínio somem.
             "reasoning_streamed": "",
+            # logs das ferramentas acumulados AO VIVO — para um parcial (erro/parar/
+            # shutdown) preservar o que a IA já executou, não só o texto.
+            "tools_streamed": [],
             "error": None,
         }
         try:
@@ -129,11 +135,22 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish) -> Gen
                     collected["streamed"] += ev.get("text", "")
                 elif t == "reasoning":
                     collected["reasoning_streamed"] += ev.get("text", "")
+                elif t == "tool_call":
+                    collected["tools_streamed"].append(
+                        {"kind": "call", "name": ev.get("name"), "data": ev.get("arguments")}
+                    )
+                elif t == "tool_result":
+                    collected["tools_streamed"].append(
+                        {"kind": "result", "name": ev.get("name"), "data": ev.get("result")}
+                    )
                 elif t == "error":
                     collected["error"] = ev.get("message")
                 await gen._append(ev)
         except asyncio.CancelledError:
-            # "Parar" do usuário ou shutdown: salva o parcial e re-propaga.
+            # "Parar" do usuário ou shutdown: salva o parcial e re-propaga. Se foi
+            # shutdown, deixa uma nota explicando (o "Parar" é intencional → sem nota).
+            if gen.interrupted_reason and not collected["error"]:
+                collected["error"] = gen.interrupted_reason
             await gen._append({"type": "stopped"})
             await _finalize(gen, on_finish, collected)
             raise
@@ -150,6 +167,10 @@ async def _finalize(gen: Generation, on_finish: OnFinish, collected: Collected) 
     """Persiste (blindado) e encerra a geração, agendando a expiração do buffer."""
     if gen.done:
         return  # já finalizada (ex.: caminho de CancelledError já rodou)
+    # parcial (o `done` não chegou): usa os logs de tools acumulados ao vivo, senão
+    # um turno interrompido salvaria o texto mas PERDERIA o que a IA já executou.
+    if not collected.get("tools") and collected.get("tools_streamed"):
+        collected["tools"] = collected["tools_streamed"]
     try:
         # `shield`: mesmo se o driver estiver sendo cancelado (shutdown), o commit
         # da resposta completa em vez de se perder.
@@ -164,3 +185,24 @@ async def _expire(gen: Generation) -> None:
     await asyncio.sleep(_DONE_TTL)
     if _active.get(gen.chat_id) is gen:
         del _active[gen.chat_id]
+
+
+async def shutdown(timeout: float = 8.0) -> None:
+    """No encerramento do servidor (SIGTERM/deploy/restart), cancela os drivers em
+    andamento e AGUARDA a persistência do parcial de cada um. Sem isto, um restart
+    no meio de um turno longo perdia o turno inteiro (texto + logs de tools).
+
+    Cada driver cancelado salva o parcial pelo caminho de ``CancelledError`` (blindado
+    por ``shield``); aqui só disparamos o cancelamento e esperamos, dentro do
+    período de graça do processo (Docker manda SIGTERM e espera antes do SIGKILL)."""
+    gens = [g for g in list(_active.values()) if not g.done and g.task and not g.task.done()]
+    if not gens:
+        return
+    logger.info("Encerrando: salvando o parcial de %d geração(ões) em andamento", len(gens))
+    for g in gens:
+        g.interrupted_reason = "o servidor reiniciou; salvei o que já havia sido gerado até aqui"
+        g.task.cancel()
+    try:
+        await asyncio.wait([g.task for g in gens], timeout=timeout)
+    except Exception:  # noqa: BLE001 — best-effort; não trava o shutdown
+        logger.exception("Falha ao aguardar o flush das gerações no encerramento")
