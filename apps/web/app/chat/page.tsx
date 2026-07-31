@@ -1825,8 +1825,11 @@ export default function ChatPage() {
           />
         ) : (
         <>
-        {/* barra superior */}
-        <div className="flex items-start justify-between gap-2 px-2 py-2.5 sm:px-4">
+        {/* barra superior: app-bar fixa no topo (sticky + fundo sólido + shrink-0) —
+            no mobile o teclado encolhe o 100dvh e alguns navegadores (Brave) rolam a
+            moldura p/ revelar o composer; sem fixar, o seletor de modelo/controles
+            sumia do topo. z-30 fica acima das mensagens, abaixo dos drawers (z-50). */}
+        <div className="sticky top-0 z-30 flex shrink-0 items-start justify-between gap-2 bg-bg px-2 py-2.5 sm:px-4">
           <div className="flex min-w-0 flex-col">
             <div className="flex items-center gap-1">
               <button onClick={() => setMobileNav(true)} title="Menu" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink md:hidden">

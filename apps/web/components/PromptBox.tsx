@@ -528,14 +528,22 @@ export default function PromptBox({
   }
 
   function pickAgent(a: { id: string; name: string }) {
+    // insere "@Nome " no texto (chip inline) e roteia o turno p/ este agente. A
+    // seleção é EXPLÍCITA (só aqui, no menu) — colar/digitar "@nome" não roteia nada.
+    const token = `@${a.name} `;
     if (atToken) {
       const pos = atToken.start;
-      onChange(value.slice(0, pos) + value.slice(caret));
+      const newVal = value.slice(0, pos) + token + value.slice(caret);
+      const np = pos + token.length;
+      onChange(newVal);
       requestAnimationFrame(() => {
         const ta = taRef.current;
-        if (ta) { ta.focus(); ta.setSelectionRange(pos, pos); }
-        setCaret(pos);
+        if (ta) { ta.focus(); ta.setSelectionRange(np, np); }
+        setCaret(np);
       });
+    } else {
+      onChange(value ? `${value.replace(/\s*$/, "")} ${token}` : token);
+      requestAnimationFrame(() => taRef.current?.focus());
     }
     onAgentChange?.(a.id);
   }
@@ -546,9 +554,8 @@ export default function PromptBox({
     requestAnimationFrame(() => taRef.current?.focus());
   }
   function pickSkill(s: Skill) {
-    // troca o "$query" pelo token "$slug " — que FICA na mensagem (o usuário se
-    // refere à skill na frase, ex.: "use a skill $revisao para X"). O token vira
-    // um chip inline via realce, e os ids seguem por skill_ids (derivados do texto).
+    // troca o "$query" pelo token "$slug " (chip inline na frase). A ANEXAÇÃO é
+    // EXPLÍCITA: só aqui, ao escolher no menu — colar/digitar "$slug" NÃO anexa.
     const token = `$${s.slug} `;
     if (dollarToken) {
       const pos = dollarToken.start;
@@ -561,10 +568,10 @@ export default function PromptBox({
         setCaret(np);
       });
     } else {
-      const newVal = value ? `${value.replace(/\s*$/, "")} ${token}` : token;
-      onChange(newVal);
+      onChange(value ? `${value.replace(/\s*$/, "")} ${token}` : token);
       requestAnimationFrame(() => taRef.current?.focus());
     }
+    if (!attachedSkillIds.includes(s.id)) onAttachedSkillIdsChange?.([...attachedSkillIds, s.id]);
   }
 
   // skills habilitadas indexadas por slug (p/ casar os tokens "$slug" do texto)
@@ -585,37 +592,71 @@ export default function PromptBox({
     }
   }
 
+  // acha o token "@Nome" do agente SELECIONADO (o nome pode ter espaços, então
+  // casa o literal exato com fronteira de espaço/início-fim)
+  function eachAgentToken(text: string, name: string, cb: (start: number, end: number) => void) {
+    const tok = `@${name}`;
+    let idx = text.indexOf(tok);
+    while (idx !== -1) {
+      const before = idx === 0 || /\s/.test(text[idx - 1]);
+      const after = idx + tok.length;
+      const afterOk = after === text.length || /\s/.test(text[after]);
+      if (before && afterOk) cb(idx, after);
+      idx = text.indexOf(tok, idx + 1);
+    }
+  }
+
+  // ranges dos "chips" ATIVOS no texto: skills ANEXADAS (não qualquer "$slug") + o
+  // agente selecionado. É isso que faz colar "$slug"/"@nome" NÃO virar chip.
+  const chipRanges = useMemo(() => {
+    const attached = new Set(attachedSkillIds);
+    const out: { start: number; end: number }[] = [];
+    eachSkillToken(value, (start, end, s) => { if (attached.has(s.id)) out.push({ start, end }); });
+    if (attachedAgent) eachAgentToken(value, attachedAgent.name, (start, end) => out.push({ start, end }));
+    return out.sort((a, b) => a.start - b.start);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, skillBySlug, attachedSkillIds, attachedAgent]);
+
   // nós de realce: texto comum (transparente, só ocupa espaço) + tokens como "chip"
   const highlightNodes = useMemo(() => {
     const nodes: React.ReactNode[] = [];
     let last = 0;
-    let k = 0;
-    eachSkillToken(value, (start, end) => {
-      if (start > last) nodes.push(value.slice(last, start));
+    chipRanges.forEach((r, k) => {
+      if (r.start < last) return; // overlap improvável ($ vs @) — ignora o 2º
+      if (r.start > last) nodes.push(value.slice(last, r.start));
       nodes.push(
         <span
-          key={k++}
+          key={k}
           style={{ padding: "0 3px", margin: "0 -3px" }}
           className="rounded bg-accent/20 ring-1 ring-inset ring-accent/40"
         >
-          {value.slice(start, end)}
+          {value.slice(r.start, r.end)}
         </span>,
       );
-      last = end;
+      last = r.end;
     });
     nodes.push(value.slice(last));
     return nodes;
+  }, [value, chipRanges]);
+
+  // PODA (nunca anexa): remove uma skill anexada se o token "$slug" dela sumiu do
+  // texto (o usuário apagou o chip). Anexar é sempre explícito no menu.
+  useEffect(() => {
+    const present = new Set<string>();
+    eachSkillToken(value, (_s, _e, s) => present.add(s.id));
+    const kept = attachedSkillIds.filter((id) => present.has(id));
+    if (kept.length !== attachedSkillIds.length) onAttachedSkillIdsChange?.(kept);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, skillBySlug]);
 
-  // sincroniza os ids anexados (enviados ao backend) com os tokens presentes no texto
+  // PODA do agente: se o token "@Nome" some do texto, desliga o roteamento.
   useEffect(() => {
-    const ids: string[] = [];
-    eachSkillToken(value, (_s, _e, s) => { if (!ids.includes(s.id)) ids.push(s.id); });
-    const same = ids.length === attachedSkillIds.length && ids.every((id) => attachedSkillIds.includes(id));
-    if (!same) onAttachedSkillIdsChange?.(ids);
+    if (!attachedAgent) return;
+    let present = false;
+    eachAgentToken(value, attachedAgent.name, () => { present = true; });
+    if (!present) onAgentChange?.(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, skillBySlug]);
+  }, [value, attachedAgent]);
 
   return (
     <div className="px-4 pb-5 pt-2">
@@ -767,18 +808,8 @@ export default function PromptBox({
             ))}
           </div>
         )}
-        {attachedAgent && (
-          <div className="mb-1.5 flex flex-wrap gap-1.5 px-1">
-            <span className="flex items-center gap-1 rounded-full bg-accent/15 px-2.5 py-0.5 text-xs text-accent-hover">
-              <AtSign size={11} /> {attachedAgent.name}
-              <button onClick={() => onAgentChange?.(null)} className="text-accent-hover/70 transition-colors hover:text-accent-hover">
-                <X size={11} />
-              </button>
-            </span>
-          </div>
-        )}
-        {/* skills anexadas aparecem INLINE no compositor como chips ($slug), via
-            camada de realce atrás do textarea — não há mais uma linha separada aqui */}
+        {/* skills ($slug) E agente (@nome) aparecem INLINE no compositor como chips,
+            via a camada de realce atrás do textarea — sem linha separada acima */}
         {/* input escondido para upload de imagens/arquivos */}
         <input
           ref={fileRef}
@@ -871,13 +902,8 @@ export default function PromptBox({
                 return;
               }
             }
-            // Backspace com campo vazio remove o agente (as skills agora são tokens
-            // inline "$slug" — apagam-se editando o texto normalmente)
-            if (e.key === "Backspace" && !value && attachedAgent) {
-              e.preventDefault();
-              onAgentChange?.(null);
-              return;
-            }
+            // agente (@nome) e skills ($slug) agora são tokens inline — removem-se
+            // apagando o texto do chip (a poda desliga o roteamento/anexo).
             if (e.key === "Backspace" && !value && refDocs.length) {
               e.preventDefault();
               onRefDocsChange?.(refDocs.slice(0, -1));
@@ -905,7 +931,7 @@ export default function PromptBox({
                 <Plus size={18} />
               </button>
               {plusOpen && (
-                <div className={`animate-pop absolute left-0 min-w-[240px] rounded-xl border border-border bg-surface p-1.5 shadow-menu ${menuUp ? "bottom-11" : "top-11"}`}>
+                <div className={`animate-pop absolute left-0 z-50 min-w-[240px] rounded-xl border border-border bg-surface p-1.5 shadow-menu ${menuUp ? "bottom-11" : "top-11"}`}>
                     <MenuItem
                       icon={<Upload size={16} />}
                       onClick={() => canAttach ? openFilePicker(false) : setPlusOpen(false)}
