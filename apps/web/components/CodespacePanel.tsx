@@ -2,14 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
-  ArrowLeft, Brain, Check, CheckCircle2, ChevronLeft, Copy, FolderOpen, GitBranch, GitMerge, Globe, HardDrive,
+  ArrowLeft, Brain, Check, CheckCircle2, ChevronLeft, Copy, Download, FolderOpen, GitBranch, GitMerge, Globe, HardDrive,
   KeyRound, Loader2, MessageSquare, MoreVertical, Pencil, Plus, RefreshCw, Search, Sparkles,
-  Terminal, Trash2, Waypoints, X, XCircle,
+  Terminal, Trash2, Upload, Waypoints, X, XCircle,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { CodespaceChatLite, CodespaceEgo, CodespaceEgoEdge, CodespaceProject, CodespaceSymbol, CodespaceTask, MemoryItem, User } from "@/lib/types";
 import { useConfirm, usePrompt } from "@/components/ConfirmDialog";
-import { AnchoredMenu, MenuItem } from "@/components/ui";
+import { AnchoredMenu, MenuItem, Toggle, InfoDot } from "@/components/ui";
 import { copyText } from "@/lib/clipboard";
 import CodespaceFileBrowser, { extLang } from "@/components/CodespaceFileBrowser";
 import CodespaceGraphView from "@/components/CodespaceGraphView";
@@ -978,16 +978,14 @@ function ProjectConfigTab({ project, onUpdated }: { project: CodespaceProject; o
   return (
     <div className="space-y-5">
       <div>
-        <div className="mb-1 flex items-center gap-2 text-sm font-medium text-ink"><Terminal size={15} /> Execução (sandbox)</div>
-        <p className="mb-3 text-xs text-muted">
-          Permite que a IA rode comandos do projeto (testes, build, lint) para verificar as mudanças.
-          Roda num sandbox com o projeto como diretório de trabalho. Desligado, a ferramenta recusa.
-        </p>
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-ink">
-          <input type="checkbox" checked={execOn} onChange={(e) => setExecOn(e.target.checked)}
-            className="h-4 w-4 rounded border-border accent-accent" />
-          Permitir execução neste projeto
-        </label>
+        <div className="mb-3 flex items-center gap-2 text-sm font-medium text-ink"><Terminal size={15} /> Execução (sandbox)</div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="flex items-center gap-1.5 text-sm text-ink">
+            Permitir execução neste projeto
+            <InfoDot text="A IA roda comandos do projeto (testes, build, lint, instalar deps) num sandbox com o projeto como diretório de trabalho, para verificar as mudanças. Desligado, a ferramenta de execução recusa." />
+          </span>
+          <Toggle on={execOn} onChange={setExecOn} />
+        </div>
       </div>
       <div>
         <label className="mb-1 block text-xs font-medium text-muted">Comando de preparo (setup)</label>
@@ -1017,8 +1015,26 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
   const [showNew, setShowNew] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [q, setQ] = useState("");
   const confirm = useConfirm();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function exportProjects() {
+    // exporta só a DEFINIÇÃO dos projetos (sem código nem chaves) — mesma ideia do
+    // "Exportar" de Modelos: um JSON que descreve o que recriar.
+    const data = projects.map((p) => ({
+      name: p.name, source: p.source, repo_url: p.repo_url, branch: p.branch,
+      default_model: p.default_model, setup_command: p.setup_command,
+      test_command: p.test_command, exec_enabled: p.exec_enabled, local_path: p.local_path,
+    }));
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "projetos-codespace.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   const load = () => api.get<CodespaceProject[]>("/codespace/projects").then(setProjects).catch(() => {});
 
@@ -1061,21 +1077,43 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
     );
   }
 
+  const filtered = projects.filter((p) =>
+    `${p.name} ${p.repo_url ?? ""}`.toLowerCase().includes(q.trim().toLowerCase()),
+  );
+
   return (
-    <div>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+    <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
+      {/* mesma moldura de "Modelos": voltar + título/contagem + filtro + ações */}
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-x-3 gap-y-2.5">
         <div className="flex min-w-0 items-center gap-3">
           {onBack && (
             <button onClick={onBack} title="Espaço de Trabalho" aria-label="Voltar ao Espaço de Trabalho" className="flex h-8 w-8 flex-none items-center justify-center rounded-xl border border-transparent bg-surface text-ink-soft transition-colors hover:border-border hover:bg-surface2 hover:text-ink">
               <ChevronLeft size={18} />
             </button>
           )}
-          <h1 className="truncate text-2xl font-bold text-ink">Codespace</h1>
+          <h1 className="truncate text-2xl font-bold text-ink">
+            Codespace<span className="ml-2 font-semibold text-muted">{projects.length}</span>
+          </h1>
         </div>
-        <button onClick={() => setShowNew(true)}
-          className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover">
-          <Plus size={15} /> Novo projeto
-        </button>
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <div className="relative">
+            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filtrar projetos…"
+              className="w-56 rounded-full border border-border bg-surface py-1.5 pl-9 pr-3 text-sm text-ink outline-none transition-[border-color] focus:border-accent/50 placeholder:text-muted" />
+          </div>
+          <button onClick={() => alert("Importar: em breve")}
+            className="whitespace-nowrap rounded-full border border-border bg-surface px-4 py-1.5 text-ink-soft transition-colors hover:bg-surface2">
+            <Upload size={14} className="mr-1.5 inline" />Importar
+          </button>
+          <button onClick={exportProjects} disabled={projects.length === 0}
+            className="whitespace-nowrap rounded-full border border-border bg-surface px-4 py-1.5 text-ink-soft transition-colors hover:bg-surface2 disabled:opacity-50">
+            <Download size={14} className="mr-1.5 inline" />Exportar
+          </button>
+          <button onClick={() => setShowNew(true)}
+            className="flex items-center gap-1.5 whitespace-nowrap rounded-full bg-accent px-4 py-1.5 font-medium text-white transition-colors hover:bg-accent-hover">
+            <Plus size={15} /> Novo projeto
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -1085,9 +1123,11 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
           <Globe size={24} className="mx-auto mb-3 text-muted" />
           <p className="text-sm font-medium text-ink">Nenhum projeto ainda</p>
         </div>
+      ) : filtered.length === 0 ? (
+        <p className="py-10 text-center text-sm text-muted">Nenhum projeto encontrado.</p>
       ) : (
         <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
-          {projects.map((p) => {
+          {filtered.map((p) => {
             const SourceIcon = SOURCE_META[p.source]?.icon ?? Globe;
             return (
               <button key={p.id} onClick={() => setOpenId(p.id)}

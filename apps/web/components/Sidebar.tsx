@@ -161,6 +161,7 @@ export default function Sidebar({
   onOpenAnalytics,
   onLogout,
   activeView = "chat",
+  width,
 }: {
   user: User;
   chats: Chat[];
@@ -188,6 +189,8 @@ export default function Sidebar({
   onLogout: () => void;
   /** tela aberta no momento — destaca o item correspondente na barra */
   activeView?: "chat" | "workspace" | "codespace" | "automations" | "playground" | "analytics";
+  /** largura (px) quando expandida — arrastável pelo divisor no desktop; undefined = w-64 */
+  width?: number;
 }) {
   const [sections, setSections] = useState({ models: true, folders: true, chats: true });
 
@@ -439,7 +442,10 @@ export default function Sidebar({
 
   return (
    <ProjectNamesContext.Provider value={projectNames}>
-    <aside className="pt-safe pb-safe group/side flex w-64 shrink-0 flex-col overflow-hidden border-r border-transparent bg-sidebar transition-[width] duration-300 ease-in-out hover:border-border">
+    <aside
+      style={width ? { width, transition: "none" } : undefined}
+      className="pt-safe pb-safe group/side flex w-64 shrink-0 flex-col overflow-hidden border-r border-transparent bg-sidebar transition-[width] duration-300 ease-in-out hover:border-border"
+    >
       {/* header */}
       <div className="flex items-center justify-between px-3 py-3">
         <span className="flex items-center gap-2.5 font-semibold tracking-tight text-ink">

@@ -13,7 +13,7 @@ from aiworkspace.tools.loader import codespace_allow, codespace_pins
 
 _ALL = {
     "code.graph.query", "code.files.browse", "code.flow.analyze",
-    "code.files.write", "code.exec.run", "code.task.manage",
+    "code.files.write", "code.exec.run", "code.exec.jobs", "code.task.manage",
 }
 
 

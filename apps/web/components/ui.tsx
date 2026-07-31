@@ -247,3 +247,44 @@ export function Toggle({
     </button>
   );
 }
+
+/** Bolinha "i" com dica: hover abre; clicar fixa (fecha ao clicar fora). Mesmo padrão
+ *  usado nas Configurações — para descrições que não devem poluir a UI. */
+export function InfoDot({ text }: { text: string }) {
+  const [hover, setHover] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  const open = hover || pinned;
+  useEffect(() => {
+    if (!pinned) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setPinned(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [pinned]);
+  return (
+    <span ref={ref} className="relative inline-flex">
+      <span
+        role="button"
+        aria-label={text}
+        tabIndex={0}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        onFocus={() => setHover(true)}
+        onBlur={() => setHover(false)}
+        onClick={(e) => { e.stopPropagation(); setPinned((v) => !v); }}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPinned((v) => !v); } }}
+        className="inline-flex h-4 w-4 shrink-0 cursor-help items-center justify-center rounded-full border border-border text-[10px] font-semibold leading-none text-muted transition-colors hover:border-accent hover:text-ink"
+      >
+        i
+      </span>
+      {open && (
+        <span
+          role="tooltip"
+          className="absolute left-0 top-6 z-50 w-60 max-w-[min(80vw,15rem)] rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs font-normal leading-snug text-ink-soft shadow-lg"
+        >
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}

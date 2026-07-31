@@ -817,21 +817,58 @@ export function fmtTime(iso: string): string {
 /** Painel embutido dos usos de ferramenta do segmento (aberto pelo botão de chave).
  *  Ao abrir, rola a si mesmo para a área visível (na última mensagem ele nasceria
  *  escondido atrás do composer flutuante — o scroll-padding do container compensa). */
-export function ToolEventsPanel({ events, live = false }: { events: ToolEvent[]; live?: boolean }) {
+/** Ferramentas usadas na resposta, COLAPSADAS por padrão atrás de um cabeçalho
+ *  ("▸ N ferramentas" / "Usando ferramentas…" ao vivo) — mesmo padrão do
+ *  ReasoningBlock: o usuário só abre o log das tools quando quer, em vez de a
+ *  lista inteira despejar na tela durante a geração. Pode ser controlado de fora
+ *  (open/onOpenChange) para o chip de Guarda expandir o painel. */
+export function ToolEventsPanel({
+  events,
+  live = false,
+  open: openProp,
+  onOpenChange,
+}: {
+  events: ToolEvent[];
+  live?: boolean;
+  open?: boolean;
+  onOpenChange?: (v: boolean) => void;
+}) {
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = (v: boolean) => (onOpenChange ? onOpenChange(v) : setOpenState(v));
   const ref = useRef<HTMLDivElement>(null);
-  // AO VIVO, acompanha os eventos chegando (rola pra baixo a cada novo).
+  // Aberto e AO VIVO: acompanha os eventos chegando (rola pra baixo a cada novo).
   useEffect(() => {
-    ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [events.length]);
+    if (open) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [events.length, open]);
   // Em modo ao vivo, o último evento sendo uma "chamada" (sem resultado ainda) =
   // ferramenta executando AGORA → a linha ganha spinner "executando", pra não
   // parecer travado enquanto a tool (criar arquivo, rodar código…) trabalha.
   const runningIdx = live && events.length > 0 && events[events.length - 1].kind === "call" ? events.length - 1 : -1;
+  const running = runningIdx >= 0;
+  const nCalls = events.filter((e) => e.kind === "call").length;
+  const nGuards = events.filter((e) => e.kind === "guard").length;
+  const parts: string[] = [];
+  if (nCalls > 0) parts.push(`${nCalls} ferramenta${nCalls === 1 ? "" : "s"}`);
+  if (nGuards > 0) parts.push(`${nGuards} guarda${nGuards === 1 ? "" : "s"} de saída`);
+  const label = running ? "Usando ferramentas…" : parts.length ? parts.join(" · ") : "Ferramentas";
   return (
-    <div ref={ref} className="animate-pop mt-1.5 w-full max-w-full space-y-1.5 rounded-xl border border-border bg-surface p-2 shadow-menu">
-      {events.map((e, i) => (
-        <ToolEventRow key={i} event={e} running={i === runningIdx} />
-      ))}
+    <div className="mb-2 mt-1.5">
+      <button
+        onClick={() => setOpen(!open)}
+        className={`flex items-center gap-1.5 text-sm transition-colors hover:text-ink-soft ${running ? "animate-pulse text-muted" : "text-muted"}`}
+      >
+        <Wrench size={13} className="shrink-0" />
+        {label}
+        <ChevronDown size={14} className={`transition-transform duration-150 ${open ? "" : "-rotate-90"}`} />
+      </button>
+      {open && (
+        <div ref={ref} className="animate-pop mt-1.5 w-full max-w-full space-y-1.5 rounded-xl border border-border bg-surface p-2 shadow-menu">
+          {events.map((e, i) => (
+            <ToolEventRow key={i} event={e} running={i === runningIdx} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1405,11 +1442,6 @@ export default function MessageItem({
               <img src={modelAvatar} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
             )}
             {name}
-            {usedTools && toolsEnabled && (
-              <span title="Ferramentas usadas neste segmento" className="text-muted">
-                <Wrench size={15} />
-              </span>
-            )}
             {guardEvents.length > 0 && (
               <button
                 onClick={() => setShowTools(true)}
@@ -1437,6 +1469,9 @@ export default function MessageItem({
         )}
         {editing ? editor : <AssistantBody content={linkifyCitations(message.content, sources)} artifacts={artifacts} chatArtifacts={chatArtifacts} onOpenArtifact={onOpenArtifact} />}
         {!editing && sources.length > 0 && <SourcesBar sources={sources} />}
+        {!editing && usedTools && toolsEnabled && (
+          <ToolEventsPanel events={toolEvents} open={showTools} onOpenChange={setShowTools} />
+        )}
 
         {/* barra de ações — abaixo de toda mensagem da IA */}
         {!editing && (
@@ -1460,16 +1495,6 @@ export default function MessageItem({
               <IconButton title="Tentar novamente" onClick={() => onRegenerate(message.id)} disabled={busy}>
                 <RotateCcw size={15} />
               </IconButton>
-              {usedTools && toolsEnabled && (
-                <IconButton title="Ferramentas usadas" onClick={() => setShowTools((v) => !v)}>
-                  <Wrench size={15} className={showTools ? "text-accent-hover" : ""} />
-                </IconButton>
-              )}
-              {guardEvents.length > 0 && (
-                <IconButton title="Guardas de saída (fluxo)" onClick={() => setShowTools((v) => !v)}>
-                  <ShieldAlert size={15} className={showTools ? "text-amber-400" : "text-amber-400/70"} />
-                </IconButton>
-              )}
               {usedMemories.length > 0 && (
                 <IconButton title="Memórias usadas" onClick={() => setShowMem((v) => !v)}>
                   <Brain size={15} className={showMem ? "text-accent-hover" : ""} />
@@ -1506,8 +1531,6 @@ export default function MessageItem({
                 <Trash2 size={15} className="hover:text-red-300" />
               </IconButton>
             </div>
-
-            {showTools && usedTools && toolsEnabled && <ToolEventsPanel events={toolEvents} />}
 
             {showMem && usedMemories.length > 0 && <MemoriesUsedPanel items={usedMemories} />}
 

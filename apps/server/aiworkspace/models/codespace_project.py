@@ -63,7 +63,10 @@ class CodespaceProject(Base):
     # a tool recusa rodar qualquer comando, mesmo equipada no modelo.
     setup_command: Mapped[str] = mapped_column(Text, default="")
     test_command: Mapped[str] = mapped_column(Text, default="")
-    exec_enabled: Mapped[bool] = mapped_column(default=False)
+    # Ligado por PADRÃO: vincular um chat ao projeto já é o consentimento de trabalhar
+    # nele (como Codex/Claude Code); a segurança fica nas outras camadas (instalar/baixar/
+    # apagar ainda pedem confirmação). Desligue por-projeto p/ um modo só-leitura.
+    exec_enabled: Mapped[bool] = mapped_column(default=True, server_default="true")
     # pending -> cloning -> indexing -> ready | error
     index_status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)

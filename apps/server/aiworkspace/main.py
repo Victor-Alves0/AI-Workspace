@@ -127,12 +127,24 @@ async def lifespan(app: FastAPI):
         _wt_reaper_task = _asyncio.create_task(_worktree_reaper())
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível agendar o reaper de worktrees (%s)", exc)
+    # reaper dos comandos em BACKGROUND do Codespace (dispara o "wake" quando um job
+    # longo — download/instalação/build — termina e ninguém esperou por ele).
+    try:
+        from .codespace import exec_jobs
+        exec_jobs.start_reaper()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Não foi possível iniciar o reaper de exec_jobs (%s)", exc)
     try:
         yield
     finally:
         # PRIMEIRO no encerramento (loop e banco ainda vivos): salva o parcial de
         # qualquer geração em andamento — senão um deploy/restart perde o turno
         # inteiro (texto + logs de tools). Ver chat/generation.shutdown.
+        try:
+            from .codespace import exec_jobs
+            await exec_jobs.shutdown()
+        except Exception:  # noqa: BLE001 - best-effort
+            logger.warning("Falha ao encerrar os jobs de exec no shutdown")
         try:
             from .chat import generation
             await generation.shutdown()

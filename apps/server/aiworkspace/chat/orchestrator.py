@@ -64,19 +64,32 @@ _MARKER_ONLY_RE = re.compile(
 #     `<invoke name="X"><parameter name="p">v</parameter>`.
 #   - Hermes/Qwen: `<tool_call>{"name":"X","arguments":{…}}</tool_call>`.
 #   - Mistral: `[TOOL_CALLS][{"name":"X","arguments":{…}}]`.
+#   - OpenAI Harmony (GPT-5.x em alguns provedores): `… to=functions.NOME <|constrain|>json
+#     {json}`. Os tokens especiais (`<|channel|>`, `<|constrain|>`, `<|call|>`) às vezes vêm
+#     CORROMPIDOS em mojibake (ex.: `代json`, `તર不中返`), então ancoramos no `to=[functions.]NOME`
+#     + o objeto JSON seguinte — não nos tokens (que podem estar ilegíveis).
 # Marcadores de ALTA confiança (praticamente nunca aparecem em prosa legítima) —
 # ainda assim o resgate só liga quando tools foram oferecidas neste turno.
-_LEAK_START_RE = re.compile(r"<｜|｜｜|<\s*invoke\s+name=|<\s*tool_call\s*>|\[TOOL_CALLS\]|<\|tool")
+# Tokens especiais do Harmony (nunca aparecem em prosa legítima → tratados como HARD).
+_HARMONY_TOKEN = r"<\|(?:channel|constrain|call|message|start|end)\|>"
+_LEAK_START_RE = re.compile(
+    r"<｜|｜｜|<\s*invoke\s+name=|<\s*tool_call\s*>|\[TOOL_CALLS\]|<\|tool|"
+    + _HARMONY_TOKEN + r"|to=functions\."
+)
 # subconjunto de ALTÍSSIMA confiança: tokens especiais do DeepSeek (barra U+FF5C). Nunca
 # aparecem em prosa legítima → suprimimos SEMPRE (mesmo na iteração de resposta final,
 # tools=None). Os marcadores "soft" (`<tool_call>`, `[TOOL_CALLS]`, `<invoke name=`) podem
 # surgir num texto legítimo (ex.: relatório de segurança citando tools), então só contam
 # quando tools estão ativas — para não engolir a resposta final por engano.
-_LEAK_HARD_RE = re.compile(r"<｜|｜｜|<\|tool")
+_LEAK_HARD_RE = re.compile(r"<｜|｜｜|<\|tool|" + _HARMONY_TOKEN)
 _INVOKE_RE = re.compile(r"invoke\s+name=\"([^\"]+)\"(.*?)(?=invoke\s+name=\"|</[^>]*tool_calls|\Z)", re.DOTALL)
 _PARAM_RE = re.compile(r"parameter\s+name=\"([^\"]+)\"([^>]*)>(.*?)</[^>]*?parameter", re.DOTALL)
 _TOOLCALL_TAG_RE = re.compile(r"<\s*tool_call\s*>(.*?)</\s*tool_call\s*>", re.DOTALL)
 _MISTRAL_RE = re.compile(r"\[TOOL_CALLS\]\s*(\[.*\]|\{.*\})", re.DOTALL)
+# Harmony: âncora `to=[functions.]NOME` — o objeto JSON dos argumentos vem logo depois
+# (após o marcador de constraint, que pode estar corrompido). `functions.` é opcional
+# porque o modelo às vezes vaza o nome cru (`to=code__exec__run`).
+_HARMONY_RE = re.compile(r"to=(?:functions\.)?([A-Za-z_][\w.]*)")
 
 
 def _mk_call(name: str, arguments: Any) -> dict:
@@ -117,6 +130,60 @@ def _calls_from_json_items(raw: str) -> list[dict]:
     return out
 
 
+def _extract_json_object(text: str, start: int) -> str | None:
+    """Do índice `start`, acha o 1º '{' e devolve o objeto JSON BALANCEADO (respeitando
+    strings e escapes, então `{`/`}` dentro de uma string não desbalanceiam). None se não
+    houver objeto fechável. Usado p/ arrancar os args de um call Harmony vazado, onde entre
+    o `to=…` e o `{` pode haver lixo (marcador de constraint corrompido)."""
+    i = text.find("{", start)
+    if i < 0:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for j in range(i, len(text)):
+        ch = text[j]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[i:j + 1]
+    return None
+
+
+def _harmony_calls(text: str) -> list[dict]:
+    """Formato Harmony (OpenAI): um ou mais `to=[functions.]NOME … {json}` vazados como
+    texto. Para cada marcador, extrai o objeto JSON seguinte (os argumentos) e monta o
+    tool_call. Ignora um marcador que caia DENTRO do JSON já consumido (ex.: uma string de
+    argumento que contenha `to=functions.x`)."""
+    out: list[dict] = []
+    consumed_to = 0
+    for m in _HARMONY_RE.finditer(text):
+        if m.start() < consumed_to:
+            continue
+        obj = _extract_json_object(text, m.end())
+        if obj is None:
+            continue
+        try:
+            args = json.loads(obj)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if isinstance(args, dict):
+            out.append(_mk_call(m.group(1), args))
+            consumed_to = text.find(obj, m.end()) + len(obj)
+    return out
+
+
 def _salvage_leaked_tool_calls(text: str) -> list[dict]:
     """Reconstrói tool_calls (formato OpenAI) de um bloco de texto vazado, tentando os
     formatos conhecidos em ordem. Devolve [] se nada for aproveitável — o chamador então
@@ -138,7 +205,10 @@ def _salvage_leaked_tool_calls(text: str) -> list[dict]:
     m = _MISTRAL_RE.search(text)
     if m:
         out.extend(_calls_from_json_items(m.group(1)))
-    return out
+    if out:
+        return out
+    # 4) OpenAI Harmony: `to=[functions.]NOME … {json}` (um ou mais blocos)
+    return _harmony_calls(text)
 
 
 def _strip_leaked_markup(text: str) -> str:
@@ -284,7 +354,13 @@ CODESPACE_AGENT_DIRECTIVE = (
     "and are looking at its real output. Never write '✅ installed', 'build running', 'tests "
     "passed' from intention, memory, or a plan. If you have not executed it yet, do not report "
     "it as done — call the tool. Long builds are fine: run the command and read the ACTUAL "
-    "output (including a real timeout) instead of guessing the result."
+    "output (including a real timeout) instead of guessing the result.\n"
+    "LONG COMMANDS RUN IN BACKGROUND: dependency downloads, toolchain installs and big builds "
+    "return a job_id immediately instead of blocking (so they never hit the timeout). You then "
+    "have two options: (1) call code.exec.jobs action=wait job_id=… to block until it finishes "
+    "and get the output right now; or (2) end your reply — you'll be WOKEN UP in a fresh turn "
+    "when the job completes, with its output, to continue. Either is fine; never claim the "
+    "command finished until you've seen its real result via wait or the wake-up."
 )
 
 # Modo Código: tools longas promovidas a specs de 1ª classe ao lado do run_code

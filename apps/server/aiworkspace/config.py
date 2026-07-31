@@ -131,6 +131,10 @@ class Settings(BaseSettings):
     code_exec_timeout_seconds: int = 900
     code_exec_cpu_seconds: int = 600
     code_exec_output_bytes: int = 200_000
+    # execução em BACKGROUND (comandos longos: download/instalação/build): teto que o
+    # `code.exec.jobs wait` pode aguardar inline por um job antes de devolver "ainda
+    # rodando" (o job segue vivo; o agente pode soltar o turno e ser acordado no fim).
+    code_exec_bg_wait_ceiling_seconds: int = 1200
     # ciclo de vida dos worktrees: TTL de ociosidade (reaper) e teto por usuário.
     codespace_worktree_ttl_seconds: int = 86_400
     codespace_max_worktrees_per_user: int = 20

@@ -50,8 +50,10 @@ def test_search_knowledge_exposes_limit():
     props = spec["function"]["parameters"]["properties"]
     assert "limit" in props, "a IA precisa poder escolher quantos trechos ver"
     assert props["limit"]["type"] == "integer"
-    assert "query" in spec["function"]["parameters"]["required"]
-    assert "limit" not in spec["function"]["parameters"]["required"]
+    assert "query" in props  # continua sendo o parâmetro de busca
+    # nada é obrigatório: a ação 'list' navega pastas/arquivos SEM query (por isso
+    # `query` deixou de ser required), e `limit` sempre foi escolha da IA.
+    assert spec["function"]["parameters"]["required"] == []
 
 
 # --------------------------------------------------------------------------- #

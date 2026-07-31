@@ -48,7 +48,8 @@ def _res(**kw):
 
 def test_text_results_unchanged():
     blk, src = _knowledge_block_and_sources([_res()])
-    assert blk == "[1] trecho"
+    # cada item nota sua localização "(in: [pasta/]arquivo)" p/ a IA atender pedidos por pasta
+    assert blk == "[1] (in: doc.txt) trecho"
     assert src[0]["title"] == "doc.txt" and "/knowledge/docs/d1/raw?t=" in src[0]["url"]
 
 
@@ -56,7 +57,7 @@ def test_image_result_teaches_the_model_to_show_it():
     blk, src = _knowledge_block_and_sources([
         _res(doc_id="d2", filename="akeno.webp", mime="image/webp", text="Imagem: akeno"),
     ])
-    assert "IMAGE — Imagem: akeno" in blk
+    assert "IMAGE (in: akeno.webp) — Imagem: akeno" in blk
     assert "![akeno.webp](/knowledge/docs/d2/raw?t=" in blk   # markdown pronto p/ colar
     assert src[0]["title"] == "akeno.webp"
 
@@ -68,7 +69,8 @@ def test_mixed_results_number_sources_by_document():
         _res(text="outro trecho do mesmo doc"),                     # [1] de novo
     ])
     assert len(src) == 2
-    assert "[1] trecho" in blk and "[2] IMAGE" in blk and "[1] outro trecho" in blk
+    assert "[1] (in: doc.txt) trecho" in blk and "[2] IMAGE" in blk \
+        and "[1] (in: doc.txt) outro trecho" in blk
 
 
 def test_missing_mime_is_treated_as_text():

@@ -92,6 +92,64 @@ const LEARN_BUILTIN: Prompt = {
   updated_at: "",
 };
 
+/** Redimensionamento horizontal por DIVISOR arrastável, lembrado no localStorage.
+ *  `edge`="left": o painel fica à DIREITA e o divisor na sua borda esquerda (arrastar
+ *  p/ a esquerda AUMENTA — artefatos/Controles). `edge`="right": painel à ESQUERDA,
+ *  divisor na borda direita (barra lateral). O teto respeita 70% do contêiner (verdade
+ *  de layout — viewport/emulação mentem) além do `max` fixo. Só desktop (o divisor é
+ *  `hidden md:flex`); no mobile os painéis são tela cheia/drawer. */
+function useHResize(key: string, def: number, min: number, max: number, edge: "left" | "right", subtle = false) {
+  const [w, setW] = useState<number>(() => {
+    if (typeof window === "undefined") return def;
+    const s = Number(window.localStorage.getItem(key));
+    return Number.isFinite(s) && s >= min ? s : def;
+  });
+  const ref = useRef<HTMLDivElement | null>(null);
+  const start = useCallback((e: React.PointerEvent) => {
+    e.preventDefault();
+    const panel = ref.current;
+    if (!panel) return;
+    const rect = panel.getBoundingClientRect();
+    const anchor = edge === "left" ? rect.right : rect.left;
+    const prevSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+    const parentW = panel.parentElement?.getBoundingClientRect().width ?? window.innerWidth;
+    const cap = Math.min(max, Math.round(parentW * 0.7));
+    const onMove = (ev: PointerEvent) => {
+      const raw = edge === "left" ? anchor - ev.clientX : ev.clientX - anchor;
+      setW(Math.max(min, Math.min(Math.round(raw), cap)));
+    };
+    const onUp = () => {
+      document.body.style.userSelect = prevSelect;
+      document.body.style.cursor = "";
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      setW((cur) => { window.localStorage.setItem(key, String(cur)); return cur; });
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }, [key, min, max, edge]);
+  const divider = (
+    <div
+      onPointerDown={start}
+      title="Arraste para redimensionar"
+      className={`group absolute inset-y-0 z-10 hidden w-2.5 cursor-col-resize items-stretch justify-center md:flex ${
+        edge === "left" ? "-left-1" : "-right-1"
+      }`}
+    >
+      {/* `subtle`: sem alça visível em repouso (não poluir a UI) — o pega ainda
+          responde ao arrasto e a alça aparece (accent) só no hover. */}
+      <span
+        className={`my-auto h-10 w-1 rounded-full transition-all ${
+          subtle ? "bg-accent opacity-0 group-hover:opacity-100" : "bg-border group-hover:bg-accent"
+        }`}
+      />
+    </div>
+  );
+  return { w, ref, divider };
+}
+
 export default function ChatPage() {
   const router = useRouter();
   const confirm = useConfirm();
@@ -212,6 +270,11 @@ export default function ChatPage() {
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   }, []);
+  // painéis redimensionáveis pelo divisor (desktop): artefatos, Controles (à direita) e
+  // a barra lateral esquerda. Cada um lembra a largura no localStorage.
+  const artResize = useHResize("artifact_w", 620, 380, 960, "left");
+  const ctrlResize = useHResize("controls_w", 340, 300, 620, "left");
+  const sbResize = useHResize("sidebar_w", 256, 210, 460, "right", true);
   const [csDropOver, setCsDropOver] = useState(false);
   // projeto do chat ativo (pro botão "Definir como padrão do projeto" saber o
   // padrão atual); null = chat sem projeto
@@ -1637,7 +1700,16 @@ export default function ChatPage() {
     const inCtx = messages.filter((m) => !m.compacted);
     for (let i = inCtx.length - 1; i >= 0; i--) {
       const u = inCtx[i].usage;
-      if (u?.total_tokens) return (u.prompt_tokens || 0) + (u.completion_tokens || 0);
+      if (u?.total_tokens) {
+        // `prompt_tokens` é CUMULATIVO entre as iterações do loop agêntico: os
+        // tool_results são re-enviados a cada passo (e depois podados), então a
+        // soma pode chegar a milhões e NÃO representa o contexto que persiste —
+        // deixava o medidor mostrar coisas como "2.9M / 400k". Desconta essa
+        // parcela transitória p/ refletir a ocupação real da janela.
+        const transient = (u as { input_breakdown?: { tool_results?: number } }).input_breakdown?.tool_results || 0;
+        const total = (u.prompt_tokens || 0) + (u.completion_tokens || 0);
+        return Math.max(0, total - transient);
+      }
     }
     const chars = inCtx.reduce((a, m) => a + (m.content?.length ?? 0), 0);
     return Math.round(chars / 4);
@@ -1772,11 +1844,14 @@ export default function ChatPage() {
       {/* barra lateral: coluna no desktop; drawer deslizante no mobile.
           `flex` faz o <aside> interno esticar até o fim da tela (altura total). */}
       <div
-        className={`fixed inset-y-0 left-0 z-50 flex shrink-0 transition-transform duration-300 md:static md:z-auto md:translate-x-0 md:transition-none ${
+        ref={sbResize.ref}
+        className={`fixed inset-y-0 left-0 z-50 flex shrink-0 transition-transform duration-300 md:relative md:z-auto md:translate-x-0 md:transition-none ${
           mobileNav ? "translate-x-0" : "-translate-x-full"
         }`}
       >
+        {!collapsed && !isMobile && sbResize.divider}
         <Sidebar
+          width={collapsed || isMobile ? undefined : sbResize.w}
           activeView={
             workspaceOpen
               ? (workspaceSection === "Codespace" ? "codespace"
@@ -2181,9 +2256,15 @@ export default function ChatPage() {
               </>
             )}
           </div>
-          {/* Artefatos: coluna ao lado da conversa; no mobile vira tela cheia */}
+          {/* Artefatos: coluna ao lado da conversa; no mobile vira tela cheia.
+              Desktop: largura controlada pelo DIVISOR arrastável (borda esquerda). */}
           {artifactsEnabled && hasConversation && artifactOpen != null && (liveArtifact || chatArtifacts.length > 0) && (
-            <div className="fixed inset-0 z-50 shrink-0 bg-bg md:static md:z-auto md:w-[46%] md:min-w-[380px] md:max-w-[760px] md:bg-transparent">
+            <div
+              ref={artResize.ref}
+              style={{ "--artw": `${artResize.w}px` } as React.CSSProperties}
+              className="fixed inset-0 z-50 shrink-0 bg-bg md:relative md:z-auto md:w-[var(--artw)] md:min-w-[380px] md:max-w-[70vw] md:bg-transparent"
+            >
+              {artResize.divider}
               <ArtifactPanel
                 artifacts={chatArtifacts}
                 openIdentifier={artifactOpen}
@@ -2239,7 +2320,12 @@ export default function ChatPage() {
         <>
           {/* backdrop (mobile): Controles viram slide-over à direita */}
           <div className="fixed inset-0 z-40 bg-black/50 md:hidden" onClick={() => setShowControls(false)} />
-          <div className="fixed inset-y-0 right-0 z-50 flex shrink-0 md:static md:z-auto">
+          <div
+            ref={ctrlResize.ref}
+            style={{ "--ctrlw": `${ctrlResize.w}px` } as React.CSSProperties}
+            className="fixed inset-y-0 right-0 z-50 flex shrink-0 md:relative md:z-auto md:w-[var(--ctrlw)]"
+          >
+            {ctrlResize.divider}
             <Controls
               key={active?.id ?? "draft"}
               systemPrompt={active ? active.system_prompt ?? "" : draftSystemPrompt}
@@ -2450,15 +2536,8 @@ function MessageBubble({
   status?: string | null;
   footer?: React.ReactNode;
 }) {
-  const [showTools, setShowTools] = useState(false);
   const isUser = role === "user";
   const usedTools = !!toolEvents?.length;
-  // Uma tool está executando AGORA quando, ao vivo, o último evento é uma "chamada"
-  // sem resultado ainda. Nesse momento (ou antes de qualquer texto) o painel abre
-  // sozinho — senão o balão fica quase vazio e parece travado. Quando a resposta
-  // volta a fluir em texto, ele recolhe de novo p/ trás do ícone da chave.
-  const toolRunning = toolsLive && usedTools && toolEvents![toolEvents!.length - 1].kind === "call";
-  const toolsOpen = toolRunning || (toolsLive && !content) || showTools;
   if (isUser) {
     return (
       <div className="mx-auto flex max-w-3xl justify-end">
@@ -2486,15 +2565,6 @@ function MessageBubble({
         {name && (
           <p className="mb-1.5 flex items-center gap-1.5 text-lg font-semibold tracking-tight text-ink" style={nameColor ? { color: nameColor } : undefined}>
             {name}
-            {usedTools && (
-              <button
-                onClick={() => setShowTools((v) => !v)}
-                title="Ferramentas usadas neste segmento"
-                className={`transition-colors hover:text-ink ${showTools ? "text-accent-hover" : "text-muted"}`}
-              >
-                <Wrench size={15} />
-              </button>
-            )}
           </p>
         )}
         {status && (
@@ -2509,7 +2579,7 @@ function MessageBubble({
         {(content || !reasoning) && (
           <Markdown content={content} fast={streaming} clamp={streaming} className={streaming ? "stream-caret" : ""} />
         )}
-        {toolsOpen && usedTools && <ToolEventsPanel events={toolEvents!} live={toolsLive} />}
+        {usedTools && <ToolEventsPanel events={toolEvents!} live={toolsLive} />}
         {footer}
         {onSpeak && (
           <button onClick={() => onSpeak()} title="Ler em voz alta" className="mt-1 flex items-center gap-1 text-xs text-muted opacity-0 transition-opacity hover:text-ink group-hover:opacity-100">

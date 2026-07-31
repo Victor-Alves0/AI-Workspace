@@ -87,6 +87,10 @@ export function useGeneration(getDeps: () => GenerationDeps) {
     // markdown inteiro a cada token travava a UI em respostas longas (O(n²)). Sem
     // timer pendente — o tail final chega pelo reloadMessages ao fim do stream.
     let lastFlush = 0;
+    // Auto-abre o painel UMA vez por artefato (identifier). Sem isto, cada flush
+    // reabria o painel — se o usuário fechasse durante a geração, o próximo flush
+    // (~70ms) reabria. Guardamos o id já aberto; só reabrimos p/ um artefato NOVO.
+    let autoOpenedId: string | null = null;
     const flush = () => {
       lastFlush = Date.now();
       if (!paint()) return;
@@ -95,7 +99,10 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         setStreaming(text);
         if (live) {
           setLiveArtifact(live);
-          deps.setArtifactOpen(live.identifier);
+          if (live.identifier !== autoOpenedId) {
+            autoOpenedId = live.identifier;
+            deps.setArtifactOpen(live.identifier);
+          }
         }
       } else {
         setStreaming(state.acc);

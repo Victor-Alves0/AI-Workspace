@@ -924,9 +924,7 @@ export default function WorkspaceView({
         </SectionShell>
       )}
       {section === "Codespace" && (
-        <div className="px-4 py-5 md:px-8 md:py-6">
-          <CodespacePanel onBack={backHome} onOpenChat={(chatId, prefill) => { onOpenChat?.(chatId, prefill); onClose(); }} />
-        </div>
+        <CodespacePanel onBack={backHome} onOpenChat={(chatId, prefill) => { onOpenChat?.(chatId, prefill); onClose(); }} />
       )}
       {section === "Automacoes" && (
         <AutomationsView onBack={backHome} onOpenChat={(cid) => { onOpenChat?.(cid); onClose(); }} />

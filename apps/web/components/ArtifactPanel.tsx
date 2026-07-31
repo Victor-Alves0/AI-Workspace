@@ -5,7 +5,6 @@ import {
   Check,
   Code2,
   Copy,
-  CopyPlus,
   Download,
   Eye,
   FolderOpen,
@@ -289,17 +288,6 @@ export default function ArtifactPanel({
     }
   }
 
-  async function duplicate() {
-    if (!current) return;
-    try {
-      const dup = await api.post<ChatArtifact>(`/artifacts/${current.id}/duplicate`);
-      if (external) setExternal(dup);
-      else { await onChanged(); onSelect(dup.identifier); }
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao duplicar");
-    }
-  }
-
   async function remove() {
     if (!current) return;
     try {
@@ -481,7 +469,6 @@ export default function ArtifactPanel({
             <button onClick={share} title="Compartilhar (copia um link público de 30 dias)" className={btn}>
               {shared ? <Check size={14} className="text-green-400" /> : <Link2 size={14} />}
             </button>
-            <button onClick={duplicate} title="Duplicar" className={btn}><CopyPlus size={14} /></button>
             <div className="relative" ref={versionsRef}>
               <button
                 onClick={() => { setVersionsOpen((v) => !v); if (!versionsOpen) loadVersions(); }}

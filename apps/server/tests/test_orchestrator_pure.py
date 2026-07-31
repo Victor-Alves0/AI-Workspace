@@ -142,3 +142,70 @@ def test_guard_regex():
     g = {"detect": "regex", "pattern": r"\bLGPD\b"}
     assert orch._guard_triggered(g, "viola a LGPD", None)
     assert not orch._guard_triggered(g, "tudo certo", None)
+
+
+# --------------------- _salvage_leaked_tool_calls (vazamentos) ----------------
+
+# Bloco Harmony (OpenAI/GPT-5.x) vazado como texto: `to=[functions.]NOME <constraint> {json}`.
+# Os tokens especiais chegam CORROMPIDOS em mojibake (`代json`, `તર不中返`) — ancoramos no
+# `to=…` + JSON, não neles. Reproduz o vazamento real observado no chat do Metabase (Luna).
+_HARMONY_LEAK = (
+    "Vou concluir as confirmações.\n\n"
+    " to=functions.code__exec__run 代json\n"
+    '{"command":"./bin/test-agent :only \'[metabase.session.api-test]\'","confirm":false}તર不中返\n\n'
+    " to=code__exec__run 代json\n"
+    '{"command":"echo {a: \\"has } brace\\"}","setup":false}\n\n'
+    " to=functions.code__files__browse 代json\n"
+    '{"action":"search","query":":http","depth":7}\n\n'
+    "Concluí a investigação.\n"
+)
+
+
+def test_salvage_harmony_multi_call():
+    """3 blocos Harmony → 3 tool_calls; o `functions.` é retirado do nome e o objeto
+    JSON é extraído por casamento de chaves (um `}` DENTRO de string não corta o args)."""
+    calls = orch._salvage_leaked_tool_calls(_HARMONY_LEAK)
+    assert [c["function"]["name"] for c in calls] == [
+        "code__exec__run", "code__exec__run", "code__files__browse",
+    ]
+    # o call do meio tem `{`/`}` dentro do valor: o args precisa vir íntegro
+    mid = json.loads(calls[1]["function"]["arguments"])
+    assert mid["command"] == 'echo {a: "has } brace"}'
+
+
+def test_salvage_harmony_marker_inside_arg_not_double_counted():
+    """Um `to=functions.x` DENTRO de uma string de argumento não vira um call extra."""
+    leaked = ' to=functions.code__exec__run x\n{"command":"grep \'to=functions.evil\' f"}\n'
+    calls = orch._salvage_leaked_tool_calls(leaked)
+    assert len(calls) == 1 and calls[0]["function"]["name"] == "code__exec__run"
+
+
+def test_salvage_no_false_positive_on_prose():
+    """Relatório de segurança citando nomes de tools/`dangerouslySetInnerHTML` NÃO é
+    confundido com vazamento (nenhum marcador Harmony/DeepSeek/Hermes presente)."""
+    report = (
+        "O executor chama code.exec.run e usa http/request; recomendo escapar antes de "
+        "dangerouslySetInnerHTML. Nenhuma cadeia foi confirmada."
+    )
+    assert orch._salvage_leaked_tool_calls(report) == []
+    assert orch._LEAK_START_RE.search(report) is None
+
+
+def test_salvage_harmony_detected_by_leak_start_re():
+    """O marcador `to=functions.` liga a supressão no stream (tier soft = só com tools)."""
+    m = orch._LEAK_START_RE.search(_HARMONY_LEAK)
+    assert m is not None and m.group(0) == "to=functions."
+
+
+def test_salvage_hermes_still_works():
+    """Regressão: os formatos antigos continuam resgatando."""
+    hermes = '<tool_call>{"name":"search_tools","arguments":{"q":"x"}}</tool_call>'
+    calls = orch._salvage_leaked_tool_calls(hermes)
+    assert [c["function"]["name"] for c in calls] == ["search_tools"]
+
+
+def test_strip_leaked_markup_removes_harmony_from_history():
+    """Sanitização do histórico corta o bloco Harmony vazado (senão o modelo o imita)."""
+    cleaned = orch._strip_leaked_markup(_HARMONY_LEAK)
+    assert "to=functions" not in cleaned
+    assert cleaned.startswith("Vou concluir")

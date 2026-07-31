@@ -343,8 +343,11 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # (tool por-modelo + exec_enabled por-projeto) + confirmação — é a capacidade mais
     # sensível do Codespace (roda código de verdade). É o que fecha o loop "escreve →
     # testa → corrige".
-    {"path": "code.exec.run", "name": "Executar no Projeto", "description": "Roda comandos do projeto vinculado (testes, build, lint, scripts) num sandbox e devolve a saída — para verificar as mudanças. Precisa ser liberado por-projeto em Configurações do projeto.",
-     "model_desc": "Run shell commands in the attached project's sandbox (tests, build, lint, scripts) and get stdout+exit code — use to VERIFY your changes after editing. Prefer the project's test_command. Requires the project to have execution enabled."},
+    {"path": "code.exec.run", "name": "Executar no Projeto", "description": "Roda comandos do projeto vinculado (testes, build, lint, scripts) num sandbox e devolve a saída — para verificar as mudanças. Comandos longos (baixar deps/instalar/buildar) rodam em background. Precisa ser liberado por-projeto em Configurações do projeto.",
+     "model_desc": "Run shell commands in the attached project's sandbox (tests, build, lint, scripts) and get stdout+exit code — use to VERIFY your changes after editing. Long commands (downloads/installs/builds) run in the background and return a job_id. Prefer the project's test_command. Requires the project to have execution enabled."},
+    # Jobs de background: espera/consulta/lista dos comandos longos disparados pelo exec.
+    {"path": "code.exec.jobs", "name": "Comandos em Background", "description": "Espera, consulta o status ou lista os comandos longos (downloads/instalações/builds) que estão rodando em segundo plano no projeto.",
+     "model_desc": "Wait for, check the status of, or list background commands (long downloads/installs/builds) started by code.exec.run. Use action=wait to get a job's result now, or end your reply and get woken up when it finishes."},
     # Tarefas/worktrees: cria uma branch isolada (worktree) por tarefa p/ o agente
     # trabalhar sem colidir com o `src` nem com outros agentes; lista/inspeciona o diff
     # e mescla/descarta. O merge normalmente é aprovado pelo humano na UI.
@@ -392,6 +395,31 @@ _RISKY_EXEC_RE = re.compile(
 def _is_risky_exec(command: str) -> bool:
     """True se o comando instala/baixa/apaga (→ pede confirmação por padrão)."""
     return bool(_RISKY_EXEC_RE.search(command or ""))
+
+
+# Comandos que tendem a DEMORAR (baixam deps / instalam toolchain / buildam) — candidatos
+# a rodar em BACKGROUND p/ não estourar o timeout do exec. Heurística: o agente pode forçar
+# com background=true/false; isto só decide o modo "auto".
+_LONG_RUNNER_RE = re.compile(
+    r"(?:^|[;&|]|\s)(?:"
+    r"mise\s+(?:install|use)|asdf\s+install|sdk\s+install|"
+    r"mvn\b|gradle\b|\./gradlew\b|\./mvnw\b|lein\s+(?:deps|install|uberjar|test)|"
+    r"clojure\s+-[PXMA]|"
+    r"npm\s+(?:i|install|ci)|pnpm\s+(?:i|install)|yarn\s+(?:install|add)|bun\s+(?:i|install)|"
+    r"pip3?\s+install|pipx\s+install|poetry\s+(?:install|add)|uv\s+(?:pip\s+install|sync|add)|"
+    r"cargo\s+(?:build|install|test)|go\s+(?:build|install|test|mod\s+download)|"
+    r"make\b|cmake\b|docker\s+build|"
+    r"apt(?:-get)?\s+install|dpkg\s+-i|yum\s+install|dnf\s+install|apk\s+add|brew\s+install|"
+    r"gem\s+install|"
+    r"git\s+clone|wget\b"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _is_long_runner(command: str) -> bool:
+    """True se o comando tende a demorar (download/instalação/build) → auto-background."""
+    return bool(_LONG_RUNNER_RE.search(command or ""))
 
 
 # Nome da integração por PREFIXO de path — uma regra, não uma flag por entrada.
@@ -1475,22 +1503,29 @@ def _register_builtins(
                 "`mise use -g java@17 maven` then `mvn -q test`, or `mise use -g node@20` then `npm test`. "
                 "Prefer asking the user before installing/downloading (those commands prompt for "
                 "confirmation automatically; tests/build run directly). "
+                "LONG COMMANDS (dependency downloads, installs, big builds) run in the BACKGROUND so "
+                "they never hit the timeout: you get a `job_id` back immediately. Then either wait for it "
+                "with code.exec.jobs (action=wait) if you want the result now, OR just end your reply — "
+                "you'll be woken up in a new turn when it finishes. Long commands go to background "
+                "automatically; force it with background=true or disable with background=false. "
                 "Requires the project owner to have enabled execution; a bad exit code means the command "
                 "failed — read the output and fix."
             ),
             params={
                 "command": "string:o::the shell command to run (empty = the project's test_command)",
                 "setup": "boolean:o::run the project's setup_command (install deps) before the command",
+                "background": "string:o::auto | true | false — run detached (long downloads/builds). auto = decide by the command",
                 "confirm": "boolean:o::set true only after the user confirmed running commands",
             },
             returns=["ok", "exit_code", "output", "seconds", "truncated", "timed_out",
-                     "command", "steps", "error",
+                     "command", "steps", "error", "job_id", "note", "status", "running",
                      "kind", "question", "options", "allow_custom", "custom_label"],
             risk=True,
             examples=["run the tests", "run npm run build and show me errors",
                       "install the dependencies then run the tests", "run pytest -k auth"],
         )
-        def _code_exec_run(command: str = "", setup: Any = None, confirm: Any = None) -> dict[str, Any]:
+        def _code_exec_run(command: str = "", setup: Any = None, background: Any = None,
+                           confirm: Any = None) -> dict[str, Any]:
             proj, confirm_on, err = _cs_project_ctx()
             if err:
                 return err
@@ -1519,6 +1554,25 @@ def _register_builtins(
             def _truthy(v: Any) -> bool:
                 return v is True or (isinstance(v, str) and v.strip().lower() in ("true", "1", "yes", "sim", "on"))
 
+            def _falsy(v: Any) -> bool:
+                return v is False or (isinstance(v, str) and v.strip().lower() in ("false", "0", "no", "nao", "não", "off"))
+
+            # BACKGROUND: comandos longos (download/instala/build) rodam desacoplados p/ não
+            # estourar o timeout — o agente espera (code.exec.jobs wait) ou é acordado no fim.
+            # Nunca em turno autônomo (canal/automação: não há usuário/UI pra acordar).
+            go_bg = (not toolctx.background.get()) and not _falsy(background) and (
+                _truthy(background) or _is_long_runner(cmd)
+            )
+            if go_bg:
+                from ..codespace import exec_jobs
+                full = cmd
+                if _truthy(setup) and (proj.setup_command or "").strip():
+                    full = f"{proj.setup_command.strip()} && {cmd}"
+                return exec_jobs.start_job(
+                    root, full, chat_id=toolctx.current_chat_id.get(),
+                    user_id=uid, project_id=pid, worktree=wt,
+                )
+
             try:
                 steps: list[dict] = []
                 if _truthy(setup) and (proj.setup_command or "").strip():
@@ -1545,6 +1599,48 @@ def _register_builtins(
                 return {"ok": r["ok"], "steps": steps + [r]} if steps else r
             except Exception as exc:  # noqa: BLE001
                 return {"error": str(exc)[:300]}
+
+    if want("code.exec.jobs"):
+        from ..codespace import exec_jobs
+
+        @sift.tool(
+            "code.exec.jobs",
+            description=(
+                "Manage BACKGROUND commands started by code.exec.run (long downloads/installs/builds). "
+                "`action`: 'wait' (block until a job finishes and return its output — pass job_id; use "
+                "this when you need the result right now, it can take minutes), 'status' (current status "
+                "+ output tail of one job_id), 'list' (background jobs in this project). If a job is still "
+                "running you can simply end your reply — you'll be woken up in a new turn when it finishes."
+            ),
+            params={
+                "action": "string:r::wait | status | list",
+                "job_id": "string:o::the job id returned by code.exec.run (required for wait/status)",
+                "timeout": "number:o::wait: max seconds to block (capped by the server)",
+            },
+            returns=["job_id", "command", "status", "exit_code", "seconds", "output",
+                     "truncated", "running", "jobs", "note", "error"],
+            examples=["wait for the dependency install to finish", "check the build job status",
+                      "list the background jobs"],
+        )
+        def _code_exec_jobs(action: str = "", job_id: str = "", timeout: Any = None) -> dict[str, Any]:
+            proj, _confirm_on, err = _cs_project_ctx()
+            if err:
+                return err
+            act = (action or "").strip().lower()
+            if act == "list":
+                return {"jobs": exec_jobs.list_jobs(project_id=str(proj.id))}
+            jid = (job_id or "").strip()
+            if not jid:
+                return {"error": "informe job_id"}
+            if act == "status":
+                return exec_jobs.job_status(jid)
+            if act == "wait":
+                try:
+                    to = float(timeout) if timeout is not None else None
+                except (TypeError, ValueError):
+                    to = None
+                return asyncio.run(exec_jobs.wait_job(jid, to))
+            return {"error": f"ação desconhecida '{action}' (use wait/status/list)"}
 
     if want("code.task.manage"):
         from ..codespace import worktree_service

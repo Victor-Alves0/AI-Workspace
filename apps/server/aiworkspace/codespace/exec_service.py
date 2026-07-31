@@ -82,19 +82,40 @@ def _kill_tree(proc: subprocess.Popen) -> None:
             pass
 
 
-def _run_host(command: str, root: Path, timeout: int, env_extra: dict | None) -> dict[str, Any]:
+def spawn_host(command: str, root: Path, env_extra: dict | None = None) -> subprocess.Popen:
+    """Sobe o subprocesso no host (shell, CWD=root, env higienizado, grupo próprio p/
+    matar a árvore). Compartilhado pelo run SÍNCRONO (`_run_host`) e pelo background
+    (`exec_jobs`). Levanta OSError/ValueError se não conseguir iniciar."""
     s = get_settings()
-    cap = int(s.code_exec_output_bytes)
     creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if _IS_WINDOWS else 0
+    return subprocess.Popen(
+        command, shell=True, cwd=str(root),
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, errors="replace", env=_clean_env(env_extra),
+        preexec_fn=_rlimit_preexec(int(s.code_exec_cpu_seconds)),
+        creationflags=creationflags,
+    )
+
+
+def cap_output(out: str | None) -> tuple[str, bool]:
+    """Corta a saída ao teto de bytes (mantém a CAUDA — o fim do build/log é o que
+    importa). Devolve (texto, truncado?)."""
+    out = out or ""
+    cap = int(get_settings().code_exec_output_bytes)
+    truncated = len(out.encode("utf-8", "ignore")) > cap
+    if truncated:
+        out = out.encode("utf-8", "ignore")[-cap:].decode("utf-8", "ignore")
+    return out, truncated
+
+
+# reexporta o kill da árvore p/ o exec_jobs (mesmo grupo de processos)
+kill_tree = _kill_tree
+
+
+def _run_host(command: str, root: Path, timeout: int, env_extra: dict | None) -> dict[str, Any]:
     started = time.monotonic()
     try:
-        proc = subprocess.Popen(
-            command, shell=True, cwd=str(root),
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, errors="replace", env=_clean_env(env_extra),
-            preexec_fn=_rlimit_preexec(int(s.code_exec_cpu_seconds)),
-            creationflags=creationflags,
-        )
+        proc = spawn_host(command, root, env_extra)
     except (OSError, ValueError) as exc:
         return {"error": f"não consegui iniciar o comando: {exc}"}
 
@@ -108,10 +129,7 @@ def _run_host(command: str, root: Path, timeout: int, env_extra: dict | None) ->
             out, _ = proc.communicate(timeout=10)
         except Exception:  # noqa: BLE001
             out = ""
-    out = out or ""
-    truncated = len(out.encode("utf-8", "ignore")) > cap
-    if truncated:
-        out = out.encode("utf-8", "ignore")[-cap:].decode("utf-8", "ignore")
+    out, truncated = cap_output(out)
     return {
         "exit_code": None if timed_out else proc.returncode,
         "output": out,

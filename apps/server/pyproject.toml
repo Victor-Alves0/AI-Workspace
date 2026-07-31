@@ -73,9 +73,14 @@ dependencies = [
     # commit (alpha v0.1.0, sem tags) p/ build reprodutível; import é `codegraph`.
     # [l1] ativa o resolver via jedi (promove chamadas Python de "inferred"/
     # "possible" a "certain" — mais lento, roda em background/sob demanda).
-    # 45a35c4: extractors dedicados HTML/CSS/SCSS + API de host (index() devolve
-    # `changes`, `exclude=` persistido no índice, doctor() sem path absoluto).
-    "graphcodemap[l1] @ https://github.com/Victor-Alves0/graphcodemap/archive/45a35c42a6310cdaf7d751458d2ede6781146598.tar.gz",
+    # 2234959 (= tag v0.1.0, 1º release público): extractor Terraform/HCL (16ª
+    # linguagem), L1 com transparência por-aresta (resolver·confidence·reason) +
+    # monorepo + multi-def/overloads, visualize investigativo (modos semeados
+    # neighborhood/callers/callees/impact/domains + filtros min_confidence/
+    # language/git — `level=` segue compatível), read-repair descobre arquivos
+    # NOVOS, 10 invariantes de contrato travados (inclui "nunca vaza path
+    # absoluto"). API de host que consumimos é 100% compatível com 45a35c4.
+    "graphcodemap[l1] @ https://github.com/Victor-Alves0/graphcodemap/archive/223495968425d0ae918a21b873981c434a13fed1.tar.gz",
 ]
 
 [project.optional-dependencies]
