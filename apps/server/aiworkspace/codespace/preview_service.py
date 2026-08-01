@@ -124,14 +124,29 @@ def _env_for(pv: Preview) -> dict[str, str]:
     }
 
 
+# porta ESTÁVEL por projeto: um projeto sempre reabre o preview na MESMA porta (link não
+# muda a cada start). Lembrada em memória (previews não sobrevivem a restart do server de
+# qualquer forma). Ver [[codespace-live-preview]].
+_project_port: dict[str, int] = {}
+
+
 def _pick_port(project_id: str, requested: int) -> int | None:
-    """Escolhe a porta do preview DENTRO do range publicado no host (own-origin). Usa a
-    pedida se estiver no range e livre; senão a menor livre do range. None = range lotado.
-    Reiniciar o mesmo projeto na mesma porta é permitido (o start substitui o anterior)."""
+    """Porta do preview no range publicado (own-origin), ESTÁVEL por projeto: se o projeto
+    já tem um preview vivo → a MESMA porta (reiniciar reusa); senão a porta que ele já usou
+    antes (se livre); senão a pedida (se no range e livre); senão a menor livre. Assim o
+    LINK não muda toda vez. None = range lotado."""
     s = get_settings()
     lo, hi = int(s.code_preview_port_min), int(s.code_preview_port_max)
-    taken = {pv.port for pv in _previews.values()
-             if not pv._ended and pv.project_id != project_id}
+    # 1) preview vivo do próprio projeto → estabilidade (o start substitui esse processo)
+    for pv in _previews.values():
+        if pv.project_id == project_id and not pv._ended:
+            return pv.port
+    taken = {pv.port for pv in _previews.values() if not pv._ended}
+    # 2) porta histórica do projeto, se ainda no range e livre
+    prev = _project_port.get(project_id)
+    if prev and lo <= prev <= hi and prev not in taken:
+        return prev
+    # 3) pedida (se no range e livre); 4) senão a menor livre
     if lo <= requested <= hi and requested not in taken:
         return requested
     for cand in range(lo, hi + 1):
@@ -159,13 +174,15 @@ def start_preview(user_id: str, project_id: str, root: Path, command: str,
             return {"error": f"todas as portas de preview ({s.code_preview_port_min}-"
                              f"{s.code_preview_port_max}) estão em uso — pare algum preview antes"}
         port = chosen
+        _project_port[project_id] = port  # fixa a porta do projeto (link estável)
         # sempre 0.0.0.0: a porta é publicada no host, então o app precisa escutar em todas
         # as interfaces do container pra o Docker encaminhar. `expose` fica só informativo.
         host = "0.0.0.0"
         expose = "lan" if str(expose).lower() in ("lan", "0.0.0.0", "network") else "localhost"
-        # substitui um preview anterior do MESMO projeto+porta (reinício)
+        # UM preview por projeto: substitui QUALQUER preview anterior do mesmo projeto
+        # (reinício) — evita acumular preview velho e mantém a mesma porta/link.
         for pv in list(_previews.values()):
-            if pv.project_id == project_id and pv.port == port:
+            if pv.project_id == project_id:
                 _stop(pv)
                 _previews.pop(pv.id, None)
         # teto por usuário
@@ -198,8 +215,9 @@ def start_preview(user_id: str, project_id: str, root: Path, command: str,
         f"nativamente (roda na raiz, sem prefixo). O app precisa escutar em 0.0.0.0:{pv.port} "
         f"— o env já traz HOST/PORT/MB_JETTY_PORT/SERVER_PORT={pv.port}; se o framework "
         f"ignorar o env, passe o flag no comando (ex.: `--host 0.0.0.0 --port {pv.port}`). "
-        f"NÃO use uma porta fora de {s.code_preview_port_min}-{s.code_preview_port_max} (só "
-        f"esse range é publicado no host). HMR funciona nativo — não passe base path."
+        f"A porta é FIXA por projeto ({pv.port}) — reiniciar reusa a MESMA porta e substitui "
+        f"o processo antigo, então o LINK NÃO MUDA; não invente uma porta nova a cada start. "
+        f"HMR funciona nativo — não passe base path."
     )
     return out
 
