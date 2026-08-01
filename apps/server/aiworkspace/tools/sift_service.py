@@ -426,6 +426,33 @@ def _is_long_runner(command: str) -> bool:
     return bool(_LONG_RUNNER_RE.search(command or ""))
 
 
+# Comandos que exigem ROOT/serviço de sistema — NÃO funcionam no sandbox: ele roda sem
+# privilégio (usuário 'app', uid 10001), sem sudo, sem apt em runtime e sem daemon do
+# Docker. Ancorado à POSIÇÃO de comando (início ou após separador de shell) p/ não pegar
+# a palavra dentro de um argumento (ex.: `npm run docker:build`, `python service.py`).
+_ROOT_EXEC_RE = re.compile(
+    r"(?:^|[\n;|]|&&|\|\|)\s*"
+    r"(?:sudo|apt-get|apt|dpkg|yum|dnf|apk|docker-compose|docker|systemctl|service|"
+    r"mount|umount|mkfs)\b",
+    re.IGNORECASE,
+)
+
+
+def _needs_root_exec(command: str) -> str | None:
+    """Devolve um erro ACIONÁVEL se o comando precisa de root/serviço de sistema — em
+    vez de deixar o shell falhar com 'sudo: command not found'. Aponta o caminho certo
+    (mise, sem root) p/ o modelo se auto-corrigir no mesmo turno."""
+    if not _ROOT_EXEC_RE.search(command or ""):
+        return None
+    return ("O sandbox de execução roda SEM privilégio (usuário 'app', sem sudo, sem "
+            "apt em runtime e sem daemon do Docker) — comandos de root ou de pacote/"
+            "serviço de sistema não funcionam aqui. Para toolchains de linguagem use "
+            "`mise` (ex.: `mise use -g java@21`, `node@22`, `python`, `go`, `maven`), "
+            "que instala sem root no volume do projeto; para bibliotecas use o "
+            "gerenciador do próprio ecossistema (pip/npm/cargo/…). Docker e serviços "
+            "de sistema não estão disponíveis no sandbox.")
+
+
 # Nome da integração por PREFIXO de path — uma regra, não uma flag por entrada.
 # Tools de integração dependem de uma conta/conexão externa; as "code.*" só
 # funcionam num chat de projeto (Codespace); o resto é nativo do app.
@@ -1580,10 +1607,18 @@ def _register_builtins(
             cmd = (command or "").strip() or (proj.test_command or "").strip()
             if not cmd:
                 return {"error": "informe 'command' — nenhum test_command configurado no projeto"}
-            # instala/baixa/apaga → confirma por padrão (o "quer que eu instale e execute?");
-            # testes/build rodam direto, a menos que o toggle global de confirmação esteja on.
-            risky = _is_risky_exec(cmd)
-            if risky or confirm_on:
+            # root/serviço de sistema (sudo/apt/docker/…) não roda no sandbox → erro claro
+            # + caminho certo (mise), em vez de deixar o shell morrer com 'sudo: not found'.
+            priv = _needs_root_exec(cmd)
+            if priv:
+                return {"error": priv}
+            # O SANDBOX é o isolamento: roda sem privilégio, com escopo no volume do projeto
+            # e morto no timeout. Por isso NÃO nos intrometemos com um card de texto por
+            # padrão — só confirmamos (qualquer comando, com aviso extra p/ install/baixa/
+            # apaga) quando o toggle global (Configurações → Segurança) está LIGADO. Off =
+            # executa direto ("se a IA faz isso, é porque o usuário pediu e sabe dos riscos").
+            if confirm_on:
+                risky = _is_risky_exec(cmd)
                 summary = (f"Instalar/baixar e rodar no projeto '{proj.name}'?" if risky
                            else f"Rodar no projeto '{proj.name}':") + f"\n`{cmd[:200]}`"
                 block = _cs_confirm_guard(True, summary, confirm)
