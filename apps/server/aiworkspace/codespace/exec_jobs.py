@@ -99,7 +99,8 @@ def _read_thread(job: Job) -> None:
 
 
 def start_job(root: Path, command: str, *, chat_id: str | None, user_id: str,
-              project_id: str, worktree: str | None) -> dict[str, Any]:
+              project_id: str, worktree: str | None,
+              env_extra: dict | None = None) -> dict[str, Any]:
     """Sobe `command` em background. Devolve o cartão `job_started` (ou {error})."""
     command = (command or "").strip()
     if not command:
@@ -107,7 +108,7 @@ def start_job(root: Path, command: str, *, chat_id: str | None, user_id: str,
     job = Job(chat_id=chat_id, user_id=user_id, project_id=project_id,
               worktree=worktree, command=command)
     try:
-        job.proc = exec_service.spawn_host(command, Path(root))
+        job.proc = exec_service.spawn_host(command, Path(root), env_extra)
     except (OSError, ValueError) as exc:
         return {"error": f"não consegui iniciar o comando: {exc}"}
     _jobs[job.id] = job

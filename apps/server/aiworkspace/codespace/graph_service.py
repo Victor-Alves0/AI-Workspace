@@ -106,6 +106,17 @@ def data_root() -> Path:
     return _DATA_ROOT
 
 
+def project_data_dir(user_id: str, project_id: str) -> Path:
+    """Dir de dados PERSISTENTE por projeto (`<proj>/data`), IRMÃO de `src`/`wt` — FORA do
+    working copy git (não polui commits) e no volume codespace_data (sobrevive a restart/
+    rebuild do server). Serviços apontam estado durável aqui (DB embarcado, uploads, caches)
+    via a env WORKSPACE_DATA — é o que dá CONTINUIDADE de ambiente entre turnos. Vale também
+    p/ source='folder' (o `<proj>/` existe no codespace_data mesmo com o `src` externo)."""
+    d = _project_dir(user_id, project_id) / "data"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def wt_dir(user_id: str, project_id: str, task_id: str) -> Path:
     """Diretório do worktree de uma tarefa: `<proj>/wt/<task_id>` (irmão de `src`)."""
     return _project_dir(user_id, project_id) / "wt" / str(task_id)

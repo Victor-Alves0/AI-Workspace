@@ -1668,6 +1668,9 @@ def _register_builtins(
             uid, pid = str(proj.user_id), str(proj.id)
             wt = toolctx.current_codespace_worktree.get()
             root = graph_service.wt_dir(uid, pid, wt) if wt else graph_service.working_copy_path(uid, pid)
+            # dir de dados PERSISTENTE do projeto (sobrevive a restart, fora do git) exposto
+            # como $WORKSPACE_DATA — dá continuidade de ambiente entre turnos (DB/caches).
+            data_env = {"WORKSPACE_DATA": str(graph_service.project_data_dir(uid, pid))}
             cmd = (command or "").strip() or (proj.test_command or "").strip()
             if not cmd:
                 return {"error": "informe 'command' — nenhum test_command configurado no projeto"}
@@ -1708,19 +1711,21 @@ def _register_builtins(
                     full = f"{proj.setup_command.strip()} && {cmd}"
                 return exec_jobs.start_job(
                     root, full, chat_id=toolctx.current_chat_id.get(),
-                    user_id=uid, project_id=pid, worktree=wt,
+                    user_id=uid, project_id=pid, worktree=wt, env_extra=data_env,
                 )
 
             try:
                 steps: list[dict] = []
                 if _truthy(setup) and (proj.setup_command or "").strip():
                     r0 = exec_service.run_command(root, proj.setup_command.strip(),
-                                                  data_root=graph_service.data_root())
+                                                  data_root=graph_service.data_root(),
+                                                  env_extra=data_env)
                     r0["command"] = proj.setup_command.strip()
                     steps.append(r0)
                     if r0.get("error") or r0.get("exit_code") not in (0, None):
                         return {"ok": False, "steps": steps}
-                r = exec_service.run_command(root, cmd, data_root=graph_service.data_root())
+                r = exec_service.run_command(root, cmd, data_root=graph_service.data_root(),
+                                             env_extra=data_env)
                 if r.get("error") and not steps:
                     return r
                 r["command"] = cmd
@@ -1791,7 +1796,9 @@ def _register_builtins(
                 "not just see files. Use this when asked to 'run it', 'serve it', 'put it up so I can test'. "
                 "`action`: 'start' (launch the server — give the `command` that starts it, e.g. 'npm run "
                 "dev' / 'python app.py' / 'gradlew bootRun', and the `port` it listens on), 'status' "
-                "(is it up yet? + recent logs — poll a few seconds after start), 'logs' (recent output, to "
+                "(is it up yet? + recent logs), 'wait' (BLOCK until the server is up or crashes — ONE call "
+                "instead of polling status in a loop; heavy backends take minutes, just call wait again if "
+                "it returns still-starting), 'logs' (recent output, to "
                 "debug a crash), 'request' (send an HTTP request to your OWN running preview and get the "
                 "raw status/headers/body back — use it to TEST/probe the running app end-to-end, e.g. hit "
                 "an API route; it runs from the server so it reaches the app in any environment, and it's "
@@ -1805,7 +1812,7 @@ def _register_builtins(
                 "starting the server."
             ),
             params={
-                "action": "string:r::start | status | logs | request | stop | list",
+                "action": "string:r::start | status | wait | logs | request | stop | list",
                 "command": "string:o::start: the command that starts the server (e.g. 'npm run dev')",
                 "port": "number:o::start: the port the app listens on — MUST be in the published preview range (4001-4010); out-of-range is auto-remapped into it. The app must listen on 0.0.0.0:<port>.",
                 "expose": "string:o:localhost:start: informational only now — the preview always runs on its own published port, reachable on the host",
@@ -1814,6 +1821,7 @@ def _register_builtins(
                 "path": "string:o:/:request: path to hit on the app (e.g. '/api/session/properties')",
                 "headers": "string:o::request: request headers as a JSON object (e.g. {\"X-Forwarded-For\":\"127.0.0.1\"})",
                 "body": "string:o::request: request body (raw string / JSON)",
+                "timeout": "number:o::wait: max seconds to block waiting for the server to come up (capped at 240)",
                 "confirm": "boolean:o::set true only after the user confirmed starting/exposing the server",
             },
             returns=["id", "command", "port", "expose", "status", "preview_url",
@@ -1828,7 +1836,8 @@ def _register_builtins(
         def _code_preview_serve(action: str = "", command: str = "", port: Any = None,
                                 expose: str = "localhost", preview_id: str = "",
                                 method: str = "GET", path: str = "/", headers: str = "",
-                                body: str = "", confirm: Any = None) -> dict[str, Any]:
+                                body: str = "", timeout: Any = None,
+                                confirm: Any = None) -> dict[str, Any]:
             proj, confirm_on, err = _cs_project_ctx()
             if err:
                 return err
@@ -1845,6 +1854,15 @@ def _register_builtins(
                 if not pvid:
                     return {"error": "informe preview_id"}
                 return preview_service.preview_status(uid, pvid, with_logs=True, tail=120)
+            if act == "wait":
+                if not pvid:
+                    return {"error": "informe preview_id (ou a porta) do preview a aguardar"}
+                # bloqueia até ficar 'up'/cair/timeout — UM call em vez de dezenas de status
+                try:
+                    to = float(timeout) if timeout not in (None, "") else 120
+                except (TypeError, ValueError):
+                    to = 120
+                return preview_service.wait_ready(uid, pid, pvid, timeout=to)
             if act == "request":
                 if not pvid:
                     return {"error": "informe preview_id (ou a porta) do preview a testar"}
@@ -1887,7 +1905,7 @@ def _register_builtins(
                 wt = toolctx.current_codespace_worktree.get()
                 root = graph_service.wt_dir(uid, pid, wt) if wt else graph_service.working_copy_path(uid, pid)
                 return preview_service.start_preview(uid, pid, root, cmd, port, expose=exp)
-            return {"error": f"ação desconhecida '{action}' (use start/status/logs/request/stop/list)"}
+            return {"error": f"ação desconhecida '{action}' (use start/status/wait/logs/request/stop/list)"}
 
     if want("code.task.manage"):
         from ..codespace import worktree_service

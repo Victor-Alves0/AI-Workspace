@@ -115,13 +115,21 @@ def _env_for(pv: Preview) -> dict[str, str]:
     # ignorar o env, a IA ainda deve passar o flag no comando (ex.: `vite --host 0.0.0.0
     # --port <porta>`, `next start -p <porta>`).
     p = str(pv.port)
-    return {
+    env = {
         "HOST": pv.host, "HOSTNAME": pv.host, "PORT": p,
         "FLASK_RUN_HOST": pv.host, "FLASK_RUN_PORT": p,
         "MB_JETTY_HOST": pv.host, "MB_JETTY_PORT": p,   # Metabase
         "SERVER_PORT": p, "HTTP_PORT": p,               # Spring Boot / genéricos
         "BROWSER": "none",  # não tenta abrir um navegador no servidor
     }
+    # dir de dados persistente do projeto (sobrevive a restart) — o app aponta estado
+    # durável (DB embarcado, uploads) aqui, e assim o preview mantém estado entre turnos.
+    try:
+        from . import graph_service
+        env["WORKSPACE_DATA"] = str(graph_service.project_data_dir(pv.user_id, pv.project_id))
+    except Exception:  # noqa: BLE001
+        pass
+    return env
 
 
 # porta ESTÁVEL por projeto: um projeto sempre reabre o preview na MESMA porta (link não
@@ -203,13 +211,13 @@ def start_preview(user_id: str, project_id: str, root: Path, command: str,
     time.sleep(0.4)
     out = pv.summary(with_logs=True, tail=20)
     out["note"] = (
-        f"O servidor está subindo. Peça `status`/`logs` (com este preview_id) até ficar "
-        f"'up'. SEJA PACIENTE: apps de backend pesados (JVM/Metabase/Spring, Rails, Django) "
-        f"levam de 1 a 3 MINUTOS no 1º boot p/ baixar deps e RODAR MIGRAÇÕES do banco — "
-        f"'connection refused', 503 'initializing' e status 'starting' são NORMAIS enquanto "
-        f"sobe. NÃO pare o preview por isso; só pare se os logs mostrarem um crash de verdade "
-        f"(exit_code preenchido/status 'crashed'). Continue lendo os `logs` até o servidor "
-        f"anunciar a porta {pv.port}. DÊ AO USUÁRIO UM LINK CLICÁVEL em markdown que abre "
+        f"O servidor está subindo. Use a ação `wait` (com este preview_id) — ela BLOQUEIA "
+        f"até ficar 'up' ou cair, num único call, em vez de você ficar chamando `status` em "
+        f"loop. SEJA PACIENTE: apps de backend pesados (JVM/Metabase/Spring, Rails, Django) "
+        f"levam de 1 a 3 MINUTOS no 1º boot p/ baixar deps e RODAR MIGRAÇÕES — 'starting'/503 "
+        f"'initializing' é NORMAL; só desista se virar 'crashed'. Se quiser que o estado do app "
+        f"(DB embarcado, uploads) SOBREVIVA a reinícios, aponte-o para $WORKSPACE_DATA (dir "
+        f"persistente do projeto, fora do git). DÊ AO USUÁRIO UM LINK CLICÁVEL em markdown que abre "
         f"o app numa nova guia: [abrir o app]({pv.summary()['preview_url']}) — a UI abre o "
         f"app na PRÓPRIA porta ({pv.port}), então login/redirect/SPA/websocket funcionam "
         f"nativamente (roda na raiz, sem prefixo). O app precisa escutar em 0.0.0.0:{pv.port} "
@@ -253,6 +261,30 @@ def list_previews(user_id: str, project_id: str | None = None) -> dict[str, Any]
             if pv.user_id == user_id and (project_id is None or pv.project_id == project_id)
         ]
     return {"previews": items}
+
+
+def wait_ready(user_id: str, project_id: str | None, ident: str,
+               timeout: float = 120) -> dict[str, Any]:
+    """Bloqueia (no threadpool da tool) até o preview ficar 'up', cair, ou o tempo
+    esgotar — em vez de o agente fazer polling em rajada. Um único call resolve o que
+    antes eram dezenas de `status`. Se ainda 'starting' no fim, o agente chama de novo
+    (backends pesados levam minutos). timeout capado em 240s por chamada."""
+    pv = _find_owned(user_id, project_id, ident)
+    if pv is None:
+        return {"error": "preview não encontrado (ou não é seu)"}
+    deadline = time.monotonic() + min(max(float(timeout or 120), 1), 240)
+    while time.monotonic() < deadline:
+        st = pv.status()
+        if st == "up":
+            return {**pv.summary(with_logs=True, tail=8), "note": "no ar (porta respondendo)."}
+        if st in ("crashed", "stopped"):
+            return {**pv.summary(with_logs=True, tail=25),
+                    "note": "o servidor CAIU/parou antes de subir — veja os logs (erro real)."}
+        time.sleep(1.5)
+    return {**pv.summary(with_logs=True, tail=12),
+            "note": "ainda subindo quando o tempo de espera acabou — isso é NORMAL p/ "
+                    "backend pesado (JVM/Metabase levam minutos). Chame `wait` de novo; "
+                    "só desista se o status virar 'crashed'."}
 
 
 def _find_owned(user_id: str, project_id: str | None, ident: str) -> "Preview | None":
