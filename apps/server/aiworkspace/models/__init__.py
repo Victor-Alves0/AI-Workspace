@@ -28,6 +28,7 @@ from .knowledge_enrichment import KnowledgeEnrichment
 from .benchmark import Benchmark, BenchmarkRun
 from .codespace_project import CodespaceProject
 from .codespace_task import CodespaceTask
+from .task_ledger import TaskLedger
 from .api_key import ApiKey, ApiRequest
 from .trace import ObsTrace, ObsSpan
 
@@ -76,6 +77,7 @@ __all__ = [
     "BenchmarkRun",
     "CodespaceProject",
     "CodespaceTask",
+    "TaskLedger",
     "ApiKey",
     "ApiRequest",
     "ObsTrace",

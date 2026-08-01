@@ -115,7 +115,10 @@ _CODESPACE_READ = ("code.graph.query", "code.files.browse", "code.flow.analyze")
 # "Trabalho": escrever arquivos, rodar testes/build e abrir worktrees isolados —
 # o loop "escreve → testa → corrige" dos agentes de código do mercado.
 _CODESPACE_WORK = ("code.files.write", "code.exec.run", "code.exec.jobs", "code.preview.serve", "code.task.manage")
-_CODESPACE_ALL = (*_CODESPACE_READ, *_CODESPACE_WORK)
+# Ledger de tarefa: memória de trabalho do objetivo (dev/refactor/security). É de 1ª
+# classe num chat de projeto — é onde as tarefas longas acontecem e onde convergir
+# importa. Ver [[harness-engineering-north-star]].
+_CODESPACE_ALL = (*_CODESPACE_READ, *_CODESPACE_WORK, "task.tracker")
 
 
 def _allow_match(path: str, allow: list[str]) -> bool:

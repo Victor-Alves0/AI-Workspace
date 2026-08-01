@@ -254,6 +254,11 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
      "model_desc": "The user's skill library: list/read existing skills and propose new ones, including importing from a URL (e.g. a SKILL.md on GitHub). Proposals are approved by the user in a card — nothing is saved automatically."},
     {"path": "prompts.library.manage", "name": "Gerenciar Prompts", "description": "Lista e lê os prompts reutilizáveis (/comandos) do usuário e propõe novos — inclusive a partir de um link. O prompt só é salvo depois que você aprova no card.",
      "model_desc": "The user's reusable prompt library (/commands): list/read existing prompts and propose new ones, including from a URL. Proposals are approved by the user in a card — nothing is saved automatically."},
+    # Ledger de tarefa: memória de trabalho estruturada e persistente do objetivo atual
+    # (um por chat), injetada no contexto a cada turno. Faz o agente CONVERGIR em tarefas
+    # longas (dev/refactor/security) sem re-derivar nem re-reportar achado refutado.
+    {"path": "task.tracker", "name": "Ledger de Tarefa", "description": "Sua memória de trabalho do objetivo atual (plano, achados, notas, próximo passo) — mantém o foco em tarefas de vários passos e persiste entre turnos.",
+     "model_desc": "Your persistent WORKING MEMORY for the current multi-step objective (one ledger per chat, injected into every turn). Record the goal, a plan with step statuses, findings with a lifecycle (open/confirmed/refuted), evidence notes, and the next step — update it AS YOU WORK so you converge instead of re-deriving. A 'refuted' finding must not be reported again as valid. Use on any long task: a refactor, a feature build, an investigation."},
     {"path": "diagram.excalidraw.render", "name": "Excalidraw (Diagrama)", "description": "Desenha um diagrama/fluxograma editável (canvas) a partir de Mermaid.",
      "model_desc": "Draw an editable diagram from a Mermaid flowchart."},
     {"path": "chart.render.plot", "name": "Gráfico", "description": "Desenha um gráfico (linha, barra, área ou pizza) a partir de dados.",
@@ -806,6 +811,52 @@ def _register_builtins(
 
     def want(path: str) -> bool:
         return allowed is None or path in allowed
+
+    if want("task.tracker"):
+        @sift.tool(
+            "task.tracker",
+            description=(
+                "Your persistent WORKING MEMORY for the CURRENT multi-step objective (one "
+                "ledger per chat), shown to you at the top of every turn. Keep it updated AS "
+                "YOU WORK so you converge on long tasks (a refactor, a feature, a security "
+                "review) instead of re-deriving each turn. Record: the objective, a plan whose "
+                "steps you move todo→doing→done, findings you move open→confirmed→refuted, "
+                "evidence notes, and the next step. A finding you set to 'refuted' was "
+                "disproven by evidence — never present it again as a valid conclusion. "
+                "Actions: 'get' (read it); 'set' (objective/next_step/status=active|done|"
+                "paused); 'plan_add' (text→new step); 'plan_status' (id + status=todo|doing|"
+                "done|blocked [+note]); 'note' (text→append an observation/evidence); "
+                "'finding_add' (text [+status]); 'finding_status' (id + status=open|confirmed|"
+                "refuted [+evidence])."
+            ),
+            params={
+                "action": "string:r::get | set | plan_add | plan_status | note | finding_add | finding_status",
+                "objective": "string:o::set: the one-line goal you're working toward",
+                "next_step": "string:o::set: the immediate next concrete action",
+                "status": "string:o::set→active|done|paused; plan_status→todo|doing|done|blocked; finding_*→open|confirmed|refuted",
+                "text": "string:o::plan_add / note / finding_add: the step / observation / finding text",
+                "id": "string:o::plan_status / finding_status: the step or finding id (e.g. s1, f2)",
+                "evidence": "string:o::finding_add / finding_status: the evidence backing this finding",
+                "note": "string:o::plan_status: a short note on the step",
+            },
+            returns=["ok", "ledger", "error"],
+            examples=["track this refactor as a plan", "mark step s2 done",
+                      "record that the SSRF hypothesis was refuted", "what's my current plan?",
+                      "note the test output", "set the objective and next step"],
+        )
+        def _task_tracker(action: str = "", objective: Any = None, next_step: Any = None,
+                          status: Any = None, text: Any = None, id: Any = None,
+                          evidence: Any = None, note: Any = None) -> dict[str, Any]:
+            from ..chat import ledger_service
+            chat_id = toolctx.current_chat_id.get()
+            if not chat_id:
+                return {"error": "sem chat vinculado — o ledger de tarefa é por chat"}
+            project_id = toolctx.current_codespace_project_id.get()
+            kw = {"objective": objective, "next_step": next_step, "status": status,
+                  "text": text, "id": id, "evidence": evidence, "note": note}
+            kw = {k: v for k, v in kw.items() if v is not None}
+            return ledger_service.apply(str(user_id or ""), str(chat_id), project_id,
+                                        (action or "").strip().lower(), **kw)
 
     if want("utils.time.now"):
         @sift.tool(

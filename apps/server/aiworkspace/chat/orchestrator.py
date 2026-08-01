@@ -337,6 +337,12 @@ CODESPACE_AGENT_DIRECTIVE = (
     "run: code.files.browse / code.graph.query / code.flow.analyze (read the project), "
     "code.files.write (edit — prefer action=patch with a unified diff), code.exec.run (run "
     "shell: build, test, lint, install), and code.task.manage.\n"
+    "KEEP A TASK LEDGER: for any objective that spans multiple steps or turns (a refactor, a "
+    "feature, a security review), use task.tracker — set the objective and an up-front plan, "
+    "move steps todo→doing→done and findings open→confirmed→refuted AS YOU WORK, and read the "
+    "ledger to CONTINUE instead of re-deriving. The ledger is shown to you every turn. A finding "
+    "you marked 'refuted' was disproven by evidence — never present it again as a valid "
+    "conclusion, and reconcile every claim against the dynamic evidence you actually observed.\n"
     "ACT, DON'T ASK: when the user tells you to install, build, run, test or fix something, "
     "DO IT NOW by calling code.exec.run. Do NOT reply with a plan followed by 'tell me to "
     "proceed' — you were already told to proceed. Keep calling tools across as many steps as "
@@ -2261,9 +2267,20 @@ async def run_turn(
     if brain_block:
         static_system = (static_system + "\n\n" + brain_block).strip()
     mem_block = _memory_block(memories)
-    # bloco de contexto por-turno (fora do prefixo cacheado): memória + conhecimento
-    # recuperado (modo auto). Ambos variam a cada turno conforme a pergunta.
-    context_block = "\n\n".join(b for b in (mem_block, knowledge_block, ref_block, ref_chat_block) if b)
+    # Ledger de tarefa (memória de trabalho do objetivo atual, injetada A CADA turno) —
+    # faz o agente CONVERGIR em tarefas longas sem re-derivar nem re-reportar achado
+    # refutado. Vem PRIMEIRO no bloco de contexto (é o estado ativo do trabalho).
+    # Ver [[harness-engineering-north-star]].
+    ledger_block = ""
+    if chat_id:
+        try:
+            from . import ledger_service
+            ledger_block = ledger_service.render_block(await ledger_service.load(chat_id))
+        except Exception:  # noqa: BLE001
+            ledger_block = ""
+    # bloco de contexto por-turno (fora do prefixo cacheado): ledger + memória +
+    # conhecimento recuperado (modo auto). Variam a cada turno.
+    context_block = "\n\n".join(b for b in (ledger_block, mem_block, knowledge_block, ref_block, ref_chat_block) if b)
     time_note = _temporal_note(user_tz, user_tz_offset) if realtime_datetime else ""
     # `extra_system` = instruções de ALTA PRIORIDADE: reforço de um Guarda de saída
     # (retry) OU instruções do canal (ex.: WhatsApp). Vão para o FIM do system, DEPOIS
@@ -2307,7 +2324,7 @@ async def run_turn(
         "context": sum(len(str(m.get("content") or "")) for m in history) if use_context else 0,
         "system": len(chat_system_prompt or "") + len(time_note),
         "extra": len(extra_system or ""),
-        "memory": len(mem_block),
+        "memory": len(mem_block) + len(ledger_block),
         "knowledge": len(knowledge_block) + len(ref_block) + len(ref_chat_block),
         "tools": len(sift_prompt) + (len(json.dumps(tools)) if tools else 0) + len(brain_block),
         "skills": len(skills_block),
