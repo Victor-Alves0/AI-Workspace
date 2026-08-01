@@ -734,6 +734,27 @@ _DEFAULT_REINFORCE = (
     "desnecessárias nem preâmbulos."
 )
 
+# Guarda de FUNDAMENTAÇÃO/OBJETIVO (juiz que enxerga o Ledger da tarefa): critério e
+# reforço padrão usados quando o guarda tem include_ledger ligado e não traz texto próprio.
+# Endereça a deriva observada no Metabase (o modelo "validou correções" quando o objetivo
+# era atacar; e re-reportar achado já refutado).
+_GROUNDING_CRITERION = (
+    "Aja (SIM) se a RESPOSTA tiver QUALQUER um destes problemas em relação ao LEDGER DA TAREFA:\n"
+    "1) DESVIO DE OBJETIVO: faz/propõe algo fora do objetivo declarado (ex.: 'corrigir/implementar' "
+    "quando o objetivo é analisar/atacar/investigar; trocar de alvo sem o usuário pedir).\n"
+    "2) CONCLUSÃO SEM FUNDAMENTO: afirma um achado/resultado como fato sem evidência observada "
+    "(execução, resposta HTTP, teste, saída real) — especulação apresentada como comprovada.\n"
+    "3) ACHADO DERRUBADO: reapresenta como válido um achado marcado 'refuted' (✗) no ledger.\n"
+    "Responda NÃO se a resposta está alinhada ao objetivo e toda afirmação forte tem lastro "
+    "(ou é declarada explicitamente como hipótese/pendente)."
+)
+_GROUNDING_REINFORCE = (
+    "Sua resposta anterior desviou do OBJETIVO do ledger da tarefa ou afirmou conclusões sem "
+    "evidência observada. Reancore no objetivo declarado no Ledger; NÃO faça algo fora dele; toda "
+    "afirmação forte deve ter lastro em evidência real (execução/HTTP/teste) — o que for hipótese, "
+    "rotule como hipótese; NÃO reapresente achados marcados refuted (✗). Refaça a resposta assim."
+)
+
 
 async def _resolve_guards(
     db: AsyncSession, user: User, model_config: ModelConfig | None
@@ -762,6 +783,9 @@ async def _resolve_guards(
             "min_len": int(g.get("min_len") or 0),
             "judge_model": str(g.get("judge_model") or "").strip(),
             "criterion": str(g.get("criterion") or ""),
+            # juiz enxerga o Ledger da tarefa (objetivo/plano/achados) → detecta deriva de
+            # objetivo e conclusão sem fundamento. Só faz sentido com detect=judge.
+            "include_ledger": bool(g.get("include_ledger")),
             "action": action,
             "inject_text": str(g.get("inject_text") or ""),
             "fallback_model": str(g.get("fallback_model") or "").strip(),
@@ -769,6 +793,9 @@ async def _resolve_guards(
         }
         # detecção por juiz LLM: resolve o provedor do modelo-juiz aqui
         if detect == "judge":
+            # include_ledger sem critério próprio → usa o rubric de fundamentação/objetivo
+            if guard["include_ledger"] and not guard["criterion"].strip():
+                guard["criterion"] = _GROUNDING_CRITERION
             if not guard["judge_model"] or not guard["criterion"].strip():
                 continue  # juiz sem modelo ou sem critério → inválido, ignora
             try:
@@ -788,8 +815,11 @@ async def _resolve_guards(
             guard["_base_url"] = base
         elif not guard["inject_text"].strip():
             # reinforce sem texto próprio → usa o reforço padrão (senão o retry
-            # repetiria o mesmo prompt e a mesma resposta)
-            guard["inject_text"] = _DEFAULT_REINFORCE
+            # repetiria o mesmo prompt e a mesma resposta). Guarda de fundamentação
+            # ganha um reforço específico (reancorar no objetivo/evidência).
+            guard["inject_text"] = (
+                _GROUNDING_REINFORCE if guard["include_ledger"] else _DEFAULT_REINFORCE
+            )
         out.append(guard)
     return out
 

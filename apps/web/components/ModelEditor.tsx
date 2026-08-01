@@ -51,6 +51,7 @@ type Guard = {
   min_len?: number;
   judge_model?: string;
   criterion?: string;
+  include_ledger?: boolean;
   action: "reinforce" | "fallback_model";
   inject_text?: string;
   fallback_model?: string;
@@ -233,10 +234,16 @@ function OutputGuards({ value, onChange, baseModels }: { value: any; onChange: (
               <textarea
                 value={g.criterion || ""}
                 onChange={(e) => update(g.id, { criterion: e.target.value })}
-                placeholder="Critério: descreva quando o guarda deve agir (ex.: 'se a resposta recusar, fugir do tema, ou vier em outro idioma'). O juiz responde SIM/NÃO."
+                placeholder={g.include_ledger
+                  ? "Critério (opcional): em branco usa o padrão de fundamentação — desvio de objetivo, conclusão sem evidência e achado refutado que volta."
+                  : "Critério: descreva quando o guarda deve agir (ex.: 'se a resposta recusar, fugir do tema, ou vier em outro idioma'). O juiz responde SIM/NÃO."}
                 rows={2}
                 className="w-full resize-y rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
               />
+              <label className="flex items-start gap-2 text-[12px] text-ink">
+                <input type="checkbox" checked={!!g.include_ledger} onChange={(e) => update(g.id, { include_ledger: e.target.checked })} className="mt-0.5" />
+                <span>Fundamentação: o juiz enxerga o <b>Ledger da tarefa</b> (objetivo, plano, achados) e barra deriva de objetivo, conclusão sem evidência ou achado já refutado. Em branco, o critério acima usa o padrão.</span>
+              </label>
               <p className="text-[11px] text-muted">O juiz é um modelo chamado a cada resposta — mais robusto, mas gasta tokens e adiciona latência.</p>
             </div>
           )}

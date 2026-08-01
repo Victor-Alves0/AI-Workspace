@@ -2852,17 +2852,22 @@ _JUDGE_SYSTEM = (
 )
 
 
-async def _judge_triggered(guard: dict, text: str, user_text: str) -> bool:
+async def _judge_triggered(guard: dict, text: str, user_text: str,
+                           ledger_block: str = "") -> bool:
     """Detecção por 'juiz' LLM: um modelo barato avalia a resposta contra um
     critério livre escrito pelo usuário. Totalmente customizável. Falha do juiz
-    NÃO bloqueia o turno (retorna False)."""
+    NÃO bloqueia o turno (retorna False). Se `ledger_block` vier (guarda com
+    include_ledger), o juiz recebe o Ledger da tarefa como contexto — assim julga
+    deriva de objetivo e conclusão sem fundamento contra o objetivo/achados reais."""
     model = (guard.get("judge_model") or "").strip()
     key = guard.get("_judge_api_key")
     criterion = (guard.get("criterion") or "").strip()
     if not model or not key or not criterion:
         return False
+    ctx = f"\nLEDGER DA TAREFA (objetivo, plano, achados):\n{ledger_block}\n" if ledger_block else ""
     user = (
-        f"CRITÉRIO (quando o guarda deve agir):\n{criterion}\n\n"
+        f"CRITÉRIO (quando o guarda deve agir):\n{criterion}\n"
+        f"{ctx}\n"
         f"MENSAGEM DO USUÁRIO:\n{user_text or '(vazia)'}\n\n"
         f"RESPOSTA DO ASSISTENTE:\n{text or '(vazia)'}\n\n"
         "A resposta se enquadra no critério? Responda apenas SIM ou NÃO."
@@ -2966,11 +2971,23 @@ async def run_turn_guarded(
         # escolhe o 1º guarda (com orçamento) que casa com a resposta
         hit = None
         if attempt < _GUARD_HARD_CAP:
+            # carrega o Ledger UMA vez se algum guarda-juiz quer enxergá-lo (fundamentação)
+            ledger_block = ""
+            if any(g.get("detect") == "judge" and g.get("include_ledger") for g in guards):
+                sess = turn_kwargs.get("session")
+                cid = getattr(sess, "chat_id", None)
+                if cid:
+                    try:
+                        from . import ledger_service
+                        ledger_block = ledger_service.render_block(await ledger_service.load(cid))
+                    except Exception:  # noqa: BLE001 - juiz é best-effort
+                        ledger_block = ""
             for g in guards:
                 if remaining.get(g["id"], 0) <= 0:
                     continue
                 if g.get("detect") == "judge":
-                    matched = await _judge_triggered(g, text, turn_kwargs.get("user_text", ""))
+                    lb = ledger_block if g.get("include_ledger") else ""
+                    matched = await _judge_triggered(g, text, turn_kwargs.get("user_text", ""), lb)
                 else:
                     matched = _guard_triggered(g, text, final_done)
                 if matched:
