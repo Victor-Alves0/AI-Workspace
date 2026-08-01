@@ -159,8 +159,13 @@ def start_preview(user_id: str, project_id: str, root: Path, command: str,
     time.sleep(0.4)
     out = pv.summary(with_logs=True, tail=20)
     out["note"] = (
-        f"O servidor está subindo. Peça `status` (com este preview_id) em alguns "
-        f"segundos até ficar 'up'. DÊ AO USUÁRIO UM LINK CLICÁVEL em markdown que abre "
+        f"O servidor está subindo. Peça `status`/`logs` (com este preview_id) até ficar "
+        f"'up'. SEJA PACIENTE: apps de backend pesados (JVM/Metabase/Spring, Rails, Django) "
+        f"levam de 1 a 3 MINUTOS no 1º boot p/ baixar deps e RODAR MIGRAÇÕES do banco — "
+        f"'connection refused', 503 'initializing' e status 'starting' são NORMAIS enquanto "
+        f"sobe. NÃO pare o preview por isso; só pare se os logs mostrarem um crash de verdade "
+        f"(exit_code preenchido/status 'crashed'). Continue lendo os `logs` até o servidor "
+        f"anunciar a porta. DÊ AO USUÁRIO UM LINK CLICÁVEL em markdown que abre "
         f"o app numa nova guia: [abrir o app]({pv.summary()['preview_url']}) — a UI "
         f"resolve o link e passa pelo login. Ele também aparece no painel Preview do "
         f"projeto. Para live-reload (HMR) funcionar dentro do preview embutido, inicie o "
