@@ -1693,7 +1693,11 @@ def _register_builtins(
                 "`action`: 'start' (launch the server — give the `command` that starts it, e.g. 'npm run "
                 "dev' / 'python app.py' / 'gradlew bootRun', and the `port` it listens on), 'status' "
                 "(is it up yet? + recent logs — poll a few seconds after start), 'logs' (recent output, to "
-                "debug a crash), 'stop', 'list'. `expose`: 'localhost' (default, safe — only this machine / "
+                "debug a crash), 'request' (send an HTTP request to your OWN running preview and get the "
+                "raw status/headers/body back — use it to TEST/probe the running app end-to-end, e.g. hit "
+                "an API route; it runs from the server so it reaches the app in any environment, and it's "
+                "ANONYMOUS by default — no auth is added, so it's also how you verify what an unauthenticated "
+                "attacker can reach; it does NOT follow redirects), 'stop', 'list'. `expose`: 'localhost' (default, safe — only this machine / "
                 "the embedded preview panel) or 'lan' (reachable on the local network, e.g. to test on a "
                 "phone) — set 'lan' ONLY when the user asks to expose it on the network, and for frameworks "
                 "that need it also pass the host flag in the command (e.g. `vite --host 0.0.0.0`). The dev "
@@ -1702,15 +1706,20 @@ def _register_builtins(
                 "starting the server."
             ),
             params={
-                "action": "string:r::start | status | logs | stop | list",
+                "action": "string:r::start | status | logs | request | stop | list",
                 "command": "string:o::start: the command that starts the server (e.g. 'npm run dev')",
                 "port": "number:o::start: the port the server listens on (1024-65535)",
                 "expose": "string:o:localhost:start: 'localhost' (default) or 'lan' (reachable on the network)",
-                "preview_id": "string:o::status/logs/stop: the id returned by 'start'/'list'",
+                "preview_id": "string:o::status/logs/request/stop: the id (or port) returned by 'start'/'list'",
+                "method": "string:o:GET:request: HTTP method (GET/POST/PUT/DELETE…)",
+                "path": "string:o:/:request: path to hit on the app (e.g. '/api/session/properties')",
+                "headers": "string:o::request: request headers as a JSON object (e.g. {\"X-Forwarded-For\":\"127.0.0.1\"})",
+                "body": "string:o::request: request body (raw string / JSON)",
                 "confirm": "boolean:o::set true only after the user confirmed starting/exposing the server",
             },
             returns=["id", "command", "port", "expose", "status", "url_hint", "age_seconds",
                      "exit_code", "logs", "previews", "note", "ok", "stopped", "error",
+                     "http_status", "resp_headers", "body", "truncated", "url",
                      "kind", "question", "options", "allow_custom", "custom_label"],
             risk=True,
             examples=["run this app so I can test it", "put the site up on localhost",
@@ -1719,7 +1728,8 @@ def _register_builtins(
         )
         def _code_preview_serve(action: str = "", command: str = "", port: Any = None,
                                 expose: str = "localhost", preview_id: str = "",
-                                confirm: Any = None) -> dict[str, Any]:
+                                method: str = "GET", path: str = "/", headers: str = "",
+                                body: str = "", confirm: Any = None) -> dict[str, Any]:
             proj, confirm_on, err = _cs_project_ctx()
             if err:
                 return err
@@ -1736,6 +1746,21 @@ def _register_builtins(
                 if not pvid:
                     return {"error": "informe preview_id"}
                 return preview_service.preview_status(uid, pvid, with_logs=True, tail=120)
+            if act == "request":
+                if not pvid:
+                    return {"error": "informe preview_id (ou a porta) do preview a testar"}
+                hdrs = None
+                if (headers or "").strip():
+                    try:
+                        hdrs = json.loads(headers)
+                        if not isinstance(hdrs, dict):
+                            return {"error": "`headers` deve ser um objeto JSON"}
+                    except json.JSONDecodeError:
+                        return {"error": "`headers` não é um JSON válido"}
+                return preview_service.request_preview(
+                    uid, pid, pvid, method=method or "GET", path=path or "/",
+                    headers=hdrs, body=body or None,
+                )
             if act == "stop":
                 if not pvid:
                     return {"error": "informe preview_id"}
@@ -1763,7 +1788,7 @@ def _register_builtins(
                 wt = toolctx.current_codespace_worktree.get()
                 root = graph_service.wt_dir(uid, pid, wt) if wt else graph_service.working_copy_path(uid, pid)
                 return preview_service.start_preview(uid, pid, root, cmd, port, expose=exp)
-            return {"error": f"ação desconhecida '{action}' (use start/status/logs/stop/list)"}
+            return {"error": f"ação desconhecida '{action}' (use start/status/logs/request/stop/list)"}
 
     if want("code.task.manage"):
         from ..codespace import worktree_service

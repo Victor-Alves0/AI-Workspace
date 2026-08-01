@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -382,6 +384,66 @@ async def stop_preview(
 ):
     p = await _owned_project(db, user, project_id)
     return await run_in_threadpool(preview_service.stop_preview, str(p.user_id), preview_id)
+
+
+# --------------------------------------------------------------------------- #
+# Reverse-proxy do preview: /codespace/preview/<porta>/<path> → 127.0.0.1:<porta>.
+# Passa pelo LOGIN (require_approved lê o cookie httpOnly) e só serve portas que
+# pertencem a um preview do próprio usuário. Funciona em desktop E Docker (o server
+# alcança 127.0.0.1 no mesmo host/container) sem publicar porta nem expor na LAN.
+# Injeta <base> p/ os caminhos relativos resolverem sob o prefixo. HMR (WebSocket)
+# NÃO é encaminhado no v1 — o app renderiza, só não recarrega sozinho.
+# --------------------------------------------------------------------------- #
+_HOP_BY_HOP = {
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te",
+    "trailers", "transfer-encoding", "upgrade", "content-encoding", "content-length", "host",
+}
+
+
+@router.api_route(
+    "/preview/{port}/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+)
+async def preview_proxy(
+    port: int, path: str, request: Request,
+    user: User = Depends(require_approved),
+):
+    if not await run_in_threadpool(preview_service.port_owned_by, str(user.id), port):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "preview não encontrado (ou não é seu)")
+    prefix = f"/codespace/preview/{port}"
+    target = f"http://127.0.0.1:{port}/{path}"
+    fwd_headers = {k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP}
+    body = await request.body()
+    try:
+        async with httpx.AsyncClient(timeout=30, follow_redirects=False) as client:
+            up = await client.request(
+                request.method, target, params=request.query_params,
+                headers=fwd_headers, content=body,
+            )
+    except httpx.HTTPError:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY,
+                            "o servidor de preview não respondeu (ainda subindo ou caiu?)")
+
+    out_headers = {k: v for k, v in up.headers.items() if k.lower() not in _HOP_BY_HOP}
+    # redirect p/ caminho absoluto: mantém o usuário DENTRO do proxy
+    for k in list(out_headers):
+        if k.lower() == "location" and out_headers[k].startswith("/"):
+            out_headers[k] = prefix + out_headers[k]
+
+    ct = up.headers.get("content-type", "")
+    if "text/html" in ct.lower():
+        html = up.text
+        tag = f'<base href="{prefix}/">'
+        low = html.lower()
+        h = low.find("<head")
+        if h != -1 and (gt := low.find(">", h)) != -1:
+            html = html[: gt + 1] + tag + html[gt + 1:]
+        else:
+            html = tag + html
+        return Response(content=html, status_code=up.status_code,
+                        headers=out_headers, media_type="text/html")
+    return Response(content=up.content, status_code=up.status_code,
+                    headers=out_headers, media_type=ct or None)
 
 
 @router.get("/projects/{project_id}/graph/find")

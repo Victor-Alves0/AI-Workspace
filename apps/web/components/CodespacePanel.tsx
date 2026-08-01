@@ -6,7 +6,7 @@ import {
   KeyRound, Loader2, MessageSquare, MoreVertical, Pencil, Play, Plus, RefreshCw, Search, Sparkles,
   Square, Terminal, Trash2, Upload, Waypoints, X, XCircle,
 } from "lucide-react";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, API_URL } from "@/lib/api";
 import type { CodespaceChatLite, CodespaceEgo, CodespaceEgoEdge, CodespacePreview, CodespaceProject, CodespaceSymbol, CodespaceTask, MemoryItem, User } from "@/lib/types";
 import { useConfirm, usePrompt } from "@/components/ConfirmDialog";
 import { AnchoredMenu, MenuItem, Toggle, InfoDot } from "@/components/ui";
@@ -686,9 +686,9 @@ function ProjectPreviewTab({ project }: { project: CodespaceProject }) {
     return () => { alive = false; clearInterval(iv); };
   }, [logsOpen, selected?.id, project.id]);
 
-  // o navegador alcança localhost só na MESMA máquina (desktop); LAN usa o host atual.
-  const urlOf = (p: CodespacePreview) =>
-    p.expose === "localhost" ? `http://localhost:${p.port}` : `http://${window.location.hostname}:${p.port}`;
+  // passa pelo reverse-proxy autenticado do server → funciona em desktop E Docker
+  // (o server alcança 127.0.0.1:porta no mesmo host), sem depender de porta exposta.
+  const urlOf = (p: CodespacePreview) => `${API_URL}/codespace/preview/${p.port}/`;
 
   async function stop(p: CodespacePreview) {
     if (!(await confirm({ title: `Parar o preview na porta ${p.port}?`, confirmLabel: "Parar", danger: true }))) return;

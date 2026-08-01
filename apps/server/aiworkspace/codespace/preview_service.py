@@ -197,6 +197,68 @@ def list_previews(user_id: str, project_id: str | None = None) -> dict[str, Any]
     return {"previews": items}
 
 
+def _find_owned(user_id: str, project_id: str | None, ident: str) -> "Preview | None":
+    """Acha um preview do usuário (e do projeto, se dado) por id OU por porta."""
+    ident = str(ident).strip()
+    with _reg_lock:
+        for pv in _previews.values():
+            if pv.user_id != user_id:
+                continue
+            if project_id is not None and pv.project_id != project_id:
+                continue
+            if pv.id == ident or str(pv.port) == ident:
+                return pv
+    return None
+
+
+def port_owned_by(user_id: str, port: int) -> bool:
+    """O usuário tem um preview vivo nesta porta? (autoriza o reverse-proxy)."""
+    try:
+        port = int(port)
+    except (TypeError, ValueError):
+        return False
+    with _reg_lock:
+        return any(pv.user_id == user_id and pv.port == port for pv in _previews.values())
+
+
+_PROBE_BODY_CAP = 200_000
+
+
+def request_preview(user_id: str, project_id: str | None, preview_id: str,
+                    method: str = "GET", path: str = "/",
+                    headers: dict | None = None, body: str | None = None) -> dict[str, Any]:
+    """Manda uma requisição HTTP ao PRÓPRIO preview do projeto (roda no server, mesmo
+    host do preview → alcança 127.0.0.1:porta em desktop e Docker). Anônimo por padrão
+    (não injeta credencial) — é o "teste/ataque ao alvo vivo" agêntico. NÃO segue
+    redirect (o 3xx interessa) e devolve status/cabeçalhos/corpo crus."""
+    import httpx
+
+    pv = _find_owned(user_id, project_id, preview_id)
+    if pv is None:
+        return {"error": "preview não encontrado — suba um com 'start' ou veja o id em 'list'"}
+    m = (method or "GET").upper()
+    p = "/" + (path or "/").lstrip("/")
+    url = f"http://127.0.0.1:{pv.port}{p}"
+    content = body.encode("utf-8", "replace") if isinstance(body, str) else body
+    try:
+        with httpx.Client(timeout=15, follow_redirects=False) as c:
+            r = c.request(m, url, headers=headers or None, content=content)
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"falha ao chamar o preview: {exc}"[:300]}
+    text = r.text
+    raw = text.encode("utf-8", "ignore")
+    truncated = len(raw) > _PROBE_BODY_CAP
+    if truncated:
+        text = raw[:_PROBE_BODY_CAP].decode("utf-8", "ignore")
+    return {
+        "http_status": r.status_code,
+        "resp_headers": dict(r.headers),
+        "body": text,
+        "truncated": truncated,
+        "url": url,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # Reaper + shutdown (subidos no lifespan, como o exec_jobs)
 # --------------------------------------------------------------------------- #
