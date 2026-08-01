@@ -417,7 +417,7 @@ def _is_risky_exec(command: str) -> bool:
 _LONG_RUNNER_RE = re.compile(
     r"(?:^|[;&|]|\s)(?:"
     r"mise\s+(?:install|use)|asdf\s+install|sdk\s+install|"
-    r"mvn\b|gradle\b|\./gradlew\b|\./mvnw\b|lein\s+(?:deps|install|uberjar|test)|"
+    r"mvn\b|gradle\b|\./gradlew\b|\./mvnw\b|lein\s+(?:deps|install|uberjar|test|run)|"
     r"clojure\s+-[PXMA]|"
     r"npm\s+(?:i|install|ci)|pnpm\s+(?:i|install)|yarn\s+(?:install|add)|bun\s+(?:i|install)|"
     r"pip3?\s+install|pipx\s+install|poetry\s+(?:install|add)|uv\s+(?:pip\s+install|sync|add)|"
@@ -425,6 +425,10 @@ _LONG_RUNNER_RE = re.compile(
     r"make\b|cmake\b|docker\s+build|"
     r"apt(?:-get)?\s+install|dpkg\s+-i|yum\s+install|dnf\s+install|apk\s+add|brew\s+install|"
     r"gem\s+install|"
+    # suítes de teste/build que estouram o teto de CPU do run síncrono (SIGXCPU/exit 152)
+    r"(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:build|test|e2e|lint)|"
+    r"(?:\S*/)?bin/(?:test|build|test-agent)\S*|"
+    r"(?:\S*/)?(?:pytest|jest|vitest|mocha)\b|playwright\s+test|tox\b|nox\b|"
     r"git\s+clone|wget\b"
     r")\b",
     re.IGNORECASE,

@@ -55,6 +55,7 @@ class Job:
         self._evt = threading.Event()     # setado pela thread leitora ao concluir
         self.waited = False               # algum wait_job já consumiu o resultado?
         self.dispatched = False           # o wake já foi disparado/decidido?
+        self.timed_out = False            # o watchdog matou por exceder o wall-clock?
 
     @property
     def running(self) -> bool:
@@ -75,11 +76,26 @@ class Job:
             "output": out,
             "truncated": self.truncated or (tail and len(self.output) > tail) or False,
             "running": self.running,
+            "timed_out": self.timed_out,
         }
 
 
 _jobs: dict[str, Job] = {}
 _reaper_task: asyncio.Task | None = None
+
+
+def _watchdog(job: Job, max_seconds: float) -> None:
+    """Mata a árvore do job se ele passar do teto de wall-clock. O background não tem o
+    kill de timeout do run síncrono nem (por padrão) RLIMIT_CPU — sem isto, um comando
+    travado rodaria para sempre. `_read_thread` então observa o processo morto e conclui."""
+    if job._evt.wait(max_seconds):
+        return  # terminou sozinho antes do teto
+    if job.running and job.proc is not None:
+        job.timed_out = True
+        try:
+            exec_service.kill_tree(job.proc)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def _read_thread(job: Job) -> None:
@@ -93,7 +109,12 @@ def _read_thread(job: Job) -> None:
     job.truncated = truncated
     rc = job.proc.returncode
     job.exit_code = rc
-    job.status = "done" if rc == 0 else ("killed" if rc is not None and rc < 0 else "failed")
+    if job.timed_out:
+        job.status = "killed"
+        if job.output:
+            job.output += "\n[job encerrado pelo watchdog: excedeu o tempo máximo de background]"
+    else:
+        job.status = "done" if rc == 0 else ("killed" if rc is not None and rc < 0 else "failed")
     job.ended_at = time.monotonic()
     job._evt.set()
 
@@ -107,12 +128,19 @@ def start_job(root: Path, command: str, *, chat_id: str | None, user_id: str,
         return {"error": "comando vazio"}
     job = Job(chat_id=chat_id, user_id=user_id, project_id=project_id,
               worktree=worktree, command=command)
+    s = get_settings()
     try:
-        job.proc = exec_service.spawn_host(command, Path(root), env_extra)
+        # background = trabalho longo por definição → CPU generoso/ilimitado (o síncrono
+        # tem o teto apertado). O runaway é contido pelo watchdog de wall-clock.
+        job.proc = exec_service.spawn_host(
+            command, Path(root), env_extra, cpu_seconds=int(s.code_exec_bg_cpu_seconds))
     except (OSError, ValueError) as exc:
         return {"error": f"não consegui iniciar o comando: {exc}"}
     _jobs[job.id] = job
     threading.Thread(target=_read_thread, args=(job,), daemon=True).start()
+    max_wall = float(s.code_exec_bg_max_seconds)
+    if max_wall > 0:
+        threading.Thread(target=_watchdog, args=(job, max_wall), daemon=True).start()
     return {
         "kind": "job_started",
         "job_id": job.id,

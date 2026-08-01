@@ -82,17 +82,27 @@ def _kill_tree(proc: subprocess.Popen) -> None:
             pass
 
 
-def spawn_host(command: str, root: Path, env_extra: dict | None = None) -> subprocess.Popen:
+def spawn_host(command: str, root: Path, env_extra: dict | None = None,
+               *, cpu_seconds: int | None = None) -> subprocess.Popen:
     """Sobe o subprocesso no host (shell, CWD=root, env higienizado, grupo próprio p/
     matar a árvore). Compartilhado pelo run SÍNCRONO (`_run_host`) e pelo background
-    (`exec_jobs`). Levanta OSError/ValueError se não conseguir iniciar."""
+    (`exec_jobs`). Levanta OSError/ValueError se não conseguir iniciar.
+
+    `cpu_seconds` = teto de CPU (RLIMIT_CPU) do processo. None → usa o default síncrono
+    (`code_exec_cpu_seconds`); <= 0 → SEM limite de CPU (só grupo próprio p/ matar a
+    árvore). O background passa um teto MUITO maior (ou 0): um build/suíte longo é o
+    caso de uso do background — o RLIMIT_CPU apertado do run síncrono o mataria com
+    SIGXCPU (exit 152) mesmo dentro do orçamento de wall-clock."""
     s = get_settings()
+    if cpu_seconds is None:
+        cpu_seconds = int(s.code_exec_cpu_seconds)
+    preexec = _rlimit_preexec(int(cpu_seconds)) if int(cpu_seconds) > 0 else _setsid_preexec()
     creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if _IS_WINDOWS else 0
     return subprocess.Popen(
         command, shell=True, cwd=str(root),
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, errors="replace", env=_clean_env(env_extra),
-        preexec_fn=_rlimit_preexec(int(s.code_exec_cpu_seconds)),
+        preexec_fn=preexec,
         creationflags=creationflags,
     )
 

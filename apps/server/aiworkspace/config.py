@@ -128,13 +128,23 @@ class Settings(BaseSettings):
     code_runner_url: str = ""
     code_runner_token: str = ""
     # caps do exec (host): timeout por comando, CPU (rlimit Linux) e teto de saída.
+    # code_exec_cpu_seconds é BACKSTOP p/ o run SÍNCRONO — o bound primário é o timeout
+    # de wall-clock. Deve ser >= o timeout (senão um build CPU-bound morre com SIGXCPU/
+    # exit 152 dentro do orçamento de tempo; foi o que matou a suíte de testes no sandbox).
     code_exec_timeout_seconds: int = 900
-    code_exec_cpu_seconds: int = 600
+    code_exec_cpu_seconds: int = 1800
     code_exec_output_bytes: int = 200_000
     # execução em BACKGROUND (comandos longos: download/instalação/build): teto que o
     # `code.exec.jobs wait` pode aguardar inline por um job antes de devolver "ainda
     # rodando" (o job segue vivo; o agente pode soltar o turno e ser acordado no fim).
     code_exec_bg_wait_ceiling_seconds: int = 1200
+    # CPU (RLIMIT_CPU) dos jobs de BACKGROUND: 0 = SEM limite de CPU (um build/suíte longo
+    # é o caso de uso — o teto apertado do síncrono o mataria). O runaway é contido pelo
+    # watchdog de wall-clock abaixo.
+    code_exec_bg_cpu_seconds: int = 0
+    # watchdog de wall-clock dos jobs de background: mata a árvore após este tempo (2h),
+    # substituindo o bound de wall-clock que o síncrono tem e o background não teria.
+    code_exec_bg_max_seconds: int = 7200
     # preview vivo (dev server/backend do projeto no ar): idade máxima antes do reaper
     # derrubar (6h) e teto de servidores no ar simultâneos por usuário.
     code_preview_max_age_seconds: int = 21_600
