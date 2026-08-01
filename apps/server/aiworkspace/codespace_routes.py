@@ -5,10 +5,11 @@ cloning→indexing→ready/error). Slice 1: só leitura, origem `git` (clone HTT
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, WebSocket, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -444,6 +445,88 @@ async def preview_proxy(
                         headers=out_headers, media_type="text/html")
     return Response(content=up.content, status_code=up.status_code,
                     headers=out_headers, media_type=ct or None)
+
+
+async def _ws_authed_user(aw_access: str | None, db: AsyncSession) -> User | None:
+    """Autentica um WebSocket pelo mesmo cookie httpOnly do HTTP (require_approved
+    não roda em rota WS) — revoga por token_version/status, como o current_user."""
+    if not aw_access:
+        return None
+    try:
+        from .auth.security import decode_token
+        user_id, token_version = decode_token(aw_access, "access")
+        u = await db.get(User, uuid.UUID(user_id))
+    except Exception:  # noqa: BLE001
+        return None
+    if u is None or not u.is_active or u.status != "active" or token_version != u.token_version:
+        return None
+    return u
+
+
+@router.websocket("/preview/{port}/{path:path}")
+async def preview_ws(
+    websocket: WebSocket, port: int, path: str,
+    aw_access: str | None = Cookie(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Encaminha o WebSocket do preview (HMR/live-reload) pelo mesmo proxy autenticado:
+    /codespace/preview/<porta>/<path> → ws://127.0.0.1:<porta>/<path>. Pra o auto-reload
+    chegar aqui, o dev server precisa usar o base path do preview (senão o cliente HMR
+    tenta a porta crua direto)."""
+    user = await _ws_authed_user(aw_access, db)
+    if user is None or not await run_in_threadpool(preview_service.port_owned_by, str(user.id), port):
+        await websocket.close(code=1008)  # policy violation
+        return
+
+    import websockets as wslib
+
+    qs = websocket.url.query
+    upstream_url = f"ws://127.0.0.1:{port}/{path}" + (f"?{qs}" if qs else "")
+    subs = websocket.headers.get("sec-websocket-protocol")
+    sub_list = [s.strip() for s in subs.split(",")] if subs else None
+    try:
+        upstream = await wslib.connect(upstream_url, subprotocols=sub_list,
+                                       open_timeout=10, max_size=None)
+    except Exception:  # noqa: BLE001 - upstream fora do ar / não fala WS aqui
+        await websocket.close(code=1011)
+        return
+
+    await websocket.accept(subprotocol=getattr(upstream, "subprotocol", None))
+
+    async def client_to_upstream() -> None:
+        try:
+            while True:
+                msg = await websocket.receive()
+                if msg.get("type") == "websocket.disconnect":
+                    break
+                if msg.get("text") is not None:
+                    await upstream.send(msg["text"])
+                elif msg.get("bytes") is not None:
+                    await upstream.send(msg["bytes"])
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def upstream_to_client() -> None:
+        try:
+            async for message in upstream:
+                if isinstance(message, (bytes, bytearray)):
+                    await websocket.send_bytes(bytes(message))
+                else:
+                    await websocket.send_text(message)
+        except Exception:  # noqa: BLE001
+            pass
+
+    tasks = [asyncio.create_task(client_to_upstream()), asyncio.create_task(upstream_to_client())]
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for t in tasks:
+            t.cancel()
+        await upstream.close()
+        try:
+            await websocket.close()
+        except Exception:  # noqa: BLE001
+            pass
 
 
 @router.get("/projects/{project_id}/graph/find")

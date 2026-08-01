@@ -175,11 +175,17 @@ function Markdown({
               <table>{children}</table>
             </div>
           ),
-          a: ({ children, href }) => (
-            <a href={href} target="_blank" rel="noreferrer noopener">
-              {children}
-            </a>
-          ),
+          a: ({ children, href }) => {
+            // links de preview do Codespace são caminhos relativos do reverse-proxy
+            // da API (/codespace/preview/<porta>/) — resolve p/ a URL completa da API
+            // (origem diferente do front) e abre em nova guia.
+            const h = href && href.startsWith("/codespace/preview/") ? `${API_URL}${href}` : href;
+            return (
+              <a href={h} target="_blank" rel="noreferrer noopener">
+                {children}
+              </a>
+            );
+          },
           // imagens inline (ex.: da Base de Conhecimento, URL assinada relativa —
           // "/knowledge/docs/…"): a URL vem do SERVIDOR, então resolve no host da
           // API, não no do front (em dev são portas diferentes)

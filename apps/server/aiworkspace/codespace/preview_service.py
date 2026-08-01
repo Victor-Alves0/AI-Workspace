@@ -70,11 +70,14 @@ class Preview:
         return "up" if self._port_open() else "starting"
 
     def summary(self, *, with_logs: bool = False, tail: int = 60) -> dict[str, Any]:
+        base = f"/codespace/preview/{self.port}/"
         out: dict[str, Any] = {
             "id": self.id, "command": self.command, "port": self.port,
             "expose": self.expose, "status": self.status(),
-            "url_hint": f"http://localhost:{self.port}" if self.expose == "localhost"
-            else f"http://<seu-ip-da-lan>:{self.port}",
+            # caminho do reverse-proxy autenticado — é o link que o usuário abre (a UI
+            # resolve p/ a URL completa da API). Funciona em desktop E Docker.
+            "preview_url": base,
+            "base_path": base,  # p/ HMR/assets: iniciar o dev server com base=este valor
             "age_seconds": round(time.monotonic() - self.started_at, 1),
             "exit_code": self.exit_code,
         }
@@ -156,10 +159,16 @@ def start_preview(user_id: str, project_id: str, root: Path, command: str,
     time.sleep(0.4)
     out = pv.summary(with_logs=True, tail=20)
     out["note"] = (
-        "O servidor está subindo. Peça `status` de novo em alguns segundos até ficar "
-        "'up'. O usuário vê o app rodando no painel Preview do projeto"
-        + (" (embutido; localhost)." if expose == "localhost"
-           else " — exposto na LAN, alcançável por outros dispositivos da rede.")
+        f"O servidor está subindo. Peça `status` (com este preview_id) em alguns "
+        f"segundos até ficar 'up'. DÊ AO USUÁRIO UM LINK CLICÁVEL em markdown que abre "
+        f"o app numa nova guia: [abrir o app]({pv.summary()['preview_url']}) — a UI "
+        f"resolve o link e passa pelo login. Ele também aparece no painel Preview do "
+        f"projeto. Para live-reload (HMR) funcionar dentro do preview embutido, inicie o "
+        f"dev server com o base path = '{pv.summary()['base_path']}' (Vite: "
+        f"`--base={pv.summary()['base_path']}`; Next: basePath) — sem isso o app "
+        f"funciona, só não recarrega sozinho."
+        + ("" if expose == "localhost"
+           else " Exposto também na LAN (alcançável direto por outros dispositivos).")
     )
     return out
 
