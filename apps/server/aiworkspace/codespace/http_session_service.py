@@ -33,6 +33,7 @@ class _Session:
         self.headers: dict[str, str] = {}     # headers persistentes (ex.: Authorization)
         self.history: deque[dict] = deque(maxlen=_HISTORY)
         self.lock = threading.Lock()
+        self.last_used = time.monotonic()     # p/ eviction LRU (não descartar sessão ativa)
 
 
 _sessions: dict[str, _Session] = {}
@@ -42,17 +43,21 @@ _reg = threading.Lock()
 def _get(chat_id: str, create: bool = True) -> _Session | None:
     with _reg:
         s = _sessions.get(chat_id)
-        if s is None and create:
-            if len(_sessions) >= _MAX_SESSIONS:
-                # descarta a mais antiga (FIFO) p/ não vazar clients
-                old_id, old = next(iter(_sessions.items()))
-                try:
-                    old.client.close()
-                except Exception:  # noqa: BLE001
-                    pass
-                _sessions.pop(old_id, None)
-            s = _Session()
-            _sessions[chat_id] = s
+        if s is not None:
+            s.last_used = time.monotonic()   # "toca" p/ o LRU (sessão em uso não é despejada)
+            return s
+        if not create:
+            return None
+        if len(_sessions) >= _MAX_SESSIONS:
+            # despeja a MENOS RECENTEMENTE USADA (LRU) — não a sessão de um chat ativo
+            lru_id = min(_sessions, key=lambda k: _sessions[k].last_used)
+            try:
+                _sessions[lru_id].client.close()
+            except Exception:  # noqa: BLE001
+                pass
+            _sessions.pop(lru_id, None)
+        s = _Session()
+        _sessions[chat_id] = s
         return s
 
 

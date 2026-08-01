@@ -136,6 +136,18 @@ def _env_for(pv: Preview) -> dict[str, str]:
 # muda a cada start). Lembrada em memória (previews não sobrevivem a restart do server de
 # qualquer forma). Ver [[codespace-live-preview]].
 _project_port: dict[str, int] = {}
+_PROJECT_PORT_CAP = 256
+
+
+def _prune_project_ports() -> None:
+    """Evita crescimento ilimitado do mapa de portas lembradas: acima do teto, mantém só
+    os projetos com preview VIVO (a memória de porta de um projeto ocioso é descartável —
+    ele só pode pegar outra porta livre no próximo start)."""
+    if len(_project_port) <= _PROJECT_PORT_CAP:
+        return
+    live = {pv.project_id for pv in _previews.values() if not pv._ended}
+    for pid in [p for p in _project_port if p not in live]:
+        _project_port.pop(pid, None)
 
 
 def _pick_port(project_id: str, requested: int) -> int | None:
@@ -183,6 +195,7 @@ def start_preview(user_id: str, project_id: str, root: Path, command: str,
                              f"{s.code_preview_port_max}) estão em uso — pare algum preview antes"}
         port = chosen
         _project_port[project_id] = port  # fixa a porta do projeto (link estável)
+        _prune_project_ports()
         # sempre 0.0.0.0: a porta é publicada no host, então o app precisa escutar em todas
         # as interfaces do container pra o Docker encaminhar. `expose` fica só informativo.
         host = "0.0.0.0"

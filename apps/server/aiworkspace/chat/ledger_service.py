@@ -12,6 +12,7 @@ volta como conclusão). Agnóstico de domínio (dev/refactor/security).
 from __future__ import annotations
 
 import asyncio
+import threading
 import uuid
 from datetime import datetime, timezone
 
@@ -200,13 +201,31 @@ async def _apply_async(user_id: str, chat_id: str, project_id: str | None,
         await eng.dispose()
 
 
+# lock POR-CHAT: serializa as mutações do mesmo ledger (a tool roda no threadpool, então
+# duas chamadas paralelas p/ o mesmo chat — read-modify-write — poderiam colidir no INSERT
+# do 1º ledger ou perder uma atualização). Um threading.Lock resolve no processo único (mesma
+# premissa dos outros registros em memória: previews/exec_jobs/sessões).
+_locks: dict[str, threading.Lock] = {}
+_locks_guard = threading.Lock()
+
+
+def _chat_lock(chat_id: str) -> threading.Lock:
+    with _locks_guard:
+        lk = _locks.get(chat_id)
+        if lk is None:
+            lk = threading.Lock()
+            _locks[chat_id] = lk
+        return lk
+
+
 def apply(user_id: str, chat_id: str, project_id: str | None, action: str, **kw) -> dict:
-    """Face síncrona p/ a tool SIFT (threadpool → asyncio.run + engine efêmera). Blinda
-    a tool de exceção crua (ex.: corrida rara no INSERT do 1º ledger com chave única) —
-    devolve erro limpo p/ o modelo em vez de estourar."""
+    """Face síncrona p/ a tool SIFT (threadpool → asyncio.run + engine efêmera). Serializa
+    por chat (sem corrida/lost-update) e blinda a tool de exceção crua — devolve erro limpo
+    p/ o modelo em vez de estourar."""
     if not chat_id:
         return {"error": "sem chat vinculado — o ledger é por chat"}
     try:
-        return asyncio.run(_apply_async(user_id, chat_id, project_id, action, kw))
+        with _chat_lock(chat_id):
+            return asyncio.run(_apply_async(user_id, chat_id, project_id, action, kw))
     except Exception as exc:  # noqa: BLE001
         return {"error": f"falha ao atualizar o ledger: {str(exc)[:200]}"}
