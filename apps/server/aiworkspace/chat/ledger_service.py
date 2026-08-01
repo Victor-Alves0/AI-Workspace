@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from ..config import get_settings
+from ..db import SessionLocal
 from ..models import TaskLedger
 
 _NOTES_CAP = 40           # notas de evidência guardadas (append-only, capado)
@@ -46,19 +47,17 @@ def _to_dict(l: TaskLedger | None) -> dict | None:
 
 
 async def load(chat_id: str) -> dict | None:
-    """Carrega o ledger do chat (dict) — usado na montagem do turno."""
-    eng = create_async_engine(get_settings().database_url, poolclass=NullPool)
+    """Carrega o ledger do chat (dict) — usado na montagem do turno. Roda no loop do
+    run_turn, então usa o pool GLOBAL (SessionLocal), sem engine efêmera por turno (isto
+    é hot path: TODO turno de TODO chat passa aqui). `apply()` (tool, threadpool) é que
+    precisa da engine efêmera — não pode tocar o SessionLocal amarrado ao outro loop."""
     try:
-        Session = async_sessionmaker(eng, expire_on_commit=False)
-        async with Session() as db:
-            try:
-                cid = uuid.UUID(str(chat_id))
-            except ValueError:
-                return None
-            l = (await db.scalars(select(TaskLedger).where(TaskLedger.chat_id == cid))).first()
-            return _to_dict(l)
-    finally:
-        await eng.dispose()
+        cid = uuid.UUID(str(chat_id))
+    except ValueError:
+        return None
+    async with SessionLocal() as db:
+        l = (await db.scalars(select(TaskLedger).where(TaskLedger.chat_id == cid))).first()
+        return _to_dict(l)
 
 
 def render_block(led: dict | None) -> str:
@@ -202,7 +201,12 @@ async def _apply_async(user_id: str, chat_id: str, project_id: str | None,
 
 
 def apply(user_id: str, chat_id: str, project_id: str | None, action: str, **kw) -> dict:
-    """Face síncrona p/ a tool SIFT (threadpool → asyncio.run + engine efêmera)."""
+    """Face síncrona p/ a tool SIFT (threadpool → asyncio.run + engine efêmera). Blinda
+    a tool de exceção crua (ex.: corrida rara no INSERT do 1º ledger com chave única) —
+    devolve erro limpo p/ o modelo em vez de estourar."""
     if not chat_id:
         return {"error": "sem chat vinculado — o ledger é por chat"}
-    return asyncio.run(_apply_async(user_id, chat_id, project_id, action, kw))
+    try:
+        return asyncio.run(_apply_async(user_id, chat_id, project_id, action, kw))
+    except Exception as exc:  # noqa: BLE001
+        return {"error": f"falha ao atualizar o ledger: {str(exc)[:200]}"}
