@@ -426,31 +426,44 @@ def _is_long_runner(command: str) -> bool:
     return bool(_LONG_RUNNER_RE.search(command or ""))
 
 
-# Comandos que exigem ROOT/serviço de sistema — NÃO funcionam no sandbox: ele roda sem
-# privilégio (usuário 'app', uid 10001), sem sudo, sem apt em runtime e sem daemon do
-# Docker. Ancorado à POSIÇÃO de comando (início ou após separador de shell) p/ não pegar
-# a palavra dentro de um argumento (ex.: `npm run docker:build`, `python service.py`).
-_ROOT_EXEC_RE = re.compile(
-    r"(?:^|[\n;|]|&&|\|\|)\s*"
-    r"(?:sudo|apt-get|apt|dpkg|yum|dnf|apk|docker-compose|docker|systemctl|service|"
-    r"mount|umount|mkfs)\b",
+# Comandos que NÃO funcionam no sandbox — ele roda sem privilégio (usuário 'app', uid
+# 10001), sem sudo, sem apt em runtime e sem daemon do Docker. Duas famílias, com
+# conselhos DIFERENTES: (1) Docker/serviço de sistema — normalmente é tentativa de
+# RODAR/servir um app → aponte o caminho nativo + code.preview.serve, NÃO "instale um
+# toolchain"; (2) sudo/pacote de sistema → aponte o mise. Ancorado à POSIÇÃO de comando
+# (início ou após separador) p/ não pegar a palavra num argumento (`npm run docker:build`,
+# `python service.py`); um `sudo ` opcional na frente ainda cai na família certa.
+_DOCKER_EXEC_RE = re.compile(
+    r"(?:^|[\n;|]|&&|\|\|)\s*(?:sudo\s+)?(?:docker-compose|docker|systemctl|service)\b",
+    re.IGNORECASE,
+)
+_ROOT_PKG_RE = re.compile(
+    r"(?:^|[\n;|]|&&|\|\|)\s*(?:sudo|apt-get|apt|dpkg|yum|dnf|apk|mount|umount|mkfs)\b",
     re.IGNORECASE,
 )
 
 
 def _needs_root_exec(command: str) -> str | None:
-    """Devolve um erro ACIONÁVEL se o comando precisa de root/serviço de sistema — em
-    vez de deixar o shell falhar com 'sudo: command not found'. Aponta o caminho certo
-    (mise, sem root) p/ o modelo se auto-corrigir no mesmo turno."""
-    if not _ROOT_EXEC_RE.search(command or ""):
-        return None
-    return ("O sandbox de execução roda SEM privilégio (usuário 'app', sem sudo, sem "
-            "apt em runtime e sem daemon do Docker) — comandos de root ou de pacote/"
-            "serviço de sistema não funcionam aqui. Para toolchains de linguagem use "
-            "`mise` (ex.: `mise use -g java@21`, `node@22`, `python`, `go`, `maven`), "
-            "que instala sem root no volume do projeto; para bibliotecas use o "
-            "gerenciador do próprio ecossistema (pip/npm/cargo/…). Docker e serviços "
-            "de sistema não estão disponíveis no sandbox.")
+    """Erro ACIONÁVEL quando o comando não roda no sandbox (root/Docker/serviço) — em vez
+    de deixar o shell morrer com 'sudo: command not found'. A mensagem já traz o caminho
+    certo p/ o modelo se auto-corrigir NO MESMO turno, sem ficar tentando variações."""
+    c = command or ""
+    if _DOCKER_EXEC_RE.search(c):
+        return ("Docker e serviços de sistema (systemctl/service) NÃO estão disponíveis no "
+                "sandbox — ele roda sem privilégio e sem daemon do Docker, e instalar o "
+                "Docker aqui é impossível (não insista com docker/sudo/apt). Para RODAR ou "
+                "SERVIR um app, rode-o NATIVAMENTE: este ambiente tem Java, Node, Python e "
+                "Go via `mise` (ex.: `mise use -g java@21` e depois `java -jar app.jar`, ou "
+                "o dev server do projeto), e exponha a porta com a tool code.preview.serve. "
+                "Se o app precisa de um banco, use um embarcado (ex.: H2/SQLite) ou o "
+                "Postgres já disponível — não o Docker.")
+    if _ROOT_PKG_RE.search(c):
+        return ("O sandbox roda SEM privilégio (usuário 'app', sem sudo e sem apt em "
+                "runtime) — não dá pra instalar pacote de sistema. Toolchains de linguagem "
+                "vêm do `mise` (ex.: `mise use -g java@21`, `node@22`, `python`, `go`, "
+                "`maven`), que instala sem root no volume do projeto; bibliotecas, do "
+                "gerenciador do próprio ecossistema (pip/npm/cargo/…).")
+    return None
 
 
 # Nome da integração por PREFIXO de path — uma regra, não uma flag por entrada.

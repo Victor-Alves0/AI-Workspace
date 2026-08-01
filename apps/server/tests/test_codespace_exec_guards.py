@@ -12,23 +12,37 @@ import pytest
 from aiworkspace.tools.sift_service import _needs_root_exec, _is_risky_exec
 
 
+# Família DOCKER/serviço → normalmente é "rodar/servir um app" → aponta o caminho
+# nativo + code.preview.serve (não "instale um toolchain").
 @pytest.mark.parametrize("cmd", [
-    "sudo apt install docker",
+    "docker build -t app .",
+    "docker compose up -d",
+    "docker-compose up",
+    "sudo docker compose up",
+    "systemctl restart nginx",
+    "service postgres start",
+    "mise use -g docker && docker --version",
+])
+def test_docker_commands_steer_to_native_preview(cmd):
+    err = _needs_root_exec(cmd)
+    assert err is not None
+    assert "code.preview.serve" in err        # caminho de RODAR/servir
+    assert "impossível" in err                # não insista com docker
+
+
+# Família PACOTE DE SISTEMA (sudo/apt/…) → aponta o mise (rootless).
+@pytest.mark.parametrize("cmd", [
+    "sudo apt install nginx",
     "apt-get install -y jq",
     "apt update && apt install curl",
     "dpkg -i pkg.deb",
     "yum install nginx",
     "dnf install git",
     "apk add bash",
-    "docker build -t app .",
-    "docker compose up -d",
-    "docker-compose up",
-    "systemctl restart nginx",
-    "service postgres start",
     "cd /app && sudo make install",
     "mount /dev/sda1 /mnt",
 ])
-def test_root_commands_are_refused(cmd):
+def test_root_package_commands_steer_to_mise(cmd):
     err = _needs_root_exec(cmd)
     assert err is not None
     assert "mise" in err  # aponta o caminho certo (rootless)
