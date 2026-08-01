@@ -259,6 +259,11 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # longas (dev/refactor/security) sem re-derivar nem re-reportar achado refutado.
     {"path": "task.tracker", "name": "Ledger de Tarefa", "description": "Sua memória de trabalho do objetivo atual (plano, achados, notas, próximo passo) — mantém o foco em tarefas de vários passos e persiste entre turnos.",
      "model_desc": "Your persistent WORKING MEMORY for the current multi-step objective (one ledger per chat, injected into every turn). Record the goal, a plan with step statuses, findings with a lifecycle (open/confirmed/refuted), evidence notes, and the next step — update it AS YOU WORK so you converge instead of re-deriving. A 'refuted' finding must not be reported again as valid. Use on any long task: a refactor, a feature build, an investigation."},
+    # Sessão HTTP com estado: cookie jar + headers persistentes + histórico por chat, pra
+    # falar com qualquer serviço rodando (sua app em dev, uma API, um alvo) sem gerenciar
+    # cookie/auth na mão. Roda de dentro do server (alcança 127.0.0.1/preview).
+    {"path": "http.session.use", "name": "Sessão HTTP", "description": "Fala com um serviço rodando (sua app em dev, uma API, um alvo) mantendo cookies/login e histórico entre as chamadas — testar rotas, autenticar uma vez e seguir logado.",
+     "model_desc": "A STATEFUL HTTP session (persistent cookie jar + headers + request history) to talk to any running service — your app in dev, an API, a target. Log in ONCE and stay authenticated across calls (cookies persist automatically); keep an Authorization header via set_headers; inspect history to compare. Runs from the server so it reaches 127.0.0.1 / your preview / the LAN in any environment; does NOT follow redirects by default (pass follow=true). Actions: request (method/url/headers/body/follow), history, set_headers, reset. Requires execution enabled. Prefer this over one-off requests when you'll make several calls that share auth/state."},
     {"path": "diagram.excalidraw.render", "name": "Excalidraw (Diagrama)", "description": "Desenha um diagrama/fluxograma editável (canvas) a partir de Mermaid.",
      "model_desc": "Draw an editable diagram from a Mermaid flowchart."},
     {"path": "chart.render.plot", "name": "Gráfico", "description": "Desenha um gráfico (linha, barra, área ou pizza) a partir de dados.",
@@ -1906,6 +1911,77 @@ def _register_builtins(
                 root = graph_service.wt_dir(uid, pid, wt) if wt else graph_service.working_copy_path(uid, pid)
                 return preview_service.start_preview(uid, pid, root, cmd, port, expose=exp)
             return {"error": f"ação desconhecida '{action}' (use start/status/wait/logs/request/stop/list)"}
+
+    if want("http.session.use"):
+        from ..codespace import http_session_service
+
+        @sift.tool(
+            "http.session.use",
+            description=(
+                "A STATEFUL HTTP session to talk to a running service (your app in dev, an API, a "
+                "target) — a persistent cookie jar + headers + request history PER CHAT, so you log "
+                "in ONCE and stay authenticated across calls instead of pasting cookies by hand. Runs "
+                "from the server, so it reaches your preview / 127.0.0.1 / the LAN in any environment. "
+                "`action`: 'request' (send method+url [+headers JSON, +body, +follow]; cookies from the "
+                "response are kept automatically for the next call), 'history' (recent requests: method/"
+                "url/status/ms), 'set_headers' (persistent headers applied to every request, e.g. an "
+                "Authorization bearer), 'reset' (drop cookies/headers/history — a fresh session). Does "
+                "NOT follow redirects unless follow=true (so you see 302s in auth/security flows). Use "
+                "this over one-off requests whenever several calls share auth or state."
+            ),
+            params={
+                "action": "string:r::request | history | set_headers | reset",
+                "url": "string:o::request: full URL (e.g. http://127.0.0.1:4001/api/session or an external API)",
+                "method": "string:o:GET:request: HTTP method (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS)",
+                "headers": "string:o::request/set_headers: headers as a JSON object (e.g. {\"Content-Type\":\"application/json\"})",
+                "body": "string:o::request: request body (raw string / JSON)",
+                "follow": "boolean:o:false:request: follow redirects (default false — you see 302s)",
+                "limit": "number:o:20:history: how many recent requests to return",
+            },
+            returns=["http_status", "resp_headers", "body", "truncated", "url", "elapsed_ms",
+                     "cookies", "history", "ok", "headers", "reset", "error"],
+            examples=["log in to the running app and then call an authed route",
+                      "POST to my dev API and keep the session cookie", "show the request history",
+                      "set an Authorization bearer for the next calls", "start a fresh session"],
+        )
+        def _http_session(action: str = "", url: str = "", method: str = "GET",
+                          headers: str = "", body: str = "", follow: Any = None,
+                          limit: Any = None) -> dict[str, Any]:
+            proj, _confirm_on, err = _cs_project_ctx()
+            if err:
+                return err
+            if not getattr(proj, "exec_enabled", False):
+                return {"error": "execução desativada neste projeto — a sessão HTTP fala com "
+                                 "serviços rodando; ligue 'Permitir execução' nas Configurações."}
+            chat_id = toolctx.current_chat_id.get()
+            if not chat_id:
+                return {"error": "sem chat vinculado"}
+            act = (action or "").strip().lower()
+            hdrs = None
+            if (headers or "").strip():
+                try:
+                    hdrs = json.loads(headers)
+                    if not isinstance(hdrs, dict):
+                        return {"error": "`headers` deve ser um objeto JSON"}
+                except json.JSONDecodeError:
+                    return {"error": "`headers` não é um JSON válido"}
+            foll = follow is True or (isinstance(follow, str) and follow.strip().lower() in ("true", "1", "yes", "sim", "on"))
+            if act == "request":
+                return http_session_service.request(
+                    str(chat_id), method or "GET", url, headers=hdrs,
+                    body=body or None, follow=foll,
+                )
+            if act == "history":
+                try:
+                    lim = int(limit) if limit not in (None, "") else 20
+                except (TypeError, ValueError):
+                    lim = 20
+                return http_session_service.history(str(chat_id), lim)
+            if act == "set_headers":
+                return http_session_service.set_headers(str(chat_id), hdrs or {})
+            if act == "reset":
+                return http_session_service.reset(str(chat_id))
+            return {"error": f"ação desconhecida '{action}' (use request/history/set_headers/reset)"}
 
     if want("code.task.manage"):
         from ..codespace import worktree_service
