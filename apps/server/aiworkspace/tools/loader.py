@@ -118,7 +118,7 @@ _CODESPACE_WORK = ("code.files.write", "code.exec.run", "code.exec.jobs", "code.
 # Ledger de tarefa: memória de trabalho do objetivo (dev/refactor/security). É de 1ª
 # classe num chat de projeto — é onde as tarefas longas acontecem e onde convergir
 # importa. Ver [[harness-engineering-north-star]].
-_CODESPACE_ALL = (*_CODESPACE_READ, *_CODESPACE_WORK, "task.tracker", "http.session.use")
+_CODESPACE_ALL = (*_CODESPACE_READ, *_CODESPACE_WORK, "task.ledger.track", "http.session.use")
 
 
 def _allow_match(path: str, allow: list[str]) -> bool:

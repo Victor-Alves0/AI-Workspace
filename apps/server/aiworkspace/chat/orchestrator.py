@@ -338,7 +338,7 @@ CODESPACE_AGENT_DIRECTIVE = (
     "code.files.write (edit — prefer action=patch with a unified diff), code.exec.run (run "
     "shell: build, test, lint, install), and code.task.manage.\n"
     "KEEP A TASK LEDGER: for any objective that spans multiple steps or turns (a refactor, a "
-    "feature, a security review), use task.tracker — set the objective and an up-front plan, "
+    "feature, a security review), use task.ledger.track — set the objective and an up-front plan, "
     "move steps todo→doing→done and findings open→confirmed→refuted AS YOU WORK, and read the "
     "ledger to CONTINUE instead of re-deriving. The ledger is shown to you every turn. A finding "
     "you marked 'refuted' was disproven by evidence — never present it again as a valid "

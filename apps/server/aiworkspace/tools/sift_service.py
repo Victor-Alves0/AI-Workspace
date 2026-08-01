@@ -257,7 +257,7 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # Ledger de tarefa: memória de trabalho estruturada e persistente do objetivo atual
     # (um por chat), injetada no contexto a cada turno. Faz o agente CONVERGIR em tarefas
     # longas (dev/refactor/security) sem re-derivar nem re-reportar achado refutado.
-    {"path": "task.tracker", "name": "Ledger de Tarefa", "description": "Sua memória de trabalho do objetivo atual (plano, achados, notas, próximo passo) — mantém o foco em tarefas de vários passos e persiste entre turnos.",
+    {"path": "task.ledger.track", "name": "Ledger de Tarefa", "description": "Sua memória de trabalho do objetivo atual (plano, achados, notas, próximo passo) — mantém o foco em tarefas de vários passos e persiste entre turnos.",
      "model_desc": "Your persistent WORKING MEMORY for the current multi-step objective (one ledger per chat, injected into every turn). Record the goal, a plan with step statuses, findings with a lifecycle (open/confirmed/refuted), evidence notes, and the next step — update it AS YOU WORK so you converge instead of re-deriving. A 'refuted' finding must not be reported again as valid. Use on any long task: a refactor, a feature build, an investigation."},
     # Sessão HTTP com estado: cookie jar + headers persistentes + histórico por chat, pra
     # falar com qualquer serviço rodando (sua app em dev, uma API, um alvo) sem gerenciar
@@ -817,9 +817,9 @@ def _register_builtins(
     def want(path: str) -> bool:
         return allowed is None or path in allowed
 
-    if want("task.tracker"):
+    if want("task.ledger.track"):
         @sift.tool(
-            "task.tracker",
+            "task.ledger.track",
             description=(
                 "Your persistent WORKING MEMORY for the CURRENT multi-step objective (one "
                 "ledger per chat), shown to you at the top of every turn. Keep it updated AS "

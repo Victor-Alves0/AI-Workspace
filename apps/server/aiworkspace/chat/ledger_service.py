@@ -69,12 +69,12 @@ def render_block(led: dict | None) -> str:
         return ""
     lines: list[str] = [
         "## Ledger da tarefa — sua MEMÓRIA DE TRABALHO deste objetivo (persiste entre turnos)",
-        "Mantenha-o ATUALIZADO com a tool `task.tracker` conforme trabalha: marque passos, "
+        "Mantenha-o ATUALIZADO com a tool `task.ledger.track` conforme trabalha: marque passos, "
         "registre evidência, e mova achados para confirmed/refuted. NÃO re-derive o que já "
         "está aqui. Um achado 'refuted' (✗) foi DERRUBADO pela evidência — NÃO o reporte de "
         "novo como risco/conclusão válida.",
     ]
-    obj = led.get("objective") or "(sem objetivo definido — defina com task.tracker action=set)"
+    obj = led.get("objective") or "(sem objetivo definido — defina com task.ledger.track action=set)"
     lines.append(f"\nObjetivo [{led.get('status', 'active')}]: {obj}")
     plan = led.get("plan") or []
     if plan:
