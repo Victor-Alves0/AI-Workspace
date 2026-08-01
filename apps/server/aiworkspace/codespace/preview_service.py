@@ -70,14 +70,14 @@ class Preview:
         return "up" if self._port_open() else "starting"
 
     def summary(self, *, with_logs: bool = False, tail: int = 60) -> dict[str, Any]:
+        # marcador que a UI reescreve p/ a origem PRÓPRIA do preview (http://<host>:porta/).
+        # A porta está no próprio caminho → o front constrói o link direto; o app roda na
+        # RAIZ dessa origem, então login/redirect/SPA/websocket funcionam sem reescrita.
         base = f"/codespace/preview/{self.port}/"
         out: dict[str, Any] = {
             "id": self.id, "command": self.command, "port": self.port,
             "expose": self.expose, "status": self.status(),
-            # caminho do reverse-proxy autenticado — é o link que o usuário abre (a UI
-            # resolve p/ a URL completa da API). Funciona em desktop E Docker.
             "preview_url": base,
-            "base_path": base,  # p/ HMR/assets: iniciar o dev server com base=este valor
             "age_seconds": round(time.monotonic() - self.started_at, 1),
             "exit_code": self.exit_code,
         }
@@ -110,14 +110,34 @@ def _reader(pv: Preview) -> None:
 
 
 def _env_for(pv: Preview) -> dict[str, str]:
-    # dicas de bind/porta que a maioria dos frameworks respeita (Next/CRA via HOST/PORT,
-    # Flask via FLASK_RUN_*, Vite lê env também). Pra LAN, a IA ainda deve passar o flag
-    # do framework quando ele não respeitar HOST (ex.: `vite --host 0.0.0.0`).
+    # dicas de bind/porta que os frameworks comuns respeitam, pra o app escutar em
+    # 0.0.0.0:<porta publicada> sem a IA ter que lembrar o flag de cada um. Se o framework
+    # ignorar o env, a IA ainda deve passar o flag no comando (ex.: `vite --host 0.0.0.0
+    # --port <porta>`, `next start -p <porta>`).
+    p = str(pv.port)
     return {
-        "HOST": pv.host, "HOSTNAME": pv.host, "PORT": str(pv.port),
-        "FLASK_RUN_HOST": pv.host, "FLASK_RUN_PORT": str(pv.port),
+        "HOST": pv.host, "HOSTNAME": pv.host, "PORT": p,
+        "FLASK_RUN_HOST": pv.host, "FLASK_RUN_PORT": p,
+        "MB_JETTY_HOST": pv.host, "MB_JETTY_PORT": p,   # Metabase
+        "SERVER_PORT": p, "HTTP_PORT": p,               # Spring Boot / genéricos
         "BROWSER": "none",  # não tenta abrir um navegador no servidor
     }
+
+
+def _pick_port(project_id: str, requested: int) -> int | None:
+    """Escolhe a porta do preview DENTRO do range publicado no host (own-origin). Usa a
+    pedida se estiver no range e livre; senão a menor livre do range. None = range lotado.
+    Reiniciar o mesmo projeto na mesma porta é permitido (o start substitui o anterior)."""
+    s = get_settings()
+    lo, hi = int(s.code_preview_port_min), int(s.code_preview_port_max)
+    taken = {pv.port for pv in _previews.values()
+             if not pv._ended and pv.project_id != project_id}
+    if lo <= requested <= hi and requested not in taken:
+        return requested
+    for cand in range(lo, hi + 1):
+        if cand not in taken:
+            return cand
+    return None
 
 
 def start_preview(user_id: str, project_id: str, root: Path, command: str,
@@ -130,12 +150,19 @@ def start_preview(user_id: str, project_id: str, root: Path, command: str,
         port = int(port)
     except (TypeError, ValueError):
         return {"error": "porta inválida"}
-    if not (1024 <= port <= 65535):
-        return {"error": "porta deve estar entre 1024 e 65535"}
-    expose = "lan" if str(expose).lower() in ("lan", "0.0.0.0", "network") else "localhost"
-    host = "0.0.0.0" if expose == "lan" else "127.0.0.1"
 
     with _reg_lock:
+        # own-origin: a porta tem que estar no range PUBLICADO no host (senão o navegador
+        # não alcança o app). Escolhe a pedida (se no range e livre) ou a menor livre.
+        chosen = _pick_port(project_id, port)
+        if chosen is None:
+            return {"error": f"todas as portas de preview ({s.code_preview_port_min}-"
+                             f"{s.code_preview_port_max}) estão em uso — pare algum preview antes"}
+        port = chosen
+        # sempre 0.0.0.0: a porta é publicada no host, então o app precisa escutar em todas
+        # as interfaces do container pra o Docker encaminhar. `expose` fica só informativo.
+        host = "0.0.0.0"
+        expose = "lan" if str(expose).lower() in ("lan", "0.0.0.0", "network") else "localhost"
         # substitui um preview anterior do MESMO projeto+porta (reinício)
         for pv in list(_previews.values()):
             if pv.project_id == project_id and pv.port == port:
@@ -165,15 +192,14 @@ def start_preview(user_id: str, project_id: str, root: Path, command: str,
         f"'connection refused', 503 'initializing' e status 'starting' são NORMAIS enquanto "
         f"sobe. NÃO pare o preview por isso; só pare se os logs mostrarem um crash de verdade "
         f"(exit_code preenchido/status 'crashed'). Continue lendo os `logs` até o servidor "
-        f"anunciar a porta. DÊ AO USUÁRIO UM LINK CLICÁVEL em markdown que abre "
-        f"o app numa nova guia: [abrir o app]({pv.summary()['preview_url']}) — a UI "
-        f"resolve o link e passa pelo login. Ele também aparece no painel Preview do "
-        f"projeto. Para live-reload (HMR) funcionar dentro do preview embutido, inicie o "
-        f"dev server com o base path = '{pv.summary()['base_path']}' (Vite: "
-        f"`--base={pv.summary()['base_path']}`; Next: basePath) — sem isso o app "
-        f"funciona, só não recarrega sozinho."
-        + ("" if expose == "localhost"
-           else " Exposto também na LAN (alcançável direto por outros dispositivos).")
+        f"anunciar a porta {pv.port}. DÊ AO USUÁRIO UM LINK CLICÁVEL em markdown que abre "
+        f"o app numa nova guia: [abrir o app]({pv.summary()['preview_url']}) — a UI abre o "
+        f"app na PRÓPRIA porta ({pv.port}), então login/redirect/SPA/websocket funcionam "
+        f"nativamente (roda na raiz, sem prefixo). O app precisa escutar em 0.0.0.0:{pv.port} "
+        f"— o env já traz HOST/PORT/MB_JETTY_PORT/SERVER_PORT={pv.port}; se o framework "
+        f"ignorar o env, passe o flag no comando (ex.: `--host 0.0.0.0 --port {pv.port}`). "
+        f"NÃO use uma porta fora de {s.code_preview_port_min}-{s.code_preview_port_max} (só "
+        f"esse range é publicado no host). HMR funciona nativo — não passe base path."
     )
     return out
 

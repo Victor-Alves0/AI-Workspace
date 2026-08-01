@@ -139,6 +139,12 @@ class Settings(BaseSettings):
     # derrubar (6h) e teto de servidores no ar simultâneos por usuário.
     code_preview_max_age_seconds: int = 21_600
     code_preview_max_per_user: int = 4
+    # "porta própria" (own-origin): o preview escuta numa porta deste range, PUBLICADA
+    # no host pelo compose (mesmo range), pra apps completos (Metabase etc.) rodarem na
+    # RAIZ da própria origem — login/redirect/SPA/websocket funcionam sem reescrita, ao
+    # contrário do reverse-proxy de prefixo. DEVE bater com o range publicado no compose.
+    code_preview_port_min: int = 4001
+    code_preview_port_max: int = 4010
     # ciclo de vida dos worktrees: TTL de ociosidade (reaper) e teto por usuário.
     codespace_worktree_ttl_seconds: int = 86_400
     codespace_max_worktrees_per_user: int = 20

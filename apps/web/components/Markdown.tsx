@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { Check, Copy, ImageOff } from "lucide-react";
-import { API_URL } from "@/lib/api";
+import { API_URL, previewHref } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 
 interface ElProps {
@@ -176,10 +176,11 @@ function Markdown({
             </div>
           ),
           a: ({ children, href }) => {
-            // links de preview do Codespace são caminhos relativos do reverse-proxy
-            // da API (/codespace/preview/<porta>/) — resolve p/ a URL completa da API
-            // (origem diferente do front) e abre em nova guia.
-            const h = href && href.startsWith("/codespace/preview/") ? `${API_URL}${href}` : href;
+            // links de preview do Codespace (/codespace/preview/<porta>/) abrem o app na
+            // PRÓPRIA ORIGEM/porta publicada (http://<host>:<porta>/) — o app roda na raiz,
+            // então login/redirect/SPA/websocket funcionam. http:// (o dev server é http)
+            // e nova guia (não iframe: apps como Metabase mandam X-Frame-Options: DENY).
+            const h = previewHref(href);
             return (
               <a href={h} target="_blank" rel="noreferrer noopener">
                 {children}

@@ -941,7 +941,7 @@ export interface CodespacePreview {
   port: number;
   expose: "localhost" | "lan";
   status: "starting" | "up" | "crashed" | "stopped";
-  url_hint: string;
+  preview_url?: string;
   age_seconds: number;
   exit_code: number | null;
   logs?: string;

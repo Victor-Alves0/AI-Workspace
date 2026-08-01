@@ -75,6 +75,10 @@ services:
       # host bind + porta configuráveis (o painel do admin diz quais valores pôr
       # no .env). Ex.: SERVER_BIND=127.0.0.1 SERVER_PORT=8000
       - "${SERVER_BIND:-0.0.0.0}:${SERVER_PORT:-8000}:8000"
+      # Codespace: previews "own-origin" — a IA sobe um app numa porta deste range,
+      # publicada no host, pra apps completos (Metabase etc.) rodarem na RAIZ da própria
+      # origem (login/redirect/SPA/websocket funcionam). DEVE bater com code_preview_port_*.
+      - "${PREVIEW_BIND:-0.0.0.0}:${PREVIEW_PORT_MIN:-4001}-${PREVIEW_PORT_MAX:-4010}:${PREVIEW_PORT_MIN:-4001}-${PREVIEW_PORT_MAX:-4010}"
 
   # Voz local (TTS) — Kokoro-FastAPI, endpoint OpenAI-compatível em :8880/v1.
   # OPT-IN: só sobe com `docker compose --profile voice up -d kokoro`.

@@ -17,6 +17,19 @@ function resolveApiUrl(): string {
 
 export const API_URL = resolveApiUrl();
 
+/** Resolve um link de preview do Codespace (/codespace/preview/<porta>/) para a ORIGEM
+ *  PRÓPRIA do app: http://<host da página>:<porta>/. O preview roda numa porta publicada
+ *  no host (own-origin), então o app fica na RAIZ dessa origem e login/redirect/SPA/
+ *  websocket funcionam sem reescrita (o reverse-proxy de prefixo quebrava SPAs). Usa
+ *  http:// porque o dev server é http puro; abrir em nova guia evita o X-Frame-Options
+ *  (Metabase etc. mandam DENY). Qualquer outro href passa direto. */
+export function previewHref(href?: string): string | undefined {
+  const m = href && /^\/codespace\/preview\/(\d+)\/?/.exec(href);
+  if (!m) return href;
+  const host = typeof window !== "undefined" ? window.location.hostname : "localhost";
+  return `http://${host}:${m[1]}/`;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
     super(message);
