@@ -114,7 +114,7 @@ _CODE_MODE_PROMOTE = ("research.deep.run", "media.video.transcribe")
 _CODESPACE_READ = ("code.graph.query", "code.files.browse", "code.flow.analyze")
 # "Trabalho": escrever arquivos, rodar testes/build e abrir worktrees isolados —
 # o loop "escreve → testa → corrige" dos agentes de código do mercado.
-_CODESPACE_WORK = ("code.files.write", "code.exec.run", "code.exec.jobs", "code.task.manage")
+_CODESPACE_WORK = ("code.files.write", "code.exec.run", "code.exec.jobs", "code.preview.serve", "code.task.manage")
 _CODESPACE_ALL = (*_CODESPACE_READ, *_CODESPACE_WORK)
 
 

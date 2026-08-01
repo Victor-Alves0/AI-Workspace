@@ -830,6 +830,18 @@ async def _resolve_subagents(
             mc = by_id.get(str(x))
             if mc is not None:
                 specs.append({"key": str(mc.id), "name": mc.name, "description": (mc.description or "")[:200]})
+    # Isolamento POR-OPERÁRIO (opt-in): `isolate` é a lista de keys que trabalham num
+    # worktree próprio (branch isolada) — um revisor "só leitura" fica de fora e não abre
+    # tarefa à toa. Legado: o bool global `worktree_isolation` liga TODOS (compat com
+    # configs antigas; a UI nova escreve `isolate`).
+    team_keys = [s["key"] for s in specs]
+    iso_raw = cfg.get("isolate")
+    if isinstance(iso_raw, list):
+        isolate = [str(x) for x in iso_raw if str(x) in set(team_keys)]
+    elif cfg.get("worktree_isolation"):
+        isolate = list(team_keys)
+    else:
+        isolate = []
     conf = {
         "mode": "parallel" if cfg.get("mode") == "parallel" else "sequential",
         "max_calls": max(1, min(int(cfg.get("max_calls") or 4), 10)),
@@ -837,9 +849,7 @@ async def _resolve_subagents(
         # opt-in: operários enxergam o histórico do chat / usam a própria memória
         "pass_context": bool(cfg.get("pass_context")),
         "worker_memory": bool(cfg.get("worker_memory")),
-        # opt-in: cada operário trabalha num worktree ISOLADO do projeto do chat
-        # (branch própria) — sem colisão em paralelo; o resultado vira tarefa a revisar.
-        "worktree_isolation": bool(cfg.get("worktree_isolation")),
+        "isolate": isolate,
     }
     return specs, conf
 
@@ -862,13 +872,15 @@ def _make_subagent_runner(
     db: AsyncSession, user: User, chat_id: uuid.UUID | None, max_depth: int,
     pass_context: bool = False, worker_memory: bool = False,
     depth: int = 0, ancestry: frozenset[str] = frozenset(),
-    project_id: str | None = None, worktree_isolation: bool = False,
+    project_id: str | None = None, isolate_keys: frozenset[str] = frozenset(),
 ):
     """Closure que executa um operário: resolve o ModelConfig e roda um turno aninhado.
     Opções: `pass_context` (dá o histórico do chat ao operário), `worker_memory` (o
-    operário lê/escreve na PRÓPRIA memória) e `worktree_isolation` (cada operário
-    trabalha num worktree isolado do `project_id`, sem colidir com os outros — o
-    resultado vira uma tarefa a revisar). Blinda contra ciclos e recursão profunda."""
+    operário lê/escreve na PRÓPRIA memória) e `isolate_keys` (o conjunto de operários
+    que trabalham num worktree ISOLADO do `project_id` — cada um numa branch própria,
+    sem colidir com os outros; o resultado vira uma tarefa a revisar. Quem não está no
+    conjunto — ex.: um revisor só-leitura — escreve/lê no `src` normal e NÃO abre
+    tarefa). Blinda contra ciclos e recursão profunda."""
     async def run_subagent(key: str, task: str) -> dict:
         if key in ancestry:
             return {"error": "ciclo de subagentes detectado; delegação abortada"}
@@ -899,7 +911,7 @@ def _make_subagent_runner(
                     worker_memory=sub_conf.get("worker_memory", False),
                     depth=depth + 1, ancestry=ancestry | {key},
                     project_id=project_id,
-                    worktree_isolation=sub_conf.get("worktree_isolation", False),
+                    isolate_keys=frozenset(sub_conf.get("isolate") or []),
                 )
         # contexto do chat (opt-in)
         history = await _recent_history(db, chat_id) if (pass_context and chat_id) else []
@@ -914,7 +926,7 @@ def _make_subagent_runner(
         # do chat, sem colidir com o `src` nem com operários paralelos. O resultado vira
         # uma tarefa `awaiting_review` que o humano aprova/descarta na UI.
         wt_task_id: str | None = None
-        if worktree_isolation and project_id:
+        if key in isolate_keys and project_id:
             from ..codespace import worktree_service
             opened = await worktree_service.open_task(
                 str(user.id), project_id, title=task[:200], agent=mc.name,

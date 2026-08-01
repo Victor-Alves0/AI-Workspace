@@ -134,6 +134,12 @@ async def lifespan(app: FastAPI):
         exec_jobs.start_reaper()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível iniciar o reaper de exec_jobs (%s)", exc)
+    # reaper dos previews (dev servers no ar): derruba os velhos/caídos.
+    try:
+        from .codespace import preview_service
+        preview_service.start_reaper()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Não foi possível iniciar o reaper de previews (%s)", exc)
     try:
         yield
     finally:
@@ -145,6 +151,11 @@ async def lifespan(app: FastAPI):
             await exec_jobs.shutdown()
         except Exception:  # noqa: BLE001 - best-effort
             logger.warning("Falha ao encerrar os jobs de exec no shutdown")
+        try:
+            from .codespace import preview_service
+            await preview_service.shutdown()
+        except Exception:  # noqa: BLE001 - best-effort
+            logger.warning("Falha ao encerrar os previews no shutdown")
         try:
             from .chat import generation
             await generation.shutdown()

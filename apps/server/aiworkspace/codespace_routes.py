@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth.deps import require_approved
-from .codespace import graph_service, worktree_service
+from .codespace import graph_service, preview_service, worktree_service
 from .db import get_db
 from .memory import mem0_service
 from .models import Chat, CodespaceProject, GithubAccount, MemoryBank, User
@@ -338,14 +338,50 @@ async def search_files_by_name_route(
 @router.get("/projects/{project_id}/graph/visualize")
 async def graph_visualize(
     project_id: uuid.UUID, level: str = "file", scope: str = "", top: int = 200,
+    mode: str = "", symbol: str = "", depth: int = 3,
+    min_confidence: str = "", language: str = "",
     user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
 ):
-    """Grafo do projeto INTEIRO (nós/arestas/comunidades) pra visão geral estilo
-    Obsidian — diferente de `graph/ego` (vizinhança de um símbolo só)."""
+    """Grafo do projeto pra visão estilo Obsidian. `level` (file|symbol) OU um `mode`
+    semeado por `symbol` (neighborhood|callers|callees|impact|domains), com filtros
+    `min_confidence`/`language` — diferente de `graph/ego` (só a vizinhança direta)."""
     p = await _owned_project(db, user, project_id)
     if p.index_status != "ready":
         raise HTTPException(status.HTTP_409_CONFLICT, "projeto ainda não está pronto (aguarde a indexação)")
-    return await run_in_threadpool(graph_service.visualize, str(p.user_id), str(p.id), level, scope, top)
+    return await run_in_threadpool(
+        graph_service.visualize, str(p.user_id), str(p.id), level, scope, top,
+        mode, symbol, depth, min_confidence, language,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Preview vivo (dev servers no ar) — a IA sobe via a tool; a UI só lista/olha/para
+# --------------------------------------------------------------------------- #
+@router.get("/projects/{project_id}/previews")
+async def list_previews(
+    project_id: uuid.UUID,
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    p = await _owned_project(db, user, project_id)
+    return await run_in_threadpool(preview_service.list_previews, str(p.user_id), str(p.id))
+
+
+@router.get("/projects/{project_id}/previews/{preview_id}")
+async def preview_status(
+    project_id: uuid.UUID, preview_id: str,
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    p = await _owned_project(db, user, project_id)
+    return await run_in_threadpool(preview_service.preview_status, str(p.user_id), preview_id)
+
+
+@router.post("/projects/{project_id}/previews/{preview_id}/stop")
+async def stop_preview(
+    project_id: uuid.UUID, preview_id: str,
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    p = await _owned_project(db, user, project_id)
+    return await run_in_threadpool(preview_service.stop_preview, str(p.user_id), preview_id)
 
 
 @router.get("/projects/{project_id}/graph/find")

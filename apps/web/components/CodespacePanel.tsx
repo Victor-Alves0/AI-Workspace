@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ArrowLeft, Brain, Check, CheckCircle2, ChevronLeft, Copy, Download, FolderOpen, GitBranch, GitMerge, Globe, HardDrive,
-  KeyRound, Loader2, MessageSquare, MoreVertical, Pencil, Plus, RefreshCw, Search, Sparkles,
-  Terminal, Trash2, Upload, Waypoints, X, XCircle,
+  ArrowLeft, Brain, Check, CheckCircle2, ChevronLeft, Copy, Download, ExternalLink, FolderOpen, GitBranch, GitMerge, Globe, HardDrive,
+  KeyRound, Loader2, MessageSquare, MoreVertical, Pencil, Play, Plus, RefreshCw, Search, Sparkles,
+  Square, Terminal, Trash2, Upload, Waypoints, X, XCircle,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import type { CodespaceChatLite, CodespaceEgo, CodespaceEgoEdge, CodespaceProject, CodespaceSymbol, CodespaceTask, MemoryItem, User } from "@/lib/types";
+import type { CodespaceChatLite, CodespaceEgo, CodespaceEgoEdge, CodespacePreview, CodespaceProject, CodespaceSymbol, CodespaceTask, MemoryItem, User } from "@/lib/types";
 import { useConfirm, usePrompt } from "@/components/ConfirmDialog";
 import { AnchoredMenu, MenuItem, Toggle, InfoDot } from "@/components/ui";
 import { copyText } from "@/lib/clipboard";
@@ -642,8 +642,119 @@ function ProjectMemoryTab({ bankId }: { bankId: string }) {
   );
 }
 
+/* ------------------------------ Preview vivo ------------------------------- */
+function PreviewStatusBadge({ status, withLabel = false }: { status: CodespacePreview["status"]; withLabel?: boolean }) {
+  const map: Record<CodespacePreview["status"], [string, string]> = {
+    up: ["bg-green-400", "No ar"], starting: ["bg-amber-400 animate-pulse", "Subindo"],
+    crashed: ["bg-red-400", "Caiu"], stopped: ["bg-muted", "Parado"],
+  };
+  const [dot, label] = map[status];
+  return <span className="flex items-center gap-1.5 text-xs text-muted"><span className={`h-2 w-2 shrink-0 rounded-full ${dot}`} />{withLabel && label}</span>;
+}
+
+function ProjectPreviewTab({ project }: { project: CodespaceProject }) {
+  const [previews, setPreviews] = useState<CodespacePreview[] | null>(null);
+  const [selId, setSelId] = useState<string | null>(null);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [logs, setLogs] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+  const confirm = useConfirm();
+
+  const load = useCallback(async () => {
+    try {
+      const r = await api.get<{ previews: CodespacePreview[] }>(`/codespace/projects/${project.id}/previews`);
+      setPreviews(r.previews);
+    } catch { setPreviews([]); }
+  }, [project.id]);
+  useEffect(() => { load(); const iv = setInterval(load, 3000); return () => clearInterval(iv); }, [load]);
+
+  const selected = previews?.find((p) => p.id === selId) ?? previews?.[0] ?? null;
+  useEffect(() => { if (selected && selId !== selected.id) setSelId(selected.id); }, [selected, selId]);
+
+  // logs ao vivo do selecionado (só quando o painel de logs está aberto)
+  useEffect(() => {
+    if (!logsOpen || !selected) return;
+    let alive = true;
+    const poll = async () => {
+      try {
+        const r = await api.get<CodespacePreview>(`/codespace/projects/${project.id}/previews/${selected.id}`);
+        if (alive) setLogs(r.logs ?? "");
+      } catch { /* ignore */ }
+    };
+    poll();
+    const iv = setInterval(poll, 2000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [logsOpen, selected?.id, project.id]);
+
+  // o navegador alcança localhost só na MESMA máquina (desktop); LAN usa o host atual.
+  const urlOf = (p: CodespacePreview) =>
+    p.expose === "localhost" ? `http://localhost:${p.port}` : `http://${window.location.hostname}:${p.port}`;
+
+  async function stop(p: CodespacePreview) {
+    if (!(await confirm({ title: `Parar o preview na porta ${p.port}?`, confirmLabel: "Parar", danger: true }))) return;
+    try { await api.post(`/codespace/projects/${project.id}/previews/${p.id}/stop`); await load(); } catch { /* ignore */ }
+  }
+
+  if (previews === null) return <p className="py-8 text-center text-sm text-muted">Carregando…</p>;
+  if (previews.length === 0) {
+    return (
+      <div className="rounded-2xl border border-dashed border-border px-4 py-10 text-center">
+        <Globe size={22} className="mx-auto mb-2 text-muted" />
+        <p className="mb-1 text-sm text-ink">Nenhum app no ar.</p>
+        <p className="text-xs text-muted">Peça à IA num chat do projeto para <span className="text-ink-soft">“pôr no ar pra eu testar”</span> — ela sobe o servidor e ele aparece aqui.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-2">
+        {previews.map((p) => (
+          <button key={p.id} onClick={() => setSelId(p.id)}
+            className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs transition-colors ${selected?.id === p.id ? "border-accent bg-accent/10 text-ink" : "border-border bg-surface2 text-ink-soft hover:text-ink"}`}>
+            <PreviewStatusBadge status={p.status} />
+            <span className="font-mono">:{p.port}</span>
+            <span className="max-w-[160px] truncate text-muted">{p.command}</span>
+            {p.expose === "lan" && <span className="rounded bg-amber-500/15 px-1 text-[10px] font-medium text-amber-400">LAN</span>}
+          </button>
+        ))}
+      </div>
+
+      {selected && (
+        <div className="overflow-hidden rounded-xl border border-border">
+          <div className="flex items-center gap-2 border-b border-border bg-surface2 px-3 py-1.5">
+            <PreviewStatusBadge status={selected.status} withLabel />
+            <a href={urlOf(selected)} target="_blank" rel="noreferrer"
+              className="flex items-center gap-1 truncate font-mono text-xs text-ink-soft hover:text-accent-hover">
+              {urlOf(selected)} <ExternalLink size={11} className="shrink-0" />
+            </a>
+            <div className="ml-auto flex shrink-0 items-center gap-1">
+              <button onClick={() => setReloadKey((k) => k + 1)} title="Recarregar" className="rounded p-1 text-muted hover:bg-hover hover:text-ink"><RefreshCw size={13} /></button>
+              <button onClick={() => setLogsOpen((v) => !v)} title="Logs do servidor" className={`rounded p-1 hover:bg-hover ${logsOpen ? "text-accent-hover" : "text-muted hover:text-ink"}`}><Terminal size={13} /></button>
+              <button onClick={() => stop(selected)} title="Parar" className="rounded p-1 text-muted hover:bg-hover hover:text-red-400"><Square size={13} /></button>
+            </div>
+          </div>
+          {selected.status === "up" ? (
+            <iframe key={reloadKey} src={urlOf(selected)} title="preview" className="h-[62vh] w-full border-0 bg-white" />
+          ) : (
+            <div className="grid h-[62vh] place-items-center bg-bg px-8 text-center text-sm text-muted">
+              {selected.status === "starting" ? (
+                <span className="flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Subindo o servidor…</span>
+              ) : selected.status === "crashed" ? "O servidor caiu — abra os logs para ver o erro." : "Parado."}
+            </div>
+          )}
+          {logsOpen && (
+            <pre className="max-h-48 overflow-auto whitespace-pre-wrap border-t border-border bg-bg px-3 py-2 font-mono text-[11px] leading-5 text-ink-soft">
+              {logs || "(sem saída ainda)"}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------ Project detail ----------------------------- */
-type Tab = "chats" | "arquivos" | "grafo" | "memoria" | "tarefas" | "config";
+type Tab = "chats" | "arquivos" | "grafo" | "preview" | "memoria" | "tarefas" | "config";
 
 function ProjectDetail({
   project, onBack, onUpdated, onDeleted, onOpenChat,
@@ -669,22 +780,6 @@ function ProjectDetail({
   async function reindex() {
     setBusy(true);
     try { onUpdated(await api.post<CodespaceProject>(`/codespace/projects/${project.id}/reindex`)); } finally { setBusy(false); }
-  }
-
-  async function resync() {
-    if (!(await confirm({
-      title: `Ressincronizar "${project.name}"?`,
-      body: "Reclona do zero a partir do repositório remoto — DESCARTA qualquer commit local não enviado. Envie (push) antes se quiser manter esse trabalho.",
-      confirmLabel: "Descartar e ressincronizar",
-      danger: true,
-    }))) return;
-    setBusy(true);
-    try { onUpdated(await api.post<CodespaceProject>(`/codespace/projects/${project.id}/resync`)); } finally { setBusy(false); }
-  }
-
-  async function refine() {
-    setBusy(true);
-    try { await api.post(`/codespace/projects/${project.id}/refine`); } finally { setBusy(false); }
   }
 
   async function del() {
@@ -715,7 +810,7 @@ function ProjectDetail({
   }
 
   return (
-    <div>
+    <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
       <button onClick={onBack} className="mb-3 flex items-center gap-1 text-xs text-muted hover:text-ink">
         <ArrowLeft size={13} /> Todos os projetos
       </button>
@@ -751,22 +846,10 @@ function ProjectDetail({
               <KeyRound size={15} />
             </button>
           )}
-          {project.index_status === "ready" && !project.stats?.refined && (
-            <button onClick={refine} disabled={busy} title="Refinar (jedi): promove chamadas Python inferidas a certas"
-              className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink disabled:opacity-60">
-              <Sparkles size={15} />
-            </button>
-          )}
           <button onClick={reindex} disabled={busy || project.index_status === "cloning" || project.index_status === "indexing"}
             title="Reindexar (seguro)" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink disabled:opacity-60">
             <RefreshCw size={15} className={busy ? "animate-spin" : ""} />
           </button>
-          {project.source !== "local" && (
-            <button onClick={resync} disabled={busy || project.index_status === "cloning" || project.index_status === "indexing"}
-              title="Ressincronizar: reclona do zero" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-amber-400 disabled:opacity-60">
-              <RefreshCw size={15} className="rotate-180" />
-            </button>
-          )}
           <button onClick={del} disabled={busy} title="Excluir" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-red-400 disabled:opacity-60">
             <Trash2 size={15} />
           </button>
@@ -797,7 +880,7 @@ function ProjectDetail({
           <div className="mb-3 flex items-center gap-1 overflow-x-auto border-b border-border">
             {([
               ["chats", "Chats"], ["arquivos", "Arquivos"], ["grafo", "Grafo"],
-              ["tarefas", "Tarefas"], ["memoria", "Memória"], ["config", "Config"],
+              ["preview", "Preview"], ["tarefas", "Tarefas"], ["memoria", "Memória"], ["config", "Config"],
             ] as [Tab, string][]).map(([key, label]) => (
               <button key={key} onClick={() => setTab(key)}
                 className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors ${tab === key ? "border-accent text-ink" : "border-transparent text-muted hover:text-ink"}`}>
@@ -808,6 +891,7 @@ function ProjectDetail({
           {tab === "chats" && <ProjectChatsTab project={project} onOpenChat={onOpenChat} />}
           {tab === "arquivos" && <CodespaceFileBrowser key={jumpPath} projectId={project.id} onUse={reference} initialPath={jumpPath} />}
           {tab === "grafo" && <ProjectGraphTab project={project} onOpenFile={openInExplorer} />}
+          {tab === "preview" && <ProjectPreviewTab project={project} />}
           {tab === "tarefas" && <ProjectTasksTab project={project} />}
           {tab === "config" && <ProjectConfigTab project={project} onUpdated={onUpdated} />}
           {tab === "memoria" && (

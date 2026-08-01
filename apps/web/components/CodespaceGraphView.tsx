@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FileCode2, Maximize2, Minus, Plus, RotateCcw, Search } from "lucide-react";
+import { ArrowRight, FileCode2, Maximize2, Minus, Plus, RotateCcw, Search } from "lucide-react";
 import { api } from "@/lib/api";
 import type { CodespaceViz, CodespaceVizNode } from "@/lib/types";
 
@@ -89,6 +89,12 @@ function forceLayout(g: CodespaceViz): { pos: Map<number, XY>; bounds: { w: numb
           continue;
         }
         if (q.mass === 0) { q.pt = i; q.cx = px[i]; q.cy = py[i]; q.mass = 1; return; }
+        // GUARDA anti-OOM: dois pontos COINCIDENTES (ou quase) fariam a quadtree
+        // subdividir infinitamente — a célula halva pra sempre e ambos caem sempre
+        // no mesmo quadrante → aloca QNodes sem parar → trava/estoura a memória. Foi
+        // o que matava o nível "Símbolos" (grafo denso → nós colapsam no mesmo ponto).
+        // Célula minúscula: para de subdividir e acumula o ponto nesta folha.
+        if (q.x1 - q.x0 < 1e-3) { q.cx += px[i]; q.cy += py[i]; q.mass++; return; }
         // folha ocupada: subdivide e reinsere o ponto existente
         const mx = (q.x0 + q.x1) / 2, my = (q.y0 + q.y1) / 2;
         q.children = [
@@ -189,6 +195,22 @@ function forceLayout(g: CodespaceViz): { pos: Map<number, XY>; bounds: { w: numb
 
 const radius = (nd: CodespaceVizNode) => 4 + Math.min(16, Math.sqrt(nd.n || 1) * 2.6);
 
+// modos de visualização. "file"/"symbol" = nível (viram ?level=); os demais são
+// SEMEADOS por um símbolo (viram ?mode=&symbol=). "domains" = grafo entre módulos.
+type VizMode = "file" | "symbol" | "neighborhood" | "callers" | "callees" | "impact" | "domains";
+const SEEDED = new Set<VizMode>(["neighborhood", "callers", "callees", "impact"]);
+const MODE_LABEL: Record<VizMode, string> = {
+  file: "Arquivos", symbol: "Símbolos", neighborhood: "Vizinhança",
+  callers: "Chamadores", callees: "Chamados", impact: "Impacto", domains: "Domínios",
+};
+type Conf = "" | "inferred" | "certain";
+const CONF_LABEL: Record<Conf, string> = { "": "Todas", inferred: "Inferidas+", certain: "Só certas" };
+// tracejado da aresta por confiança (o v0.1.0 diferencia certain/inferred/possible)
+const DASH: Record<string, number[]> = { certain: [], inferred: [5, 4], possible: [2, 4] };
+const EMPTY: CodespaceViz = { level: "file", nodes: [], links: [], domains: [], warnings: [] };
+// um label é um ARQUIVO (abrível) quando parece caminho; senão é um símbolo (fqn).
+const isFileLabel = (s: string) => s.includes("/") || /\.[a-z0-9]{1,5}$/i.test(s);
+
 export default function CodespaceGraphView({
   projectId, onOpenFile,
 }: {
@@ -199,6 +221,10 @@ export default function CodespaceGraphView({
   const [graph, setGraph] = useState<CodespaceViz | null>(null);
   const [q, setQ] = useState("");
   const [selected, setSelected] = useState<CodespaceVizNode | null>(null);
+  const [mode, setMode] = useState<VizMode>("file");
+  const [seed, setSeed] = useState("");        // símbolo aplicado (modos semeados)
+  const [seedInput, setSeedInput] = useState(""); // o que está sendo digitado
+  const [minConf, setMinConf] = useState<Conf>("");
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
@@ -212,11 +238,21 @@ export default function CodespaceGraphView({
   const rafRef = useRef<number | null>(null);
   const lastDouble = useRef(0);
 
-  const load = useCallback(
-    () => api.get<CodespaceViz>(`/codespace/projects/${projectId}/graph/visualize?level=file&top=250`)
-      .then(setGraph).catch(() => setGraph({ level: "file", nodes: [], links: [], domains: [], warnings: [] })),
-    [projectId],
-  );
+  const load = useCallback(() => {
+    const p = new URLSearchParams({ top: "250" });
+    const seeded = SEEDED.has(mode);
+    if (seeded) {
+      if (!seed.trim()) { setGraph(EMPTY); return Promise.resolve(); }
+      p.set("mode", mode); p.set("symbol", seed.trim()); p.set("depth", "2");
+    } else if (mode === "domains") {
+      p.set("mode", "domains");
+    } else {
+      p.set("level", mode); // file | symbol
+    }
+    if (minConf) p.set("min_confidence", minConf);
+    return api.get<CodespaceViz>(`/codespace/projects/${projectId}/graph/visualize?${p.toString()}`)
+      .then(setGraph).catch(() => setGraph(EMPTY));
+  }, [projectId, mode, seed, minConf]);
   useEffect(() => { didFit.current = false; offsetsRef.current.clear(); load(); }, [load]);
 
   const { pos, bounds } = useMemo(
@@ -269,19 +305,44 @@ export default function CodespaceGraphView({
     ctx.translate(v.x, v.y);
     ctx.scale(v.k, v.k);
 
-    // links — em dois lotes (normal/apagado) p/ trocar de estilo o mínimo possível
-    for (const pass of [0, 1] as const) {
-      ctx.beginPath();
-      ctx.strokeStyle = `rgba(${border},${pass === 0 ? 0.5 : 0.07})`;
-      ctx.lineWidth = 1.2 / v.k;
-      for (const e of graph.links) {
-        const dim = (match && (!match.has(e.source) || !match.has(e.target)))
-          || (neighbors && (!neighbors.has(e.source) || !neighbors.has(e.target)));
-        if ((dim ? 1 : 0) !== pass) continue;
-        const a = at(e.source), b = at(e.target);
-        ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+    const dimEdge = (e: { source: number; target: number }) =>
+      (!!match && (!match.has(e.source) || !match.has(e.target)))
+      || (!!neighbors && (!neighbors.has(e.source) || !neighbors.has(e.target)));
+    const hasConf = graph.links.some((e) => e.confidence);
+    if (hasConf) {
+      // modos investigativos: arestas estilizadas pela CONFIANÇA (sólida/tracejada/
+      // pontilhada), como o v0.1.0 faz no HTML de investigação. Agrupadas por
+      // categoria×realce → no MÁXIMO 6 chamadas de path (não uma por aresta), pra
+      // aguentar grafos densos de símbolos sem engasgar/gerar lixo por frame.
+      ctx.lineWidth = 1.3 / v.k;
+      for (const cat of ["certain", "inferred", "possible"] as const) {
+        ctx.setLineDash((DASH[cat] ?? []).map((d) => d / v.k));
+        for (const pass of [0, 1] as const) {
+          ctx.beginPath();
+          ctx.strokeStyle = `rgba(${border},${pass === 1 ? 0.07 : 0.6})`;
+          for (const e of graph.links) {
+            if ((e.confidence ?? "certain") !== cat) continue;
+            if ((dimEdge(e) ? 1 : 0) !== pass) continue;
+            const a = at(e.source), b = at(e.target);
+            ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+          }
+          ctx.stroke();
+        }
       }
-      ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
+      // links — em dois lotes (normal/apagado) p/ trocar de estilo o mínimo possível
+      for (const pass of [0, 1] as const) {
+        ctx.beginPath();
+        ctx.strokeStyle = `rgba(${border},${pass === 0 ? 0.5 : 0.07})`;
+        ctx.lineWidth = 1.2 / v.k;
+        for (const e of graph.links) {
+          if ((dimEdge(e) ? 1 : 0) !== pass) continue;
+          const a = at(e.source), b = at(e.target);
+          ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+        }
+        ctx.stroke();
+      }
     }
 
     // nós (círculos) + rótulos (só com zoom suficiente — LOD)
@@ -298,6 +359,14 @@ export default function CodespaceGraphView({
       ctx.fillStyle = domainColor(nd.domain);
       ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
       ctx.fill();
+      if (nd.seed) {
+        // o símbolo semeador do modo investigativo: anel accent grosso
+        ctx.lineWidth = 2.5 / v.k;
+        ctx.strokeStyle = "#3b82f6";
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r + 3.5 / v.k + 1, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       if (selected?.id === nd.id) {
         ctx.lineWidth = 2 / v.k;
         ctx.strokeStyle = `rgb(${ink})`;
@@ -392,9 +461,14 @@ export default function CodespaceGraphView({
       const { x: mx, y: my } = localXY(e);
       const nd = nodeAt(mx, my);
       if (nd) {
-        // duplo-clique (dois ups no mesmo nó em <350ms) abre o arquivo
+        // duplo-clique (dois ups no mesmo nó em <350ms): arquivo → abre no explorador;
+        // símbolo → re-semeia o grafo na VIZINHANÇA dele (navegação investigativa).
         const now = Date.now();
-        if (selected?.id === nd.id && now - lastDouble.current < 350) { onOpenFile(nd.label); lastDouble.current = 0; return; }
+        if (selected?.id === nd.id && now - lastDouble.current < 350) {
+          if (isFileLabel(nd.label)) onOpenFile(nd.label);
+          else { setMode("neighborhood"); setSeedInput(nd.label); setSeed(nd.label); }
+          lastDouble.current = 0; return;
+        }
         lastDouble.current = now;
         setSelected((cur) => (cur?.id === nd.id ? cur : nd));
       } else {
@@ -422,18 +496,38 @@ export default function CodespaceGraphView({
 
   return (
     <div className="relative h-[58vh] min-h-[360px] overflow-hidden rounded-xl border border-border bg-[radial-gradient(circle,rgb(var(--c-border))_1px,transparent_1px)] [background-size:22px_22px]">
-      <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded-lg border border-border bg-surface/90 px-2.5 py-1.5 backdrop-blur">
-        <Search size={13} className="text-muted" />
-        <input
-          value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filtrar arquivos…"
-          className="w-40 bg-transparent text-xs text-ink outline-none placeholder:text-muted"
-        />
+      <div className="absolute left-3 top-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-1.5 rounded-lg border border-border bg-surface/90 px-2 py-1.5 backdrop-blur">
+        <select value={mode} onChange={(e) => setMode(e.target.value as VizMode)}
+          title="Modo de visualização" className="rounded-md bg-surface2 px-1.5 py-1 text-xs text-ink outline-none">
+          {(Object.keys(MODE_LABEL) as VizMode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
+        </select>
+        {SEEDED.has(mode) && (
+          <div className="flex items-center gap-1 rounded-md bg-surface2 px-1.5 py-1">
+            <input value={seedInput} onChange={(e) => setSeedInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && setSeed(seedInput.trim())}
+              placeholder="função/classe…" className="w-32 bg-transparent text-xs text-ink outline-none placeholder:text-muted" />
+            <button onClick={() => setSeed(seedInput.trim())} title="Semear" className="rounded p-0.5 text-muted hover:text-ink"><ArrowRight size={12} /></button>
+          </div>
+        )}
+        <select value={minConf} onChange={(e) => setMinConf(e.target.value as Conf)}
+          title="Filtrar arestas por confiança" className="rounded-md bg-surface2 px-1.5 py-1 text-xs text-ink outline-none">
+          {(Object.keys(CONF_LABEL) as Conf[]).map((c) => <option key={c} value={c}>{CONF_LABEL[c]}</option>)}
+        </select>
+        <div className="flex items-center gap-1 rounded-md bg-surface2 px-1.5 py-1">
+          <Search size={12} className="text-muted" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Realçar…"
+            className="w-24 bg-transparent text-xs text-ink outline-none placeholder:text-muted" />
+        </div>
       </div>
 
       {graph === null ? (
         <p className="grid h-full place-items-center text-sm text-muted">Carregando…</p>
       ) : graph.nodes.length === 0 ? (
-        <p className="grid h-full place-items-center px-8 text-center text-sm text-muted">Sem dados suficientes ainda.</p>
+        <p className="grid h-full place-items-center px-8 text-center text-sm text-muted">
+          {SEEDED.has(mode) && !seed.trim()
+            ? "Digite uma função/classe acima para semear o grafo (ex.: run_turn)."
+            : "Sem dados suficientes ainda."}
+        </p>
       ) : (
         <div
           ref={viewportRef}
@@ -453,12 +547,21 @@ export default function CodespaceGraphView({
             <FileCode2 size={14} className="mt-0.5 shrink-0 text-muted" />
             <div className="min-w-0 flex-1">
               <p className="truncate font-mono text-[11px] text-ink">{selected.label}</p>
-              <p className="text-[10px] text-muted">{selected.n} símbolo(s)</p>
+              <p className="text-[10px] text-muted">
+                {isFileLabel(selected.label) ? `${selected.n} símbolo(s)` : (selected.kind || "símbolo")}
+              </p>
             </div>
-            <button onClick={() => onOpenFile(selected.label)}
-              className="shrink-0 rounded-full bg-accent px-2.5 py-1 text-[11px] font-medium text-white hover:bg-accent-hover">
-              Abrir
-            </button>
+            {isFileLabel(selected.label) ? (
+              <button onClick={() => onOpenFile(selected.label)}
+                className="shrink-0 rounded-full bg-accent px-2.5 py-1 text-[11px] font-medium text-white hover:bg-accent-hover">
+                Abrir
+              </button>
+            ) : (
+              <button onClick={() => { setMode("neighborhood"); setSeedInput(selected.label); setSeed(selected.label); }}
+                className="shrink-0 rounded-full bg-accent px-2.5 py-1 text-[11px] font-medium text-white hover:bg-accent-hover">
+                Vizinhança
+              </button>
+            )}
           </div>
         </div>
       )}

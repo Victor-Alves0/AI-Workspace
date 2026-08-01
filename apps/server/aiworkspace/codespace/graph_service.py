@@ -611,17 +611,75 @@ def _file_graph_fallback(conn, top: int) -> tuple[list[dict], list[dict]]:
     return nodes, links
 
 
-def visualize(user_id: str, project_id: str, level: str = "file", scope: str = "", top: int = 200) -> dict:
-    """Grafo do projeto inteiro (nós/arestas/comunidades) pra visualização estilo
-    Obsidian — diferente de `ego`/`find` (vizinhança de UM símbolo), aqui é a visão
-    geral. `level="file"` (padrão) agrega por arquivo — MUITO mais legível que
-    símbolo-a-símbolo num repo de milhares de símbolos; `level="symbol"` existe pra
-    repos pequenos/escopo estreito. `top` limita nós (a lib já poda pelos mais
-    conectados; aqui só reforçamos o teto de contexto/render)."""
+# modos de visualização SEMEADOS por um símbolo (v0.1.0): vizinhança/chamadores/
+# chamados/impacto partem de UM `symbol`; `domains` é o grafo entre comunidades.
+_SEEDED_MODES = ("neighborhood", "callers", "callees", "impact")
+_VIZ_MODES = _SEEDED_MODES + ("domains",)
+
+
+def _norm_viz_node(nd: dict) -> dict:
+    out = {
+        "id": nd.get("id"),
+        "label": nd.get("label") or nd.get("path") or nd.get("fqn") or str(nd.get("id")),
+        "domain": nd.get("domain"),
+        "n": nd.get("n") or nd.get("weight") or nd.get("size") or 1,
+    }
+    if nd.get("seed"):
+        out["seed"] = True
+    if nd.get("kind"):
+        out["kind"] = nd.get("kind")
+    return out
+
+
+def _norm_viz_link(e: dict) -> dict:
+    out = {"source": e.get("source"), "target": e.get("target"), "w": e.get("w") or e.get("weight") or 1}
+    if e.get("confidence"):
+        out["confidence"] = e.get("confidence")
+    return out
+
+
+def visualize(user_id: str, project_id: str, level: str = "file", scope: str = "",
+              top: int = 200, mode: str = "", symbol: str = "",
+              depth: int = 3, min_confidence: str = "", language: str = "") -> dict:
+    """Grafo do projeto pra visualização estilo Obsidian. Dois eixos:
+
+    - **nível** (`level`): `file` (padrão, agrega por arquivo — legível em repos
+      grandes) ou `symbol` (função/classe a função/classe — "consultar por função").
+    - **modo semeado** (`mode`, opcional, exige `symbol`): `neighborhood`,
+      `callers`, `callees`, `impact` (subgrafo em volta de UM símbolo, à profundidade
+      `depth`); ou `domains` (grafo entre comunidades). Ignora `level`.
+
+    Filtros (v0.1.0): `min_confidence` (certain|inferred|possible — descarta arestas
+    abaixo) e `language`. `top` limita nós (a lib já poda pelos mais conectados)."""
     cg = _get_graph(user_id, project_id)
-    lvl = level if level in ("file", "symbol") else "file"
     cap = min(max(top, 10), _MAX_VIZ_NODES)
-    data, env = cg.visualize(level=lvl, scope=scope or None, top=cap)
+    mc = min_confidence or None
+    lang = language or None
+    m = (mode or "").strip().lower()
+    if m == "modules":
+        m = "file"
+    if m == "symbols":
+        m = "symbol"
+
+    if m in _VIZ_MODES:
+        # modo investigativo semeado (ou o grafo de domínios)
+        sym = (symbol or "").strip() or None
+        if m in _SEEDED_MODES and not sym:
+            return {"level": m, "nodes": [], "links": [], "domains": [],
+                    "warnings": [f"o modo '{m}' precisa de um símbolo (função/classe) para partir"]}
+        data, env = cg.visualize(m, symbol=sym, depth=max(1, min(depth, 5)), top=cap,
+                                  min_confidence=mc, language=lang)
+        return {
+            "level": data.get("mode") or data.get("level") or m,
+            "nodes": [_norm_viz_node(n) for n in (data.get("nodes") or [])],
+            "links": [_norm_viz_link(e) for e in (data.get("links") or [])],
+            "domains": data.get("domains") or [],
+            "warnings": env.warnings,
+        }
+
+    lvl = level if level in ("file", "symbol") else "file"
+    data, env = cg.visualize(level=lvl, scope=scope or None, top=cap,
+                             min_confidence=mc, language=lang)
     nodes = data.get("nodes", [])
     links = data.get("links", [])
     domains = data.get("domains", [])
@@ -629,7 +687,7 @@ def visualize(user_id: str, project_id: str, level: str = "file", scope: str = "
     # (`edges.src` NULL — resolvers de nível 0 como HTML→CSS) ou quando nenhum
     # arquivo tem aresta cruzada. Sem isto o usuário via "Sem dados suficientes"
     # com o painel dizendo "2 arquivos, 22 símbolos, 23 relações".
-    if lvl == "file" and not nodes and not scope:
+    if lvl == "file" and not nodes and not scope and not mc and not lang:
         try:
             nodes, links = _file_graph_fallback(cg.query.conn, cap)
             if nodes:
@@ -639,8 +697,8 @@ def visualize(user_id: str, project_id: str, level: str = "file", scope: str = "
             logger.warning("fallback do grafo por arquivo falhou: %s", exc)
     return {
         "level": data.get("level", lvl),
-        "nodes": nodes,
-        "links": links,
+        "nodes": [_norm_viz_node(n) for n in nodes],
+        "links": [_norm_viz_link(e) for e in links],
         "domains": domains,
         "warnings": env.warnings,
     }
@@ -752,6 +810,113 @@ def communities(user_id: str, project_id: str, limit: int = 20, min_size: int = 
             for c in (rows or [])
         ],
         "meta": meta or {},
+        "warnings": env.warnings,
+    }
+
+
+def change_impact(user_id: str, project_id: str, target: str, depth: int = 3) -> dict:
+    """Impacto de um CONJUNTO de mudanças — recebe PATHS ou um DIFF (não um fqn):
+    quais símbolos declarados nos arquivos mudados têm dependentes, e o fecho
+    transitivo deles (o que revisar/re-testar). Orientado ao diff real do agente."""
+    cg = _get_graph(user_id, project_id)
+    data, env = cg.change_impact(target, depth=max(1, min(depth, 5)))
+    return {
+        "changed_files": (data.get("changed_files") or [])[:_MAX_RESULTS],
+        "changed_symbols": [
+            {"fqn": s.get("fqn"), "path": s.get("path"), "line": s.get("start_line")}
+            for s in (data.get("changed_symbols") or [])[:_MAX_RESULTS]
+        ],
+        "impacted": [
+            {
+                "fqn": e.get("fqn"), "path": e.get("path"), "line": e.get("start_line"),
+                "depth": e.get("depth"), "confidence": e.get("confidence"), "via": e.get("via"),
+            }
+            for e in (data.get("impacted") or [])[:_MAX_RESULTS]
+        ],
+        "n_changed": data.get("n_changed"),
+        "n_impacted": data.get("n_impacted"),
+        "warnings": env.warnings,
+    }
+
+
+def affected_modules(user_id: str, project_id: str, target: str, depth: int = 3) -> dict:
+    """`change_impact` agregado por ARQUIVO/módulo: quais módulos uma mudança toca
+    e com que profundidade — visão de alto nível p/ o agente decidir o que abrir."""
+    cg = _get_graph(user_id, project_id)
+    data, env = cg.find_affected_modules(target, depth=max(1, min(depth, 5)))
+    return {
+        "changed_files": (data.get("changed_files") or [])[:_MAX_RESULTS],
+        "modules": [
+            {
+                "path": m.get("path"), "count": m.get("count"),
+                "min_depth": m.get("min_depth"), "symbols": (m.get("symbols") or [])[:6],
+            }
+            for m in (data.get("modules") or [])[:_MAX_RESULTS]
+        ],
+        "n_modules": data.get("n_modules"),
+        "warnings": env.warnings,
+    }
+
+
+def related_tests(user_id: str, project_id: str, selector: str, depth: int = 3) -> dict:
+    """Testes que exercitam um símbolo: callers transitivos que moram em arquivos
+    de teste (test_*, *_test, *Spec…) — heurística sobre o call graph, "o que já
+    cobre isto hoje". Confiança sempre junto (é estática)."""
+    cg = _get_graph(user_id, project_id)
+    data, env = cg.find_related_tests(selector, depth=max(1, min(depth, 4)))
+    return {
+        "symbol": _short(data.get("symbol")),
+        "tests": [
+            {
+                "test": t.get("test"), "path": t.get("path"), "line": t.get("line"),
+                "depth": t.get("depth"), "confidence": t.get("confidence"),
+            }
+            for t in (data.get("tests") or [])[:_MAX_RESULTS]
+        ],
+        "n": data.get("n"),
+        "warnings": env.warnings,
+    }
+
+
+def explain(user_id: str, project_id: str, selector: str) -> dict:
+    """Ficha rica de um símbolo p/ decidir SEM reler o código: assinatura/doc/span
+    + contagens + vizinhança imediata (top callers/callees c/ confiança) + domínio.
+    Sem custo de LLM (é o `info` turbinado)."""
+    cg = _get_graph(user_id, project_id)
+    data, env = cg.explain_symbol(selector)
+    return {
+        "symbol": _short(data.get("symbol")),
+        "children": [
+            {"name": c.get("name"), "kind": c.get("kind"), "line": c.get("start_line")}
+            for c in (data.get("children") or [])[:_MAX_RESULTS]
+        ],
+        "counts": data.get("counts") or {},
+        "domain": data.get("domain"),
+        "callers": [
+            {"fqn": e.get("fqn"), "confidence": e.get("confidence")}
+            for e in (data.get("callers") or [])[:_MAX_RESULTS]
+        ],
+        "callees": [
+            {"fqn": e.get("fqn"), "confidence": e.get("confidence")}
+            for e in (data.get("callees") or [])[:_MAX_RESULTS]
+        ],
+        "warnings": env.warnings,
+    }
+
+
+def suggest_files(user_id: str, project_id: str, task: str, limit: int = 8) -> dict:
+    """Arquivos mais relevantes p/ uma TAREFA em linguagem natural: extrai termos,
+    casa símbolos e ranqueia por importância no grafo (PageRank) + nº de casamentos.
+    Ponto de partida do agente num projeto desconhecido — 'por onde começo pra X'."""
+    cg = _get_graph(user_id, project_id)
+    data, env = cg.suggest_files_to_read(task, limit=max(1, min(limit, 20)))
+    return {
+        "task": data.get("task"),
+        "tokens": data.get("tokens") or [],
+        "files": [
+            {"path": f.get("path"), "score": f.get("score"), "matches": (f.get("matches") or [])[:5]}
+            for f in (data.get("files") or [])[:_MAX_RESULTS]
+        ],
         "warnings": env.warnings,
     }
 

@@ -184,6 +184,65 @@ async def task_diff(user_id: str, task_id: str) -> dict[str, Any]:
         await eng.dispose()
 
 
+def _names(root: Path, base: str) -> list[str]:
+    """Arquivos tocados por uma tarefa (vs a base) — barato (--name-only)."""
+    proc = graph_service._git(root, "diff", "--name-only", base)
+    return [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+
+
+async def synthesize_merge(user_id: str, project_id: str) -> dict[str, Any]:
+    """Síntese assistida de merge: reúne as tarefas ABERTAS (running/awaiting_review)
+    do projeto, os arquivos que cada uma toca e as SOBREPOSIÇÕES entre elas (arquivo
+    mexido por >1 tarefa = risco de conflito). Não mescla nada — devolve o material
+    para o orquestrador propor a ordem de integração e resolver conflitos antes de
+    chamar `merge` tarefa a tarefa. Cada worktree é independente, então o git só vê o
+    conflito no momento do merge; esta visão antecipa isso."""
+    eng = _engine()
+    try:
+        Session = async_sessionmaker(eng, expire_on_commit=False)
+        async with Session() as db:
+            try:
+                pid = uuid.UUID(str(project_id))
+            except ValueError:
+                return {"error": "projeto inválido"}
+            rows = list(await db.scalars(
+                select(CodespaceTask).where(
+                    CodespaceTask.project_id == pid,
+                    CodespaceTask.user_id == uuid.UUID(str(user_id)),
+                    CodespaceTask.status.in_(("running", "awaiting_review")),
+                ).order_by(CodespaceTask.created_at)
+            ))
+            tasks: list[dict[str, Any]] = []
+            by_file: dict[str, list[str]] = {}
+            for t in rows:
+                wt = Path(t.worktree_path) if t.worktree_path else None
+                files = (
+                    await run_in_threadpool(_names, wt, t.base_branch or "main")
+                    if wt and wt.exists() else []
+                )
+                for f in files:
+                    by_file.setdefault(f, []).append(str(t.id))
+                tasks.append({
+                    "id": str(t.id), "title": t.title or "", "agent": t.agent or "",
+                    "status": t.status, "test_status": t.test_status,
+                    "diff_stat": t.diff_stat or {}, "files": files[:60],
+                })
+            overlaps = [
+                {"file": f, "tasks": ids}
+                for f, ids in sorted(by_file.items()) if len(ids) > 1
+            ]
+            note = (
+                "Sem tarefas abertas para integrar." if not tasks else
+                ("Nenhuma sobreposição de arquivos — as tarefas podem ser mescladas em qualquer ordem."
+                 if not overlaps else
+                 "Há arquivos tocados por mais de uma tarefa (abaixo, em `overlaps`): mescle uma, "
+                 "revise/rebase as outras e resolva o conflito ANTES de mesclá-las.")
+            )
+            return {"tasks": tasks, "overlaps": overlaps, "n_awaiting": len(tasks), "note": note}
+    finally:
+        await eng.dispose()
+
+
 # --------------------------------------------------------------------------- #
 # Mesclar / PR / descartar
 # --------------------------------------------------------------------------- #

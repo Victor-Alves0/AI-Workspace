@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, BookOpen, Box, Brain, Camera, Check, ChevronDown, ChevronRight, Ear, FileText, Gauge, Info, Pin, Plus, Search, Settings, ShieldAlert, Sliders, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
+import { ArrowLeft, BookOpen, Box, Brain, Camera, Check, ChevronDown, ChevronRight, Ear, FileText, Gauge, GitBranch, Info, Pin, Plus, Search, Settings, ShieldAlert, Sliders, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { fileToAvatarDataUrl } from "@/lib/image";
 import type { KnowledgeBase, MemoryBank, Model, ModelConfig, Skill, SystemTool, Tool } from "@/lib/types";
@@ -560,6 +560,13 @@ export default function ModelEditor({
   const openWakeSettings = () =>
     window.dispatchEvent(new CustomEvent("aiw:open-settings", { detail: { view: "assistant-voice" } }));
   const team: string[] = Array.isArray(subCfg.team) ? subCfg.team : [];
+  // keys dos operários que trabalham em worktree ISOLADO (por-operário). Legado: bool
+  // global `worktree_isolation` = todos. Alterna a inclusão de um id no conjunto.
+  const isolate: string[] = Array.isArray(subCfg.isolate)
+    ? subCfg.isolate
+    : (subCfg.worktree_isolation ? team : []);
+  const toggleIsolate = (id: string) =>
+    setSubCfg({ isolate: isolate.includes(id) ? isolate.filter((x) => x !== id) : [...isolate, id] });
   const teamCandidates = useMemo(() => myModels.filter((m) => m.id !== model?.id), [myModels, model]);
   const [teamModal, setTeamModal] = useState(false);
   // itens do seletor de operários (TransferModal): nome + modelo-base como sublabel
@@ -779,14 +786,20 @@ export default function ModelEditor({
     // config dos subagentes (time/modo/limites) — só quando a permissão está ligada
     if (subOn) {
       const sc = filterConfig.subagents ?? {};
+      const scTeam: string[] = Array.isArray(sc.team) ? sc.team : [];
+      // isolamento POR-OPERÁRIO: guarda só as keys que ainda estão no time. Legado:
+      // se não há lista `isolate` mas o bool global antigo estava ligado, migra p/
+      // "todos isolados" (mantém o comportamento da config antiga ao reeditá-la).
+      const scIsolate: string[] = (Array.isArray(sc.isolate) ? sc.isolate : (sc.worktree_isolation ? scTeam : []))
+        .filter((x: string) => scTeam.includes(x));
       cleanFilterConfig.subagents = {
-        team: Array.isArray(sc.team) ? sc.team : [],
+        team: scTeam,
         mode: sc.mode === "parallel" ? "parallel" : "sequential",
         max_calls: Math.max(1, Math.min(10, Number(sc.max_calls) || 4)),
         max_depth: Math.max(1, Math.min(3, Number(sc.max_depth) || 2)),
         pass_context: !!sc.pass_context,
         worker_memory: !!sc.worker_memory,
-        worktree_isolation: !!sc.worktree_isolation,
+        isolate: scIsolate,
       };
     }
     // assistente de voz — só persiste quando ligado
@@ -1605,7 +1618,16 @@ export default function ModelEditor({
                           <Box size={13} className="shrink-0 text-accent-hover" />
                           <span className="flex-1 truncate text-sm text-ink">{teamLabel(tid)}</span>
                           <button
-                            onClick={() => setSubCfg({ team: team.filter((x) => x !== tid) })}
+                            onClick={() => toggleIsolate(tid)}
+                            title={isolate.includes(tid)
+                              ? "Worktree isolado: LIGADO — trabalha numa branch própria (sem colidir em paralelo); o resultado vira uma tarefa a revisar"
+                              : "Worktree isolado: desligado — escreve/lê no projeto direto (ideal para operários de revisão/leitura)"}
+                            className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[10px] font-medium transition-colors ${isolate.includes(tid) ? "bg-accent/15 text-accent-hover" : "text-muted hover:text-ink"}`}
+                          >
+                            <GitBranch size={12} /> worktree
+                          </button>
+                          <button
+                            onClick={() => setSubCfg({ team: team.filter((x) => x !== tid), isolate: isolate.filter((x) => x !== tid) })}
                             title="Remover do time"
                             className="rounded-md p-1 text-muted transition-colors hover:text-red-300"
                           >
@@ -1648,12 +1670,11 @@ export default function ModelEditor({
                     </div>
                     <Toggle on={!!subCfg.worker_memory} onChange={(v) => setSubCfg({ worker_memory: v })} />
                   </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm text-ink">Operários em worktree isolado</p>
-                      <p className="text-[11px] text-muted">Em projetos do Codespace, cada operário trabalha numa branch própria (sem colidir em paralelo); o resultado vira uma tarefa a revisar/mesclar.</p>
-                    </div>
-                    <Toggle on={!!subCfg.worktree_isolation} onChange={(v) => setSubCfg({ worktree_isolation: v })} />
+                  <div className="flex items-start gap-2 rounded-lg bg-surface2/60 px-3 py-2">
+                    <GitBranch size={13} className="mt-0.5 shrink-0 text-muted" />
+                    <p className="text-[11px] text-muted">
+                      <span className="text-ink-soft">Worktree isolado por-operário:</span> use o botão <span className="font-mono">worktree</span> em cada operário do time acima. Ligado, ele trabalha numa branch própria em projetos do Codespace (sem colidir em paralelo) e o resultado vira uma tarefa a revisar/mesclar. Deixe desligado para revisores (só leitura) — eles não abrem tarefa.
+                    </p>
                   </div>
                 </div>
                 <p className="text-[11px] text-muted">

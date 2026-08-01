@@ -743,6 +743,107 @@ def test_signature_change_is_reported_on_edit(fake_git_project):
     assert ch.get("signature_changed"), ch
 
 
+# --------------------------------------------------------------------------- #
+# GraphCodeMap v0.1.0: consultas de alto nível expostas ao modelo
+# (explain / suggest_files / related_tests / change_impact / affected_modules)
+# --------------------------------------------------------------------------- #
+def test_explain_bundles_info_and_neighborhood(indexed_project):
+    user_id, project_id, _root = indexed_project
+    out = gs.explain(user_id, project_id, "save_user")
+    assert out["symbol"]["fqn"].endswith("save_user")
+    # explain traz a vizinhança imediata pronta (handle chama save_user)
+    caller_fqns = {c["fqn"] for c in out["callers"]}
+    assert any("handle" in f for f in caller_fqns), out["callers"]
+    assert "counts" in out and "warnings" in out
+
+
+def test_suggest_files_ranks_by_task(indexed_project):
+    user_id, project_id, _root = indexed_project
+    out = gs.suggest_files(user_id, project_id, "save the user record", limit=5)
+    paths = {f["path"] for f in out["files"]}
+    assert "db.py" in paths or "app.py" in paths, out
+    # cada arquivo vem compacto: path/score/matches
+    assert set(out["files"][0]) == {"path", "score", "matches"}
+    assert "tokens" in out
+
+
+def test_related_tests_finds_covering_tests(indexed_project):
+    user_id, project_id, root = indexed_project
+    (root / "test_users.py").write_text(
+        "from db import save_user\n\ndef test_save():\n    save_user('a')\n"
+    )
+    gs._get_graph(user_id, project_id).index()
+    out = gs.related_tests(user_id, project_id, "save_user")
+    assert out["n"] >= 1, out
+    assert any("test_users.py" == t["path"] for t in out["tests"]), out
+
+
+def test_change_impact_from_a_path(indexed_project):
+    user_id, project_id, _root = indexed_project
+    out = gs.change_impact(user_id, project_id, "db.py")
+    # mudar db.py (save_user) atinge quem chama save_user (handle) transitivamente
+    impacted = {e["fqn"] for e in out["impacted"]}
+    assert any("handle" in f for f in impacted), out
+    assert out["n_impacted"] >= 1
+    assert "db.py" in out["changed_files"]
+
+
+def test_affected_modules_groups_by_file(indexed_project):
+    user_id, project_id, _root = indexed_project
+    out = gs.affected_modules(user_id, project_id, "db.py")
+    module_paths = {m["path"] for m in out["modules"]}
+    assert "app.py" in module_paths, out
+    assert out["n_modules"] >= 1
+
+
+def test_visualize_symbol_level_normalizes_nodes(indexed_project):
+    user_id, project_id, _root = indexed_project
+    out = gs.visualize(user_id, project_id, level="symbol", top=100)
+    assert out["nodes"], out
+    for nd in out["nodes"]:
+        assert set(["id", "label", "domain", "n"]).issubset(nd), nd
+    for e in out["links"]:
+        assert set(["source", "target", "w"]).issubset(e), e
+
+
+def test_visualize_neighborhood_mode_marks_seed(indexed_project):
+    user_id, project_id, _root = indexed_project
+    out = gs.visualize(user_id, project_id, mode="neighborhood", symbol="save_user", depth=2)
+    assert out["nodes"], out
+    # o símbolo de partida vem marcado como semente
+    assert any(nd.get("seed") for nd in out["nodes"]), out
+
+
+def test_visualize_seeded_mode_without_symbol_warns(indexed_project):
+    user_id, project_id, _root = indexed_project
+    out = gs.visualize(user_id, project_id, mode="callers", symbol="")
+    assert out["nodes"] == []
+    assert out["warnings"], out
+
+
+def test_returns_whitelist_covers_new_high_level_actions(indexed_project):
+    """Mesma armadilha do status/doctor: uma chave nova que não esteja no
+    whitelist some antes de chegar ao modelo. Compara contra o retorno REAL."""
+    from aiworkspace.tools.sift_service import CODE_GRAPH_RETURNS
+
+    user_id, project_id, root = indexed_project
+    (root / "test_users.py").write_text(
+        "from db import save_user\n\ndef test_save():\n    save_user('a')\n"
+    )
+    gs._get_graph(user_id, project_id).index()
+    allowed = set(CODE_GRAPH_RETURNS)
+    cases = {
+        "explain": gs.explain(user_id, project_id, "save_user"),
+        "suggest_files": gs.suggest_files(user_id, project_id, "save the user"),
+        "related_tests": gs.related_tests(user_id, project_id, "save_user"),
+        "change_impact": gs.change_impact(user_id, project_id, "db.py"),
+        "affected_modules": gs.affected_modules(user_id, project_id, "db.py"),
+    }
+    for action, out in cases.items():
+        missing = set(out) - allowed
+        assert not missing, f"'{action}' perde as chaves {sorted(missing)} no retorno"
+
+
 def test_unchanged_write_returns_no_symbol_changes(fake_git_project):
     """Commit sem mudança de símbolo (mesmo conteúdo/só corpo) não polui o
     retorno com um campo vazio."""

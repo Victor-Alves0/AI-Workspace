@@ -291,7 +291,7 @@ async def send_message(
         pass_context=sub_conf.get("pass_context", False),
         worker_memory=sub_conf.get("worker_memory", False),
         project_id=str(chat.project_id) if chat.project_id else None,
-        worktree_isolation=sub_conf.get("worktree_isolation", False),
+        isolate_keys=frozenset(sub_conf.get("isolate") or []),
     ) if sub_specs else None
     source = run_turn_guarded(
         guards=guards,
@@ -501,7 +501,7 @@ async def regenerate_message(
         pass_context=sub_conf.get("pass_context", False),
         worker_memory=sub_conf.get("worker_memory", False),
         project_id=str(chat.project_id) if chat.project_id else None,
-        worktree_isolation=sub_conf.get("worktree_isolation", False),
+        isolate_keys=frozenset(sub_conf.get("isolate") or []),
     ) if sub_specs else None
     source = run_turn_guarded(
         guards=guards,

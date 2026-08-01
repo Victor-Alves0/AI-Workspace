@@ -97,6 +97,35 @@ def spawn_host(command: str, root: Path, env_extra: dict | None = None) -> subpr
     )
 
 
+def _setsid_preexec():
+    """POSIX: só o grupo próprio (p/ matar a árvore) — SEM RLIMIT_CPU."""
+    if _IS_WINDOWS:
+        return None
+
+    def _apply() -> None:  # pragma: no cover - roda no filho
+        try:
+            os.setsid()
+        except Exception:
+            pass
+
+    return _apply
+
+
+def spawn_server(command: str, root: Path, env_extra: dict | None = None) -> subprocess.Popen:
+    """Como `spawn_host`, mas SEM RLIMIT_CPU: um servidor de preview (dev server/
+    backend) roda por horas e o limite de CPU o mataria. Mantém o env higienizado e o
+    grupo de processos próprio (p/ `kill_tree` derrubar a árvore). Só o preview_service
+    usa isto — o run normal continua com o limite de CPU."""
+    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if _IS_WINDOWS else 0
+    return subprocess.Popen(
+        command, shell=True, cwd=str(root),
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, errors="replace", env=_clean_env(env_extra),
+        preexec_fn=_setsid_preexec(),
+        creationflags=creationflags,
+    )
+
+
 def cap_output(out: str | None) -> tuple[str, bool]:
     """Corta a saída ao teto de bytes (mantém a CAUDA — o fim do build/log é o que
     importa). Devolve (texto, truncado?)."""

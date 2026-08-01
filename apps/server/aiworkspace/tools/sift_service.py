@@ -324,8 +324,8 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # chama quem, blast radius) em vez de grep — menos rodadas de leitura, mais
     # precisão. Confiança (certain/inferred/possible) e avisos de completude NUNCA
     # são escondidos do modelo.
-    {"path": "code.graph.query", "name": "Grafo de Código", "description": "Consulta o grafo de código do projeto vinculado: encontra símbolos, quem chama quem, o impacto de mudar algo e a vizinhança de uma função/classe.",
-     "model_desc": "Query the project's code graph: find symbols, who calls what, blast radius of a change, and a symbol's neighborhood. Use INSTEAD of grepping when a project is attached."},
+    {"path": "code.graph.query", "name": "Grafo de Código", "description": "Consulta o grafo de código do projeto vinculado: encontra símbolos, quem chama quem, o impacto de mudar algo, a vizinhança de uma função/classe, quais arquivos abrir para uma tarefa, quais testes cobrem um símbolo e o raio de impacto de um diff.",
+     "model_desc": "Query the project's code graph: find symbols, who calls what, blast radius of a change or of a whole diff, a symbol's neighborhood, which files to read for a task, and which tests cover a symbol. Use INSTEAD of grepping when a project is attached."},
     {"path": "code.files.browse", "name": "Arquivos do Projeto", "description": "Lista, lê e busca texto nos arquivos do projeto vinculado, além do histórico de commits (respeitando o escopo liberado/bloqueado).",
      "model_desc": "List, read and text-search the attached project's files, plus its git history/diffs (respects the project's allow/deny scope)."},
     # Escrita: SEPARADA da leitura (code.files.browse) por princípio de menor
@@ -348,6 +348,10 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # Jobs de background: espera/consulta/lista dos comandos longos disparados pelo exec.
     {"path": "code.exec.jobs", "name": "Comandos em Background", "description": "Espera, consulta o status ou lista os comandos longos (downloads/instalações/builds) que estão rodando em segundo plano no projeto.",
      "model_desc": "Wait for, check the status of, or list background commands (long downloads/installs/builds) started by code.exec.run. Use action=wait to get a job's result now, or end your reply and get woken up when it finishes."},
+    # Preview vivo: sobe um dev server/backend e o mantém no ar entre turnos p/ o usuário
+    # abrir e testar o app rodando (com backend), não só ver o arquivo.
+    {"path": "code.preview.serve", "name": "Pôr no Ar (Preview)", "description": "Sobe o app do projeto vinculado (dev server/backend) e o mantém no ar para o usuário abrir e testar rodando de verdade — não só como arquivo. Ligar/parar/ver logs; padrão localhost, ou expor na LAN a pedido.",
+     "model_desc": "Put the attached project's app ON THE AIR: start a long-running dev server/backend (npm run dev, python app.py, gradlew bootRun…) and keep it up across turns so the user can open and test the running app with its backend. Actions start/status/logs/stop/list; expose localhost (default) or lan. Requires execution enabled. Use when asked to 'run it'/'serve it'/'put it up to test'."},
     # Tarefas/worktrees: cria uma branch isolada (worktree) por tarefa p/ o agente
     # trabalhar sem colidir com o `src` nem com outros agentes; lista/inspeciona o diff
     # e mescla/descarta. O merge normalmente é aprovado pelo humano na UI.
@@ -723,10 +727,16 @@ CODE_GRAPH_RETURNS = [
     "symbols", "target", "callers", "callees", "references", "affects", "symbol",
     "children", "calls", "called_by", "counts", "domain", "communities", "meta",
     "total_found", "total_files", "warnings", "files", "edges", "error",
+    # consultas de alto nível (v0.1.0): change_impact / affected_modules /
+    # related_tests / suggest_files (explain reusa symbol/children/counts/domain/
+    # callers/callees, já acima).
+    "changed_files", "changed_symbols", "impacted", "n_changed", "n_impacted",
+    "modules", "n_modules", "tests", "n", "task", "tokens",
     # diagnóstico (status/doctor)
     "by_language", "edges_resolved", "edges_dangling", "parse_partial",
     "parse", "parse_failed_total", "parse_failed_sample", "call_edges",
     "confidence", "certain_pct", "dangling", "l1_resolvers",
+    "l1_missing",  # doctor() >= v0.1.0: quais resolvers L1 NÃO estão instalados
     "last_full_scan_age_s", "indexer_version",
     "root_name",  # doctor() >= 45a35c4: só o NOME do diretório (não vaza path)
 ]
@@ -1159,7 +1169,8 @@ def _register_builtins(
     # instância SIFT é cacheada por-USUÁRIO (não por-chat) — mesma solução do
     # navegador (current_chat_id) e do mesmo motivo.
     if (want("code.graph.query") or want("code.files.browse") or want("code.files.write")
-            or want("code.flow.analyze") or want("code.exec.run") or want("code.task.manage")):
+            or want("code.flow.analyze") or want("code.exec.run") or want("code.task.manage")
+            or want("code.preview.serve")):
         from ..codespace import graph_service
 
         def _cs_project():
@@ -1231,19 +1242,28 @@ def _register_builtins(
                 "'callees' (what this symbol calls), 'references' (EVERY reference, not just calls "
                 "— includes imports), 'impact' (what breaks if you change this — transitive callers), "
                 "'ego' (neighborhood: parent/children/calls/called_by), 'info' (definition + how many "
-                "callers/callees/references it has), 'communities' (how the codebase clusters into "
-                "modules), 'status' (index counts), 'doctor' (index health: files that failed to "
-                "parse, %% of certain edges — use when a symbol you expect is missing). Edges carry "
-                "a confidence level (certain/inferred/possible) — static analysis, so treat "
-                "'possible' as a hint, not a fact."
+                "callers/callees/references it has), 'explain' (info + top callers/callees + domain in "
+                "one shot — decide about a symbol WITHOUT re-reading its code), 'communities' (how the "
+                "codebase clusters into modules), 'suggest_files' (given a natural-language TASK, the "
+                "files most worth opening first — START HERE when you don't know a symbol name yet), "
+                "'related_tests' (which existing tests exercise a symbol), 'change_impact' (blast "
+                "radius of a SET of changes — pass `target` as paths or a diff, not an fqn — what to "
+                "re-review/re-test), 'affected_modules' (change_impact grouped by file/module), "
+                "'status' (index counts), 'doctor' (index health: files that failed to parse, %% of "
+                "certain edges — use when a symbol you expect is missing). Edges carry a confidence "
+                "level (certain/inferred/possible) — static analysis, so treat 'possible' as a hint, "
+                "not a fact."
             ),
             params={
                 "action": ("string:r::overview | find | callers | callees | references | impact | "
-                           "ego | info | communities | status | doctor"),
+                           "ego | info | explain | communities | suggest_files | related_tests | "
+                           "change_impact | affected_modules | status | doctor"),
                 "query": "string:o::find: symbol name or substring to search for",
-                "symbol": "string:o::callers/callees/references/impact/ego/info: the fully-qualified name (fqn) from a previous 'find'",
-                "depth": "number:o::callers/callees/impact: hops to follow (1-4, impact 1-5)",
-                "limit": "number:o:10:find: max matches to return",
+                "symbol": "string:o::callers/callees/references/impact/ego/info/explain/related_tests: the fully-qualified name (fqn) from a previous 'find'",
+                "task": "string:o::suggest_files: a natural-language description of what you want to do",
+                "target": "string:o::change_impact/affected_modules: changed paths (comma/space-separated) or a unified diff",
+                "depth": "number:o::callers/callees/impact/related_tests/change_impact: hops to follow (1-4, impact/change 1-5)",
+                "limit": "number:o:10:find/suggest_files: max matches to return",
                 "scope": "string:o::overview: restrict to a subtree (e.g. 'src/api')",
                 "token_budget": "number:o:2000:overview: how big the map may be (200-8000)",
                 "kind": "string:o::references: filter by reference kind (e.g. 'calls', 'imports')",
@@ -1252,11 +1272,13 @@ def _register_builtins(
             examples=["give me an overview of this project", "find the function validate_token",
                       "who calls run_turn?", "what does handle_request call?",
                       "find all references to Settings", "what breaks if I change _register_builtins?",
-                      "why can't you find my Rust files?"],
+                      "which files should I read to add rate limiting?", "what tests cover run_turn?",
+                      "what's the blast radius of my current diff?", "why can't you find my Rust files?"],
         )
         def _code_graph_query(action: str = "", query: str = "", symbol: str = "",
                                depth: Any = None, limit: Any = 10, scope: str = "",
-                               token_budget: Any = 2000, kind: str = "") -> dict[str, Any]:
+                               token_budget: Any = 2000, kind: str = "",
+                               task: str = "", target: str = "") -> dict[str, Any]:
             proj, err = _cs_project()
             if err:
                 return err
@@ -1284,7 +1306,19 @@ def _register_builtins(
                     if not (query or "").strip():
                         return {"error": "provide 'query' (symbol name to search for)"}
                     return graph_service.find(uid, pid, query.strip(), limit=_int(limit, 10))
-                if act in ("callers", "callees", "references", "impact", "ego", "info"):
+                if act == "suggest_files":
+                    if not (task or "").strip():
+                        return {"error": "provide 'task' (what you want to do, in natural language)"}
+                    return graph_service.suggest_files(uid, pid, task.strip(), limit=_int(limit, 8))
+                if act in ("change_impact", "affected_modules"):
+                    if not (target or "").strip():
+                        return {"error": f"provide 'target' (changed paths or a diff) for '{act}'"}
+                    tgt, dep = target.strip(), _int(depth, 3)
+                    if act == "change_impact":
+                        return graph_service.change_impact(uid, pid, tgt, depth=dep)
+                    return graph_service.affected_modules(uid, pid, tgt, depth=dep)
+                if act in ("callers", "callees", "references", "impact", "ego", "info",
+                           "explain", "related_tests"):
                     if not (symbol or "").strip():
                         return {"error": f"provide 'symbol' (fqn from a previous 'find') for '{act}'"}
                     sym = symbol.strip()
@@ -1298,6 +1332,10 @@ def _register_builtins(
                         return graph_service.impact(uid, pid, sym, depth=_int(depth, 3))
                     if act == "info":
                         return graph_service.symbol_info(uid, pid, sym)
+                    if act == "explain":
+                        return graph_service.explain(uid, pid, sym)
+                    if act == "related_tests":
+                        return graph_service.related_tests(uid, pid, sym, depth=_int(depth, 3))
                     return graph_service.ego(uid, pid, sym)
                 if act == "communities":
                     return graph_service.communities(uid, pid, limit=_int(limit, 20))
@@ -1306,7 +1344,8 @@ def _register_builtins(
                 if act == "doctor":
                     return graph_service.doctor(uid, pid, failed_limit=_int(limit, 20))
                 return {"error": f"unknown action '{act}' (use overview/find/callers/callees/"
-                                 "references/impact/ego/info/communities/status/doctor)"}
+                                 "references/impact/ego/info/explain/communities/suggest_files/"
+                                 "related_tests/change_impact/affected_modules/status/doctor)"}
             except Exception as exc:  # noqa: BLE001 - erro do grafo não quebra o turno
                 return {"error": str(exc)[:300]}
 
@@ -1642,6 +1681,90 @@ def _register_builtins(
                 return asyncio.run(exec_jobs.wait_job(jid, to))
             return {"error": f"ação desconhecida '{action}' (use wait/status/list)"}
 
+    if want("code.preview.serve"):
+        from ..codespace import preview_service
+
+        @sift.tool(
+            "code.preview.serve",
+            description=(
+                "Put the project's app ON THE AIR: start a long-running dev server / backend and keep it "
+                "up across turns so the USER can open it and actually test the running app (with backend), "
+                "not just see files. Use this when asked to 'run it', 'serve it', 'put it up so I can test'. "
+                "`action`: 'start' (launch the server — give the `command` that starts it, e.g. 'npm run "
+                "dev' / 'python app.py' / 'gradlew bootRun', and the `port` it listens on), 'status' "
+                "(is it up yet? + recent logs — poll a few seconds after start), 'logs' (recent output, to "
+                "debug a crash), 'stop', 'list'. `expose`: 'localhost' (default, safe — only this machine / "
+                "the embedded preview panel) or 'lan' (reachable on the local network, e.g. to test on a "
+                "phone) — set 'lan' ONLY when the user asks to expose it on the network, and for frameworks "
+                "that need it also pass the host flag in the command (e.g. `vite --host 0.0.0.0`). The dev "
+                "server runs without the exec timeout (it's meant to stay up). Needs the same 'Permitir "
+                "execução' that code.exec.run needs. Prefer background installs (code.exec.run) BEFORE "
+                "starting the server."
+            ),
+            params={
+                "action": "string:r::start | status | logs | stop | list",
+                "command": "string:o::start: the command that starts the server (e.g. 'npm run dev')",
+                "port": "number:o::start: the port the server listens on (1024-65535)",
+                "expose": "string:o:localhost:start: 'localhost' (default) or 'lan' (reachable on the network)",
+                "preview_id": "string:o::status/logs/stop: the id returned by 'start'/'list'",
+                "confirm": "boolean:o::set true only after the user confirmed starting/exposing the server",
+            },
+            returns=["id", "command", "port", "expose", "status", "url_hint", "age_seconds",
+                     "exit_code", "logs", "previews", "note", "ok", "stopped", "error",
+                     "kind", "question", "options", "allow_custom", "custom_label"],
+            risk=True,
+            examples=["run this app so I can test it", "put the site up on localhost",
+                      "expose it on the LAN so I can open it on my phone", "is the server up yet?",
+                      "show the server logs", "stop the preview"],
+        )
+        def _code_preview_serve(action: str = "", command: str = "", port: Any = None,
+                                expose: str = "localhost", preview_id: str = "",
+                                confirm: Any = None) -> dict[str, Any]:
+            proj, confirm_on, err = _cs_project_ctx()
+            if err:
+                return err
+            uid, pid = str(proj.user_id), str(proj.id)
+            act = (action or "").strip().lower()
+            if act == "list":
+                return preview_service.list_previews(uid, project_id=pid)
+            pvid = (preview_id or "").strip()
+            if act == "status":
+                if not pvid:
+                    return {"error": "informe preview_id"}
+                return preview_service.preview_status(uid, pvid)
+            if act == "logs":
+                if not pvid:
+                    return {"error": "informe preview_id"}
+                return preview_service.preview_status(uid, pvid, with_logs=True, tail=120)
+            if act == "stop":
+                if not pvid:
+                    return {"error": "informe preview_id"}
+                return preview_service.stop_preview(uid, pvid)
+            if act == "start":
+                bad = _cs_require_ready(proj)
+                if bad:
+                    return bad
+                if not getattr(proj, "exec_enabled", False):
+                    return {"error": "execução desativada neste projeto. O dono precisa ligar "
+                                     "'Permitir execução' nas Configurações do projeto (Codespace)."}
+                if toolctx.background.get():
+                    return {"error": "preview só em conversa interativa (não em canal/automação)"}
+                cmd = (command or "").strip()
+                if not cmd:
+                    return {"error": "informe 'command' (o que sobe o servidor, ex.: 'npm run dev')"}
+                # subir um servidor exposto na LAN é a ação sensível: confirma quando LAN
+                # (fica alcançável na rede) OU sob o toggle global de confirmação.
+                exp = "lan" if str(expose).lower() in ("lan", "0.0.0.0", "network") else "localhost"
+                if exp == "lan" or confirm_on:
+                    where = "exposto na REDE LOCAL" if exp == "lan" else "em localhost"
+                    block = _cs_confirm_guard(True, f"Subir o servidor do projeto '{proj.name}' {where}?\n`{cmd[:200]}`", confirm)
+                    if block:
+                        return block
+                wt = toolctx.current_codespace_worktree.get()
+                root = graph_service.wt_dir(uid, pid, wt) if wt else graph_service.working_copy_path(uid, pid)
+                return preview_service.start_preview(uid, pid, root, cmd, port, expose=exp)
+            return {"error": f"ação desconhecida '{action}' (use start/status/logs/stop/list)"}
+
     if want("code.task.manage"):
         from ..codespace import worktree_service
 
@@ -1654,10 +1777,13 @@ def _register_builtins(
                 "tree, until it's merged/discarded), 'list' (tasks and their status/diff size), 'diff' "
                 "(the full diff of a task vs its base — pass `task_id`), 'merge' (merge the task into the "
                 "project branch — usually the HUMAN approves this in the UI; set push=true to also push), "
-                "'discard' (throw the worktree away). Use 'open' before delegating parallel coding work."
+                "'discard' (throw the worktree away), 'synthesize' (integration plan for ALL open tasks: "
+                "which files each touches and which are touched by more than one task — the conflict risks "
+                "— so you can propose a merge ORDER and resolve overlaps before merging). Use 'open' before "
+                "delegating parallel coding work, and 'synthesize' after the parallel workers finish."
             ),
             params={
-                "action": "string:r::open | list | diff | merge | discard",
+                "action": "string:r::open | list | diff | merge | discard | synthesize",
                 "title": "string:o::open: a short description of the task",
                 "task_id": "string:o::diff/merge/discard: the task id from 'open'/'list'",
                 "agent": "string:o::open: label of the agent doing the work (optional)",
@@ -1668,10 +1794,12 @@ def _register_builtins(
             returns=["id", "title", "agent", "branch", "base_branch", "status", "diff_stat",
                      "test_status", "created_at", "tasks", "diff", "ok", "merged", "discarded",
                      "already", "conflict", "push", "error",
+                     "overlaps", "n_awaiting", "note",  # synthesize
                      "kind", "question", "options", "allow_custom", "custom_label"],
             risk=True,
             examples=["open an isolated task to refactor the auth module", "list the open tasks",
-                      "show me the diff of that task", "merge the task", "discard this task"],
+                      "show me the diff of that task", "merge the task", "discard this task",
+                      "how should I integrate the parallel tasks?"],
         )
         def _code_task_manage(action: str = "", title: str = "", task_id: str = "",
                                agent: str = "", base: str = "", push: Any = None,
@@ -1695,6 +1823,8 @@ def _register_builtins(
                                                               chat_id=chat_id, base=base))
             if act == "list":
                 return asyncio.run(worktree_service.list_tasks(uid, pid))
+            if act in ("synthesize", "synthesise", "integrate"):
+                return asyncio.run(worktree_service.synthesize_merge(uid, pid))
             if act == "diff":
                 if not tid:
                     return {"error": "informe task_id"}
@@ -1713,7 +1843,7 @@ def _register_builtins(
                 if block:
                     return block
                 return asyncio.run(worktree_service.discard_task(uid, tid))
-            return {"error": f"unknown action '{act}' (use open/list/diff/merge/discard)"}
+            return {"error": f"unknown action '{act}' (use open/list/diff/merge/discard/synthesize)"}
 
     if want("code.flow.analyze"):
         @sift.tool(

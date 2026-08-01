@@ -913,14 +913,17 @@ export interface CodespaceVizNode {
   id: number;
   label: string;
   domain: number | null;
-  weight: number;
+  weight?: number;
   n: number;
+  seed?: boolean;   // modo semeado: o símbolo de partida
+  kind?: string;
 }
 
 export interface CodespaceVizLink {
   source: number;
   target: number;
   w: number;
+  confidence?: "certain" | "inferred" | "possible";
 }
 
 export interface CodespaceViz {
@@ -929,6 +932,19 @@ export interface CodespaceViz {
   links: CodespaceVizLink[];
   domains: { id: number; size: number; label: string | null }[];
   warnings: string[];
+}
+
+// preview vivo (dev server/backend do projeto no ar)
+export interface CodespacePreview {
+  id: string;
+  command: string;
+  port: number;
+  expose: "localhost" | "lan";
+  status: "starting" | "up" | "crashed" | "stopped";
+  url_hint: string;
+  age_seconds: number;
+  exit_code: number | null;
+  logs?: string;
 }
 
 // ---- API pública (chaves, uso) -------------------------------------------- #

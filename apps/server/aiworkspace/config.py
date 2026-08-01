@@ -135,6 +135,10 @@ class Settings(BaseSettings):
     # `code.exec.jobs wait` pode aguardar inline por um job antes de devolver "ainda
     # rodando" (o job segue vivo; o agente pode soltar o turno e ser acordado no fim).
     code_exec_bg_wait_ceiling_seconds: int = 1200
+    # preview vivo (dev server/backend do projeto no ar): idade máxima antes do reaper
+    # derrubar (6h) e teto de servidores no ar simultâneos por usuário.
+    code_preview_max_age_seconds: int = 21_600
+    code_preview_max_per_user: int = 4
     # ciclo de vida dos worktrees: TTL de ociosidade (reaper) e teto por usuário.
     codespace_worktree_ttl_seconds: int = 86_400
     codespace_max_worktrees_per_user: int = 20
