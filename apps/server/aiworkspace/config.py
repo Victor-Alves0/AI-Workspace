@@ -145,13 +145,6 @@ class Settings(BaseSettings):
     # watchdog de wall-clock dos jobs de background: mata a árvore após este tempo (2h),
     # substituindo o bound de wall-clock que o síncrono tem e o background não teria.
     code_exec_bg_max_seconds: int = 7200
-    # Loop autônomo (self-continue): a IA continua a tarefa sozinha até concluir/teto.
-    # Opt-in por-modelo (capability autonomous_loop). max_iterations = teto de continuações
-    # automáticas seguidas antes de pausar e avisar; cost_cap 0 = usa só o orçamento global;
-    # stall_limit = turnos sem mudança no Ledger que contam como "travado".
-    autoloop_max_iterations: int = 6
-    autoloop_task_cost_cap_usd: float = 0.0
-    autoloop_stall_limit: int = 2
     # preview vivo (dev server/backend do projeto no ar): idade máxima antes do reaper
     # derrubar (6h) e teto de servidores no ar simultâneos por usuário.
     code_preview_max_age_seconds: int = 21_600
@@ -189,7 +182,12 @@ class Settings(BaseSettings):
     # → corrige), que precisa de dezenas de passos como Codex/Claude Code/opencode —
     # por isso tem um teto próprio, bem mais alto, aplicado só nesses chats.
     max_tool_iterations: int = 8
-    codespace_max_tool_iterations: int = 40
+    # backstop ALTO (não é o ponto de parada normal): como no Claude Code/Codex, o loop
+    # roda até o MODELO parar de chamar tools; este teto só evita loop infinito. Antes era
+    # 40 e CORTAVA o modelo no meio de tarefas longas (forçava a resposta final). O que
+    # segura o contexto por chamada é o _trim_tool_results; o histórico entre requests é
+    # papel da compactação.
+    codespace_max_tool_iterations: int = 150
 
     # Cache do índice SIFT (.npz por usuário) — string vazia desabilita.
     # A SIFT valida por hash de conteúdo+modelo, então cache velho é ignorado.
