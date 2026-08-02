@@ -166,11 +166,11 @@ async def run_compaction(db: AsyncSession, user: User, chat: Chat, *,
 # --------------------------------------------------------------------------- #
 # Auto-compactação: dispara na entrada do turno quando o contexto passa do limiar
 # --------------------------------------------------------------------------- #
-async def _last_prompt_tokens(db: AsyncSession, chat_id) -> int:
-    """Tokens que o modelo REALMENTE viu na última resposta (usage.prompt_tokens) — o
-    melhor sinal do tamanho atual do contexto."""
-    # o último turno REAL não-compactado (exclui o divisor is_summary, que não tem usage —
-    # senão logo após uma compactação leríamos 0 e nunca mais dispararíamos)
+async def _last_context_tokens(db: AsyncSession, chat_id) -> int:
+    """Tamanho REAL do contexto (usage.context_tokens = prompt da 1ª chamada do último
+    turno). NÃO usa prompt_tokens: ele é a SOMA cumulativa das iterações do loop agêntico
+    (pode dar milhões e não representa o contexto). Exclui o divisor is_summary (sem usage —
+    senão logo após compactar leríamos 0 e nunca mais dispararíamos)."""
     m = (await db.scalars(
         select(Message).where(Message.chat_id == chat_id, Message.role == "assistant",
                               Message.compacted.is_(False), Message.is_summary.is_(False))
@@ -179,7 +179,8 @@ async def _last_prompt_tokens(db: AsyncSession, chat_id) -> int:
     if m is None or not m.usage:
         return 0
     try:
-        return int(m.usage.get("prompt_tokens") or 0)
+        # context_tokens é o campo certo; prompt_tokens (soma) só como fallback grosseiro
+        return int(m.usage.get("context_tokens") or m.usage.get("prompt_tokens") or 0)
     except (TypeError, ValueError):
         return 0
 
@@ -208,7 +209,7 @@ async def maybe_autocompact(db: AsyncSession, user: User, chat: Chat,
     if not s.autocompact_enabled:
         return False
     try:
-        last_tokens = await _last_prompt_tokens(db, chat.id)
+        last_tokens = await _last_context_tokens(db, chat.id)
         if last_tokens <= 0:
             return False
         window = await _model_window(db, user, chat.model) or int(s.autocompact_fallback_window)

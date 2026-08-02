@@ -297,6 +297,8 @@ export interface MessageUsage {
   total_tokens: number;
   reasoning_tokens?: number;
   cached_tokens?: number;
+  /** tamanho REAL do contexto (prompt da 1ª chamada); ≠ prompt_tokens (soma das iterações) */
+  context_tokens?: number;
   /** limite de aviso (tokens) que este turno ultrapassou; ausente = dentro do limite */
   over_budget?: number;
   cost: number;

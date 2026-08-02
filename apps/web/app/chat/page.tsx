@@ -1700,17 +1700,14 @@ export default function ChatPage() {
     const inCtx = messages.filter((m) => !m.compacted);
     for (let i = inCtx.length - 1; i >= 0; i--) {
       const u = inCtx[i].usage;
-      if (u?.total_tokens) {
-        // `prompt_tokens` é CUMULATIVO entre as iterações do loop agêntico: os
-        // tool_results são re-enviados a cada passo (e depois podados), então a
-        // soma pode chegar a milhões e NÃO representa o contexto que persiste —
-        // deixava o medidor mostrar coisas como "2.9M / 400k". Desconta essa
-        // parcela transitória p/ refletir a ocupação real da janela.
-        const transient = (u as { input_breakdown?: { tool_results?: number } }).input_breakdown?.tool_results || 0;
-        const total = (u.prompt_tokens || 0) + (u.completion_tokens || 0);
-        return Math.max(0, total - transient);
+      // `context_tokens` = tamanho REAL do contexto (prompt da 1ª chamada do turno). NÃO
+      // usar `prompt_tokens`: é a SOMA cumulativa das N iterações do loop agêntico (os
+      // tool_results são re-enviados a cada passo), então dá milhões e falseia "estourado".
+      if (u?.context_tokens) {
+        return u.context_tokens + (u.completion_tokens || 0);
       }
     }
+    // sem context_tokens (turnos antigos): estima pelo tamanho do que sobrou em contexto
     const chars = inCtx.reduce((a, m) => a + (m.content?.length ?? 0), 0);
     return Math.round(chars / 4);
   }, [messages]);

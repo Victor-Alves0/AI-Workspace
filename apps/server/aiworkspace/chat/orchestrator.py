@@ -2382,6 +2382,11 @@ async def run_turn(
         "cached_tokens": 0,
         "cost": 0.0,
     }
+    # tamanho REAL do contexto (≠ prompt_tokens, que é a SOMA cumulativa das N iterações
+    # do loop agêntico). Guardamos o prompt da 1ª chamada = a base do turno (system +
+    # histórico + tools, antes dos tool_results se acumularem). É o que o medidor de
+    # contexto e a auto-compactação devem usar — senão leem "milhões" e falseiam "estourado".
+    first_ctx_tokens: int | None = None
     # registro dos usos de ferramenta neste turno (p/ embutir na mensagem)
     tool_events: list[dict[str, Any]] = []
     # modo "auto" da Base de Conhecimento: registra as fontes recuperadas (já
@@ -2549,6 +2554,8 @@ async def run_turn(
 
         if usage:
             _merge_usage(total_usage, usage)
+            if first_ctx_tokens is None and usage.get("prompt_tokens"):
+                first_ctx_tokens = int(usage["prompt_tokens"])  # base do turno (1ª chamada)
             yield {"type": "usage", "usage": usage}
 
         # fecha o span de raciocínio ao FIM de cada iteração: quando o modelo pensa
@@ -2739,6 +2746,11 @@ async def run_turn(
         tools_prompt_chars=tools_prompt_chars, calls_log=calls_log,
     )
     sift_service.tool_calls_log.reset(calls_token)
+
+    # tamanho real do contexto deste turno (base da 1ª chamada) — p/ o medidor e a
+    # auto-compactação, que não podem usar prompt_tokens (soma cumulativa das iterações).
+    if first_ctx_tokens is not None:
+        total_usage["context_tokens"] = first_ctx_tokens
 
     has_usage = total_usage["total_tokens"] > 0 or total_usage["cost"] > 0
 
