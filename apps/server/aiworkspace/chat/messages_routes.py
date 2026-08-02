@@ -21,7 +21,7 @@ from ..schemas.chat import MessageEdit, MessageOut, SendMessageIn
 from ..tools.loader import get_sift_for_user
 from ..usage_service import usage_event_from_record
 from . import artifacts as artifacts_service
-from . import generation
+from . import autoloop_service, generation
 from .orchestrator import TurnSession, run_turn, run_turn_guarded
 from .titles import generate_title
 from .turn_setup import (
@@ -283,7 +283,15 @@ async def send_message(
                         c.title = new_title
                         await s.commit()
                 await emit({"type": "title", "title": new_title})
+        # loop autônomo (opt-in): decide se continua a tarefa sozinho no próximo turno
+        await autoloop_service.after_turn(
+            chat_id=str(chat_id), user_id=str(user.id),
+            project_id=str(chat.project_id) if chat.project_id else None,
+            model_config=model_config, collected=collected,
+        )
 
+    # mensagem NOVA do usuário = tarefa nova → zera o contador do loop autônomo
+    autoloop_service.reset(str(chat_id))
     guards = await _resolve_guards(db, user, model_config)
     sub_specs, sub_conf = await _resolve_subagents(db, user, model_config)
     sub_runner = _make_subagent_runner(
@@ -338,6 +346,7 @@ async def stop_generation(
     """"Parar" do usuário: cancela a geração em andamento deste chat. O texto já
     transmitido é persistido como resposta parcial (mesmo caminho do shutdown)."""
     await _get_owned_chat(db, chat_id, user)
+    autoloop_service.halt(str(chat_id))  # Parar também interrompe o loop autônomo
     gen = generation.get_active(str(chat_id))
     return {"ok": True, "stopped": bool(gen and gen.stop())}
 

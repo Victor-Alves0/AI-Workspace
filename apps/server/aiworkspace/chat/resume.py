@@ -126,6 +126,12 @@ async def resume_chat_turn(
             from ..push_service import send_to_user
             import asyncio as _asyncio
             _asyncio.create_task(send_to_user(user.id, notify_title, notify_body or content.strip(), "/"))
+            # encadeia o loop autônomo: este próprio turno de continuação pode disparar o próximo
+            from . import autoloop_service
+            await autoloop_service.after_turn(
+                chat_id=str(cid), user_id=str(user.id), project_id=project_id,
+                model_config=model_config, collected=collected,
+            )
 
         source = run_turn(
             api_key=api_key,

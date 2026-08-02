@@ -491,6 +491,8 @@ export default function ModelEditor({
   );
   // Subagentes: permissão de delegar (capability) + config (time/modo/limites em filter_config)
   const [subOn, setSubOn] = useState<boolean>((model?.capabilities as Record<string, unknown> | undefined)?.subagents === true);
+  // Loop autônomo (self-continue): capability + config (teto/custo em filter_config.autoloop)
+  const [loopOn, setLoopOn] = useState<boolean>((model?.capabilities as Record<string, unknown> | undefined)?.autonomous_loop === true);
   const [myModels, setMyModels] = useState<ModelConfig[]>([]);
   const [memBanks, setMemBanks] = useState<MemoryBank[]>([]);
   // Base de Conhecimento POR-MODELO (capabilities.knowledge): bases acopladas + modo
@@ -785,6 +787,8 @@ export default function ModelEditor({
     if (tokenWarn !== "" && Number(tokenWarn) > 0) capabilities.token_warn = Number(tokenWarn);
     // permissão de delegar a subagentes (capability)
     capabilities.subagents = subOn;
+    // loop autônomo (capability)
+    capabilities.autonomous_loop = loopOn;
     // config dos filtros: só mantém a de filtros ativos (ex.: vision_router)
     const cleanFilterConfig: Record<string, unknown> = {};
     for (const f of filters) if (filterConfig[f]) cleanFilterConfig[f] = filterConfig[f];
@@ -807,6 +811,14 @@ export default function ModelEditor({
         pass_context: !!sc.pass_context,
         worker_memory: !!sc.worker_memory,
         isolate: scIsolate,
+      };
+    }
+    // loop autônomo (teto de passos + custo por-tarefa) — só quando ligado
+    if (loopOn) {
+      const lc = filterConfig.autoloop ?? {};
+      cleanFilterConfig.autoloop = {
+        max_iterations: Math.max(1, Math.min(30, Number(lc.max_iterations) || 6)),
+        cost_cap_usd: Math.max(0, Number(lc.cost_cap_usd) || 0),
       };
     }
     // assistente de voz — só persiste quando ligado
@@ -1687,6 +1699,46 @@ export default function ModelEditor({
                 <p className="text-[11px] text-muted">
                   Profundidade limita cadeias (operário chamando operário). Na conversa, você também chama um agente direto digitando <span className="font-mono text-ink-soft">@</span>.
                 </p>
+              </div>
+            )}
+          </div>
+
+          {/* Loop autônomo — a IA continua a tarefa sozinha (self-continue) até concluir/teto */}
+          <div className="mt-8 border-t border-border pt-7">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
+                <span className="text-muted"><Gauge size={15} /></span>
+                Loop autônomo
+                <InfoHint text="Em chat de projeto com objetivo no Ledger, a IA continua a tarefa sozinha turno após turno (sem você digitar 'continuar') até concluir o objetivo, bater o teto de passos, ou precisar de uma decisão sua. Amplifica acerto E erro — ligue em modelos de trabalho rigoroso." />
+              </h2>
+              <Toggle on={loopOn} onChange={setLoopOn} />
+            </div>
+            {loopOn && (
+              <div className="mt-3 space-y-3 rounded-xl border border-border bg-surface p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm text-ink">Teto de passos automáticos</p>
+                    <p className="text-[11px] text-muted">Máximo de continuações seguidas antes de pausar e te avisar (cada passo é um turno inteiro).</p>
+                  </div>
+                  <input type="number" min={1} max={30}
+                    value={(filterConfig.autoloop?.max_iterations) ?? 6}
+                    onChange={(e) => setFilterConfig((fc) => ({ ...fc, autoloop: { ...(fc.autoloop ?? {}), max_iterations: Math.max(1, Math.min(30, Number(e.target.value) || 6)) } }))}
+                    className={inpCls} />
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm text-ink">Teto de custo por tarefa (US$)</p>
+                    <p className="text-[11px] text-muted">Pausa se o custo desta tarefa passar disto. 0 = usa só o orçamento global.</p>
+                  </div>
+                  <input type="number" min={0} step={0.5}
+                    value={(filterConfig.autoloop?.cost_cap_usd) ?? 0}
+                    onChange={(e) => setFilterConfig((fc) => ({ ...fc, autoloop: { ...(fc.autoloop ?? {}), cost_cap_usd: Math.max(0, Number(e.target.value) || 0) } }))}
+                    className={inpCls} />
+                </div>
+                <div className="flex items-start gap-2 rounded-lg bg-surface2/60 px-3 py-2">
+                  <ShieldAlert size={13} className="mt-0.5 shrink-0 text-muted" />
+                  <p className="text-[11px] text-muted">Para sozinho quando o objetivo do Ledger vira <span className="font-mono">done</span>, quando a IA te faz uma pergunta, quando não há progresso, ou no botão Parar. Uma ação sensível pendente sempre te devolve o controle.</p>
+                </div>
               </div>
             )}
           </div>

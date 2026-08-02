@@ -145,6 +145,13 @@ class Settings(BaseSettings):
     # watchdog de wall-clock dos jobs de background: mata a árvore após este tempo (2h),
     # substituindo o bound de wall-clock que o síncrono tem e o background não teria.
     code_exec_bg_max_seconds: int = 7200
+    # Loop autônomo (self-continue): a IA continua a tarefa sozinha até concluir/teto.
+    # Opt-in por-modelo (capability autonomous_loop). max_iterations = teto de continuações
+    # automáticas seguidas antes de pausar e avisar; cost_cap 0 = usa só o orçamento global;
+    # stall_limit = turnos sem mudança no Ledger que contam como "travado".
+    autoloop_max_iterations: int = 6
+    autoloop_task_cost_cap_usd: float = 0.0
+    autoloop_stall_limit: int = 2
     # preview vivo (dev server/backend do projeto no ar): idade máxima antes do reaper
     # derrubar (6h) e teto de servidores no ar simultâneos por usuário.
     code_preview_max_age_seconds: int = 21_600
