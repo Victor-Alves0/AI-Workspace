@@ -21,7 +21,7 @@ from ..schemas.chat import MessageEdit, MessageOut, SendMessageIn
 from ..tools.loader import get_sift_for_user
 from ..usage_service import usage_event_from_record
 from . import artifacts as artifacts_service
-from . import generation
+from . import compaction_service, generation
 from .orchestrator import TurnSession, run_turn, run_turn_guarded
 from .titles import generate_title
 from .turn_setup import (
@@ -171,6 +171,11 @@ async def send_message(
     _remember_tz(user, user_tz)  # canais (sem navegador) usam o fuso salvo aqui
 
     api_key, base_url = await _resolve_provider(db, user, chat.model)
+
+    # auto-compactação (modelo do Claude Code): se o contexto passou do limiar da janela do
+    # modelo, resume o histórico ANTIGO agora — ANTES de montar o turno e de persistir a nova
+    # mensagem — mantendo as últimas mensagens. Best-effort, só dispara quando grande.
+    await compaction_service.maybe_autocompact(db, user, chat, None)
 
     # histórico atual (antes da nova mensagem) no formato OpenAI
     rows = await db.scalars(

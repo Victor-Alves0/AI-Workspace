@@ -145,6 +145,15 @@ class Settings(BaseSettings):
     # watchdog de wall-clock dos jobs de background: mata a árvore após este tempo (2h),
     # substituindo o bound de wall-clock que o síncrono tem e o background não teria.
     code_exec_bg_max_seconds: int = 7200
+    # Auto-compactação (modelo do Claude Code): quando o contexto passa de threshold da
+    # janela do modelo, resume o histórico ANTIGO na entrada do turno e mantém as últimas
+    # keep_last mensagens. Ligado por padrão; quando dispara, ECONOMIZA (encolhe os turnos
+    # seguintes). fallback_window = janela assumida se o modelo não expõe context_length.
+    autocompact_enabled: bool = True
+    autocompact_threshold: float = 0.75
+    autocompact_keep_last: int = 8
+    autocompact_min_messages: int = 12
+    autocompact_fallback_window: int = 100_000
     # preview vivo (dev server/backend do projeto no ar): idade máxima antes do reaper
     # derrubar (6h) e teto de servidores no ar simultâneos por usuário.
     code_preview_max_age_seconds: int = 21_600

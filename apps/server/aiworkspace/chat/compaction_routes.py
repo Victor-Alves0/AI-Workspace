@@ -16,32 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth.deps import require_approved
 from ..db import get_db
 from ..models import ChatCompaction, Message, User
-from .turn_setup import (
-    _get_owned_chat,
-    _ordered_messages,
-    _resolve_provider,
-)
+from .compaction_service import run_compaction, serialize_message, summary_content
+from .turn_setup import _get_owned_chat, _ordered_messages
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-
-# --------------------------------------------------------------------------- #
-# Compactação de contexto (resumir a conversa para liberar espaço)
-# --------------------------------------------------------------------------- #
-_COMPACT_SYSTEM = (
-    "Você resume conversas preservando o máximo de contexto útil no mínimo de espaço."
-)
-# Instrução lida pelo MODELO => inglês (padrão do projeto). O RESUMO sai no idioma da
-# conversa, porque ele substitui as mensagens no contexto e é lido pelo usuário.
-_COMPACT_INSTRUCTION = (
-    "Summarize the conversation below concisely but completely, preserving: important "
-    "facts and data, decisions made, the user's preferences and personal details, the "
-    "current state of the task, and every piece of context needed to continue without "
-    "losing anything relevant. Use clear bullet points. Never invent information that is "
-    "not in the conversation. Write the summary in the same language as the conversation. "
-    "Reply with the summary only."
-)
 
 
 @router.post("/{chat_id}/compact")
@@ -51,140 +30,19 @@ async def compact_chat(
     db: AsyncSession = Depends(get_db),
 ):
     """Compacta o contexto: envia a conversa ao modelo, pede um resumo e substitui
-    as mensagens por esse resumo (mantendo o contexto essencial em menos tokens)."""
-    from ..providers import openrouter
-
+    as mensagens por esse resumo (mantendo o contexto essencial em menos tokens).
+    Manual = resume TUDO (keep_last=0); a auto-compactação usa o mesmo núcleo com
+    keep_last (ver compaction_service)."""
     chat = await _get_owned_chat(db, chat_id, user)
     if not chat.model:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chat sem modelo definido")
-    # Resumir é uma tarefa auxiliar barata: se o usuário escolheu um modelo dedicado
-    # (Configurações → Barra Lateral → Chats), usa ele; senão, o modelo da conversa.
-    iface = (user.profile or {}).get("interface") or {}
-    summary_model = (iface.get("compact_model") or "").strip() or chat.model
-    api_key, base_url = await _resolve_provider(db, user, summary_model)
-
-    rows = await _ordered_messages(db, chat_id)
-    # só o que ainda está no contexto (não-compactado) entra no resumo — o divisor
-    # de resumo (is_summary) já carrega o histórico anterior condensado.
-    convo = [
-        m for m in rows
-        if m.role in ("user", "assistant") and (m.content or "").strip() and not m.compacted
-    ]
-    if len(convo) < 3:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Conversa curta demais para compactar")
-
-    transcript = "\n\n".join(
-        f"{'Usuário' if m.role == 'user' else 'Assistente'}: {m.content}" for m in convo
-    )
-    messages = [
-        {"role": "system", "content": _COMPACT_SYSTEM},
-        {"role": "user", "content": f"{_COMPACT_INSTRUCTION}\n\n=== CONVERSA ===\n{transcript}"},
-    ]
-
-    # completa sem streaming (acumula o texto do resumo)
-    summary = ""
     try:
-        async for chunk in openrouter.stream_chat(
-            api_key, summary_model, messages, tools=None, params={}, base_url=base_url
-        ):
-            for choice in chunk.get("choices", []):
-                delta = choice.get("delta", {})
-                if delta.get("content"):
-                    summary += delta["content"]
-    except Exception as exc:  # noqa: BLE001
+        res = await run_compaction(db, user, chat, keep_last=0, min_convo=3)
+    except Exception as exc:  # noqa: BLE001 - falha no resumo
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Falha ao resumir: {exc}")
-
-    summary = summary.strip()
-    if not summary:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "O modelo não retornou um resumo")
-
-    # registra o checkpoint no histórico (timeline) com o SNAPSHOT das mensagens
-    # atuais — assim é possível RESTAURAR exatamente este ponto depois.
-    # parent_id = checkpoint ativo agora → forma a ÁRVORE de contexto (ramificação).
-    original_snapshot = [_serialize_message(m) for m in rows]
-    parent_id = await db.scalar(
-        select(ChatCompaction.id).where(
-            ChatCompaction.chat_id == chat_id, ChatCompaction.pinned.is_(True)
-        )
-    )
-    # PRIMEIRA compactação deste chat? Antes de compactar, salva um checkpoint
-    # "Estado original" (snapshot ÍNTEGRO, sem resumo) — um ponto permanente e
-    # rotulado para SEMPRE poder voltar à conversa inteira, independente da cadeia
-    # de compactações. A compactação abaixo descende dele.
-    prior = await db.scalar(
-        select(ChatCompaction.id).where(ChatCompaction.chat_id == chat_id).limit(1)
-    )
-    if prior is None:
-        original = ChatCompaction(
-            chat_id=chat_id,
-            summary="",  # sem resumo: representa o chat inteiro, não uma compactação
-            message_count=len(convo),
-            pinned=False,
-            parent_id=None,
-            snapshot=original_snapshot,
-            name="Estado original",
-        )
-        db.add(original)
-        await db.flush()  # gera o id p/ ancorar a compactação nele
-        parent_id = original.id
-    await db.execute(
-        update(ChatCompaction).where(ChatCompaction.chat_id == chat_id).values(pinned=False)
-    )
-    checkpoint = ChatCompaction(
-        chat_id=chat_id,
-        summary=summary,
-        message_count=len(convo),
-        pinned=True,
-        parent_id=parent_id,
-        snapshot=original_snapshot,
-    )
-    db.add(checkpoint)
-
-    # compactação NÃO-destrutiva: as mensagens permanecem visíveis ao usuário, mas
-    # saem do contexto da IA (compacted=True). Um divisor (is_summary) marca o ponto
-    # e leva o resumo para o contexto no lugar delas. O que muda é só o que vai ao
-    # modelo — não o que o usuário vê. O resumo em si fica no nó do Grafo de contexto.
-    await db.execute(
-        update(Message)
-        .where(Message.chat_id == chat_id, Message.compacted.is_(False))
-        .values(compacted=True)
-    )
-    note = Message(
-        chat_id=chat_id,
-        role="assistant",
-        content=_summary_content(summary),
-        is_summary=True,
-        compacted=False,
-    )
-    db.add(note)
-    await db.commit()
-    await db.refresh(checkpoint)
-    return {"ok": True, "summary": summary, "compaction_id": str(checkpoint.id)}
-
-
-def _summary_content(summary: str) -> str:
-    return f"📝 **Resumo da conversa anterior (contexto compactado):**\n\n{summary}"
-
-
-
-def _serialize_message(m: Message) -> dict:
-    """Serializa uma mensagem p/ o snapshot do checkpoint (restaurável)."""
-    return {
-        "role": m.role,
-        "content": m.content,
-        "tool_calls": m.tool_calls,
-        "tool_call_id": m.tool_call_id,
-        "tokens": m.tokens,
-        "cost": m.cost,
-        "usage": m.usage,
-        "reasoning": m.reasoning,
-        "tool_events": m.tool_events,
-        "attachments": m.attachments,
-        "is_summary": bool(m.is_summary),
-        "compacted": bool(m.compacted),
-        "speaker": m.speaker,
-        "created_at": m.created_at.isoformat() if m.created_at else None,
-    }
+    if res is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Conversa curta demais para compactar")
+    return res
 
 
 class CompactionOut(BaseModel):
@@ -369,7 +227,7 @@ async def restore_compaction(
     cur_rows = await _ordered_messages(db, chat_id)
     convo_n = len([m for m in cur_rows if m.role in ("user", "assistant") and (m.content or "").strip()])
     if cur_rows and prev_pinned != cp.id and convo_n > 0:
-        cur_snapshot = [_serialize_message(m) for m in cur_rows]
+        cur_snapshot = [serialize_message(m) for m in cur_rows]
         branch = ChatCompaction(
             chat_id=chat_id,
             summary=_last_message_preview(cur_snapshot) or "Ramo salvo ao restaurar",
@@ -426,13 +284,13 @@ async def restore_compaction(
         .limit(1)
     )
     if summary_msg is not None:
-        summary_msg.content = _summary_content(cp.summary)
+        summary_msg.content = summary_content(cp.summary)
     else:
         earliest = await db.scalar(
             select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at).limit(1)
         )
         note = Message(
-            chat_id=chat_id, role="assistant", content=_summary_content(cp.summary), is_summary=True
+            chat_id=chat_id, role="assistant", content=summary_content(cp.summary), is_summary=True
         )
         if earliest is not None:
             note.created_at = earliest.created_at - timedelta(seconds=1)

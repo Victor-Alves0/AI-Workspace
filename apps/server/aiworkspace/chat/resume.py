@@ -74,6 +74,9 @@ async def resume_chat_turn(
             system_prompt = chat.system_prompt
             params = chat.params or {}
             arts_on = _artifacts_enabled(user)
+            # auto-compactação (Claude Code): encolhe o contexto antes de continuar se cresceu
+            from . import compaction_service
+            await compaction_service.maybe_autocompact(db, user, chat, model_config)
             rows = await _ordered_messages(db, cid)
             history = [
                 {"role": m.role, "content": m.content}
