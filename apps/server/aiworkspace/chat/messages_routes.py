@@ -552,6 +552,9 @@ async def continue_message(
     chat = await _get_owned_chat(db, chat_id, user)
     await budget_service.enforce_or_raise(db, user)  # orçamento pessoal (modo "pausar")
     api_key, base_url, model_config, sift, skills = await _prepare_turn(db, user, chat)
+    # guardas de saída valem também na continuação (mesma resposta ao usuário) — sem
+    # isto, um modelo com guarda de recusa/fundamentação ficava sem proteção só aqui.
+    guards = await _resolve_guards(db, user, model_config)
 
     rows = await _ordered_messages(db, chat_id)
     idx = next((i for i, m in enumerate(rows) if m.id == message_id), None)
@@ -634,7 +637,8 @@ async def continue_message(
         if arts_changed:
             await emit({"type": "artifacts", "ids": arts_changed})
 
-    source = run_turn(
+    source = run_turn_guarded(
+        guards=guards,
         api_key=api_key,
         model=model,
         history=history,

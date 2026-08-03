@@ -92,13 +92,20 @@ sequenceDiagram
 |---|---|---|
 | Web send | `messages_routes::send_message` | `run_turn_guarded` via `generation.start` |
 | Web regenerate | `messages_routes::regenerate_message` | `run_turn_guarded` |
-| Web continue | `messages_routes::continue_message` | `run_turn` (raw — **no output guards**) |
+| Web continue | `messages_routes::continue_message` | `run_turn_guarded` |
 | Ephemeral (no persist) | `messages_routes::ephemeral` | `run_turn_guarded` |
-| Wake (bg job done) | `chat/resume.py::resume_chat_turn` | `run_turn` |
+| Wake (bg job done) | `chat/resume.py::resume_chat_turn` | `run_turn_guarded` |
 | Channels (WA/TG/Discord/Slack) | `integrations/*_service.py` | `run_turn_guarded` |
 | Automation / Monitor | `automation/runner.py` | `run_turn` |
-| Public API `/v1` | `api/runner.py` | `run_turn` |
-| Roundtable / Playground | `chat/roundtable_routes.py`, `playground/` | `run_turn` |
+| Public API `/v1` | `api/runner.py` | `run_turn` (raw — see note) |
+| Roundtable / Playground | `chat/roundtable_routes.py`, `playground/` | `run_turn` (raw — intentional) |
+
+> **Guards coverage:** every path that produces a normal chat reply — send, regenerate,
+> **continue**, **wake**, channels, ephemeral — goes through `run_turn_guarded`, so a
+> model's output guards apply consistently. The remaining raw `run_turn` paths are
+> deliberate: Playground/Roundtable are debug/multi-model surfaces, and the public API
+> is a passthrough. Automation is a candidate follow-up (it produces a user-facing
+> message but currently runs raw).
 
 **Front gates (before any model call), in order:** ownership check → model set →
 non-empty → `budget_service.enforce_or_raise` (personal $ budget, HTTP 402 when
@@ -247,6 +254,9 @@ highest recency/priority — and is rewritten by `run_turn_guarded` on each retr
 - **"Answer keeps getting re-generated / swapped model."** → `run_turn_guarded` output
   guard. The *guard* re-ran the turn; the wrong-answer *cause* is stage 4/5, not the
   guard. Read the `guard` events (attempt, detect, rejected_preview).
+- **"Guard didn't fire on a continue / wake turn."** → fixed: both now use
+  `run_turn_guarded`. If a guard still doesn't fire there, check `_resolve_guards`
+  returned it (model has `filter:output_guard` capability + enabled guard).
 - **"Model says a tool doesn't exist / won't act."** → SIFT catalog exposure (list-mode
   only) + `TOOL_ACTION_GUARD` + scope-error hint. Check `search_tools` results and pins.
 - **"Tool silently did nothing."** → confirmation card (`ask_options`) awaiting the user,

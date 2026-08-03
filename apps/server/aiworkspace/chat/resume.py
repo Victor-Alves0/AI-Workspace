@@ -19,7 +19,7 @@ from ..models import Chat, Message, Notification, User
 from ..usage_service import usage_event_from_record
 from . import artifacts as artifacts_service
 from . import generation
-from .orchestrator import TurnSession, run_turn
+from .orchestrator import TurnSession, run_turn_guarded
 from .turn_setup import (
     _artifacts_enabled,
     _artifacts_kwargs,
@@ -32,6 +32,7 @@ from .turn_setup import (
     _ordered_messages,
     _prepare_turn,
     _realtime_datetime,
+    _resolve_guards,
     _resolve_knowledge,
     _session_tz,
     _skill_learning,
@@ -70,6 +71,9 @@ async def resume_chat_turn(
                 logger.info("resume pausado: orçamento do usuário %s atingido", user.id)
                 return
             api_key, base_url, model_config, sift, skills = await _prepare_turn(db, user, chat)
+            # guardas de saída valem no wake tanto quanto no send: é o trabalho autônomo
+            # continuando — exatamente onde o guarda-juiz de fundamentação deve atuar.
+            guards = await _resolve_guards(db, user, model_config)
             model = chat.model
             system_prompt = chat.system_prompt
             params = chat.params or {}
@@ -130,7 +134,8 @@ async def resume_chat_turn(
             import asyncio as _asyncio
             _asyncio.create_task(send_to_user(user.id, notify_title, notify_body or content.strip(), "/"))
 
-        source = run_turn(
+        source = run_turn_guarded(
+            guards=guards,
             api_key=api_key,
             model=model,
             history=history,
