@@ -2059,13 +2059,33 @@ class _ToolDispatcher:
             self.result = {"error": f"o subagente falhou: {exc}"}
         yield {"type": "subagent", "status": "done", "agent": (self.result.get("agent") if isinstance(self.result, dict) else None) or spec.get("name", key)}
 
+    async def _dispatch_tp(self, *call: Any) -> Any:
+        """Roda a tool sync numa thread com um TETO DE PAREDE. Sem isto, uma builtin que
+        gira/explode (ex.: taint sobre uma base enorme) pendura o turno inteiro pra sempre.
+        Usa `run_in_executor` (não `run_in_threadpool`): no timeout o await é ABANDONADO —
+        a thread segue em background até terminar (não dá p/ matar thread em Python), mas o
+        turno se recupera com um erro acionável. Ver settings.builtin_tool_timeout_seconds."""
+        t = int(get_settings().builtin_tool_timeout_seconds or 0)
+        fut = asyncio.get_running_loop().run_in_executor(None, self.sift.dispatch, *call)
+        if t <= 0:
+            return await fut
+        try:
+            return await asyncio.wait_for(fut, timeout=t)
+        except asyncio.TimeoutError:
+            logger.warning("tool '%s' excedeu %ss — abortada (a thread segue em bg)", call[0], t)
+            return json.dumps({
+                "error": f"a ferramenta '{call[0]}' passou de {t}s e foi abortada. "
+                         "Reduza o escopo/depth (ex.: mire um arquivo ou função específica, "
+                         "não a base inteira) e tente de novo.",
+            }, ensure_ascii=False)
+
     async def _sift_dispatch(self, name: str, args: dict) -> Any:
         # NÃO trocar por sift.adispatch: na SIFT 0.8 ele roda tools SÍNCRONAS inline
         # ("offload them yourself if they block") — e TODAS as nossas builtins são
         # sync (requests/Google/Tuya, segundos cada) → bloquearia o event loop do
         # servidor inteiro. O threadpool é o offload correto enquanto as tools não
         # forem `async def`.
-        result = await run_in_threadpool(self.sift.dispatch, name, args)
+        result = await self._dispatch_tp(name, args)
         # Recuperação: modelos fracos às vezes chamam o PATH da tool DIRETO como
         # nome da função (ex.: função "web.search.query" com {query,limit}) em vez
         # de execute_tool{path,params}. A SIFT devolve "unknown meta-tool"; nós
@@ -2076,9 +2096,7 @@ class _ToolDispatcher:
             and "." in name
             and name not in {"search_tools", "execute_tool", "run_code", "get_tool_schema"}
         ):
-            result = await run_in_threadpool(
-                self.sift.dispatch, "execute_tool", {"path": name, "params": args}
-            )
+            result = await self._dispatch_tp("execute_tool", {"path": name, "params": args})
         # Path errado/fora do escopo (modelo chutou, ex.: 'web.read' em vez de
         # 'web.page.read'): enriquece o erro com o caminho de recuperação, senão
         # modelos fracos DESISTEM e dizem que a ferramenta não existe.

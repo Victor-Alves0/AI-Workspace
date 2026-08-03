@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     tool_timeout_seconds: int = 10
     tool_cpu_seconds: int = 5
     tool_mem_mb: int = 256
+    # Teto de parede POR tool-call nativa (dispatch da SIFT no threadpool). Backstop
+    # anti-travamento: uma builtin normal leva segundos; uma que gira/explode (ex.:
+    # taint sobre uma base gigante) abortava o TURNO INTEIRO sem watchdog. Ao estourar,
+    # devolve erro ao modelo (que estreita o escopo) em vez de pendurar. 0 = sem teto.
+    builtin_tool_timeout_seconds: int = 120
     # Off-switch global do "code mode" (run_code): executa código GERADO PELO
     # MODELO no sandbox de subprocesso. É o vetor de maior risco (RCE por design).
     # O sandbox limita CPU/memória/tempo, mas NÃO isola rede nem /proc — um processo
