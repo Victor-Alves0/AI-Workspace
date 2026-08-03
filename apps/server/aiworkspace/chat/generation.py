@@ -49,6 +49,33 @@ class Generation:
         # "Parar" do usuário): vira uma nota no parcial salvo ("interrompida porque…").
         self.interrupted_reason: str | None = None
         self._cond = asyncio.Condition()
+        # Caixa de entrada: mensagens que o usuário enviou DURANTE esta geração. Cada
+        # item {"text", "steer"}. steer=True é drenado pelo loop do turno em curso
+        # (injeção em tempo real); steer=False é drenado no FIM do turno (fila →
+        # turno de continuação). Preenchido pela rota, drenado pelo loop/driver.
+        self.pending: list[dict] = []
+
+    async def enqueue(self, text: str, *, steer: bool) -> None:
+        """Adiciona uma mensagem enviada durante a geração (steer ou fila)."""
+        async with self._cond:
+            self.pending.append({"text": text, "steer": bool(steer)})
+            self._cond.notify_all()
+        await self._append({"type": "queued", "text": text[:200], "steer": bool(steer)})
+
+    def drain_steer(self) -> list[str]:
+        """Remove e devolve as mensagens de STEER (injeção no turno em curso). Sync:
+        roda no mesmo event loop do loop do turno, entre awaits — sem corrida."""
+        texts = [p["text"] for p in self.pending if p.get("steer")]
+        if texts:
+            self.pending = [p for p in self.pending if not p.get("steer")]
+        return texts
+
+    def drain_queue(self) -> list[str]:
+        """Remove e devolve as mensagens de FILA (turno de continuação no fim)."""
+        texts = [p["text"] for p in self.pending if not p.get("steer")]
+        if texts:
+            self.pending = [p for p in self.pending if p.get("steer")]
+        return texts
 
     async def _append(self, ev: dict) -> None:
         async with self._cond:
@@ -96,12 +123,17 @@ def get_active(chat_id: str) -> Generation | None:
     return _active.get(chat_id)
 
 
-def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish) -> Generation:
+def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
+          on_queue: Callable[[list[str]], Awaitable[None]] | None = None) -> Generation:
     """Inicia uma geração em background e devolve o ``Generation``.
 
     ``source`` é o gerador de eventos do turno (``run_turn``). O driver consome
     esse gerador numa task independente da request, acumula o estado terminal e
     chama ``on_finish`` para persistir — blindado contra cancelamento.
+
+    ``on_queue(texts)`` (opcional): chamado ao FIM de um turno COMPLETO se o usuário
+    enfileirou mensagens durante ele (dispara um turno de continuação). Não roda no
+    "Parar" (cancelamento) — o usuário parou de propósito.
     """
     gen = Generation(chat_id)
     _active[chat_id] = gen
@@ -158,6 +190,11 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish) -> Gen
             logger.exception("Geração falhou (chat %s)", chat_id)
             await gen._append({"type": "error", "message": str(exc)})
         await _finalize(gen, on_finish, collected)
+        # fim de turno COMPLETO: se o usuário enfileirou (ou deixou steer não-consumido),
+        # dispara a continuação. Não roda no cancelamento (CancelledError re-propaga antes).
+        leftover = gen.drain_queue() + gen.drain_steer()
+        if leftover and on_queue is not None:
+            asyncio.create_task(on_queue(leftover))
 
     gen.task = asyncio.create_task(_driver())
     return gen

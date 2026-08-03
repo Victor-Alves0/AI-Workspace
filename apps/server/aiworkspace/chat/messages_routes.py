@@ -170,6 +170,19 @@ async def send_message(
     await budget_service.enforce_or_raise(db, user)  # orçamento pessoal (modo "pausar")
     _remember_tz(user, user_tz)  # canais (sem navegador) usam o fuso salvo aqui
 
+    # ENVIO DURANTE GERAÇÃO ATIVA: não abre uma 2ª geração (corrida de duas respostas no
+    # mesmo chat). Persiste a mensagem (visível) e a ENFILEIRA na geração em curso —
+    # steer=True injeta no turno agora (entre iterações), steer=False vira um turno de
+    # continuação quando o atual terminar. Ver generation.Generation / run_turn steer.
+    active_gen = generation.get_active(str(chat_id))
+    if active_gen is not None and not active_gen.done:
+        mc = await _get_model_config(db, chat.model_config_id, user)
+        atts = await _prepare_attachments([a.model_dump() for a in body.attachments], mc)
+        db.add(Message(chat_id=chat.id, role="user", content=body.content, attachments=atts or None))
+        await db.commit()
+        await active_gen.enqueue(body.content, steer=body.steer)
+        return {"queued": True, "steer": body.steer}
+
     api_key, base_url = await _resolve_provider(db, user, chat.model)
 
     # auto-compactação (modelo do Claude Code): se o contexto passou do limiar da janela do
@@ -298,6 +311,22 @@ async def send_message(
         project_id=str(chat.project_id) if chat.project_id else None,
         isolate_keys=frozenset(sub_conf.get("isolate") or []),
     ) if sub_specs else None
+    # steer/fila: o loop do turno drena as mensagens de STEER desta geração. A `gen` só
+    # existe após generation.start; um box de late-binding liga o drain à gen certa (o
+    # driver só chama isto depois do start retornar). on_queue dispara a continuação.
+    _genbox: dict[str, Any] = {}
+
+    def _steer_drain() -> list[str]:
+        g = _genbox.get("gen")
+        return g.drain_steer() if g is not None else []
+
+    async def _on_queue(texts: list[str]) -> None:
+        from .resume import resume_chat_turn
+        await resume_chat_turn(
+            str(chat_id), "\n\n".join(texts),
+            notify_title="Continuação", already_persisted=True, notify=False,
+        )
+
     source = run_turn_guarded(
         guards=guards,
         api_key=api_key,
@@ -313,6 +342,7 @@ async def send_message(
             agent_id=_mem_agent_id(model_config, model),
             user_profile=_user_profile_dict(user),
             codespace_project_id=str(chat.project_id) if chat.project_id else None,
+            steer_drain=_steer_drain,
         ),
         sift=sift,
         code_mode=_code_mode(model_config),
@@ -330,7 +360,8 @@ async def send_message(
     )
     # a geração roda em background (desacoplada da request); a resposta abaixo é
     # só um assinante do buffer. F5/desconexão mata o assinante, não a geração.
-    gen = generation.start(str(chat_id), source, _finish)
+    gen = generation.start(str(chat_id), source, _finish, on_queue=_on_queue)
+    _genbox["gen"] = gen
     return _sse_stream(_subscribe(gen))
 
 

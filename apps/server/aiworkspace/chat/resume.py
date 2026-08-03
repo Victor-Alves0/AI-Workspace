@@ -47,10 +47,16 @@ logger = logging.getLogger(__name__)
 async def resume_chat_turn(
     chat_id: str | None, injected_text: str, *,
     notify_title: str, notify_body: str = "",
+    already_persisted: bool = False, notify: bool = True,
 ) -> None:
     """Dispara um turno novo em `chat_id` com `injected_text` (nota do usuário). Se o chat
     já tem uma geração ativa, NÃO faz nada (o chamador — reaper — só chega aqui quando o
-    chat está ocioso, mas checamos de novo por segurança)."""
+    chat está ocioso, mas checamos de novo por segurança).
+
+    `already_persisted=True` (drenagem de fila): as mensagens já estão no banco como
+    'user' no fim do histórico — não re-persiste; remove-as do histórico e usa o
+    `injected_text` (a junção delas) como entrada, reconstruindo um turno normal.
+    `notify=False` silencia a notificação (o usuário está presente, vendo ao vivo)."""
     if not chat_id:
         return
     if generation.get_active(chat_id) and not generation.get_active(chat_id).done:
@@ -82,14 +88,21 @@ async def resume_chat_turn(
             from . import compaction_service
             await compaction_service.maybe_autocompact(db, user, chat, model_config)
             rows = await _ordered_messages(db, cid)
-            history = [
-                {"role": m.role, "content": m.content}
-                for m in rows
+            convo = [
+                m for m in rows
                 if m.role in ("user", "assistant") and m.content and not m.compacted
             ]
-            # registra a nota como mensagem do usuário (transcrição legível do chat)
-            db.add(Message(chat_id=cid, role="user", content=injected_text))
-            await db.commit()
+            if already_persisted:
+                # as mensagens enfileiradas já estão no fim como 'user' sem resposta; o
+                # injected_text é a junção delas → remove-as p/ não duplicar no turno.
+                while convo and convo[-1].role == "user":
+                    convo.pop()
+                history = [{"role": m.role, "content": m.content} for m in convo]
+            else:
+                history = [{"role": m.role, "content": m.content} for m in convo]
+                # registra a nota como mensagem do usuário (transcrição legível do chat)
+                db.add(Message(chat_id=cid, role="user", content=injected_text))
+                await db.commit()
             user_id = str(user.id)
             project_id = str(chat.project_id) if chat.project_id else None
             arts_kwargs = await _artifacts_kwargs(db, cid, user, arts_on, model_config)
@@ -122,17 +135,32 @@ async def resume_chat_turn(
                 ev = usage_event_from_record(user.id, cid, m.id, rec)
                 if ev is not None:
                     s.add(ev)
-                s.add(Notification(
-                    user_id=user.id, title=notify_title,
-                    body=(content.strip() or notify_body)[:500],
-                    chat_id=cid, message_id=m.id,
-                ))
+                if notify:
+                    s.add(Notification(
+                        user_id=user.id, title=notify_title,
+                        body=(content.strip() or notify_body)[:500],
+                        chat_id=cid, message_id=m.id,
+                    ))
                 await s.commit()
             if arts_changed:
                 await emit({"type": "artifacts", "ids": arts_changed})
-            from ..push_service import send_to_user
-            import asyncio as _asyncio
-            _asyncio.create_task(send_to_user(user.id, notify_title, notify_body or content.strip(), "/"))
+            if notify:
+                from ..push_service import send_to_user
+                import asyncio as _asyncio
+                _asyncio.create_task(send_to_user(user.id, notify_title, notify_body or content.strip(), "/"))
+
+        # steer/fila também valem na continuação (steering durante o wake, encadear filas)
+        _genbox: dict = {}
+
+        def _steer_drain() -> list[str]:
+            g = _genbox.get("gen")
+            return g.drain_steer() if g is not None else []
+
+        async def _on_queue(texts: list[str]) -> None:
+            await resume_chat_turn(
+                str(cid), "\n\n".join(texts),
+                notify_title=notify_title, already_persisted=True, notify=False,
+            )
 
         source = run_turn_guarded(
             guards=guards,
@@ -149,6 +177,7 @@ async def resume_chat_turn(
                 agent_id=_mem_agent_id(model_config, model),
                 user_profile=_user_profile_dict(user),
                 codespace_project_id=project_id,
+                steer_drain=_steer_drain,
             ),
             sift=sift,
             code_mode=_code_mode(model_config),
@@ -161,6 +190,6 @@ async def resume_chat_turn(
             memory=memory,
             media=media,
         )
-        generation.start(str(cid), source, _finish)
+        _genbox["gen"] = generation.start(str(cid), source, _finish, on_queue=_on_queue)
     except Exception:  # noqa: BLE001 - wake é best-effort
         logger.exception("resume_chat_turn falhou (chat %s)", chat_id)

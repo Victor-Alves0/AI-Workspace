@@ -1153,6 +1153,11 @@ class TurnSession:
     # escritas e o exec operam no worktree isolado, não no `src`. Usado pela
     # orquestração (operário com worktree próprio). None = trabalha no `src`.
     codespace_worktree: str | None = None
+    # STEER em tempo real: callable sync que devolve (e remove) as mensagens que o
+    # usuário enviou DURANTE este turno com steer=True. O loop chama a cada iteração e
+    # injeta o texto como mensagem de usuário prioritária — redireciona sem reiniciar.
+    # None = sem steering (turno normal). Ver generation.Generation.drain_steer.
+    steer_drain: Any | None = None
 
 
 @dataclass
@@ -2349,6 +2354,7 @@ async def run_turn(
         subagents=subagents, run_subagent=run_subagent,
     )
     tools: Any = asm.tools
+    _base_tools = asm.tools  # tools originais: p/ reabrir após um corte (ex.: steer)
     sift_prompt = asm.sift_prompt
     has_tools = asm.has_tools
     skills_by_slug = asm.skills_by_slug
@@ -2534,6 +2540,21 @@ async def run_turn(
     # 3-4. loop de tool calling. O +1 dá uma rodada de GRAÇA só-texto na última volta
     # (tools já cortadas) antes de a síntese em prompt limpo assumir.
     for _iter in range(max_iters + 1):
+        # STEER em tempo real: mensagens que o usuário enviou DURANTE o turno (steer=True)
+        # entram AQUI, antes da próxima chamada ao modelo, como input prioritário. O turno
+        # segue já ciente da correção — sem reiniciar nem descartar o trabalho feito. Se
+        # as tools já foram cortadas (rodada final), reabre p/ o modelo poder agir sobre
+        # a nova instrução. Ver TurnSession.steer_drain / generation.Generation.
+        if session.steer_drain is not None:
+            for _st in session.steer_drain():
+                if not (_st or "").strip():
+                    continue
+                messages.append({"role": "user", "content": (
+                    "[O usuário interveio durante a geração — priorize esta instrução]:\n" + _st)})
+                input_chars["user"] += len(_st)
+                yield {"type": "steer", "text": _st[:200]}
+                if tools is None and _base_tools is not None:
+                    tools = _base_tools  # reabre tools p/ agir sobre a nova instrução
         # últimas rodadas: retira as tools para OBRIGAR uma resposta final. Sem isto, um
         # modelo que continua chamando tools até o teto encerra o loop com texto vazio.
         if _iter > 0 and _iter >= max_iters - 1:

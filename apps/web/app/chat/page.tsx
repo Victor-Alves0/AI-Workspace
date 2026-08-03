@@ -180,6 +180,11 @@ export default function ChatPage() {
   const isActiveChat = (id: string | null) => (id ?? null) === activeIdRef.current;
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  // mensagens enviadas DURANTE a geração (fila/steer) — chips acima do composer até
+  // o turno terminar. steer=injeta no turno em curso; senão vira turno de continuação.
+  const [queued, setQueued] = useState<{ id: string; text: string; steer: boolean }[]>([]);
+  const queuedRef = useRef(queued);
+  queuedRef.current = queued;
   // Subsistema de GERAÇÃO (streaming/tools/imagem/conhecimento/áudio/subagentes/
   // guardas/artefato ao vivo + parser SSE + retomada + parar) — extraído p/ um hook.
   // getDeps é lido pós-render, então as deps podem ser declaradas mais abaixo.
@@ -1212,6 +1217,14 @@ export default function ChatPage() {
           // recarrega as mensagens reais (ids do servidor + registro de tokens/custo)
           await reloadMessages(chat.id);
           await reloadArtifacts(chat.id);
+          // as mensagens enfileiradas já "aterrissaram" (persistidas + no histórico):
+          // limpa os chips. Se havia FILA (não-steer), o back disparou um turno de
+          // continuação — re-assina p/ vê-lo ao vivo (best-effort; o poll é a rede).
+          if (queuedRef.current.length) {
+            const hadQueue = queuedRef.current.some((q) => !q.steer);
+            setQueued([]);
+            if (hadQueue) resumeStream(chat.id);
+          }
         }
       }
       if (state.acc) notify("Resposta pronta", state.acc.replace(/\s+/g, " ").slice(0, 90));
@@ -1234,6 +1247,22 @@ export default function ChatPage() {
         setSending(false);
       }
       refreshBudget(); // atualiza o gasto do mês (mantém o banner em dia)
+    }
+  }
+
+  // Enviar DURANTE a geração: não abre um 2º turno (o back enfileira). steer=true injeta
+  // no turno em curso (entre iterações); steer=false vira turno de continuação no fim.
+  async function enqueue(steer: boolean) {
+    const text = input.trim();
+    if (!text || !active) return;
+    setInput("");
+    const id = `q-${Date.now()}`;
+    setQueued((q) => [...q, { id, text, steer }]);
+    try {
+      await api.post(`/chats/${active.id}/messages`, { content: text, steer });
+    } catch {
+      setQueued((q) => q.filter((x) => x.id !== id)); // falhou → desfaz o chip
+      setInput(text);
     }
   }
 
@@ -2036,7 +2065,7 @@ export default function ChatPage() {
                   onDragLeave={() => setCsDropOver(false)}
                   onDrop={handleComposerFileDrop}
                 >
-                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} temporary={temporary} />
+                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} temporary={temporary} />
                 </div>
                 {/* menu do "+" abre para baixo aqui (há espaço); na conversa abre para cima */}
                 {temporary && <p className="mt-2 text-xs text-muted">Chat temporário — esta conversa não será salva.</p>}
@@ -2245,7 +2274,7 @@ export default function ChatPage() {
                       {showAsk && askSpec && (
                         <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                       )}
-                      <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
+                      <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
                     </div>
                   </div>
                 </div>

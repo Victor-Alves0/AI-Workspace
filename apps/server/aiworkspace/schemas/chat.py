@@ -135,6 +135,10 @@ class SendMessageIn(BaseModel):
     # "Chats de Referência": outros chats do usuário anexados como contexto p/ ESTE
     # turno (o modelo recebe uma transcrição resumida deles). Máx. 5.
     ref_chat_ids: list[uuid.UUID] = Field(default_factory=list, max_length=5)
+    # enviado DURANTE uma geração ativa: steer=True injeta a mensagem no turno em
+    # curso (entre iterações do loop); steer=False (padrão) enfileira p/ um turno de
+    # continuação após o atual terminar. Sem geração ativa, é um turno normal.
+    steer: bool = False
 
 
 class FolderCreate(BaseModel):

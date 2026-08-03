@@ -7,6 +7,8 @@ import {
   Brain,
   Camera,
   Check,
+  Clock,
+  CornerDownRight,
   Database,
   FileText,
   Hash,
@@ -250,6 +252,8 @@ export default function PromptBox({
   onChange,
   onSend,
   onStop,
+  onQueue,
+  queued = [],
   sending,
   recording,
   onToggleMic,
@@ -287,6 +291,10 @@ export default function PromptBox({
   onSend: () => void;
   /** enquanto `sending`, o botão de enviar vira "Parar" e chama isto */
   onStop?: () => void;
+  /** enviar DURANTE a geração: enfileira (steer=false) ou injeta no turno (steer=true) */
+  onQueue?: (steer: boolean) => void;
+  /** mensagens já enfileiradas neste turno (chips acima do composer) */
+  queued?: { id: string; text: string; steer: boolean }[];
   placeholder?: string;
   sending: boolean;
   recording: boolean;
@@ -852,6 +860,23 @@ export default function PromptBox({
             {attachErr && <p className="text-[11px] text-red-400">{attachErr}</p>}
           </div>
         )}
+        {/* mensagens enviadas DURANTE a geração: chips (fila/steer) até o turno acabar */}
+        {queued.length > 0 && (
+          <div className="mb-1.5 flex flex-wrap gap-1.5 px-1">
+            {queued.map((q) => (
+              <span
+                key={q.id}
+                title={q.steer ? "Injetada no turno atual (steer)" : "Na fila — continua após esta resposta"}
+                className={`flex max-w-[240px] items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs ${
+                  q.steer ? "border-accent/40 bg-accent/10 text-accent-hover" : "border-border bg-surface2 text-ink-soft"
+                }`}
+              >
+                {q.steer ? <CornerDownRight size={12} className="shrink-0" /> : <Clock size={12} className="shrink-0" />}
+                <span className="truncate">{q.text}</span>
+              </span>
+            ))}
+          </div>
+        )}
         {/* compositor: uma camada de realce (chips $slug) atrás de um textarea de
             fundo transparente — mesma métrica de fonte/padding/altura de linha, então
             os glifos alinham e o cursor cai no lugar certo (o "chip" usa padding com
@@ -911,7 +936,10 @@ export default function PromptBox({
             }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
-              onSend();
+              // durante a geração, Enter ENFILEIRA (não abre 2º turno); Alt+Enter faz
+              // STEER (injeta no turno em curso). Fora da geração, envia normal.
+              if (sending && onQueue && value.trim()) onQueue(e.altKey);
+              else onSend();
             }
           }}
           placeholder={placeholder}
@@ -1055,13 +1083,24 @@ export default function PromptBox({
               <Mic size={18} />
             </button>
             {sending && onStop ? (
-              <button
-                onClick={onStop}
-                title="Parar geração"
-                className="rounded-full bg-accent p-2 text-ink transition-colors hover:bg-accent-hover"
-              >
-                <Square size={16} fill="currentColor" />
-              </button>
+              <div className="flex items-center gap-1">
+                {onQueue && value.trim() && (
+                  <button
+                    onClick={() => onQueue(false)}
+                    title="Enfileirar (segure Alt p/ steer: injeta no turno atual)"
+                    className="rounded-full bg-surface2 p-2 text-ink-soft transition-colors hover:bg-hover hover:text-ink"
+                  >
+                    <Send size={16} />
+                  </button>
+                )}
+                <button
+                  onClick={onStop}
+                  title="Parar geração"
+                  className="rounded-full bg-accent p-2 text-ink transition-colors hover:bg-accent-hover"
+                >
+                  <Square size={16} fill="currentColor" />
+                </button>
+              </div>
             ) : value.trim() ? (
               <button
                 onClick={onSend}
