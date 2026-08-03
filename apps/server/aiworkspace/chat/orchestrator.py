@@ -2201,6 +2201,45 @@ def _deterministic_final(tool_events: list[dict[str, Any]]) -> str:
             "apurei com as ferramentas:\n\n" + digest)
 
 
+async def _final_synthesis(
+    api_key: str, model: str, base_url: str | None, aux_model: str,
+    user_text: str, tool_events: list[dict[str, Any]], reasoning_text: str,
+    total_usage: dict[str, float], chat_id: str | None,
+) -> AsyncGenerator[dict[str, Any], None]:
+    """Produz a resposta final quando o loop agêntico NÃO a redigiu (modelo preso no
+    formato de tool-call). Streama tokens ao vivo e, por ÚLTIMO, emite o sentinela
+    {"type":"__final_text__","text":...} que o chamador captura (não repassa à UI).
+    Camadas: A) mesmo modelo em prompt LIMPO (fora do histórico poluído que ele copia);
+    B) modelo auxiliar; C) digest determinístico. Chamado no PRIMEIRO sinal de trava
+    (anti-spin / parada muda) e como rede no fim — sempre entrega texto."""
+    synth_models = [model] + ([aux_model] if aux_model and aux_model != model else [])
+    msgs = _synthesis_messages(user_text, tool_events, reasoning_text)
+    for sm in synth_models:
+        got = ""
+        try:
+            async for chunk in openrouter.stream_chat(
+                api_key, sm, msgs, tools=None, params={}, base_url=base_url,
+            ):
+                if chunk.get("usage"):
+                    _merge_usage(total_usage, chunk["usage"])
+                for choice in chunk.get("choices", []):
+                    c = choice.get("delta", {}).get("content")
+                    if c:
+                        got += c
+                        yield {"type": "token", "text": c}
+        except Exception as e:  # provedor/modelo aux indisponível → próxima camada
+            logger.warning("síntese final com %s falhou: %s", sm, e)
+            continue
+        if got.strip():
+            logger.info("síntese final redigiu a resposta via %s (chat %s)", sm, chat_id)
+            yield {"type": "__final_text__", "text": got}
+            return
+    # camada C: determinístico, sem LLM — sempre entrega a substância apurada.
+    text = _deterministic_final(tool_events)
+    yield {"type": "token", "text": text}
+    yield {"type": "__final_text__", "text": text}
+
+
 async def run_turn(
     *,
     api_key: str,
@@ -2456,6 +2495,10 @@ async def run_turn(
     _noprogress: dict[str, int] = {}
     _spin = {"stop": False}
     _spin_limit = max(2, int(settings.agent_noprogress_repeats))
+    # modelo auxiliar (Config → Chats) p/ a síntese final camada B — a mesma escolha da
+    # compactação. Resolvido uma vez: usado na trava in-loop e na rede do fim do turno.
+    _aux = ((session.user_profile or {}).get("interface") or {}).get("compact_model") or ""
+    _aux = _aux.strip()
     # registro dos usos de ferramenta neste turno (p/ embutir na mensagem)
     tool_events: list[dict[str, Any]] = []
     # modo "auto" da Base de Conhecimento: registra as fontes recuperadas (já
@@ -2477,11 +2520,6 @@ async def run_turn(
     # (ex.: image_generation num modelo só-texto → 404/400) degrada p/ texto em vez de
     # quebrar TODA mensagem do chat.
     retried_plain = False
-    # "cutucada" final: modelos às vezes terminam MUDOS (ou só com um marcador
-    # [[research]]) depois de uma tool pesada — o usuário via o card e nenhuma
-    # resposta. Uma única volta extra, sem tools, força a redação final.
-    nudged = False
-
     # Teto de iterações do loop agêntico. Num chat de Codespace (loop escreve → testa
     # → corrige) usamos um teto bem maior, como os agentes de código do mercado; nos
     # demais, o teto normal. O flag vem do scope.meta["codespace"] montado no loader.
@@ -2493,9 +2531,8 @@ async def run_turn(
         else settings.max_tool_iterations
     )
 
-    # 3-4. loop de tool calling. O +1 dá uma rodada de GRAÇA só-texto: se o modelo, na
-    # rodada final sem tools, ainda vazar chamadas em vez de redigir (DeepSeek preso no
-    # formato), a cutucada tem uma iteração real para produzir a resposta.
+    # 3-4. loop de tool calling. O +1 dá uma rodada de GRAÇA só-texto na última volta
+    # (tools já cortadas) antes de a síntese em prompt limpo assumir.
     for _iter in range(max_iters + 1):
         # últimas rodadas: retira as tools para OBRIGAR uma resposta final. Sem isto, um
         # modelo que continua chamando tools até o teto encerra o loop com texto vazio.
@@ -2504,16 +2541,23 @@ async def run_turn(
         # loop longo de código: encolhe leituras de arquivo obsoletas antes de reenviar
         if _in_codespace and _iter > 0:
             _trim_tool_results(messages)
-        # anti-spin: detectou repetição sem progresso → corta as tools e OBRIGA a resposta
-        # final agora (em vez de moer até o teto). Resolve o "girando" sem mexer no teto.
+        # anti-spin: repetição sem progresso = trava. NÃO re-chama o modelo no histórico
+        # poluído de tool_calls (é o que PERPETUA a trava de formato — ele copia o padrão).
+        # Sintetiza a resposta em prompt LIMPO agora e encerra o loop. Ataca a causa em vez
+        # de gastar chamadas re-travando até a rede do fim pegar.
         if _spin["stop"] and tools is not None:
-            messages.append({"role": "user", "content": (
-                "Você repetiu a mesma ação e obteve o mesmo resultado, sem progresso. PARE de "
-                "chamar ferramentas e responda AGORA, em texto, com base no que já apurou. Se a "
-                "tarefa já está concluída, diga isso e resuma o resultado.")})
-            tools = None
-            _spin["stop"] = False
-            logger.info("anti-spin: repetição sem progresso no chat %s — forçando resposta final", chat_id)
+            logger.info("anti-spin no chat %s — síntese em prompt limpo (sem re-travar)", chat_id)
+            _synth_text = ""
+            async for _ev in _final_synthesis(
+                api_key, model, base_url, _aux, user_text, tool_events, reasoning_text,
+                total_usage, chat_id,
+            ):
+                if _ev.get("type") == "__final_text__":
+                    _synth_text = _ev["text"]
+                else:
+                    yield _ev
+            assistant_text = _synth_text
+            break
         tool_buffer: dict[int, dict] = {}
         finish_reason: str | None = None
         usage: dict | None = None
@@ -2666,25 +2710,23 @@ async def run_turn(
             leaked_text = ""
 
         if finish_reason != "tool_calls" or not tool_buffer:
-            # Resposta vazia / só-marcadores: cutuca UMA vez p/ o modelo escrever a
-            # resposta final. Cobre dois casos frágeis: (a) o modelo rodou tools e não
-            # redigiu o texto; (b) o modelo devolveu SÓ o raciocínio (campo reasoning),
-            # sem conteúdo. Sem isto o usuário via uma bolha vazia.
+            # O modelo parou de chamar tools. Se a resposta veio VAZIA / só-marcadores
+            # (rodou tools mas não redigiu, ou devolveu só o raciocínio), NÃO re-chama no
+            # histórico poluído (que perpetua a trava de formato): sintetiza em prompt
+            # LIMPO agora. No caminho normal (texto de verdade), só encerra.
             answer_empty = _MARKER_ONLY_RE.match(assistant_text or "") is not None
-            if not nudged and answer_empty and (tool_events or reasoning_text.strip()):
-                nudged = True
-                if assistant_text.strip():
-                    messages.append({"role": "assistant", "content": assistant_text})
-                nudge = (
-                    "Now write your final answer to the user's request in plain text, "
-                    "based on the tool results above. Do not call any tools."
-                    if tool_events else
-                    "You returned only your internal reasoning, with no answer to the user. "
-                    "Now write your final answer in plain text."
-                )
-                messages.append({"role": "user", "content": nudge})
-                tools = None
-                continue
+            if answer_empty and (tool_events or reasoning_text.strip()):
+                _synth_text = ""
+                async for _ev in _final_synthesis(
+                    api_key, model, base_url, _aux, user_text, tool_events, reasoning_text,
+                    total_usage, chat_id,
+                ):
+                    if _ev.get("type") == "__final_text__":
+                        _synth_text = _ev["text"]
+                    else:
+                        yield _ev
+                if _synth_text.strip():
+                    assistant_text = _synth_text
             break
 
         # registra a mensagem do assistant com os tool_calls e executa cada um
@@ -2838,40 +2880,21 @@ async def run_turn(
     if first_ctx_tokens is not None:
         total_usage["context_tokens"] = first_ctx_tokens
 
-    # SÍNTESE FINAL GARANTIDA: rodou tools (ou só raciocínio) mas terminou SEM texto — o
-    # modelo travou no formato de tool-call, nem a cutucada in-loop o soltou. Em vez de
-    # devolver "regenere/troque de modelo" (o usuário pagou o turno), reredigimos num
-    # prompt LIMPO (camada A, mesmo modelo), depois no modelo auxiliar (camada B), e por
-    # fim um resumo determinístico (camada C). Ver _synthesis_messages/_deterministic_final.
+    # REDE DE SEGURANÇA: se o loop se exauriu sem redigir (nenhuma das travas in-loop
+    # pegou — ex.: o modelo devolveu tool_calls válidas até a última iteração), a síntese
+    # em prompt limpo garante a resposta final aqui. No caminho normal (in-loop já
+    # sintetizou ou o modelo redigiu) `assistant_text` está preenchido e isto é pulado.
     if not (assistant_text or "").strip() and (tool_events or reasoning_text.strip()):
-        _iface = (session.user_profile or {}).get("interface") or {}
-        _aux = (_iface.get("compact_model") or "").strip()
-        _synth_models = [model] + ([_aux] if _aux and _aux != model else [])
-        _synth_msgs = _synthesis_messages(user_text, tool_events, reasoning_text)
-        for _sm in _synth_models:
-            _got = ""
-            try:
-                async for _chunk in openrouter.stream_chat(
-                    api_key, _sm, _synth_msgs, tools=None, params={}, base_url=base_url,
-                ):
-                    if _chunk.get("usage"):
-                        _merge_usage(total_usage, _chunk["usage"])
-                    for _choice in _chunk.get("choices", []):
-                        _c = _choice.get("delta", {}).get("content")
-                        if _c:
-                            _got += _c
-                            yield {"type": "token", "text": _c}
-            except Exception as _e:  # provedor/modelo aux indisponível → próxima camada
-                logger.warning("síntese final com %s falhou: %s", _sm, _e)
-                continue
-            if _got.strip():
-                assistant_text = _got
-                logger.info("síntese final redigiu a resposta via %s (chat %s)", _sm, chat_id)
-                break
-        if not (assistant_text or "").strip():
-            # camada C: determinístico, sem LLM — sempre entrega a substância apurada.
-            assistant_text = _deterministic_final(tool_events)
-            yield {"type": "token", "text": assistant_text}
+        _synth_text = ""
+        async for _ev in _final_synthesis(
+            api_key, model, base_url, _aux, user_text, tool_events, reasoning_text,
+            total_usage, chat_id,
+        ):
+            if _ev.get("type") == "__final_text__":
+                _synth_text = _ev["text"]
+            else:
+                yield _ev
+        assistant_text = _synth_text or assistant_text
 
     # uso pode ter crescido na síntese final (camadas A/B) — recalcula após o bloco
     has_usage = total_usage["total_tokens"] > 0 or total_usage["cost"] > 0
