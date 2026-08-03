@@ -181,6 +181,15 @@ async def send_message(
         db.add(Message(chat_id=chat.id, role="user", content=body.content, attachments=atts or None))
         await db.commit()
         await active_gen.enqueue(body.content, steer=body.steer)
+        # corrida rara: o turno pode ter terminado DURANTE o enqueue (o driver já drenou e
+        # não pegaria este item). Se a geração já acabou, dispara a continuação nós mesmos —
+        # resume_chat_turn lê as pendentes do banco e é idempotente (sai se nada pendente).
+        if active_gen.done:
+            from .resume import resume_chat_turn
+            await resume_chat_turn(
+                str(chat_id), body.content,
+                notify_title="Continuação", already_persisted=True, notify=False,
+            )
         return {"queued": True, "steer": body.steer}
 
     api_key, base_url = await _resolve_provider(db, user, chat.model)

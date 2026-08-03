@@ -93,11 +93,17 @@ async def resume_chat_turn(
                 if m.role in ("user", "assistant") and m.content and not m.compacted
             ]
             if already_persisted:
-                # as mensagens enfileiradas já estão no fim como 'user' sem resposta; o
-                # injected_text é a junção delas → remove-as p/ não duplicar no turno.
+                # as mensagens enfileiradas já estão no fim como 'user' sem resposta.
+                # Reconstrói o input a partir do BANCO (não dos textos passados): assim é
+                # idempotente sob corrida — se duas continuações dispararem, a 2ª acha o
+                # fim já respondido (sem 'user' pendente) e SAI, sem duplicar o turno.
+                trailing = []
                 while convo and convo[-1].role == "user":
-                    convo.pop()
+                    trailing.insert(0, convo.pop())
+                if not trailing:
+                    return  # já respondido por outra continuação → nada a fazer
                 history = [{"role": m.role, "content": m.content} for m in convo]
+                injected_text = "\n\n".join((m.content or "") for m in trailing).strip()
             else:
                 history = [{"role": m.role, "content": m.content} for m in convo]
                 # registra a nota como mensagem do usuário (transcrição legível do chat)
