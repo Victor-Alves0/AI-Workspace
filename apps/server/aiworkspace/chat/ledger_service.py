@@ -190,6 +190,15 @@ async def _apply_async(user_id: str, chat_id: str, project_id: str | None,
                 if kw.get("evidence") is not None:
                     hit["evidence"] = str(kw["evidence"])[:600]
                 l.findings = finds
+                # medição de primitivo: mover um achado p/ confirmed/refuted é um sinal
+                # de QUALIDADE (o ledger fez o modelo reconciliar contra evidência).
+                if st in ("confirmed", "refuted"):
+                    try:
+                        from .. import health_service
+                        health_service.record("ledger", f"finding_{st}", severity="info",
+                                              detail={"id": fid}, chat_id=chat_id)
+                    except Exception:  # noqa: BLE001
+                        pass
             else:
                 return {"error": f"ação desconhecida: {action}"}
 

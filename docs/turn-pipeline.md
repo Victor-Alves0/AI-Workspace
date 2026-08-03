@@ -9,6 +9,11 @@ Why it matters: a symptom often surfaces at a layer that is not its cause. A gua
 when the real fault is in `x` (or in the guard's ordering). Use the **Guards &
 Checkpoints** table and the **Debug by layer** section to look in the right place first.
 
+> This page is **sequential** (one turn, in order). For the **cross-cutting** view — how
+> the wrapping/observing/background layers depend on each other and fail *between* layers,
+> plus the DB-session/event-loop discipline and a maintenance checklist — see
+> [harness-coupling.md](harness-coupling.md).
+
 > File anchors use `file:function` (line numbers drift). The canonical web path is
 > `apps/server/aiworkspace/chat/messages_routes.py::send_message`. Every other entry
 > point converges on the same `_prepare_turn → run_turn_guarded → run_turn` core.

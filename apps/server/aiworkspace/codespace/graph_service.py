@@ -979,16 +979,45 @@ def data_flow(user_id: str, project_id: str, selector: str, depth: int = 2) -> d
     }
 
 
+def _analysis_deadline_ms() -> int:
+    """Teto de tempo INTERNO passado ao codegraph (taint/reaches) — o commit 4eba4c9
+    do GraphCodeMap respeita `deadline_ms` e devolve resultado PARCIAL + aviso ao
+    estourar. Usamos ~75% do watchdog por-tool (builtin_tool_timeout_seconds), então
+    a análise se auto-encerra com dados úteis ANTES do dispatcher abortar seco. Sem
+    watchdog (0), teto fixo de 60s p/ a análise nunca girar sem fim ([[tool-call-watchdog]])."""
+    t = int(get_settings().builtin_tool_timeout_seconds or 0)
+    return int(t * 750) if t > 0 else 60_000
+
+
+def _note_truncation(env: Any, kind: str, **ctx: Any) -> None:
+    """Se a análise foi TRUNCADA (deadline/budget do codegraph estourou), registra um
+    evento de saúde — é o sinal de que a base é grande demais p/ o escopo pedido.
+    Nunca levanta (fire-and-forget)."""
+    if not getattr(env, "truncated", False):
+        return
+    try:
+        from .. import health_service
+        from ..tools import toolctx
+        detail = {"analysis": kind, **{k: v for k, v in ctx.items() if v}}
+        health_service.record("codegraph", "truncated", severity="warn",
+                              detail=detail, chat_id=toolctx.current_chat_id.get())
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def reaches(user_id: str, project_id: str, selector: str, sink: str = "http",
             via: str = "", depth: int = 8) -> dict:
     """Este símbolo alcança um `sink` (http, db, fs…)? Devolve as CADEIAS de
     chamada que levam até lá — a confiança é a MÍNIMA do caminho."""
     cg = _get_graph(user_id, project_id)
     # depth 12 enumerava caminhos demais em grafos grandes (blowup como o da taint);
-    # 6 já cobre cadeias reais e termina rápido. Watchdog do dispatcher é a rede final.
+    # 6 já cobre cadeias reais e termina rápido. `deadline_ms` é o bound de TEMPO
+    # interno (auto-encerra com parcial); o watchdog do dispatcher é a rede final.
     target, data, env = cg.reaches(
-        selector, sink=sink or "http", via=via or None, depth=max(1, min(depth, 6))
+        selector, sink=sink or "http", via=via or None, depth=max(1, min(depth, 6)),
+        deadline_ms=_analysis_deadline_ms(),
     )
+    _note_truncation(env, "reaches", selector=selector, sink=sink)
     paths = data.get("paths") or []
     return {
         "target": _short(target),
@@ -1021,7 +1050,11 @@ def taint(user_id: str, project_id: str, scope: str = "", entry: str = "",
     _entry = entry or None
     _cap = 6 if _entry else 3
     eff_depth = max(1, min(depth, _cap))
-    data, env = cg.taint(scope=scope or None, entry=_entry, depth=eff_depth)
+    # `deadline_ms`: bound de TEMPO interno (commit 4eba4c9) — a varredura que pendurou
+    # o turno no Metabase agora se auto-encerra com parcial + aviso antes do watchdog.
+    data, env = cg.taint(scope=scope or None, entry=_entry, depth=eff_depth,
+                         deadline_ms=_analysis_deadline_ms())
+    _note_truncation(env, "taint", scope=scope, entry=_entry)
     findings = data.get("findings") or []
     warns = list(env.warnings)
     if not _entry:

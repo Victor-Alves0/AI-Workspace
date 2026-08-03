@@ -159,6 +159,14 @@ async def run_compaction(db: AsyncSession, user: User, chat: Chat, *,
     db.add(note)
     await db.commit()
     await db.refresh(checkpoint)
+    # medição de primitivo: a compactação preservou a janela de contexto. record_bg:
+    # roda no main loop (pré-turno) → offloada o psycopg2 p/ não bloquear o loop.
+    try:
+        from .. import health_service
+        health_service.record_bg("compaction", "fired", severity="info",
+                                 detail={"compacted": len(to_summarize)}, chat_id=str(chat.id))
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True, "summary": summary, "compaction_id": str(checkpoint.id),
             "compacted_count": len(to_summarize)}
 

@@ -10,6 +10,7 @@ Reference guide for AI Workspace. If you just want to get it running, start with
 | [features.md](features.md)           | Full feature catalog, grouped by area |
 | [architecture.md](architecture.md)   | System view, components and the lifecycle of a chat turn |
 | [turn-pipeline.md](turn-pipeline.md) | One turn end to end: order of operations, every guard/checkpoint, debug-by-layer |
+| [harness-coupling.md](harness-coupling.md) | Cross-cutting view: how the layers depend on each other and fail *between* layers; DB-session/loop discipline; maintenance checklist |
 | [configuration.md](configuration.md) | Reference for every environment variable (`.env`) |
 | [deployment.md](deployment.md)       | LAN/VPS, domain + HTTPS, backup/restore, updates, `APP_SECRET` rotation |
 | [public-api.md](public-api.md)       | OpenAI-compatible API (`/v1`) and key management |

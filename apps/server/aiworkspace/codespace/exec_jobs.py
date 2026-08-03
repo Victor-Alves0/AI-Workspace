@@ -27,11 +27,61 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+
+from fastapi.concurrency import run_in_threadpool
 
 from ..config import get_settings
 from . import exec_service
 
 logger = logging.getLogger(__name__)
+
+
+# --------------------------------------------------------------------------- #
+# Persistência (durabilidade): espelha o ciclo de vida em disco SÓ p/ a recuperação
+# no boot. Sync psycopg2, fire-and-forget, NUNCA levanta — um erro de persistência
+# jamais pode derrubar a execução do job. Ver models/exec_job.py.
+# --------------------------------------------------------------------------- #
+def _pg():
+    import psycopg2
+    url = urlparse(get_settings().sync_database_url)
+    return psycopg2.connect(
+        dbname=url.path.lstrip("/"), user=url.username, password=url.password,
+        host=url.hostname, port=url.port or 5432, connect_timeout=10,
+    )
+
+
+def _db_insert(job: "Job") -> None:
+    try:
+        conn = _pg()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO codespace_exec_jobs (id, job_key, user_id, chat_id, "
+                "project_id, worktree, command, status, settled, output_tail, "
+                "created_at, updated_at) VALUES "
+                "(%s,%s,%s,%s,%s,%s,%s,'running',false,'', now(), now())",
+                (str(uuid.uuid4()), job.id, job.user_id, job.chat_id or None,
+                 job.project_id or None, job.worktree, job.command[:20000]),
+            )
+        conn.close()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("exec_jobs._db_insert falhou (%s): %s", job.id, exc)
+
+
+def _db_update(job_key: str, **fields: Any) -> None:
+    if not fields:
+        return
+    try:
+        cols = ", ".join(f"{k} = %s" for k in fields)
+        conn = _pg()
+        with conn, conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE codespace_exec_jobs SET {cols}, updated_at = now() WHERE job_key = %s",
+                (*fields.values(), job_key),
+            )
+        conn.close()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("exec_jobs._db_update falhou (%s): %s", job_key, exc)
 
 
 class Job:
@@ -116,6 +166,8 @@ def _read_thread(job: Job) -> None:
     else:
         job.status = "done" if rc == 0 else ("killed" if rc is not None and rc < 0 else "failed")
     job.ended_at = time.monotonic()
+    _db_update(job.id, status=job.status, exit_code=job.exit_code,
+               output_tail=job.output[-4000:])
     job._evt.set()
 
 
@@ -137,6 +189,7 @@ def start_job(root: Path, command: str, *, chat_id: str | None, user_id: str,
     except (OSError, ValueError) as exc:
         return {"error": f"não consegui iniciar o comando: {exc}"}
     _jobs[job.id] = job
+    _db_insert(job)  # durabilidade: registra o job (running) p/ a recuperação no boot
     threading.Thread(target=_read_thread, args=(job,), daemon=True).start()
     max_wall = float(s.code_exec_bg_max_seconds)
     if max_wall > 0:
@@ -169,6 +222,8 @@ async def wait_job(job_id: str, timeout: float | None = None) -> dict[str, Any]:
         snap = job.snapshot()
         snap["note"] = "Ainda rodando após a espera. Encerre a resposta que eu te aviso ao terminar."
         return snap
+    # consumido inline (o turno tem o resultado) → SETTLED: nada devendo p/ a recuperação
+    _db_update(job.id, settled=True)
     return job.snapshot()
 
 
@@ -216,8 +271,15 @@ async def _maybe_wake(job: Job) -> None:
     """Decide o destino de um job concluído: se ninguém esperou e o chat não tem geração
     ativa, acorda um turno novo. Espera a geração corrente (se houver) terminar antes."""
     from ..chat import generation
-    if job.dispatched or job.waited or not job.chat_id:
+
+    async def _settle() -> None:
         job.dispatched = True
+        # roda no main loop (reaper) → offloada o psycopg2 síncrono p/ não travar o loop
+        # até o connect_timeout se o banco engasgar. Desfecho entregue → não é órfão.
+        await run_in_threadpool(_db_update, job.id, settled=True)
+
+    if job.dispatched or job.waited or not job.chat_id:
+        await _settle()
         return
     # espera o chat ficar ocioso (o agente pode ter soltado o job e ainda estar redigindo
     # o texto de encerramento do turno atual). Teto curto p/ não pendurar o reaper.
@@ -226,13 +288,13 @@ async def _maybe_wake(job: Job) -> None:
         if gen is None or gen.done:
             break
         if job.waited:      # um wait_job apareceu nesse meio tempo
-            job.dispatched = True
+            await _settle()
             return
         await asyncio.sleep(1.0)
     if job.waited:
-        job.dispatched = True
+        await _settle()
         return
-    job.dispatched = True
+    await _settle()
     try:
         await _fire_wake(job)
     except Exception:  # noqa: BLE001 - wake é best-effort, nunca derruba o reaper
@@ -262,6 +324,70 @@ def start_reaper() -> None:
     global _reaper_task
     if _reaper_task is None or _reaper_task.done():
         _reaper_task = asyncio.create_task(_reaper())
+
+
+async def recover_orphans() -> None:
+    """RECUPERAÇÃO no boot: jobs com `settled=False` no banco que NÃO estão no `_jobs`
+    deste processo são órfãos de um restart — o subprocesso morreu e o chat que esperava
+    o wake ficou travado. Marca-os interrompidos e ACORDA o chat com um aviso (destrava
+    o 'wake que nunca chega'). A guarda `not in _jobs` evita pegar um job novo que acabou
+    de iniciar. Nunca levanta; roda em background p/ não atrasar o readiness."""
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        from sqlalchemy import delete, select
+
+        from ..db import SessionLocal
+        from ..models import ExecJob
+        async with SessionLocal() as db:
+            # poda registros já resolvidos e antigos (não crescer sem fim)
+            await db.execute(delete(ExecJob).where(
+                ExecJob.settled.is_(True),
+                ExecJob.updated_at < datetime.now(timezone.utc) - timedelta(days=7)))
+            rows = list(await db.scalars(select(ExecJob).where(ExecJob.settled.is_(False))))
+            orphans = [j for j in rows if j.job_key not in _jobs]  # exclui jobs deste processo
+            if not orphans:
+                await db.commit()
+                return
+            for j in orphans:
+                if j.status == "running":
+                    j.status = "interrupted"
+                j.settled = True
+            await db.commit()
+        logger.warning("recuperação de exec_jobs: %d job(s) órfão(s) de um restart", len(orphans))
+    except Exception:  # noqa: BLE001
+        logger.exception("recover_orphans (query/mark) falhou")
+        return
+
+    from .. import health_service
+    woken = 0
+    for j in orphans:
+        # sync `record` de propósito: recover_orphans é one-shot de BOOT (o loop ainda
+        # não serve tráfego) e é raro — o custo de bloqueio é irrelevante aqui, ao
+        # contrário do hot-path por-turno (que usa record_bg).
+        health_service.record(
+            "exec_jobs", "interrupted", severity="warn",
+            detail={"command": (j.command or "")[:200]},
+            user_id=str(j.user_id) if j.user_id else None,
+            chat_id=str(j.chat_id) if j.chat_id else None,
+        )
+        # acorda o chat p/ destravar (capado — evita estampido de N turnos no boot).
+        if j.chat_id and woken < 15:
+            woken += 1
+            try:
+                from ..chat import resume
+                note = (
+                    f"[Comando em background interrompido] `{j.command}` foi cortado por um "
+                    "restart do servidor e não chegou a terminar. Se ainda precisar do "
+                    "resultado, rode o comando de novo."
+                )
+                await resume.resume_chat_turn(
+                    str(j.chat_id), note,
+                    notify_title="Comando em background interrompido",
+                    notify_body=(j.command or "")[:120],
+                )
+            except Exception:  # noqa: BLE001 - wake é best-effort
+                logger.exception("wake de recuperação falhou (job %s)", j.job_key)
 
 
 async def shutdown(timeout: float = 5.0) -> None:

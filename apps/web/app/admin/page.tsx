@@ -3,18 +3,20 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft, Bug, Check, DatabaseBackup, Download, Gauge, Loader2, Network,
+  ArrowLeft, Bug, Check, DatabaseBackup, Download, Gauge, HeartPulse, Loader2, Network,
   RefreshCw, Shield, Trash2, Upload, Users, X,
 } from "lucide-react";
 import { api, API_URL, ApiError } from "@/lib/api";
 import type { AdminUser } from "@/lib/types";
 import ObservabilityView from "@/components/ObservabilityView";
+import HealthView from "@/components/HealthView";
 
 /* ------------------------------- navegação por cards ------------------------ */
-type AdminSection = "users" | "network" | "update" | "backup" | "observability";
+type AdminSection = "users" | "network" | "update" | "backup" | "observability" | "health";
 
 const ADMIN_CARDS: { key: AdminSection; name: string; desc: string; icon: ReactNode }[] = [
   { key: "users", name: "Usuários", desc: "Aprovar, remover e cadastros", icon: <Users size={22} /> },
+  { key: "health", name: "Saúde", desc: "Estado das capacidades do sistema", icon: <HeartPulse size={22} /> },
   { key: "observability", name: "Observabilidade", desc: "Inspecione cada chamada", icon: <Gauge size={22} /> },
   { key: "network", name: "Rede", desc: "IPs permitidos, host e porta", icon: <Network size={22} /> },
   { key: "update", name: "Atualização", desc: "Verificar novas versões", icon: <RefreshCw size={22} /> },
@@ -193,6 +195,12 @@ export default function AdminPage() {
         )}
 
         {/* SEÇÃO: Observabilidade */}
+        {section === "health" && (
+          <AdminShell title="Saúde" onBack={() => setSection(null)}>
+            <HealthView />
+          </AdminShell>
+        )}
+
         {section === "observability" && (
           <AdminShell title="Observabilidade" onBack={() => setSection(null)}>
             <ObservabilityView />

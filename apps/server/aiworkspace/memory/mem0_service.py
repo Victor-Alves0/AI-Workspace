@@ -156,7 +156,10 @@ def _fastembed_embedder():
 
 def _build_config(api_key: str) -> dict[str, Any]:
     s = get_settings()
-    pg = _pg_conn_params()
+    # `connect_timeout` é válido no psycopg2.connect (usos diretos), mas o MemoryConfig
+    # do mem0 REJEITA campos extras — remove aqui antes de espalhar no vector_store,
+    # senão o mem0 cai inteiro para no-op na validação.
+    pg = {k: v for k, v in _pg_conn_params().items() if k != "connect_timeout"}
     return {
         "llm": {
             "provider": "openai",
@@ -194,6 +197,13 @@ def _memory_for_key(api_key: str):
         return Memory.from_config(_build_config(api_key))
     except Exception as exc:  # noqa: BLE001
         logger.warning("mem0 indisponível (degradando para no-op): %s", exc)
+        # auto-observabilidade: registra + alarma (foi ISTO que rodou silencioso).
+        try:
+            from ..health_service import record as _health_record
+            _health_record("memory", "no_op", severity="degraded",
+                           detail={"error": str(exc)[:400]})
+        except Exception:  # noqa: BLE001 - nunca deixar a observação derrubar o observado
+            pass
         return None
 
 

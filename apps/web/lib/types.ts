@@ -1064,3 +1064,41 @@ export interface ObsConfig {
   slow_ms: number;
   sink: { queued: number; dropped: number; written: number; running: boolean };
 }
+
+// Grafo de Investigação (recon/RE/comportamento) — preenchido pela IA investigando.
+export type InvestigationConfidence = "certain" | "inferred" | "possible";
+
+export interface InvestigationVizNode {
+  id: string;
+  type: string;
+  label: string;
+  props: Record<string, unknown>;
+  confidence: InvestigationConfidence;
+}
+
+export interface InvestigationVizEdge {
+  id: string;
+  source: string;
+  target: string;
+  rel: string;
+  props: Record<string, unknown>;
+  confidence: InvestigationConfidence;
+}
+
+export interface InvestigationViz {
+  graph: { id: string; name: string; kind: string; target: string; description: string };
+  nodes: InvestigationVizNode[];
+  edges: InvestigationVizEdge[];
+  truncated: boolean;
+  error?: string;
+}
+
+export interface InvestigationGraphMeta {
+  graph_id: string;
+  name: string;
+  kind: string;
+  target: string;
+  nodes: number;
+  edges: number;
+  created_at: string | null;
+}

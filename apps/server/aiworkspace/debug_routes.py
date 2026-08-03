@@ -76,8 +76,29 @@ async def deep_health(
     except Exception as exc:  # noqa: BLE001
         components["pgvector"] = {"ok": False, "error": str(exc)}
 
-    overall = all(c.get("ok") for c in components.values())
-    return {"ok": overall, "components": components}
+    # saúde das CAPACIDADES do harness (últimas 24h): mem0 no-op, síntese caindo p/
+    # camada C, watchdog abortando tools, deadline do codegraph, etc. — a competência
+    # do sistema, não só a latência das requisições.
+    try:
+        from . import health_service
+        capabilities = await health_service.snapshot(db, hours=24)
+    except Exception as exc:  # noqa: BLE001
+        capabilities = {"ok": True, "error": str(exc), "capabilities": []}
+
+    overall = all(c.get("ok") for c in components.values()) and capabilities.get("ok", True)
+    return {"ok": overall, "components": components, "health": capabilities}
+
+
+@router.get("/primitives")
+async def primitives(
+    days: int = 7,
+    admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db),
+):
+    """Medição dos PRIMITIVOS do harness: com que frequência cada um agiu (steering,
+    anti-spin, síntese A/B/C, watchdog, output-guard, ledger, compactação) e com que
+    desfecho, nos últimos `days` dias. Uso, não saúde — o outro eixo da observação."""
+    from . import health_service
+    return await health_service.primitive_metrics(db, days=days)
 
 
 @router.get("/logs")

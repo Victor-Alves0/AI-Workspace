@@ -80,7 +80,12 @@ dependencies = [
     # language/git — `level=` segue compatível), read-repair descobre arquivos
     # NOVOS, 10 invariantes de contrato travados (inclui "nunca vaza path
     # absoluto"). API de host que consumimos é 100% compatível com 45a35c4.
-    "graphcodemap[l1] @ https://github.com/Victor-Alves0/graphcodemap/archive/223495968425d0ae918a21b873981c434a13fed1.tar.gz",
+    # 4eba4c9 (03/08): anti-explosão de taint/reaches — deadline + memo global +
+    # budget + truncation. É o bound INTERNO que faz a análise TERMINAR sozinha,
+    # complementando o watchdog de 120s por-tool ([[tool-call-watchdog]]): a taint
+    # que pendurou o turno no Metabase agora respeita um teto de tempo/nós. API
+    # de host 100% compatível com 2234959.
+    "graphcodemap[l1] @ https://github.com/Victor-Alves0/graphcodemap/archive/4eba4c9ac393afe48c13d48d551b5e3ec68f63c0.tar.gz",
 ]
 
 [project.optional-dependencies]

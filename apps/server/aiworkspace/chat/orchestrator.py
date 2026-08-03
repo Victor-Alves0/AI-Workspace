@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextvars
+import functools
 import json
 import logging
 import re
@@ -397,6 +399,19 @@ CODESPACE_AGENT_DIRECTIVE = (
     "and get the output right now; or (2) end your reply — you'll be WOKEN UP in a fresh turn "
     "when the job completes, with its output, to continue. Either is fine; never claim the "
     "command finished until you've seen its real result via wait or the wake-up."
+)
+
+# Injetada sempre que a tool investigation.graph está equipada (recon/RE/black-box),
+# COM OU SEM projeto do Codespace — o codegraph cobre o fonte que você tem; este é
+# para o que você não tem. Curta de propósito: o "COMO" está na descrição da tool.
+INVESTIGATION_DIRECTIVE = (
+    "MAP AS YOU INVESTIGATE: when you probe something you don't have source for — a "
+    "network/cloud target, a binary, a system's observed behavior — build it up in "
+    "investigation.graph as you go (create a graph, then add nodes/edges with 'link'), "
+    "instead of leaving findings as loose prose. Record hosts/ports/services/endpoints/"
+    "params/functions/behaviors as typed nodes with a confidence, and attach evidence with "
+    "'note'. It persists across turns and is queryable ('which endpoints take POST without "
+    "auth?') — so you converge on the target instead of re-deriving what you already found."
 )
 
 # Modo Código: tools longas promovidas a specs de 1ª classe ao lado do run_code
@@ -1433,6 +1448,18 @@ def _assemble_tools_and_prompt(
         # execução). scope.meta["codespace"] é montado pelo loader p/ chats de projeto.
         if sift_meta.get("codespace"):
             a.sift_prompt += "\n\n" + CODESPACE_AGENT_DIRECTIVE
+        # Grafo de Investigação: injeta a diretriz quando a tool está equipada (native,
+        # independe de projeto). Pode estar FIXADA (spec em a.tools, nome dot→__) ou só
+        # no catálogo (string "Grafo de Investigação — ..." montada pelo loader).
+        _tool_names = {
+            (t.get("function") or {}).get("name", "") for t in (a.tools or [])
+            if isinstance(t, dict)
+        }
+        _has_inv = ("investigation.graph.manage" in _tool_names
+                    or "investigation__graph__manage" in _tool_names
+                    or any(str(c).startswith("Grafo de Investigação") for c in catalog))
+        if _has_inv:
+            a.sift_prompt += "\n\n" + INVESTIGATION_DIRECTIVE
 
     # Tools NATIVAS (fora do índice SIFT) anunciadas ao modelo no fim da montagem:
     # elas já estão no array de tools, mas o prompt do SIFT ensina que o caminho para
@@ -2064,15 +2091,34 @@ class _ToolDispatcher:
         gira/explode (ex.: taint sobre uma base enorme) pendura o turno inteiro pra sempre.
         Usa `run_in_executor` (não `run_in_threadpool`): no timeout o await é ABANDONADO —
         a thread segue em background até terminar (não dá p/ matar thread em Python), mas o
-        turno se recupera com um erro acionável. Ver settings.builtin_tool_timeout_seconds."""
+        turno se recupera com um erro acionável. Ver settings.builtin_tool_timeout_seconds.
+
+        `run_in_executor(None, ...)` roda a func numa thread do pool que NÃO herda o
+        `contextvars.Context` do turno (ao contrário de `run_in_threadpool`, que copia). Sem
+        propagar, a tool leria os DEFAULTS dos contextvars — `current_codespace_project_id`,
+        `current_chat_id`, `user_tz`, `background`, `user_profile` (ver toolctx.py) — e.g.
+        code.graph/files/exec veriam "Nenhum projeto vinculado" num chat de projeto legítimo.
+        Por isso copiamos o contexto e rodamos `dispatch` DENTRO dele (`ctx.run`)."""
         t = int(get_settings().builtin_tool_timeout_seconds or 0)
-        fut = asyncio.get_running_loop().run_in_executor(None, self.sift.dispatch, *call)
+        ctx = contextvars.copy_context()
+        fut = asyncio.get_running_loop().run_in_executor(
+            None, functools.partial(ctx.run, self.sift.dispatch, *call))
         if t <= 0:
             return await fut
         try:
             return await asyncio.wait_for(fut, timeout=t)
         except asyncio.TimeoutError:
             logger.warning("tool '%s' excedeu %ss — abortada (a thread segue em bg)", call[0], t)
+            try:
+                from .. import health_service
+                from ..tools import toolctx as _tc
+                # record_bg: _dispatch_tp roda no MAIN loop → offloada o psycopg2 p/ não
+                # travar o loop no connect_timeout bem quando uma tool já pendurou.
+                health_service.record_bg("tool_watchdog", "abort", severity="degraded",
+                                         detail={"tool": str(call[0]), "timeout_s": t},
+                                         chat_id=_tc.current_chat_id.get())
+            except Exception:  # noqa: BLE001
+                pass
             return json.dumps({
                 "error": f"a ferramenta '{call[0]}' passou de {t}s e foi abortada. "
                          "Reduza o escopo/depth (ex.: mire um arquivo ou função específica, "
@@ -2255,12 +2301,29 @@ async def _final_synthesis(
             continue
         if got.strip():
             logger.info("síntese final redigiu a resposta via %s (chat %s)", sm, chat_id)
+            _health("synthesis", "tier_a" if sm == model else "tier_b", "warn",
+                    {"model": sm}, chat_id)
             yield {"type": "__final_text__", "text": got}
             return
     # camada C: determinístico, sem LLM — sempre entrega a substância apurada.
+    _health("synthesis", "tier_c", "degraded",
+            {"reason": "as camadas LLM (A/B) não redigiram; caiu no digest determinístico"},
+            chat_id)
     text = _deterministic_final(tool_events)
     yield {"type": "token", "text": text}
     yield {"type": "__final_text__", "text": text}
+
+
+def _health(capability: str, event: str, severity: str, detail: dict, chat_id: str | None) -> None:
+    """Registra um evento de saúde sem nunca derrubar NEM BLOQUEAR o caminho observado.
+    `record_bg` offloada o psycopg2 síncrono p/ um thread — este helper roda no main loop
+    (dentro dos geradores de run_turn), então um `record()` direto poderia travá-lo até o
+    connect_timeout se o banco engasgasse, e bem na hora em que algo já está degradando."""
+    try:
+        from .. import health_service
+        health_service.record_bg(capability, event, severity=severity, detail=detail, chat_id=chat_id)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 async def run_turn(
@@ -2571,6 +2634,7 @@ async def run_turn(
                     "[O usuário interveio durante a geração — priorize esta instrução]:\n" + _st)})
                 input_chars["user"] += len(_st)
                 yield {"type": "steer", "text": _st[:200]}
+                _health("steering", "injected", "info", {"chars": len(_st)}, chat_id)
                 if tools is None and _base_tools is not None:
                     tools = _base_tools  # reabre tools p/ agir sobre a nova instrução
         # últimas rodadas: retira as tools para OBRIGAR uma resposta final. Sem isto, um
@@ -2829,6 +2893,9 @@ async def run_turn(
             _psig = f"{name}|{tc['function'].get('arguments', '')}|{content[:400]}"
             _noprogress[_psig] = _noprogress.get(_psig, 0) + 1
             if _noprogress[_psig] >= _spin_limit:
+                if not _spin["stop"]:
+                    _health("anti_spin", "stop", "warn",
+                            {"tool": name, "repeats": _noprogress[_psig]}, chat_id)
                 _spin["stop"] = True
             tool_events.append({
                 "kind": "result", "name": name, "data": event_result,
@@ -3215,6 +3282,10 @@ async def run_turn_guarded(
                 "detect": hit.get("detect") or "refusal",
                 "fallback_model": cur_model if action == "fallback_model" else None,
             }
+            # medição de primitivo: o guarda de saída reagiu (reforço ou troca de modelo)
+            _health("output_guard", action, "warn",
+                    {"detect": hit.get("detect") or "refusal", "attempt": attempt},
+                    getattr(turn_kwargs.get("session"), "chat_id", None))
             yield {"type": "guard_reset"}  # o front descarta a tentativa anterior
             continue
 

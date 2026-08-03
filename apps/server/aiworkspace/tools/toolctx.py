@@ -1,9 +1,12 @@
 """Contexto do turno visível às ferramentas (via contextvars).
 
-As tools SIFT rodam num thread do pool (`run_in_threadpool`), que herda o
-`contextvars.Context` do turno atual. Isto permite que uma tool descubra o chat
-em que foi chamada (ex.: o lembrete "no chat atual") sem precisar plumbar o
-chat_id por toda a cadeia de registro/cache da SIFT (que é por-usuário).
+As tools SIFT rodam numa thread do pool via `_ToolDispatcher._dispatch_tp`
+(`run_in_executor` + `contextvars.copy_context()` — o executor NÃO herda o
+contexto sozinho, então o dispatch copia e roda `dispatch` dentro dele com
+`ctx.run`). Isso dá à thread o `contextvars.Context` do turno, permitindo que
+uma tool descubra o chat/projeto/fuso em que foi chamada (ex.: o lembrete "no
+chat atual", o projeto do Codespace vinculado) sem plumbar esses valores por
+toda a cadeia de registro/cache da SIFT (que é por-USUÁRIO, não por-chat).
 """
 
 from __future__ import annotations

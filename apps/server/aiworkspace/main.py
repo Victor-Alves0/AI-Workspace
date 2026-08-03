@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -23,6 +24,7 @@ from .memory_routes import router as memory_router
 from .brain_routes import router as brain_router
 from .knowledge_routes import router as knowledge_router
 from .codespace_routes import router as codespace_router
+from .investigation_routes import router as investigation_router
 from .share_routes import router as share_router
 from .telegram_routes import router as telegram_router
 from .discord_routes import router as discord_router
@@ -69,6 +71,14 @@ async def lifespan(app: FastAPI):
         await tracing.sink.start()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível iniciar a observabilidade (%s)", exc)
+    # auto-observabilidade: self-check das capacidades centrais (db, mem0) no boot —
+    # grava + ALARMA se algo estiver caído. Foi assim que o mem0 rodou em no-op sem
+    # ninguém ver. Em thread + task p/ não atrasar o readiness (mem0.warm bloqueia ~1-3s).
+    try:
+        from . import health_service
+        asyncio.create_task(run_in_threadpool(health_service.self_check))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Não foi possível agendar o self-check de saúde (%s)", exc)
     if settings.secret_is_insecure:
         msg = (
             "APP_SECRET inseguro/curto. Gere um valor forte: "
@@ -132,6 +142,9 @@ async def lifespan(app: FastAPI):
     try:
         from .codespace import exec_jobs
         exec_jobs.start_reaper()
+        # durabilidade: destrava chats cujos jobs de background foram cortados por um
+        # restart (o "wake que nunca chega"). Em background p/ não atrasar o readiness.
+        asyncio.create_task(exec_jobs.recover_orphans())
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível iniciar o reaper de exec_jobs (%s)", exc)
     # reaper dos previews (dev servers no ar): derruba os velhos/caídos.
@@ -412,6 +425,7 @@ def create_app() -> FastAPI:
     app.include_router(learning_router)
     app.include_router(knowledge_router)
     app.include_router(codespace_router)
+    app.include_router(investigation_router)
     app.include_router(brain_router)
     app.include_router(share_router)
     app.include_router(telegram_router)

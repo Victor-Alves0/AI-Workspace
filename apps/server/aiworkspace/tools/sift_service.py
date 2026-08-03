@@ -367,6 +367,12 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # e mescla/descarta. O merge normalmente é aprovado pelo humano na UI.
     {"path": "code.task.manage", "name": "Tarefas do Projeto", "description": "Abre uma tarefa isolada (worktree/branch) no projeto vinculado para trabalhar sem afetar o código principal, lista as tarefas, mostra o diff e mescla ou descarta.",
      "model_desc": "Open an isolated worktree/branch to work in without touching the project's main tree, list tasks, show a task's diff, and merge or discard it. Use 'open' before a big or parallel change; merging is usually approved by the human in the UI."},
+    # Grafo de Investigação: o análogo do codegraph para o que NÃO é código-fonte em
+    # disco — alvos black-box (recon), binários sem fonte (RE), comportamento observado.
+    # A IA sonda com as tools existentes (exec/navegador/http.session/deep_search) e vai
+    # montando um grafo TIPADO e persistido, consultável e visualizável.
+    {"path": "investigation.graph.manage", "name": "Grafo de Investigação", "description": "Monta um grafo à medida que você investiga algo sem o código-fonte — um alvo na rede, um binário, um comportamento: registra hosts, portas, serviços, endpoints, funções e achados como nós ligados, que ficam consultáveis e visuais.",
+     "model_desc": "Build a TYPED, persistent graph as you investigate something you don't have source for — a network target (recon), a binary (reverse engineering), or observed behavior. YOU are the extractor: probe with code.exec.run (curl/httpx/python sockets), the headless browser, http.session, deep_search, then record what you find here as linked nodes (host, port, service, endpoint, form, param, function, import, string, syscall, behavior, finding). It persists, is queryable ('which endpoints take POST without auth?') and renders on a canvas. The codegraph covers source you HAVE; this covers everything else. Use it whenever an investigation would otherwise leave findings as loose prose."},
 ]
 # NOTA: "perguntar opções" (kind:"ask") é uma PRIMITIVA de sistema (tools/interaction.py),
 # não uma tool equipável — qualquer ferramenta a usa via `ask_options(...)` (ex.: o Lembrete
@@ -1261,6 +1267,115 @@ def _register_builtins(
                     "note": "Proposal shown to the user for approval — NOT saved yet.",
                 }
             return {"error": f"unknown action '{act}' (use list/read/import/create)"}
+
+    # Grafo de Investigação: tool NATIVA (não precisa de projeto). A IA é o extrator —
+    # sonda com as outras tools e registra aqui. Persistido em DB (investigation_service),
+    # chamado via asyncio.run como as demais tools async. O grafo alvo é resolvido por
+    # graph_id explícito OU pelo grafo mais recente deste chat (toolctx.current_chat_id).
+    if want("investigation.graph.manage"):
+        from . import toolctx as _toolctx
+        from .. import investigation_service as _inv
+
+        def _inv_graph_id(explicit: str) -> str | None:
+            """Resolve o grafo alvo: id explícito, senão o mais recente deste chat."""
+            if (explicit or "").strip():
+                return explicit.strip()
+            g = asyncio.run(_inv.resolve_graph(
+                user_id, chat_id=_toolctx.current_chat_id.get()))
+            return str(g.id) if g is not None else None
+
+        @sift.tool(
+            "investigation.graph.manage",
+            description=(
+                "Build and query a TYPED, persistent graph as you investigate something you "
+                "do NOT have source code for — a network/cloud target (recon), a binary "
+                "(reverse engineering), or a system's observed behavior. The codegraph covers "
+                "source you HAVE; this covers everything else. YOU are the extractor: probe with "
+                "code.exec.run (curl/httpx/python sockets/objdump/nm), the headless browser, "
+                "http.session, deep_search — then record findings HERE instead of leaving them "
+                "as loose prose, so they stay queryable and visual and survive across turns. "
+                "Nodes are typed (suggested: host, port, service, endpoint, page, form, param, "
+                "function, import, string, section, syscall, behavior, finding) with free-form "
+                "props and a confidence (certain|inferred|possible — recon is uncertain). "
+                "Actions: 'create' (start a graph for a target — do this first; returns graph_id); "
+                "'add_node'; 'add_edge' (src/dst are a node id, a label, or 'type/label'); "
+                "'link' (bulk: add many nodes+edges in ONE call — the cheap path; missing edge "
+                "endpoints are auto-created); 'note' (attach an observation/finding to a node); "
+                "'query' (filter nodes by type/label, edges by rel, or a node's neighbors_of); "
+                "'visualize' (whole graph for the canvas); 'list' (your graphs); 'delete'. If you "
+                "omit graph_id, the most recent graph in THIS chat is used."
+            ),
+            params={
+                "action": ("string:r::create | add_node | add_edge | link | note | query | "
+                           "visualize | list | delete"),
+                "graph_id": "string:o::the graph to operate on (omit = most recent graph in this chat)",
+                "name": "string:o::create: a name for the investigation",
+                "target": "string:o::create: the thing under investigation (host, url, binary path, service)",
+                "kind": "string:o::create: recon | re | behavior | generic",
+                "type": "string:o::add_node/query: node type (host, port, service, endpoint, function, finding, ...)",
+                "label": "string:o::add_node: the node's label; query: substring to filter node labels by",
+                "props": "object:o::add_node/add_edge: arbitrary observed properties, e.g. {\"status\":200,\"banner\":\"nginx\"}",
+                "confidence": "string:o::add_node/add_edge: certain | inferred | possible (default inferred)",
+                "src": "string:o::add_edge: source node — a node id, a label, or 'type/label'",
+                "dst": "string:o::add_edge: target node — a node id, a label, or 'type/label'",
+                "rel": "string:o::add_edge (relation, e.g. exposes/serves/has_param/calls); query: filter edges by rel",
+                "nodes": "array:o::link: [{type, label, props?, confidence?}, ...]",
+                "edges": "array:o::link: [{src, dst, rel, props?, confidence?}, ...]",
+                "node": "string:o::note: the node to attach to (id, label, or 'type/label')",
+                "text": "string:o::note: the observation/finding text",
+                "neighbors_of": "string:o::query: a node (id/label) whose neighborhood you want",
+            },
+            returns=["graph_id", "node", "edge", "nodes", "edges", "graphs", "ok", "error"],
+            examples=["start mapping the target 10.0.0.5", "add an endpoint node /api/login",
+                      "link host 10.0.0.5 exposes port 443", "which endpoints did I find?",
+                      "record that /admin returns 200 without auth", "show the recon graph"],
+        )
+        def _investigation_graph(action: str = "", graph_id: str = "", name: str = "",
+                                 target: str = "", kind: str = "generic", type: str = "",
+                                 label: str = "", props: Any = None, confidence: str = "inferred",
+                                 src: str = "", dst: str = "", rel: str = "",
+                                 nodes: Any = None, edges: Any = None, node: str = "",
+                                 text: str = "", neighbors_of: str = "") -> dict[str, Any]:
+            act = (action or "").strip().lower()
+            chat_id = _toolctx.current_chat_id.get()
+            if act == "create":
+                return asyncio.run(_inv.create_graph(
+                    user_id, name or target or "investigação", target=target,
+                    kind=kind or "generic", chat_id=chat_id,
+                    project_id=_toolctx.current_codespace_project_id.get()))
+            if act == "list":
+                return {"graphs": asyncio.run(_inv.list_graphs(user_id, chat_id=chat_id))}
+
+            gid = _inv_graph_id(graph_id)
+            if gid is None:
+                return {"error": "nenhum grafo — crie um com action='create' primeiro "
+                                 "(ou passe graph_id)"}
+            _props = props if isinstance(props, dict) else None
+            if act == "add_node":
+                return asyncio.run(_inv.add_node(
+                    user_id, gid, type=type or "node", label=label,
+                    props=_props, confidence=confidence))
+            if act == "add_edge":
+                return asyncio.run(_inv.add_edge(
+                    user_id, gid, src=src, dst=dst, rel=rel or "rel",
+                    props=_props, confidence=confidence))
+            if act == "link":
+                return asyncio.run(_inv.bulk_link(
+                    user_id, gid,
+                    nodes=nodes if isinstance(nodes, list) else [],
+                    edges=edges if isinstance(edges, list) else []))
+            if act == "note":
+                return asyncio.run(_inv.add_note(user_id, gid, node=node or neighbors_of, text=text))
+            if act == "query":
+                return asyncio.run(_inv.query(
+                    user_id, gid, type=type, rel=rel, label=label,
+                    neighbors_of=neighbors_of))
+            if act == "visualize":
+                return asyncio.run(_inv.visualize(user_id, gid))
+            if act == "delete":
+                return asyncio.run(_inv.delete_graph(user_id, gid))
+            return {"error": f"ação desconhecida '{act}' (use create/add_node/add_edge/"
+                             "link/note/query/visualize/list/delete)"}
 
     # Codespace (grafo de código) — só existe se este chat estiver vinculado a um
     # projeto (toolctx.current_codespace_project_id). O projeto é resolvido a CADA

@@ -20,14 +20,17 @@ def test_long_runner_detects_installs_and_builds():
         "pip install requests", "cargo build", "go mod download",
         "git clone https://x/y", "./gradlew build", "clojure -P",
         "wget https://x/y.jar", "apt-get install foo", "poetry add bar",
+        # suítes de teste/lint/build também auto-backgroundam (podem estourar o teto
+        # de CPU do run síncrono → SIGXCPU/exit 152) — ver _LONG_RUNNER_RE.
+        "npm run lint", "pytest -k auth",
     ]:
         assert _is_long_runner(cmd), cmd
 
 
 def test_long_runner_ignores_quick_commands():
     for cmd in [
-        "ls -la", "cat pom.xml", "grep -r foo src", "npm run lint",
-        "python script.py", "echo hi", "git status", "pytest -k auth",
+        "ls -la", "cat pom.xml", "grep -r foo src",
+        "python script.py", "echo hi", "git status",
     ]:
         assert not _is_long_runner(cmd), cmd
 
