@@ -191,6 +191,10 @@ class Settings(BaseSettings):
     # → corrige), que precisa de dezenas de passos como Codex/Claude Code/opencode —
     # por isso tem um teto próprio, bem mais alto, aplicado só nesses chats.
     max_tool_iterations: int = 8
+    # anti-spin AGNÓSTICO DE MODELO (estado da arte): se a MESMA (ferramenta, args, resultado)
+    # se repete N vezes, o agente não está progredindo → força a resposta final em vez de moer
+    # até o teto. É isto que resolve o "girando", não mexer no teto por-modelo.
+    agent_noprogress_repeats: int = 3
     # backstop ALTO (não é o ponto de parada normal): como no Claude Code/Codex, o loop
     # roda até o MODELO parar de chamar tools; este teto só evita loop infinito. Antes era
     # 40 e CORTAVA o modelo no meio de tarefas longas (forçava a resposta final). O que

@@ -2387,6 +2387,12 @@ async def run_turn(
     # histórico + tools, antes dos tool_results se acumularem). É o que o medidor de
     # contexto e a auto-compactação devem usar — senão leem "milhões" e falseiam "estourado".
     first_ctx_tokens: int | None = None
+    # anti-spin (estado da arte, agnóstico de modelo): conta (ferramenta,args,resultado)
+    # idênticos. Se um se repete N vezes, o agente não progride → força a resposta final,
+    # em vez de moer até o teto de iterações (o que causou o giro de 170 chamadas do 83).
+    _noprogress: dict[str, int] = {}
+    _spin = {"stop": False}
+    _spin_limit = max(2, int(settings.agent_noprogress_repeats))
     # registro dos usos de ferramenta neste turno (p/ embutir na mensagem)
     tool_events: list[dict[str, Any]] = []
     # modo "auto" da Base de Conhecimento: registra as fontes recuperadas (já
@@ -2435,6 +2441,16 @@ async def run_turn(
         # loop longo de código: encolhe leituras de arquivo obsoletas antes de reenviar
         if _in_codespace and _iter > 0:
             _trim_tool_results(messages)
+        # anti-spin: detectou repetição sem progresso → corta as tools e OBRIGA a resposta
+        # final agora (em vez de moer até o teto). Resolve o "girando" sem mexer no teto.
+        if _spin["stop"] and tools is not None:
+            messages.append({"role": "user", "content": (
+                "Você repetiu a mesma ação e obteve o mesmo resultado, sem progresso. PARE de "
+                "chamar ferramentas e responda AGORA, em texto, com base no que já apurou. Se a "
+                "tarefa já está concluída, diga isso e resuma o resultado.")})
+            tools = None
+            _spin["stop"] = False
+            logger.info("anti-spin: repetição sem progresso no chat %s — forçando resposta final", chat_id)
         tool_buffer: dict[int, dict] = {}
         finish_reason: str | None = None
         usage: dict | None = None
@@ -2663,6 +2679,13 @@ async def run_turn(
             """Registra o resultado de UMA tool: evento p/ a UI, mensagem p/ o modelo e
             a contabilidade de tokens. Devolve o evento a emitir."""
             content, event_result = _shape_tool_result(result)
+            # anti-spin: assina (ferramenta, args, resultado). Mesma assinatura repetida =
+            # o agente está refazendo a mesma coisa sem aprender nada → sinaliza p/ o topo
+            # do loop forçar a resposta final (não conta polling que MUDA de resultado).
+            _psig = f"{name}|{tc['function'].get('arguments', '')}|{content[:400]}"
+            _noprogress[_psig] = _noprogress.get(_psig, 0) + 1
+            if _noprogress[_psig] >= _spin_limit:
+                _spin["stop"] = True
             tool_events.append({
                 "kind": "result", "name": name, "data": event_result,
                 "chars": len(content),  # o que de fato volta como ENTRADA do modelo
