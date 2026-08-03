@@ -2138,6 +2138,69 @@ def _shape_tool_result(result: Any) -> tuple[str, Any]:
     return content, event_result
 
 
+# --------------------------------------------------------------------------- #
+# Síntese final garantida — quando o loop termina SEM texto porque o modelo
+# ficou preso no formato de tool-call (DeepSeek/local travam nisso; ver a
+# pesquisa: um modelo estável no MESMO ponto redige). O usuário PAGOU pelo
+# turno; nunca entregar "regenere / troque de modelo". Três camadas:
+#   A) reredija com o MESMO modelo, mas num prompt LIMPO (fora do histórico
+#      poluído de tool_calls que ele está copiando) — quebra o loop de formato;
+#   B) se ainda vier vazio, um modelo AUXILIAR (compact_model) faz a redação —
+#      agnóstico de modelo: outra trajetória não compartilha o trava-formato;
+#   C) último recurso determinístico: um resumo do que as tools apuraram, pra
+#      o usuário SEMPRE receber a substância. Isto é o `early_stopping_method=
+#      "generate"` do estado da arte + fallback de modelo, não um erro canned.
+# --------------------------------------------------------------------------- #
+
+def _tool_digest(tool_events: list[dict[str, Any]], *, limit: int = 600) -> str:
+    """Renderiza chamadas+resultados de tools em texto legível (determinístico)."""
+    lines: list[str] = []
+    for ev in tool_events or []:
+        name = ev.get("name") or "?"
+        data = ev.get("data")
+        try:
+            body = data if isinstance(data, str) else json.dumps(data, ensure_ascii=False, default=str)
+        except (TypeError, ValueError):
+            body = str(data)
+        body = (body or "").strip()
+        if len(body) > limit:
+            body = body[:limit] + "…"
+        if ev.get("kind") == "call":
+            lines.append(f"→ chamou {name}({body})")
+        else:
+            lines.append(f"← {name}: {body}")
+    return "\n".join(lines)
+
+
+def _synthesis_messages(user_text: str, tool_events: list[dict[str, Any]],
+                        reasoning_text: str) -> list[dict[str, str]]:
+    """Prompt LIMPO (sem o histórico de tool_calls) que força a redação final."""
+    digest = _tool_digest(tool_events)
+    if reasoning_text.strip():
+        digest = (digest + "\n\n=== Rascunho de raciocínio ===\n" + reasoning_text.strip()) if digest \
+            else ("=== Rascunho de raciocínio ===\n" + reasoning_text.strip())
+    return [
+        {"role": "system", "content": (
+            "Você está finalizando a resposta do assistente. As ferramentas JÁ rodaram e "
+            "os resultados estão abaixo. Escreva a resposta final ao usuário, no idioma dele, "
+            "em prosa clara. NÃO chame ferramentas, NÃO emita JSON nem sintaxe de function-call "
+            "— apenas a resposta.")},
+        {"role": "user", "content": (
+            f"Pedido do usuário:\n{user_text}\n\n=== Resultados das ferramentas ===\n"
+            f"{digest}\n\nEscreva a resposta final agora.")},
+    ]
+
+
+def _deterministic_final(tool_events: list[dict[str, Any]]) -> str:
+    """Último recurso, sem LLM: apresenta o que foi apurado como resultado útil."""
+    digest = _tool_digest(tool_events, limit=800)
+    if not digest:
+        return ("_Não consegui redigir uma resposta final desta vez. Tente reenviar a "
+                "mensagem._")
+    return ("Não consegui redigir a resposta em prosa desta vez, mas aqui está o que "
+            "apurei com as ferramentas:\n\n" + digest)
+
+
 async def run_turn(
     *,
     api_key: str,
@@ -2775,17 +2838,43 @@ async def run_turn(
     if first_ctx_tokens is not None:
         total_usage["context_tokens"] = first_ctx_tokens
 
-    has_usage = total_usage["total_tokens"] > 0 or total_usage["cost"] > 0
+    # SÍNTESE FINAL GARANTIDA: rodou tools (ou só raciocínio) mas terminou SEM texto — o
+    # modelo travou no formato de tool-call, nem a cutucada in-loop o soltou. Em vez de
+    # devolver "regenere/troque de modelo" (o usuário pagou o turno), reredigimos num
+    # prompt LIMPO (camada A, mesmo modelo), depois no modelo auxiliar (camada B), e por
+    # fim um resumo determinístico (camada C). Ver _synthesis_messages/_deterministic_final.
+    if not (assistant_text or "").strip() and (tool_events or reasoning_text.strip()):
+        _iface = (session.user_profile or {}).get("interface") or {}
+        _aux = (_iface.get("compact_model") or "").strip()
+        _synth_models = [model] + ([_aux] if _aux and _aux != model else [])
+        _synth_msgs = _synthesis_messages(user_text, tool_events, reasoning_text)
+        for _sm in _synth_models:
+            _got = ""
+            try:
+                async for _chunk in openrouter.stream_chat(
+                    api_key, _sm, _synth_msgs, tools=None, params={}, base_url=base_url,
+                ):
+                    if _chunk.get("usage"):
+                        _merge_usage(total_usage, _chunk["usage"])
+                    for _choice in _chunk.get("choices", []):
+                        _c = _choice.get("delta", {}).get("content")
+                        if _c:
+                            _got += _c
+                            yield {"type": "token", "text": _c}
+            except Exception as _e:  # provedor/modelo aux indisponível → próxima camada
+                logger.warning("síntese final com %s falhou: %s", _sm, _e)
+                continue
+            if _got.strip():
+                assistant_text = _got
+                logger.info("síntese final redigiu a resposta via %s (chat %s)", _sm, chat_id)
+                break
+        if not (assistant_text or "").strip():
+            # camada C: determinístico, sem LLM — sempre entrega a substância apurada.
+            assistant_text = _deterministic_final(tool_events)
+            yield {"type": "token", "text": assistant_text}
 
-    # fallback honesto: rodou tools mas terminou SEM texto (o modelo insistiu em vazar
-    # chamadas em vez de redigir, mesmo na rodada de graça). Melhor uma nota clara do que
-    # bolha vazia OU o markup cru. Só quando houve trabalho (tool_events).
-    if not (assistant_text or "").strip() and tool_events:
-        assistant_text = (
-            "_As ferramentas foram executadas, mas o modelo não redigiu a resposta final "
-            "(ficou emitindo chamadas de ferramenta em vez de texto). Tente **Regenerar** "
-            "ou usar outro modelo — os resultados das ferramentas estão acima._"
-        )
+    # uso pode ter crescido na síntese final (camadas A/B) — recalcula após o bloco
+    has_usage = total_usage["total_tokens"] > 0 or total_usage["cost"] > 0
 
     # reassina URLs de imagem da KB antes de emitir/persistir (token pode ter sido
     # adulterado pelo modelo) — garante que a imagem carregue no chat
