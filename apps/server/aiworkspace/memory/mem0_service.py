@@ -36,6 +36,9 @@ def _pg_conn_params() -> dict[str, Any]:
         "password": url.password,
         "host": url.hostname,
         "port": url.port or 5432,
+        # nunca pendurar em conexão: se o DB estiver inacessível, falha em 10s em vez
+        # de bloquear a thread (mem0 roda sync via psycopg2 fora do watchdog de tools).
+        "connect_timeout": 10,
     }
 
 

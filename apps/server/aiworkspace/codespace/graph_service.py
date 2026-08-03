@@ -984,8 +984,10 @@ def reaches(user_id: str, project_id: str, selector: str, sink: str = "http",
     """Este símbolo alcança um `sink` (http, db, fs…)? Devolve as CADEIAS de
     chamada que levam até lá — a confiança é a MÍNIMA do caminho."""
     cg = _get_graph(user_id, project_id)
+    # depth 12 enumerava caminhos demais em grafos grandes (blowup como o da taint);
+    # 6 já cobre cadeias reais e termina rápido. Watchdog do dispatcher é a rede final.
     target, data, env = cg.reaches(
-        selector, sink=sink or "http", via=via or None, depth=max(1, min(depth, 12))
+        selector, sink=sink or "http", via=via or None, depth=max(1, min(depth, 6))
     )
     paths = data.get("paths") or []
     return {
@@ -1011,16 +1013,30 @@ def taint(user_id: str, project_id: str, scope: str = "", entry: str = "",
     Sem `entry` varre o projeto; com `entry` parte de uma função específica.
     Regras customizáveis pelo usuário em `.codegraph/taint.json` do projeto."""
     cg = _get_graph(user_id, project_id)
-    data, env = cg.taint(
-        scope=scope or None, entry=entry or None, depth=max(1, min(depth, 8))
-    )
+    # BOUND anti-explosão: o modo VARREDURA (sem entry) roda um trace interprocedural a
+    # partir de TODA função do escopo — depth alto sobre uma base grande explode
+    # (custo ~ funções × ramificação^depth) e pendurava o turno. Com `entry` (focado,
+    # 1 função) o custo é baixo, então permitimos mais fundo. O watchdog do dispatcher
+    # (builtin_tool_timeout_seconds) é a rede final; aqui evitamos CHEGAR nela.
+    _entry = entry or None
+    _cap = 6 if _entry else 3
+    eff_depth = max(1, min(depth, _cap))
+    data, env = cg.taint(scope=scope or None, entry=_entry, depth=eff_depth)
     findings = data.get("findings") or []
+    warns = list(env.warnings)
+    if not _entry:
+        warns.append(
+            "modo varredura (sem `entry`): profundidade limitada a "
+            f"{eff_depth} p/ não explodir numa base grande. Para ir mais fundo numa "
+            "cadeia específica, chame de novo com `entry=<função>` (rápido e preciso) "
+            "ou reduza o `scope` a um diretório/arquivo."
+        )
     return {
         "mode": data.get("mode"),
         "findings": findings[:_MAX_RESULTS],
         "scanned": data.get("scanned"),
         "total_found": len(findings),
-        "warnings": env.warnings,
+        "warnings": warns,
     }
 
 
