@@ -26,6 +26,11 @@ services:
   server:
     build:
       context: ./apps/server
+      args:
+        # commit desta build (o update.sh exporta antes de reconstruir). Permite ao
+        # painel comparar COMMIT a commit, e não só a tag de release. Vazio = degrada
+        # p/ a comparação por release. Ver docs/trust-model.md e update.sh.
+        GIT_COMMIT: ${GIT_COMMIT:-}
     restart: unless-stopped
     depends_on:
       db:

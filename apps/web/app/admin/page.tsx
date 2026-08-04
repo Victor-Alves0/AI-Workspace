@@ -69,7 +69,7 @@ function AdminShell({ title, onBack, children }: { title: string; onBack: () => 
 }
 
 interface NetworkCfg { host: string; port: number; allowed_ips: string[]; repo: string; branch: string; trust_proxy?: boolean; web_origin?: string }
-interface UpdateInfo { current_version: string; repo: string; branch: string; latest_release: string | null; latest_commit: string | null; update_available: boolean; authenticated: boolean; error: string | null }
+interface UpdateInfo { current_version: string; current_commit: string | null; repo: string; branch: string; latest_release: string | null; latest_commit: string | null; update_available: boolean; commits_behind: boolean | null; authenticated: boolean; error: string | null }
 
 const STATUS_STYLE: Record<string, string> = {
   active: "bg-green-500/15 text-green-400",
@@ -374,24 +374,32 @@ export default function AdminPage() {
                   <>
                     <p className="text-ink">
                       Versão atual: <span className="font-mono">{upd.current_version}</span>
+                      {upd.current_commit && <> (<span className="font-mono">{upd.current_commit}</span>)</>}
                       {upd.latest_release && <> · Último release: <span className="font-mono">{upd.latest_release}</span></>}
                       {upd.latest_commit && <> · Commit: <span className="font-mono">{upd.latest_commit}</span></>}
                     </p>
                     {upd.update_available ? (
-                      <p className="mt-1 text-amber-300">Há uma atualização disponível. No host, rode <span className="font-mono">./update.sh</span> para aplicar.</p>
+                      <p className="mt-1 text-amber-300">
+                        {upd.commits_behind
+                          ? `Há commits novos no branch ${upd.branch}.`
+                          : "Há uma atualização disponível."}{" "}
+                        No host, rode <span className="font-mono">./update.sh</span> para aplicar.
+                      </p>
                     ) : (
                       <p className="mt-1 text-green-400">
-                        Você está na última release{upd.latest_release ? ` (${upd.latest_release})` : ""}.
+                        {upd.commits_behind === false
+                          ? "Tudo atualizado (release e commit)."
+                          : `Você está na última release${upd.latest_release ? ` (${upd.latest_release})` : ""}.`}
                       </p>
                     )}
-                    {/* `update_available` compara RELEASES, mas o update.sh puxa o BRANCH:
-                        pode haver commits novos sem release. Dizer só "atualizado"
-                        escondia isso. */}
-                    {upd.latest_commit && (
+                    {/* sem GIT_COMMIT na imagem não dá p/ comparar commits: o update.sh
+                        puxa o BRANCH, então dizer só "atualizado" esconderia código novo. */}
+                    {upd.commits_behind === null && upd.latest_commit && (
                       <p className="mt-1 text-xs text-muted">
-                        O <span className="font-mono">./update.sh</span> acompanha o branch
-                        <span className="font-mono"> {upd.branch}</span>, não a release — pode
-                        trazer commits mais novos que <span className="font-mono">{upd.latest_commit}</span>.
+                        Esta imagem não registra o commit de build, então só a release é
+                        comparada — o <span className="font-mono">./update.sh</span> acompanha o
+                        branch <span className="font-mono">{upd.branch}</span> e pode trazer
+                        código mais novo. Rode-o para passar a comparar commit a commit.
                       </p>
                     )}
                   </>

@@ -258,6 +258,12 @@ class Settings(BaseSettings):
     app_secret_file: str = ""
     database_url_file: str = ""
 
+    # commit de onde a imagem foi construída (ARG GIT_COMMIT no Dockerfile, exportado
+    # pelo update.sh). A checagem de atualização o compara com o último commit do branch
+    # no GitHub — o update.sh puxa o BRANCH, então comparar só a tag de release dizia
+    # "atualizado" mesmo havendo código novo. Vazio = comparação só por release.
+    git_commit: str = ""
+
     def model_post_init(self, __context) -> None:  # noqa: D105 - pydantic hook
         secret = _read_secret_file(self.app_secret_file)
         if secret:

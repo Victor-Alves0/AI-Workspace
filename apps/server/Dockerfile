@@ -84,5 +84,13 @@ ENV HOME=/home/app \
     MISE_YES=1 \
     PATH=/data/codespace/.mise/data/shims:/home/app/.local/bin:/usr/local/bin:${PATH}
 
+# Commit de onde esta imagem foi construída. Fica no FIM de propósito: muda a cada
+# build e invalidaria o cache das camadas pesadas se viesse antes.
+# Serve p/ a checagem de atualização comparar COMMIT a commit — o `update.sh` puxa o
+# BRANCH, então comparar só a tag de release dizia "atualizado" mesmo havendo código
+# novo. Vazio (build manual sem o arg) = cai na comparação por release.
+ARG GIT_COMMIT=""
+ENV GIT_COMMIT=${GIT_COMMIT}
+
 EXPOSE 8000
 CMD ["./entrypoint.sh"]

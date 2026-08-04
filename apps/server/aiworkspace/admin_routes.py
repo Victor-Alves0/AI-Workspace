@@ -123,6 +123,19 @@ class NetworkIn(BaseModel):
     branch: str = Field(default="main", max_length=100)
 
 
+def _same_commit(a: str | None, b: str | None) -> bool | None:
+    """Dois hashes de commit apontam para o mesmo? Compara pelo PREFIXO comum, porque os
+    lados têm comprimentos diferentes (a API do GitHub devolve o sha completo; a imagem
+    guarda um short hash). None = desconhecido (sem um dos lados) — o chamador então não
+    afirma nada sobre commits."""
+    a = (a or "").strip().lower()
+    b = (b or "").strip().lower()
+    if not a or not b:
+        return None
+    n = min(len(a), len(b))
+    return a[:n] == b[:n]
+
+
 def _normalize_repo(value: str) -> str:
     """Normaliza o repositório para `owner/repo` — o formato que a API do GitHub usa em
     /repos/{owner}/{repo}. Aceita o que o admin naturalmente cola: a URL do navegador
@@ -201,11 +214,13 @@ async def update_check(
     branch = (cfg.get("branch") or "main").strip()
     out: dict = {
         "current_version": __version__,
+        "current_commit": (get_settings().git_commit or "").strip() or None,
         "repo": repo,
         "branch": branch,
         "latest_release": None,
         "latest_commit": None,
         "update_available": False,
+        "commits_behind": None,   # True/False; None = imagem sem GIT_COMMIT (desconhecido)
         "authenticated": False,
         "error": None,
     }
@@ -226,7 +241,17 @@ async def update_check(
                     out["update_available"] = tag.lstrip("v") != __version__.lstrip("v")
             c = await client.get(f"https://api.github.com/repos/{repo}/commits/{branch}")
             if c.status_code == 200:
-                out["latest_commit"] = ((c.json() or {}).get("sha") or "")[:8]
+                sha = (c.json() or {}).get("sha") or ""
+                out["latest_commit"] = sha[:8]
+                # o update.sh puxa o BRANCH: se a imagem foi construída de um commit
+                # diferente do topo do branch, HÁ atualização — mesmo que a release
+                # bata. Sem GIT_COMMIT na imagem, `commits_behind` fica None e só a
+                # release manda (comportamento antigo, sem afirmar o que não se sabe).
+                same = _same_commit(out["current_commit"], sha)
+                if same is not None:
+                    out["commits_behind"] = not same
+                    if not same:
+                        out["update_available"] = True
             elif c.status_code in (401, 403):
                 out["error"] = ("O GitHub recusou o token da conta conectada "
                                 f"(HTTP {c.status_code}) — reconecte em Integrações → GitHub.")

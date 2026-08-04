@@ -6,7 +6,7 @@ URL do navegador. A API do GitHub usa /repos/{owner}/{repo}, então a URL crua m
 """
 from __future__ import annotations
 
-from aiworkspace.admin_routes import _normalize_repo
+from aiworkspace.admin_routes import _normalize_repo, _same_commit
 
 _ESPERADO = "Victor-Alves0/AI-Workspace"
 
@@ -34,6 +34,28 @@ def test_entradas_vazias_ou_parciais_nao_quebram():
     # só o dono (sem repo): devolve como veio — o update-check então dá 404 explicado,
     # em vez de estourar aqui
     assert _normalize_repo("Victor-Alves0") == "Victor-Alves0"
+
+
+def test_compara_commit_por_prefixo_comum():
+    """A imagem guarda um short hash e a API do GitHub devolve o sha completo — a
+    comparação tem que ser por prefixo, senão NUNCA bateria e o painel diria
+    'há commits novos' para sempre."""
+    curto, completo = "24db3c7a1b2c", "24db3c7a1b2c3d4e5f60718293a4b5c6d7e8f900"
+    assert _same_commit(curto, completo) is True
+    assert _same_commit(completo, curto) is True          # ordem não importa
+    assert _same_commit("24db3c7a", completo) is True     # 8 chars também casa
+    assert _same_commit("AABBCCDD", "aabbccddeeff") is True  # case-insensitive
+
+
+def test_commit_diferente_e_desconhecido():
+    completo = "24db3c7a1b2c3d4e5f60718293a4b5c6d7e8f900"
+    assert _same_commit("deadbeef", completo) is False
+    # None = não dá p/ afirmar nada (imagem sem GIT_COMMIT, ou GitHub sem responder).
+    # Importa que seja None e NÃO False: False acusaria "atrasado" sem saber.
+    assert _same_commit("", completo) is None
+    assert _same_commit(None, completo) is None
+    assert _same_commit(completo, "") is None
+    assert _same_commit("   ", completo) is None
 
 
 def test_url_normalizada_monta_o_endpoint_certo_da_api():

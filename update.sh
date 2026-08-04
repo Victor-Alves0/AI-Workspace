@@ -21,6 +21,9 @@ echo "==> Puxando a versão mais recente…"
 git pull --ff-only
 
 echo "==> Reconstruindo as imagens…"
+# grava o commit NA IMAGEM: sem isto o painel só compara a tag de release e dizia
+# "atualizado" mesmo com commits novos no branch (que é o que este script puxa).
+export GIT_COMMIT="$(git rev-parse --short=12 HEAD)"
 docker compose build
 
 echo "==> Subindo os containers…"
