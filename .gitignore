@@ -19,6 +19,15 @@ dist/
 .env
 .env.local
 *.local
+# segredos por ARQUIVO (APP_SECRET_FILE/DATABASE_URL_FILE montados em /run/secrets)
+secrets/
+# chaves privadas: assinatura do updater (aiworkspace.key) e code signing (.pfx/.p12).
+# O .cer (certificado PÚBLICO) fica versionado de propósito — é o que o usuário importa
+# para confiar na assinatura do instalador.
+*.key
+*.pfx
+*.p12
+*.pem
 
 # Tauri
 desktop/src-tauri/target/
