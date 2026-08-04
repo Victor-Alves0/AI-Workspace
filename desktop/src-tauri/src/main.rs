@@ -299,6 +299,11 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             show_main_window(app);
         }))
+        // atualização in-app: a UI chama updater.check() e downloadAndInstall(); o
+        // instalador NSIS aplica por cima (os dados ficam em app_data_dir e não são
+        // tocados). `process` dá o relaunch. Ver docs/desktop-updates.md.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         // Atalho GLOBAL do modo voz: no gatilho, traz a janela e avisa a UI web
         // (evento "voice-activate") — a UI abre o modo voz (ver lib/desktop.ts).
         .plugin(
@@ -335,15 +340,20 @@ fn main() {
             // uma segunda "main" e o build colide no label). Abre na tela de
             // "iniciando..." (index.html dos assets); wait_and_show navega para a
             // interface local quando ela responde.
+            // versão vem do Cargo.toml em tempo de compilação: estava fixa em '0.3.0'
+            // enquanto o app já ia em 0.5.0 — a mesma deriva que quebrou a checagem de
+            // atualização. O Cargo.toml é sincronizado por scripts/set_version.py.
+            let init_script = format!(
+                "window.__AIW_DESKTOP__ = {{ platform: 'windows', version: '{}' }};",
+                env!("CARGO_PKG_VERSION"),
+            );
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("AI Workspace")
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(380.0, 480.0)
                 .center()
                 .visible(!start_hidden)
-                .initialization_script(
-                    "window.__AIW_DESKTOP__ = { platform: 'windows', version: '0.3.0' };",
-                )
+                .initialization_script(init_script.as_str())
                 .build()?;
 
             wait_and_show(handle.clone());

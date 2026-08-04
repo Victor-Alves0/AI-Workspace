@@ -68,13 +68,36 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: desktop/engine/build-engine.ps1 -OutDir "$env:GITHUB_WORKSPACE/desktop/src-tauri/engine"
 
+      # Atualização in-app: com a chave de assinatura do updater configurada, o build
+      # também gera o `latest.json` ASSINADO e o anexa à Release — é o manifesto que o
+      # tauri-plugin-updater lê para se atualizar sozinho. É CONDICIONAL de propósito:
+      # sem o secret, `createUpdaterArtifacts` faria o build FALHAR, quebrando a release
+      # inteira por causa de uma funcionalidade opcional.
+      #   Gere o par com: npx @tauri-apps/cli signer generate -w aiworkspace.key
+      #   Guarde a PRIVADA em Settings > Secrets > TAURI_SIGNING_PRIVATE_KEY
+      #   (a pública já está em tauri.conf.json > plugins.updater.pubkey)
+      - name: Configurar artefatos de atualização
+        id: updater
+        shell: bash
+        run: |
+          if [ -n "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ]; then
+            echo 'args=--config {"bundle":{"createUpdaterArtifacts":true}}' >> "$GITHUB_OUTPUT"
+            echo "Updater LIGADO: a Release terá latest.json assinado."
+          else
+            echo 'args=' >> "$GITHUB_OUTPUT"
+            echo "Sem TAURI_SIGNING_PRIVATE_KEY — build normal, sem atualização in-app."
+          fi
+
       # --- disparo por TAG: compila e publica a Release com o instalador ---
       - name: Compilar e publicar Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          args: ${{ steps.updater.outputs.args }}
           projectPath: desktop
           tagName: ${{ github.ref_name }}
           releaseName: AI Workspace ${{ github.ref_name }}
@@ -87,6 +110,9 @@ jobs:
 
             Requer o servidor no ar (por padrão `http://localhost:3000`; dá para
             apontar para outra máquina em Configurações -> Aplicativo).
+
+            Já tem uma versão instalada? Rode este instalador por cima: ele atualiza
+            no lugar e mantém seus dados (ficam fora da pasta de instalação).
           releaseDraft: false
           prerelease: false
 

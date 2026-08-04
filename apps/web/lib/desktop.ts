@@ -22,9 +22,18 @@ export interface DesktopPatch {
   voiceHotkey?: string;
 }
 
+/** Handle de atualização do tauri-plugin-updater (só os campos que usamos). */
+interface TauriUpdate {
+  version: string;
+  downloadAndInstall: (onEvent?: (e: unknown) => void) => Promise<void>;
+}
+
 interface TauriBridge {
   core?: { invoke?: (cmd: string, args?: unknown) => Promise<unknown> };
   event?: { listen?: (event: string, handler: (e: unknown) => void) => Promise<() => void> };
+  // expostos por `withGlobalTauri: true` quando os plugins estão instalados
+  updater?: { check?: () => Promise<TauriUpdate | null> };
+  process?: { relaunch?: () => Promise<void> };
 }
 
 function bridge(): TauriBridge | null {
@@ -78,6 +87,48 @@ export async function openExternal(url: string): Promise<boolean> {
     return false;
   }
   return !!window.open(url, "_blank", "noopener,noreferrer");
+}
+
+/** Há uma atualização do APP DESKTOP pronta para instalar?
+ *
+ *  Usa o tauri-plugin-updater: ele baixa o manifesto assinado da release, compara com
+ *  a versão instalada e devolve um handle. Retorna null quando não é desktop, quando o
+ *  plugin não está no build, ou quando já está atualizado — o chamador então cai no
+ *  caminho manual (baixar o instalador). NUNCA levanta: falha de rede/manifesto não
+ *  pode quebrar a tela de Configurações. */
+export async function checkDesktopUpdate(): Promise<{ version: string } | null> {
+  if (!isDesktop()) return null;
+  const check = bridge()?.updater?.check;
+  if (!check) return null;
+  try {
+    const upd = await check();
+    return upd ? { version: upd.version } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Baixa e instala a atualização e REINICIA o app.
+ *
+ *  Chama `check()` de novo em vez de guardar o handle: ele não é serializável e ficaria
+ *  velho entre a checagem e o clique do usuário. Devolve uma mensagem de erro (string)
+ *  quando não dá — quem chama mostra o caminho manual. */
+export async function installDesktopUpdate(): Promise<string | null> {
+  const check = bridge()?.updater?.check;
+  if (!check) return "atualização automática indisponível nesta versão do app";
+  try {
+    const upd = await check();
+    if (!upd) return "nenhuma atualização pendente";
+    await upd.downloadAndInstall();
+  } catch (e) {
+    return e instanceof Error ? e.message : "falha ao baixar a atualização";
+  }
+  try {
+    await bridge()?.process?.relaunch?.();
+  } catch {
+    // instalou mas não reiniciou: o usuário fecha e abre. Não é erro de update.
+  }
+  return null;
 }
 
 /** Assina o evento "voice-activate" que o atalho GLOBAL do desktop dispara.

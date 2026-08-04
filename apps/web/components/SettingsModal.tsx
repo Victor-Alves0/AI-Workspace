@@ -76,6 +76,7 @@ import HiggsfieldPanel from "./HiggsfieldPanel";
 import SubscriptionsPanel from "./SubscriptionsPanel";
 import OllamaPanel from "./OllamaPanel";
 import ProvidersPanel from "./ProvidersPanel";
+import DesktopUpdateNotice from "./DesktopUpdateNotice";
 import VoicePanel from "./VoicePanel";
 import AssistantVoicePanel from "./AssistantVoicePanel";
 import { WebSearchPanel, BrowserPanel } from "./toolPanels";
@@ -1097,7 +1098,7 @@ function SidebarItemsEditor({ iface, setIface }: { iface: Record<string, any>; s
 }
 
 /* ---------------------------------- Sobre --------------------------------- */
-interface AboutInfo { version: string; latest_version: string | null; update_available: boolean; repo_url: string | null }
+interface AboutInfo { version: string; latest_version: string | null; update_available: boolean; repo_url: string | null; release_url: string | null }
 
 /* Preferências DA MÁQUINA (bandeja, iniciar com o Windows). Só existe dentro do
    app instalado; ficam num arquivo local do shell, não no perfil do usuário —
@@ -1188,6 +1189,13 @@ function AboutTab() {
           </span>
         )}
       </p>
+      {/* o selo sozinho não levava a lugar nenhum. No desktop, atualizar = baixar o
+          instalador da release e rodar por cima (o NSIS atualiza no lugar, os dados
+          ficam em app_data_dir e não são tocados). openExternal porque <a> morre no
+          webview do Tauri. */}
+      {info?.update_available && info.release_url && (
+        <DesktopUpdateNotice releaseUrl={info.release_url} version={info.latest_version} />
+      )}
       <p className="mt-5 text-xs text-muted">Copyright (c) 2026 AI Workspace. All rights reserved.</p>
       <a
         href={repoUrl}

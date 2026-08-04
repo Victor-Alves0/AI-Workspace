@@ -271,6 +271,10 @@ async def about(
         "latest_version": None,
         "update_available": False,
         "repo_url": None,
+        # página da release nova: é o que o usuário do app DESKTOP precisa (baixar o
+        # instalador e rodar por cima — o Tauri/NSIS atualiza no lugar). Sem isto o
+        # aviso dizia "há atualização" e não levava a lugar nenhum.
+        "release_url": None,
     }
     from .admin_routes import _github_auth_header, _normalize_repo
     try:
@@ -292,10 +296,16 @@ async def about(
         ) as client:
             r = await client.get(f"https://api.github.com/repos/{repo}/releases/latest")
             if r.status_code == 200:
-                tag = (r.json() or {}).get("tag_name")
+                body = r.json() or {}
+                tag = body.get("tag_name")
                 if tag:
                     out["latest_version"] = tag
                     out["update_available"] = tag.lstrip("v") != __version__.lstrip("v")
+                    # `html_url` é a página da release (com os instaladores anexados);
+                    # cai p/ /releases/tag/<tag> se a API não trouxer.
+                    out["release_url"] = (
+                        body.get("html_url") or f"https://github.com/{repo}/releases/tag/{tag}"
+                    )
     except Exception:  # noqa: BLE001
         pass  # offline / sem release: mantém só a versão local
     return out
