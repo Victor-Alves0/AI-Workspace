@@ -380,7 +380,19 @@ export default function AdminPage() {
                     {upd.update_available ? (
                       <p className="mt-1 text-amber-300">Há uma atualização disponível. No host, rode <span className="font-mono">./update.sh</span> para aplicar.</p>
                     ) : (
-                      <p className="mt-1 text-green-400">Você está atualizado.</p>
+                      <p className="mt-1 text-green-400">
+                        Você está na última release{upd.latest_release ? ` (${upd.latest_release})` : ""}.
+                      </p>
+                    )}
+                    {/* `update_available` compara RELEASES, mas o update.sh puxa o BRANCH:
+                        pode haver commits novos sem release. Dizer só "atualizado"
+                        escondia isso. */}
+                    {upd.latest_commit && (
+                      <p className="mt-1 text-xs text-muted">
+                        O <span className="font-mono">./update.sh</span> acompanha o branch
+                        <span className="font-mono"> {upd.branch}</span>, não a release — pode
+                        trazer commits mais novos que <span className="font-mono">{upd.latest_commit}</span>.
+                      </p>
                     )}
                   </>
                 )}
