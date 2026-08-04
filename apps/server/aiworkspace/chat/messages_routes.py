@@ -182,14 +182,19 @@ async def send_message(
         await db.commit()
         await active_gen.enqueue(body.content, steer=body.steer)
         # corrida rara: o turno pode ter terminado DURANTE o enqueue (o driver já drenou e
-        # não pegaria este item). Se a geração já acabou, dispara a continuação nós mesmos —
-        # resume_chat_turn lê as pendentes do banco e é idempotente (sai se nada pendente).
+        # não pegaria este item). Se a geração já acabou, disparamos a continuação — mas
+        # DRENANDO a fila aqui: `drain_queue` é o ponto de idempotência (esvazia a lista no
+        # loop single-thread), então se o driver já levou os textos recebemos [] e não
+        # fazemos nada — sem turno duplicado. Antes passávamos `body.content` direto, o que
+        # podia responder duas vezes a mesma mensagem.
         if active_gen.done:
-            from .resume import resume_chat_turn
-            await resume_chat_turn(
-                str(chat_id), body.content,
-                notify_title="Continuação", already_persisted=True, notify=False,
-            )
+            leftover = active_gen.drain_queue() + active_gen.drain_steer()
+            if leftover:
+                from .resume import resume_chat_turn
+                await resume_chat_turn(
+                    str(chat_id), "\n\n".join(leftover), queued_texts=list(leftover),
+                    notify_title="Continuação", already_persisted=True, notify=False,
+                )
         return {"queued": True, "steer": body.steer}
 
     api_key, base_url = await _resolve_provider(db, user, chat.model)
@@ -331,8 +336,10 @@ async def send_message(
 
     async def _on_queue(texts: list[str]) -> None:
         from .resume import resume_chat_turn
+        # `texts` já vêm DRENADOS pelo driver — passa a lista p/ o turno remover
+        # exatamente essas mensagens do histórico (elas já estão persistidas).
         await resume_chat_turn(
-            str(chat_id), "\n\n".join(texts),
+            str(chat_id), "\n\n".join(texts), queued_texts=list(texts),
             notify_title="Continuação", already_persisted=True, notify=False,
         )
 

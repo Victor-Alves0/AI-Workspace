@@ -123,6 +123,27 @@ class NetworkIn(BaseModel):
     branch: str = Field(default="main", max_length=100)
 
 
+def _normalize_repo(value: str) -> str:
+    """Normaliza o repositório para `owner/repo` — o formato que a API do GitHub usa em
+    /repos/{owner}/{repo}. Aceita o que o admin naturalmente cola: a URL do navegador
+    (https://github.com/owner/repo), com ou sem `.git`, `git@github.com:owner/repo.git`,
+    barras sobrando ou caminho extra (…/tree/main). Sem isto, colar a URL inteira montava
+    `/repos/https://github.com/owner/repo/releases/latest` e devolvia 404 sem explicar."""
+    v = (value or "").strip()
+    if not v:
+        return ""
+    v = v.removeprefix("git@github.com:").removeprefix("ssh://git@github.com/")
+    for pref in ("https://github.com/", "http://github.com/", "github.com/", "www.github.com/"):
+        if v.lower().startswith(pref):
+            v = v[len(pref):]
+            break
+    v = v.strip("/")
+    if v.lower().endswith(".git"):
+        v = v[:-4]
+    parts = [p for p in v.split("/") if p]
+    return "/".join(parts[:2]) if len(parts) >= 2 else v
+
+
 @router.get("/network")
 async def get_network(admin: User = Depends(require_admin)):
     cfg = await network_config.load_config()
@@ -143,16 +164,40 @@ async def put_network(body: NetworkIn, admin: User = Depends(require_admin)):
     # limpa/normaliza IPs (a validação real é no ipaddress do network_config)
     cfg = body.model_dump()
     cfg["allowed_ips"] = [i.strip() for i in cfg["allowed_ips"] if i and i.strip()][:200]
-    cfg["repo"] = cfg["repo"].strip()
+    cfg["repo"] = _normalize_repo(cfg["repo"])
     await network_config.save_config(cfg)
     return {"ok": True, **cfg, "allowed_ips": network_config.get_allowlist()}
 
 
+async def _github_auth_header(db: AsyncSession, user_id) -> tuple[dict[str, str], bool]:
+    """Cabeçalho de autorização usando a conta GitHub CONECTADA do admin (Integrações →
+    GitHub). Necessário para repositório PRIVADO: sem token a API responde 404 (não 403 —
+    o GitHub esconde a existência de repo privado), o que faz o check parecer "repo não
+    encontrado". Devolve ({}, False) quando não há conta conectada."""
+    from .integrations import github_service
+    from .models import GithubAccount
+
+    accs = list(await db.scalars(
+        select(GithubAccount).where(GithubAccount.user_id == user_id)
+        .order_by(GithubAccount.created_at)
+    ))
+    for acc in accs:
+        token = await github_service.get_token(str(acc.id))
+        if token:
+            return {"Authorization": f"Bearer {token}"}, True
+    return {}, False
+
+
 @router.get("/update-check")
-async def update_check(admin: User = Depends(require_admin)):
-    """Compara a versão local com o GitHub (release mais recente + último commit)."""
+async def update_check(
+    admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
+):
+    """Compara a versão local com o GitHub (release mais recente + último commit).
+    Usa a conta GitHub conectada do admin quando houver — sem ela, repositório privado
+    responde 404 e não há como checar."""
     cfg = await network_config.load_config()
-    repo = (cfg.get("repo") or "").strip()
+    # normaliza na LEITURA também: um valor salvo antes (URL crua) se cura sozinho
+    repo = _normalize_repo(cfg.get("repo") or "")
     branch = (cfg.get("branch") or "main").strip()
     out: dict = {
         "current_version": __version__,
@@ -161,14 +206,17 @@ async def update_check(admin: User = Depends(require_admin)):
         "latest_release": None,
         "latest_commit": None,
         "update_available": False,
+        "authenticated": False,
         "error": None,
     }
     if not repo:
         out["error"] = "Defina o repositório (owner/repo) para checar atualizações."
         return out
     try:
+        auth, has_token = await _github_auth_header(db, admin.id)
+        out["authenticated"] = has_token
         async with httpx.AsyncClient(
-            timeout=10, headers={"Accept": "application/vnd.github+json"}
+            timeout=10, headers={"Accept": "application/vnd.github+json", **auth}
         ) as client:
             r = await client.get(f"https://api.github.com/repos/{repo}/releases/latest")
             if r.status_code == 200:
@@ -179,8 +227,21 @@ async def update_check(admin: User = Depends(require_admin)):
             c = await client.get(f"https://api.github.com/repos/{repo}/commits/{branch}")
             if c.status_code == 200:
                 out["latest_commit"] = ((c.json() or {}).get("sha") or "")[:8]
+            elif c.status_code in (401, 403):
+                out["error"] = ("O GitHub recusou o token da conta conectada "
+                                f"(HTTP {c.status_code}) — reconecte em Integrações → GitHub.")
             elif c.status_code == 404 and out["latest_release"] is None:
-                out["error"] = "Repositório ou branch não encontrado (verifique owner/repo)."
+                # 404 é ambíguo de propósito no GitHub: repo inexistente OU privado sem
+                # acesso. Diferenciar aqui evita mandar o admin caçar um erro de digitação
+                # que não existe (foi o caso deste projeto: repo privado, sem token).
+                out["error"] = (
+                    f"Repositório '{repo}' não encontrado — confira o owner/repo e o branch "
+                    f"'{branch}'."
+                    if has_token else
+                    f"Não consegui ver '{repo}'. Se ele for PRIVADO, conecte sua conta em "
+                    "Integrações → GitHub (o check passa a usá-la); se for público, confira "
+                    "o owner/repo."
+                )
     except httpx.HTTPError as exc:
         out["error"] = f"Falha ao consultar o GitHub: {exc}"
     return out

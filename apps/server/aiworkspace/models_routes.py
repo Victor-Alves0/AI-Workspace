@@ -133,6 +133,39 @@ async def delete_model(
     db: AsyncSession = Depends(get_db),
 ):
     mc = await _owned(db, model_id, user)
+    await _clear_model_references(db, user, str(model_id))
     await db.delete(mc)
     await db.commit()
     return {"ok": True}
+
+
+async def _clear_model_references(db: AsyncSession, user: User, model_id: str) -> None:
+    """Remove as referências "custom:<id>" ao modelo que está sendo apagado.
+
+    Sem isto elas ficam PENDURADAS: o seletor não acha o ModelConfig e passava a exibir
+    (e enviar) a string crua "custom:<uuid>" como se fosse o nome de um modelo — foi o
+    bug do rótulo `custom:b15bfddd-…` marcado como "Modelo padrão". Cobre o padrão do
+    usuário, o padrão dos projetos do Codespace e as listas de fixados/favoritos.
+    Os chats não precisam: `model_config_id` é FK (o banco resolve)."""
+    from .models import CodespaceProject
+
+    ref = f"custom:{model_id}"
+    if (user.default_model or "") == ref:
+        user.default_model = None
+    profile = dict(user.profile or {})
+    changed = False
+    for field in ("pinned_models", "favorite_models"):
+        vals = profile.get(field)
+        if isinstance(vals, list) and ref in vals:
+            profile[field] = [v for v in vals if v != ref]
+            changed = True
+    if changed:
+        user.profile = profile  # reatribui: JSONB não detecta mutação in-place
+    projs = await db.scalars(
+        select(CodespaceProject).where(
+            CodespaceProject.user_id == user.id, CodespaceProject.default_model == ref
+        )
+    )
+    for p in projs:
+        if (p.default_model or "") == ref:  # confere de novo: não depende só do WHERE
+            p.default_model = None

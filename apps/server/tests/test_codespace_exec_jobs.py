@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 from aiworkspace.codespace import exec_jobs
-from aiworkspace.tools.sift_service import _is_long_runner
+from aiworkspace.tools.sift_service import _is_long_runner, _looks_like_server
 
 
 # ------------------------------- detecção --------------------------------------
@@ -21,7 +21,7 @@ def test_long_runner_detects_installs_and_builds():
         "git clone https://x/y", "./gradlew build", "clojure -P",
         "wget https://x/y.jar", "apt-get install foo", "poetry add bar",
         # suítes de teste/lint/build também auto-backgroundam (podem estourar o teto
-        # de CPU do run síncrono → SIGXCPU/exit 152) — ver _LONG_RUNNER_RE.
+        # de CPU do run síncrono → SIGXCPU/exit 152) — ver _subcmd_is_long.
         "npm run lint", "pytest -k auth",
     ]:
         assert _is_long_runner(cmd), cmd
@@ -33,6 +33,29 @@ def test_long_runner_ignores_quick_commands():
         "python script.py", "echo hi", "git status",
     ]:
         assert not _is_long_runner(cmd), cmd
+
+
+def test_looks_like_server_detecta_servidores():
+    for cmd in [
+        # o comando EXATO do bug do Metabase
+        'MB_DB_TYPE=h2 HOST=0.0.0.0 PORT=4001 clojure -M:run:dev:dev-start',
+        "npm run dev", "npm start", "yarn dev", "pnpm run serve",
+        "next dev", "next start -p 3000", "vite", "ng serve", "astro dev",
+        "python manage.py runserver 0.0.0.0:8000", "flask run --host 0.0.0.0",
+        "uvicorn app:app --host 0.0.0.0", "gunicorn wsgi:app",
+        "./gradlew bootRun", "rails server", "php -S 0.0.0.0:8000", "dotnet run",
+    ]:
+        assert _looks_like_server(cmd), cmd
+
+
+def test_looks_like_server_ignora_builds_e_scripts():
+    # instalar/buildar/testar COMPLETAM → não são servidores (vão pro bg job, não preview)
+    for cmd in [
+        "npm install", "npm run build", "npm run test", "mvn -q test", "./gradlew build",
+        "pip install requests", "cargo build", "pytest -k auth",
+        "clojure -M:build", "python script.py", "cat pom.xml", "ls -la",
+    ]:
+        assert not _looks_like_server(cmd), cmd
 
 
 # ------------------------------- start/wait ------------------------------------
@@ -61,6 +84,26 @@ async def test_wait_job_failure_exit_code():
 async def test_wait_job_unknown_id():
     res = await exec_jobs.wait_job("deadbeef00")
     assert res.get("error")
+
+
+async def test_job_escopado_ao_projeto():
+    """ISOLAMENTO: status/wait por job_id são escopados ao projeto. Um id REAL de outro
+    projeto é tratado como inexistente (não vaza a saída). Sem project_id, resolve global."""
+    with tempfile.TemporaryDirectory() as d:
+        card = exec_jobs.start_job(Path(d), "echo x", chat_id="c", user_id="u1",
+                                   project_id="pA", worktree=None)
+        jid = card["job_id"]
+        try:
+            assert exec_jobs._jobs[jid]._evt.wait(10)
+            # projeto certo → enxerga; projeto errado → not-found (sem vazar)
+            assert exec_jobs.job_status(jid, project_id="pA").get("job_id") == jid
+            assert exec_jobs.job_status(jid, project_id="pB").get("error")
+            w = await exec_jobs.wait_job(jid, timeout=5, project_id="pB")
+            assert w.get("error") and "x" not in str(w.get("output", ""))
+            # sem escopo (compat) → resolve
+            assert exec_jobs.job_status(jid).get("job_id") == jid
+        finally:
+            exec_jobs._jobs.pop(jid, None)
 
 
 async def test_start_job_empty_command():
@@ -94,6 +137,52 @@ async def test_maybe_wake_fires_when_idle():
             assert "echo x" in calls[0][1]    # a nota carrega o comando
     finally:
         resume_mod.resume_chat_turn, gen.get_active = orig_resume, orig_active
+
+
+async def test_reaper_nao_duplica_wake_com_chat_ocupado():
+    """REGRESSÃO (dinheiro): o job termina enquanto o chat AINDA gera (o agente soltou o
+    job e segue escrevendo o fim do turno). O reaper varre a cada 2s; a decisão de wake
+    (`dispatched`) só é tomada no FIM de `_maybe_wake`, após esperar o chat ficar ocioso
+    (até ~120s). Sem a reivindicação síncrona (`_claimed`), o reaper criava uma task nova
+    a cada ciclo → N `_fire_wake` = N gerações de modelo duplicadas quando o chat enfim
+    ficasse ocioso. Tem que disparar UM ÚNICO wake."""
+    import asyncio
+
+    import aiworkspace.chat.resume as resume_mod
+    from aiworkspace.chat import generation as gen
+    calls: list = []
+
+    async def fake_resume(chat_id, text, *, notify_title, notify_body=""):
+        calls.append(chat_id)
+
+    class _Gen:
+        done = False
+
+    state = {"polls": 0}
+
+    def fake_active(cid):            # "ocupado" nos primeiros ~4 polls (≈4s), depois ocioso
+        state["polls"] += 1
+        return _Gen() if state["polls"] <= 4 else None
+
+    orig_resume, orig_active = resume_mod.resume_chat_turn, gen.get_active
+    resume_mod.resume_chat_turn = fake_resume
+    gen.get_active = fake_active
+    exec_jobs._reaper_task = None
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            card = exec_jobs.start_job(Path(d), "echo x", chat_id="cbusy",
+                                       user_id="u1", project_id="p1", worktree=None)
+            job = exec_jobs._jobs[card["job_id"]]
+            assert job._evt.wait(10)
+            exec_jobs.start_reaper()   # varre a cada 2s enquanto o chat está "ocupado"
+            await asyncio.sleep(7)     # cobre ~3 ciclos do reaper (t≈0,2,4,6)
+    finally:
+        if exec_jobs._reaper_task:
+            exec_jobs._reaper_task.cancel()
+        resume_mod.resume_chat_turn, gen.get_active = orig_resume, orig_active
+        exec_jobs._jobs.pop(card["job_id"], None)
+    assert len(calls) == 1, f"esperava 1 wake, veio {len(calls)}"
+    assert calls[0] == "cbusy" and job.dispatched
 
 
 async def test_maybe_wake_skips_when_waited():

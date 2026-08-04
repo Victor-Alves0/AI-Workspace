@@ -21,6 +21,7 @@ from typing import Any
 import websockets
 from sqlalchemy import select
 
+from .. import bg
 from ..db import SessionLocal
 from ..models import DiscordConnection
 from . import discord_api, discord_service
@@ -113,8 +114,10 @@ async def _session(ws, conn_id: uuid.UUID, token: str, sess: dict) -> None:
                 elif t == "RESUMED":
                     await _persist_state(conn_id, status="connected", last_error=None)
                 elif t == "MESSAGE_CREATE":
-                    # não bloqueia o loop (heartbeat precisa fluir): dispara em task
-                    asyncio.create_task(_safe_handle(conn_id, payload.get("d") or {}))
+                    # não bloqueia o loop (heartbeat precisa fluir): dispara em task.
+                    # bg.spawn (não create_task nu): o loop não guarda a task → sem isto o
+                    # GC poderia coletá-la e a mensagem de entrada do Discord sumiria.
+                    bg.spawn(_safe_handle(conn_id, payload.get("d") or {}))
     finally:
         if hb_task is not None and not hb_task.done():
             hb_task.cancel()

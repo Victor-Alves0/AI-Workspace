@@ -1,8 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, ChevronLeft, Crown, ExternalLink, Loader2, Trash2, TriangleAlert } from "lucide-react";
+import { Check, ChevronLeft, Copy, Crown, ExternalLink, Loader2, Trash2, TriangleAlert } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
+import { openExternal } from "@/lib/desktop";
 
 interface ChatgptStatus {
   connected: boolean;
@@ -165,10 +167,26 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
             <span className="font-mono"> localhost:1455</span> e falha — é esperado.
             3. Copie a URL inteira da barra de endereço e cole aqui.
           </p>
-          <a href={authUrl} target="_blank" rel="noreferrer noopener"
-            className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-ink transition-colors hover:bg-hover">
-            <ExternalLink size={13} /> Abrir login da OpenAI
-          </a>
+          {/* NÃO usar <a target="_blank">: no webview do app desktop isso não faz nada
+              (sem handler de nova janela / plugin de shell) e o clique parece morto.
+              openExternal chama o shell; se falhar (ex.: .exe antigo, sem o comando),
+              cai no botão de copiar o link, que sempre funciona. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={async () => {
+                if (!(await openExternal(authUrl))) {
+                  setErr("Não consegui abrir o navegador daqui — use “Copiar link” e cole no seu navegador.");
+                }
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-ink transition-colors hover:bg-hover">
+              <ExternalLink size={13} /> Abrir login da OpenAI
+            </button>
+            <button
+              onClick={async () => { setErr(await copyText(authUrl) ? null : "Não consegui copiar — selecione o link manualmente."); }}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:bg-hover hover:text-ink">
+              <Copy size={13} /> Copiar link
+            </button>
+          </div>
           <textarea rows={2} value={pasted} onChange={(e) => setPasted(e.target.value)}
             placeholder="http://localhost:1455/auth/callback?code=…&state=…"
             className="w-full resize-y rounded-lg border border-border bg-surface2 px-3 py-2 font-mono text-[11px] text-ink outline-none focus:border-accent" />

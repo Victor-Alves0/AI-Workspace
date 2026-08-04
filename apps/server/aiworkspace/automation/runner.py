@@ -20,7 +20,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from .. import tracing
+from .. import bg, tracing
 from ..chat.turn_setup import _code_mode, _load_skills, _usage_record
 from ..chat.orchestrator import TurnSession, run_turn
 from ..db import SessionLocal
@@ -398,7 +398,7 @@ async def _deliver_whatsapp(db, automation: Automation, user: User, text: str | 
     if not recipients:
         logger.info("automação %s: sem destinatários no WhatsApp", automation.id)
         return
-    asyncio.create_task(whatsapp_service.broadcast(conn.id, recipients, text.strip()))
+    bg.spawn(whatsapp_service.broadcast(conn.id, recipients, text.strip()))
 
 
 async def _deliver_telegram(db, automation: Automation, user: User, text: str | None) -> None:
@@ -420,7 +420,7 @@ async def _deliver_telegram(db, automation: Automation, user: User, text: str | 
     if not recipients:
         logger.info("automação %s: sem destinatários no Telegram", automation.id)
         return
-    asyncio.create_task(telegram_service.broadcast(conn.id, recipients, text.strip()))
+    bg.spawn(telegram_service.broadcast(conn.id, recipients, text.strip()))
 
 
 async def _record_run(
@@ -515,7 +515,7 @@ async def _run_automation_body(automation_id: uuid.UUID, trigger: str) -> dict[s
                 # notificação push no navegador (best-effort, em background)
                 if result.get("text"):
                     from ..push_service import send_to_user
-                    asyncio.create_task(send_to_user(user.id, automation.title, result["text"], "/"))
+                    bg.spawn(send_to_user(user.id, automation.title, result["text"], "/"))
             return result
     finally:
         # libera assim que o corpo termina; `run_automation` repete o pop como

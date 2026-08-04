@@ -16,6 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import __version__
+from .app_config import signups_allowed
 from .auth.deps import require_admin
 from .config import get_settings
 from .db import get_db
@@ -35,7 +36,7 @@ router = APIRouter(prefix="/debug", tags=["debug"])
 
 
 @router.get("/info")
-async def info(admin: User = Depends(require_admin)):
+async def info(admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     s = get_settings()
     return {
         "version": __version__,
@@ -43,7 +44,10 @@ async def info(admin: User = Depends(require_admin)):
         "python": sys.version.split()[0],
         "platform": platform.platform(),
         "secret_insecure": s.secret_is_insecure,
-        "signup_enabled": s.enable_signup,
+        # estado REAL do cadastro (DB, via signups_allowed) — antes reportava uma
+        # config de ambiente sem efeito nenhum. Ver docs/trust-model.md.
+        "signup_enabled": await signups_allowed(db),
+        "secrets_in_env": s.secrets_in_env,
         "web_search_provider": s.web_search_provider,
         "voice_base_url": s.voice_base_url,
         "openrouter_base_url": s.openrouter_base_url,

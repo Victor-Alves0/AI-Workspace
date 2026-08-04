@@ -511,9 +511,32 @@ def add_manual(
         return False
 
 
-def update_memory(api_key: str, memory_id: str, text: str) -> bool:
+def _owns_memory(mem, memory_id: str, owner_user_id: str) -> bool:
+    """O `memory_id` pertence a `owner_user_id`? `update`/`delete` do mem0 endereçam o
+    vector store por id GLOBAL — sem esta checagem, um id de OUTRO usuário é aceito e
+    alterado/apagado (o `api_key` não é escopo: é a chave do LLM, e vira "x" p/ quem não
+    tem chave, fazendo usuários compartilharem o mesmo cliente). Todas as demais operações
+    passam `user_id=`; só estas duas não passavam. Falha FECHADO: se não der p/ confirmar
+    a posse, retorna False (não altera nada)."""
+    owner = str(owner_user_id or "").strip()
+    if not owner:
+        return False
+    try:
+        item = mem.get(memory_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("mem0.get (checagem de posse) falhou: %s", exc)
+        return False
+    if not isinstance(item, dict):
+        return False
+    return _field(item, "user_id") == owner
+
+
+def update_memory(api_key: str, memory_id: str, text: str, owner_user_id: str = "") -> bool:
     mem = _memory_for_key(api_key)
     if mem is None:
+        return False
+    if not _owns_memory(mem, memory_id, owner_user_id):
+        logger.warning("mem0.update recusado: memória %s não é do usuário", memory_id)
         return False
     try:
         mem.update(memory_id, text)
@@ -523,9 +546,12 @@ def update_memory(api_key: str, memory_id: str, text: str) -> bool:
         return False
 
 
-def delete_memory(api_key: str, memory_id: str) -> bool:
+def delete_memory(api_key: str, memory_id: str, owner_user_id: str = "") -> bool:
     mem = _memory_for_key(api_key)
     if mem is None:
+        return False
+    if not _owns_memory(mem, memory_id, owner_user_id):
+        logger.warning("mem0.delete recusado: memória %s não é do usuário", memory_id)
         return False
     try:
         mem.delete(memory_id)

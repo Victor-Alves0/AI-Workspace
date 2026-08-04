@@ -255,7 +255,9 @@ async def test_browser(body: BrowserTestIn, user: User = Depends(require_approve
 
 
 @router.get("/about")
-async def about(user: User = Depends(require_approved)):
+async def about(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
     """Versão do app + checagem best-effort de nova versão (release do GitHub).
 
     Disponível a qualquer usuário aprovado (a checagem de update do admin exige
@@ -270,16 +272,24 @@ async def about(user: User = Depends(require_approved)):
         "update_available": False,
         "repo_url": None,
     }
+    from .admin_routes import _github_auth_header, _normalize_repo
     try:
         cfg = await network_config.load_config()
-        repo = (cfg.get("repo") or "").strip()
+        # normaliza: se o repo foi salvo como URL, `https://github.com/{repo}` abaixo
+        # viraria `https://github.com/https://github.com/...` e a API 404aria
+        repo = _normalize_repo(cfg.get("repo") or "")
     except Exception:  # noqa: BLE001
         repo = ""
     if not repo:
         return out
     out["repo_url"] = f"https://github.com/{repo}"
     try:
-        async with httpx.AsyncClient(timeout=6, headers={"Accept": "application/vnd.github+json"}) as client:
+        # usa a conta GitHub do PRÓPRIO usuário (se conectada): sem token, repositório
+        # privado responde 404 e a aba Status nunca mostraria versão nova.
+        auth, _ = await _github_auth_header(db, user.id)
+        async with httpx.AsyncClient(
+            timeout=6, headers={"Accept": "application/vnd.github+json", **auth}
+        ) as client:
             r = await client.get(f"https://api.github.com/repos/{repo}/releases/latest")
             if r.status_code == 200:
                 tag = (r.json() or {}).get("tag_name")

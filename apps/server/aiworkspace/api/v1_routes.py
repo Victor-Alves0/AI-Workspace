@@ -458,7 +458,10 @@ async def _start_background(ctx: ApiContext, rm, parsed, body, started: float):
                                 model=rm.public_id, started=started,
                                 usage=collected.get("usage"), rec=rec)
 
-    asyncio.create_task(_work())
+    # bg.spawn (não create_task nu): o job async responde 202 e roda destacado. Se o GC
+    # coletasse a task, o job ficaria "queued" p/ sempre e o cliente pollaria sem fim.
+    from .. import bg as _bg
+    _bg.spawn(_work())
     return JSONResponse(
         status_code=202,
         content={"id": job_id, "object": "chat.completion.job", "status": "queued",

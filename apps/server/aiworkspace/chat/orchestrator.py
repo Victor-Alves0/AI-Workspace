@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import concurrent.futures
 import contextvars
 import functools
 import json
@@ -383,8 +384,9 @@ CODESPACE_AGENT_DIRECTIVE = (
     "manager (pip/npm/cargo/…). When you serve with code.preview.serve, pick a port in the "
     "published range 4001-4010 and make the app listen on 0.0.0.0:<port> (the env already "
     "carries HOST/PORT/MB_JETTY_PORT/SERVER_PORT) so the user can open it on its own origin. "
-    "After starting, use code.preview.serve action=wait (it blocks until up/crashed — don't poll "
-    "status in a loop). For state that must SURVIVE restarts (an app DB, uploads, caches), point "
+    "After starting, either code.preview.serve action=wait (blocks until up/crashed — don't poll "
+    "status in a loop) OR action=wake_ready (end your reply and get WOKEN when it's up/crashed — "
+    "best for slow backends, so you don't sit blocking). For state that must SURVIVE restarts (an app DB, uploads, caches), point "
     "it at $WORKSPACE_DATA — a per-project persistent dir (present in exec and preview) that lives "
     "outside the git tree, so your environment carries over between turns instead of resetting.\n"
     "NEVER FABRICATE EXECUTION: you may state that a command ran, a tool was installed, a "
@@ -398,7 +400,11 @@ CODESPACE_AGENT_DIRECTIVE = (
     "have two options: (1) call code.exec.jobs action=wait job_id=… to block until it finishes "
     "and get the output right now; or (2) end your reply — you'll be WOKEN UP in a fresh turn "
     "when the job completes, with its output, to continue. Either is fine; never claim the "
-    "command finished until you've seen its real result via wait or the wake-up."
+    "command finished until you've seen its real result via wait or the wake-up. "
+    "A SERVER IS NOT A JOB: background jobs are for commands that COMPLETE (installs/builds/tests). "
+    "A dev server / backend NEVER completes, so it will never 'finish' and never wake you — never "
+    "launch one with code.exec.run (it'll be refused). Start servers with code.preview.serve, then "
+    "wait or wake_ready on THAT."
 )
 
 # Injetada sempre que a tool investigation.graph está equipada (recon/RE/black-box),
@@ -1720,6 +1726,49 @@ _SCOPE_ERROR_HINT = (
 # terceiros — que responderia com rate limit.
 _MAX_PARALLEL_TOOLS = 6
 
+# Tools cujo action=wait BLOQUEIA de propósito, com teto PRÓPRIO e retorno gracioso
+# (code.exec.jobs.wait_job ≤ code_exec_bg_wait_ceiling_seconds; code.preview.serve.
+# wait_ready ≤ 240s). O watchdog de 120s do dispatcher NÃO deve matá-los — senão
+# esperar um build/servidor subir vira uma cascata de aborts (o bug do Metabase:
+# 6 waits mortos aos 120s). Ver [[tool-call-watchdog]] / docs/harness-coupling.md.
+_SELFBOUND_WAIT_TOOLS = {"code.exec.jobs", "code.preview.serve"}
+
+# Executor DEDICADO p/ os waits auto-limitados. Sem isto eles rodariam no executor DEFAULT
+# (compartilhado com TODO dispatch de tool via run_in_executor) e, por segurarem uma thread
+# por até 1200s/240s, poderiam ESFOMEAR as demais tools sob concorrência. Isolando, um wait
+# longo nunca trava o dispatch de outra tool; se este pool encher, só outros WAITS enfileiram
+# (e o agente sempre tem a alternativa de encerrar o turno e ser acordado — wake_ready/jobs).
+_WAIT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=32, thread_name_prefix="selfbound-wait")
+
+
+def _is_selfbound_wait(call: tuple) -> bool:
+    """A call é um WAIT auto-limitado (isento do watchdog)? Robusto às formas de dispatch:
+    tool fixada ('code.exec.jobs'/'code__exec__jobs') ou via execute_tool{path,params}."""
+    try:
+        name = str(call[0]) if call else ""
+        args = call[1] if len(call) > 1 and isinstance(call[1], dict) else {}
+        if name == "execute_tool":
+            path = str(args.get("path") or "")
+            params = args.get("params")
+        else:
+            path, params = name, args
+        # `params` normalmente é dict; alguns caminhos passam JSON como STRING — parseia,
+        # senão um wait legítimo (com params stringificado) não seria isento e o watchdog
+        # o mataria. Nunca levanta: entrada estranha → params vazio → não isenta.
+        if isinstance(params, str):
+            try:
+                params = json.loads(params)
+            except Exception:  # noqa: BLE001
+                params = {}
+        if not isinstance(params, dict):
+            params = {}
+        path = path.replace("__", ".")
+        action = str(params.get("action") or "").strip().lower()
+        return path in _SELFBOUND_WAIT_TOOLS and action == "wait"
+    except Exception:  # noqa: BLE001
+        return False
+
 
 @dataclass
 class _ToolDispatcher:
@@ -2101,9 +2150,15 @@ class _ToolDispatcher:
         Por isso copiamos o contexto e rodamos `dispatch` DENTRO dele (`ctx.run`)."""
         t = int(get_settings().builtin_tool_timeout_seconds or 0)
         ctx = contextvars.copy_context()
+        # waits auto-limitados (code.exec.jobs/preview.serve action=wait) bloqueiam de
+        # propósito, com teto próprio → (a) rodam num executor DEDICADO p/ não esfomear o
+        # dispatch das demais tools, e (b) NÃO são mortos pelo watchdog (senão nunca dá p/
+        # esperar um build/servidor subir). Ver _SELFBOUND_WAIT_TOOLS / _WAIT_EXECUTOR.
+        selfbound = _is_selfbound_wait(call)
         fut = asyncio.get_running_loop().run_in_executor(
-            None, functools.partial(ctx.run, self.sift.dispatch, *call))
-        if t <= 0:
+            _WAIT_EXECUTOR if selfbound else None,
+            functools.partial(ctx.run, self.sift.dispatch, *call))
+        if t <= 0 or selfbound:
             return await fut
         try:
             return await asyncio.wait_for(fut, timeout=t)

@@ -21,6 +21,8 @@ import logging
 import time
 from typing import AsyncIterator, Awaitable, Callable
 
+from .. import bg
+
 logger = logging.getLogger(__name__)
 
 # Quanto tempo manter a geração já concluída em memória após o "done", para um
@@ -134,7 +136,29 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
     ``on_queue(texts)`` (opcional): chamado ao FIM de um turno COMPLETO se o usuário
     enfileirou mensagens durante ele (dispara um turno de continuação). Não roda no
     "Parar" (cancelamento) — o usuário parou de propósito.
+
+    SINGLE-FLIGHT (rede de segurança / dinheiro): se já há uma geração ATIVA (não-``done``)
+    neste chat, NÃO abre uma 2ª — devolve a existente sem consumir ``source``. Os caminhos
+    de envio E de wake (``resume_chat_turn``) checam "sem geração ativa" e só então esperam
+    (awaits de setup: prepare_turn, auto-compactação, leituras de banco); dois deles podiam
+    passar o check e, no fim do setup, ambos chamar ``start`` → DOIS drivers no mesmo chat =
+    chamada de modelo dobrada (custo) + duas respostas intercaladas + contabilidade de uso
+    corrompida. Gatilho sem usuário: o reaper do ``exec_jobs`` e o ``_ready_poller`` do
+    preview disparam wakes independentes no mesmo chat. Como o loop é single-thread, este
+    check + a atribuição em ``_active`` abaixo são ATÔMICOS (sem ``await`` entre eles), então
+    nunca há dois drivers. O chamador do wake ainda enfileira a nota na ativa (não perde a
+    mensagem); ver ``resume_chat_turn``.
     """
+    existing = _active.get(chat_id)
+    if existing is not None and not existing.done:
+        logger.warning("start ignorado: chat %s já tem geração ativa (corrida de 2 gerações evitada)", chat_id)
+        try:
+            from .. import health_service
+            health_service.record_bg("generation", "double_start_avoided",
+                                     severity="warn", chat_id=chat_id)
+        except Exception:  # noqa: BLE001 - observação nunca derruba o caminho quente
+            pass
+        return existing
     gen = Generation(chat_id)
     _active[chat_id] = gen
 
@@ -194,7 +218,9 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
         # dispara a continuação. Não roda no cancelamento (CancelledError re-propaga antes).
         leftover = gen.drain_queue() + gen.drain_steer()
         if leftover and on_queue is not None:
-            asyncio.create_task(on_queue(leftover))
+            # bg.spawn (não create_task nu): a continuação da fila é a resposta a uma
+            # mensagem que o usuário enviou durante o turno — não pode ser coletada pelo GC.
+            bg.spawn(on_queue(leftover))
 
     gen.task = asyncio.create_task(_driver())
     return gen
@@ -215,7 +241,7 @@ async def _finalize(gen: Generation, on_finish: OnFinish, collected: Collected) 
     except Exception:  # noqa: BLE001 - persistência best-effort; não derruba o loop
         logger.exception("Falha ao persistir geração (chat %s)", gen.chat_id)
     await gen._finish()
-    asyncio.create_task(_expire(gen))
+    bg.spawn(_expire(gen))
 
 
 async def _expire(gen: Generation) -> None:

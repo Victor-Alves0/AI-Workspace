@@ -21,6 +21,7 @@ from typing import Any
 import websockets
 from sqlalchemy import select
 
+from .. import bg
 from ..db import SessionLocal
 from ..models import SlackChannelConnection
 from . import slack_channel_api, slack_channel_service
@@ -67,8 +68,9 @@ async def _session(ws, conn_id: uuid.UUID, bot_user_id: str) -> bool:
         if etype == "events_api":
             event = ((env.get("payload") or {}).get("event")) or {}
             if event.get("type") == "message":
-                # não bloqueia o loop de recepção
-                asyncio.create_task(_safe_handle(conn_id, event, bot_user_id))
+                # não bloqueia o loop de recepção. bg.spawn (não create_task nu): o loop
+                # não guarda a task → sem isto o GC poderia coletá-la e a mensagem sumiria.
+                bg.spawn(_safe_handle(conn_id, event, bot_user_id))
     return False  # a conexão fechou
 
 

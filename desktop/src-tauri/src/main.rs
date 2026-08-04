@@ -256,6 +256,38 @@ fn desktop_set_settings(
     Ok(out)
 }
 
+/// Abre uma URL no navegador PADRÃO do sistema.
+///
+/// Necessário porque no webview do Tauri um `<a target="_blank">` (ou `window.open`)
+/// simplesmente NÃO faz nada: não há handler de nova janela nem plugin de shell. Sem
+/// isto, TODO link externo do app desktop ficava morto — foi o que quebrou o botão
+/// "Abrir login da OpenAI" (assinatura ChatGPT/Codex), e valia também para links do
+/// chat, downloads e links compartilhados.
+///
+/// Só aceita http/https: a UI é remota, então não damos a ela um "abra qualquer coisa"
+/// (file://, ms-msdt:, etc.). Os argumentos vão como ARGV separado — nada de montar
+/// linha de comando por concatenação.
+#[tauri::command]
+fn desktop_open_external(url: String) -> Result<(), String> {
+    let u = url.trim();
+    if !(u.starts_with("http://") || u.starts_with("https://")) {
+        return Err("apenas URLs http/https".into());
+    }
+    // defesa extra: caractere de controle não entra em linha de comando
+    if u.chars().any(|c| c.is_control()) {
+        return Err("URL inválida".into());
+    }
+    #[cfg(target_os = "windows")]
+    let res = std::process::Command::new("rundll32.exe")
+        .args(["url.dll,FileProtocolHandler", u])
+        .spawn();
+    #[cfg(target_os = "macos")]
+    let res = std::process::Command::new("open").arg(u).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let res = std::process::Command::new("xdg-open").arg(u).spawn();
+    res.map(|_| ()).map_err(|e| e.to_string())
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_autostart::init(
@@ -282,7 +314,8 @@ fn main() {
         .manage(EngineState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             desktop_get_settings,
-            desktop_set_settings
+            desktop_set_settings,
+            desktop_open_external
         ])
         .setup(|app| {
             let handle = app.handle().clone();

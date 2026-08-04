@@ -79,13 +79,17 @@ def test_recover_orphans_destrava_e_poupa_o_processo_atual():
     resume_mod.resume_chat_turn = _fake_resume
     try:
         async def _run():
-            await ej.recover_orphans()
             # recover_orphans usa o SessionLocal/engine GLOBAL (correto: no boot real roda
             # no main loop). Aqui rodamos num asyncio.run próprio, cujo loop FECHA ao fim —
-            # as conexões do pool ficariam atadas a um loop morto e poluiriam o próximo teste
-            # que use SessionLocal (o de investigação pinga e falharia). Descartar o engine
-            # no MESMO loop fecha as conexões limpo. Ver docstring do _run_db lá.
+            # as conexões do pool ficam atadas a loops mortos entre testes. Descartamos o
+            # engine ANTES (pool limpo p/ recover_orphans não pegar conexão de loop morto de
+            # um teste anterior) e DEPOIS (não poluir o próximo). Ver docstring do _run_db lá.
             from aiworkspace.db import engine
+            try:
+                await engine.dispose()
+            except Exception:  # noqa: BLE001 — pool possivelmente atado a um loop já fechado
+                pass
+            await ej.recover_orphans()
             await engine.dispose()
         asyncio.run(_run())
 

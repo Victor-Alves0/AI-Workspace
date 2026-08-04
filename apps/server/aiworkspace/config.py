@@ -7,13 +7,35 @@ from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _read_secret_file(path: str) -> str:
+    """Lê um segredo de arquivo (convenção *_FILE). Devolve "" se não configurado, se o
+    arquivo não existir ou estiver vazio — nunca levanta: um caminho errado NÃO pode
+    impedir o servidor de subir (cai no valor de ambiente, que é o comportamento antigo).
+    """
+    path = (path or "").strip()
+    if not path:
+        return ""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        import logging
+        logging.getLogger(__name__).warning(
+            "segredo por arquivo não pôde ser lido (%s) — usando a variável de ambiente", path)
+        return ""
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # Segurança / ambiente
     app_env: str = "development"  # development | production
     app_secret: str = "dev-insecure-secret-change-me"
-    enable_signup: bool = True
+    # NÃO existe chave de ambiente para abrir o cadastro. Quem decide é
+    # `app_config.signups_allowed()`: libera só enquanto não há NENHUM usuário (bootstrap
+    # do 1º admin) e, depois disso, apenas se o admin habilitar no painel (default False).
+    # Um `ENABLE_SIGNUP` já existiu aqui sem efeito algum — config morta que dava a
+    # impressão de cadastro aberto. Ver docs/trust-model.md.
     access_token_ttl_min: int = 30
     refresh_token_ttl_days: int = 30
 
@@ -225,6 +247,37 @@ class Settings(BaseSettings):
     # limiar (ms) acima do qual um trace é considerado "lento" e sempre mantido,
     # mesmo quando a amostragem descartaria
     obs_slow_ms: int = 1500
+
+    # --- segredos por ARQUIVO (convenção *_FILE, como Docker/Swarm secrets) ---------
+    # Passar segredo por variável de ambiente o deixa legível em /proc/<pid>/environ para
+    # QUALQUER processo do mesmo usuário — inclusive um comando que a IA execute
+    # (`code.exec.run`). O `_clean_env` do exec_service limpa o env do FILHO, mas não
+    # apaga o do PID 1, então `tr '\0' '\n' < /proc/1/environ` recupera tudo.
+    # Apontando estes caminhos, o valor NUNCA entra no ambiente do processo.
+    # Precedência: *_FILE (se legível) > variável de ambiente. Ver docs/trust-model.md.
+    app_secret_file: str = ""
+    database_url_file: str = ""
+
+    def model_post_init(self, __context) -> None:  # noqa: D105 - pydantic hook
+        secret = _read_secret_file(self.app_secret_file)
+        if secret:
+            object.__setattr__(self, "app_secret", secret)
+        dburl = _read_secret_file(self.database_url_file)
+        if dburl:
+            object.__setattr__(self, "database_url", dburl)
+
+    @property
+    def secrets_in_env(self) -> list[str]:
+        """Segredos que continuam vindo do AMBIENTE (não de arquivo) e, portanto, ficam
+        expostos via /proc/1/environ a comandos executados pela IA. Lista vazia = ok.
+        Consumido pelo self-check de saúde e pelo /debug/info."""
+        import os
+        leaking = []
+        if not _read_secret_file(self.app_secret_file) and os.environ.get("APP_SECRET"):
+            leaking.append("APP_SECRET")
+        if not _read_secret_file(self.database_url_file) and os.environ.get("DATABASE_URL"):
+            leaking.append("DATABASE_URL")
+        return leaking
 
     @property
     def is_production(self) -> bool:

@@ -507,8 +507,24 @@ export default function ModelEditor({
   useEffect(() => { api.get<MemoryBank[]>("/memory/banks").then(setMemBanks).catch(() => {}); }, []);
   useEffect(() => { api.get<KnowledgeBase[]>("/knowledge/bases").then(setKbBases).catch(() => {}); }, []);
   useEffect(() => { api.get<KnowledgeBase[]>("/knowledge/bases?kind=brain").then(setBrainBases).catch(() => {}); }, []);
-  const [toolsEnabled, setToolsEnabled] = useState(model?.tools_enabled ?? false);
+  // Modelo NOVO já nasce com a SIFT ligada (e, no efeito abaixo, com todas as
+  // ferramentas equipadas): o padrão útil é "sabe fazer as coisas". Ao EDITAR, respeita
+  // exatamente o que está salvo — nunca religa algo que o usuário desligou.
+  const [toolsEnabled, setToolsEnabled] = useState(model?.tools_enabled ?? isNew);
   const [toolIds, setToolIds] = useState<string[]>(model?.tool_ids ?? []);
+  // as listas chegam assíncronas; ao criar, equipa TODAS assim que carregarem. O
+  // `equippedOnceRef` garante que isso rode uma única vez — senão o usuário não
+  // conseguiria remover nenhuma (o efeito re-equiparia a cada render).
+  const equippedOnceRef = useRef(false);
+  useEffect(() => {
+    if (!isNew || equippedOnceRef.current) return;
+    if (systemTools.length === 0 && tools.length === 0) return; // ainda carregando
+    equippedOnceRef.current = true;
+    setToolIds([
+      ...systemTools.map((st) => `builtin:${st.path}`),
+      ...tools.filter((t) => t.enabled).map((t) => t.id),
+    ]);
+  }, [isNew, systemTools, tools]);
   const [codeMode, setCodeMode] = useState(model?.code_mode ?? false);
   // config do SIFT: como expor as tools (modo) + prompt "quando usar" + fixadas
   const [siftMode, setSiftMode] = useState<"prompt" | "list">(model?.sift_config?.mode ?? "prompt");

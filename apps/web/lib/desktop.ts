@@ -54,6 +54,32 @@ export const getDesktopSettings = () => invoke<DesktopSettings>("desktop_get_set
 export const setDesktopSettings = (patch: DesktopPatch) =>
   invoke<DesktopSettings>("desktop_set_settings", patch as Record<string, unknown>);
 
+/** Abre uma URL externa no navegador do sistema.
+ *
+ *  No navegador é só `window.open`. No app desktop isso é OBRIGATÓRIO: no webview do
+ *  Tauri um `<a target="_blank">` (e `window.open`) não faz NADA — não há handler de
+ *  nova janela nem plugin de shell. Sem passar por aqui, o link fica morto e o clique
+ *  parece "não acontecer" (foi o que quebrou o login por assinatura ChatGPT/Codex).
+ *
+ *  Use SEMPRE que o destino for fora do app. Devolve false se não deu para abrir —
+ *  aí a UI deve oferecer copiar o link. */
+export async function openExternal(url: string): Promise<boolean> {
+  if (!url) return false;
+  if (isDesktop()) {
+    const inv = bridge()?.core?.invoke;
+    if (inv) {
+      try {
+        await inv("desktop_open_external", { url });
+        return true;
+      } catch {
+        return false; // shell antigo (sem o comando) ou o SO recusou
+      }
+    }
+    return false;
+  }
+  return !!window.open(url, "_blank", "noopener,noreferrer");
+}
+
 /** Assina o evento "voice-activate" que o atalho GLOBAL do desktop dispara.
  *  Retorna uma função para cancelar a assinatura (no-op fora do desktop). */
 export async function onVoiceActivate(cb: () => void): Promise<() => void> {

@@ -1070,8 +1070,11 @@ async def chatgpt_models(
     cfg = await chatgpt_service.public_config(db, str(user.id))
     if not cfg.get("connected"):
         return []
+    # provider="OpenAI": é a etiqueta que o seletor mostra ao lado do nome (ModelPicker),
+    # do mesmo jeito que "OpenRouter" — assim dá p/ diferenciar a origem de olho. O nome
+    # fica limpo (sem sufixo "(ChatGPT)"), já que a etiqueta carrega essa informação.
     return [
-        {"id": m, "name": f"{m.removeprefix(chatgpt_service.MODEL_PREFIX)} (ChatGPT)", "provider": "ChatGPT"}
+        {"id": m, "name": m.removeprefix(chatgpt_service.MODEL_PREFIX), "provider": "OpenAI"}
         for m in cfg.get("models") or []
     ]
 

@@ -449,8 +449,16 @@ export default function ChatPage() {
       if (mc) {
         setCurModel(mc.base_model);
         setCurCustomId(mc.id);
-        return;
       }
+      // modelo apagado: a referência ficou pendurada. NÃO cair no setCurModel(dm)
+      // abaixo — isso colocava a string crua "custom:<uuid>" como se fosse um modelo
+      // (era o rótulo esquisito no seletor). Mantém o modelo atual e limpa o padrão
+      // (cura bancos que já ficaram nesse estado antes do fix no DELETE do modelo).
+      else {
+        api.put("/settings/default-model", { model: "" }).catch(() => {});
+        setUser({ ...u, default_model: null });
+      }
+      return;
     }
     setCurModel(dm);
     setCurCustomId(null);

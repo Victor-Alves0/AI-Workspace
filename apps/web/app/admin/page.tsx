@@ -11,6 +11,10 @@ import type { AdminUser } from "@/lib/types";
 import ObservabilityView from "@/components/ObservabilityView";
 import HealthView from "@/components/HealthView";
 
+/* Repositório oficial do projeto — o botão "Padrão" da seção Atualização preenche
+ * isto. Formato owner/repo: é o que a API do GitHub consome em /repos/{owner}/{repo}. */
+const DEFAULT_REPO = "Victor-Alves0/AI-Workspace";
+
 /* ------------------------------- navegação por cards ------------------------ */
 type AdminSection = "users" | "network" | "update" | "backup" | "observability" | "health";
 
@@ -65,7 +69,7 @@ function AdminShell({ title, onBack, children }: { title: string; onBack: () => 
 }
 
 interface NetworkCfg { host: string; port: number; allowed_ips: string[]; repo: string; branch: string; trust_proxy?: boolean; web_origin?: string }
-interface UpdateInfo { current_version: string; repo: string; branch: string; latest_release: string | null; latest_commit: string | null; update_available: boolean; error: string | null }
+interface UpdateInfo { current_version: string; repo: string; branch: string; latest_release: string | null; latest_commit: string | null; update_available: boolean; authenticated: boolean; error: string | null }
 
 const STATUS_STYLE: Record<string, string> = {
   active: "bg-green-500/15 text-green-400",
@@ -348,6 +352,15 @@ export default function AdminPage() {
               </label>
             </div>
             <div className="flex flex-wrap items-center gap-3">
+              {/* Preenche o repositório oficial do projeto. Guarda no formato owner/repo
+                  (é o que a API do GitHub usa em /repos/{owner}/{repo}); colar a URL
+                  inteira também funciona — o servidor normaliza. */}
+              <button
+                onClick={() => setNet({ ...net, repo: DEFAULT_REPO, branch: net.branch || "main" })}
+                title={`Preenche ${DEFAULT_REPO} (repositório oficial)`}
+                className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft hover:bg-surface2">
+                Padrão
+              </button>
               <button onClick={saveNet} className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft hover:bg-surface2">Salvar repo</button>
               <button onClick={checkUpdate} disabled={checking} className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-60">
                 <RefreshCw size={14} className={checking ? "animate-spin" : ""} /> Verificar atualizações
@@ -373,6 +386,11 @@ export default function AdminPage() {
                 )}
               </div>
             )}
+            <p className="text-xs leading-5 text-muted">
+              Repositório <span className="text-ink-soft">privado</span>? Conecte sua conta em
+              <span className="text-ink-soft"> Integrações → GitHub</span> — a verificação usa
+              esse token automaticamente{upd && !upd.authenticated ? " (nenhuma conta conectada agora)" : ""}.
+            </p>
             <p className="text-xs leading-5 text-muted">
               Por segurança, a atualização roda no <span className="text-ink-soft">host</span> (o container não tem acesso ao Docker):
               execute <span className="font-mono text-ink-soft">./update.sh</span> na pasta do projeto — ele puxa do git, reconstrói, sobe e migra.

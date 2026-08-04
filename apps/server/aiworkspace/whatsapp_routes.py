@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from . import bg
 from .auth.deps import require_approved
 from .config import get_settings
 from .db import get_db
@@ -359,8 +360,10 @@ async def evolution_webhook(token: str, request: Request, db: AsyncSession = Dep
         return {"ok": True}
     messages = evolution.parse_webhook(payload)
     if messages:
-        # responde 200 já; o processamento (modelo + resposta) segue em background
-        asyncio.create_task(whatsapp_service.handle_incoming(conn.id, messages))
+        # responde 200 já; o processamento (modelo + resposta) segue em background.
+        # bg.spawn (não create_task nu): o webhook já respondeu 200 → a Evolution/Meta NÃO
+        # reentrega. Se o GC coletasse a task, a mensagem de entrada sumiria sem resposta.
+        bg.spawn(whatsapp_service.handle_incoming(conn.id, messages))
     return {"ok": True}
 
 
@@ -394,5 +397,6 @@ async def official_webhook(token: str, request: Request, db: AsyncSession = Depe
         return {"ok": False}
     messages = official.parse_webhook(payload)
     if messages:
-        asyncio.create_task(whatsapp_service.handle_incoming(conn.id, messages))
+        # ver nota acima: bg.spawn p/ a mensagem de entrada não ser coletada pelo GC.
+        bg.spawn(whatsapp_service.handle_incoming(conn.id, messages))
     return {"ok": True}

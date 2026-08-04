@@ -162,7 +162,8 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "AccessKey Picovoice", cat: "connections", view: "assistant-voice" },
   { label: "Vosk", cat: "connections", view: "assistant-voice" },
   { label: "Testar escuta", cat: "connections", view: "assistant-voice" },
-  { label: "Chave do OpenRouter", cat: "connections", view: "apis" },
+  // a chave do OpenRouter mora em Provedores (junto com os demais provedores de LLM)
+  { label: "Chave do OpenRouter", cat: "connections", view: "providers" },
   { label: "Chave Tavily", cat: "connections", view: "apis" },
   { label: "Chave Brave Search", cat: "connections", view: "apis" },
   { label: "Chave Finnhub", cat: "connections", view: "apis" },
@@ -573,11 +574,13 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
             )}
             {cat === "connections" && (
               connView === "apis" ? (
-                <ApisPanel status={status} reloadSecrets={reloadSecrets} onConnectionsChanged={onConnectionsChanged} onBack={() => setConnView(null)} />
+                <ApisPanel status={status} reloadSecrets={reloadSecrets} onBack={() => setConnView(null)} />
               ) : connView === "ollama" ? (
                 <OllamaPanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
               ) : connView === "providers" ? (
-                <ProvidersPanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
+                // onChanged recarrega TAMBÉM o status dos segredos: a chave do OpenRouter
+                // é salva aqui agora e a aba Status a lê de lá (senão ficava "sem chave").
+                <ProvidersPanel onBack={() => setConnView(null)} onChanged={() => { onConnectionsChanged?.(); reloadSecrets(); }} />
               ) : connView === "voice" ? (
                 <VoicePanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
               ) : connView === "assistant-voice" ? (
@@ -601,11 +604,11 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                   <Heading>Conexões</Heading>
                   <CardGrid
                     cards={[
-                      { key: "apis", icon: <KeyRound size={22} />, name: "APIs", desc: "Chaves de serviços" },
+                      { key: "apis", icon: <KeyRound size={22} />, name: "APIs", desc: "Voz, pesquisa e finanças" },
                       { key: "subscriptions", icon: <Crown size={22} />, name: "Assinaturas", desc: "Suas assinaturas" },
                       { key: "web", icon: <Globe size={22} />, name: "Web", desc: "Acesso a internet" },
                       { key: "ollama", icon: <SiOllama size={22} />, name: "Ollama", desc: "Utilize modelos locais" },
-                      { key: "providers", icon: <Server size={22} />, name: "Provedores", desc: "kie.ai, LiteLLM e afins" },
+                      { key: "providers", icon: <Server size={22} />, name: "Provedores", desc: "Provedores de LLMs" },
                       { key: "voice", icon: <AudioLines size={22} />, name: "Voz Local", desc: "Kokoro / clonagem de voz" },
                       { key: "assistant-voice", icon: <Bot size={22} />, name: "Assistente", desc: "Usabilidade de agentes" },
                     ]}
@@ -1798,7 +1801,7 @@ function StatusTab({ user, onGoto }: { user: User | null; onGoto: (cat: Cat, vie
           state={st.openrouter_key ? "ok" : "off"}
           detail={st.openrouter_key ? (orTest === "ok" ? "Válida ✓" : orTest === "fail" ? "A chave falhou no teste" : "Configurada") : "Necessária para conversar"}
           actionLabel={st.openrouter_key ? undefined : "Configurar"}
-          onAction={() => onGoto("connections", "apis")}
+          onAction={() => onGoto("connections", "providers")}
           extra={st.openrouter_key && (
             <button onClick={testOpenRouter} disabled={testing} className="shrink-0 rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-60">
               {testing ? "Testando…" : "Testar"}
@@ -2120,79 +2123,16 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
 }
 
 /* ------------------------------- Conexões --------------------------------- */
+/* As chaves dos provedores de LLM ficam em Conexões → Provedores (ProvidersPanel):
+ * lá cada provedor tem chave, base URL e modelos no MESMO lugar. Este arquivo cuida
+ * das chaves de serviços (voz, pesquisa, finanças). */
 
-interface ProviderRow { slug: string; name: string; base_url: string; models: string[]; existing?: { has_key: boolean } }
-
-/** Campo de chave de um PROVEDOR (kie.ai, LiteLLM, …). Espelha o SecretField, mas
- *  grava no sistema de provedores: ao salvar a chave de um preset ainda não criado,
- *  cria o provedor já com a base URL e os modelos do preset. */
-function ProviderKeyField({ row, onSaved }: { row: ProviderRow; onSaved: () => void }) {
-  const [value, setValue] = useState("");
-  const [saved, setSaved] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const configured = !!row.existing?.has_key;
-  async function save() {
-    setBusy(true);
-    try {
-      const body = row.existing
-        ? { api_key: value } // provedor já existe: só troca a chave (preserva base/modelos)
-        : { name: row.name, base_url: row.base_url, models: row.models, enabled: true, api_key: value };
-      await api.put(`/integrations/providers/${row.slug}`, body);
-      setValue(""); setSaved(true); onSaved();
-      setTimeout(() => setSaved(false), 1500);
-    } finally { setBusy(false); }
-  }
-  return (
-    <div className="space-y-1.5 py-2">
-      <label className="text-sm text-ink-soft">
-        Chave {row.name} {configured && <span className="text-green-400">(configurada)</span>}
-      </label>
-      <div className="flex gap-2">
-        <input
-          type="password" placeholder="••••••" value={value}
-          onChange={(e) => setValue(e.target.value)}
-          className="flex-1 rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
-        />
-        <button onClick={save} disabled={!value.trim() || busy} className="rounded-lg bg-accent px-3 py-2 text-sm text-ink disabled:opacity-50">
-          {saved ? "✓" : "Salvar"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ApisPanel({ status, reloadSecrets, onConnectionsChanged, onBack }: { status: SecretStatus | null; reloadSecrets: () => void; onConnectionsChanged?: () => void; onBack: () => void }) {
-  // salvar a chave do OpenRouter precisa recarregar a LISTA DE MODELOS (não só o
-  // status do segredo), senão os modelos só aparecem após um F5.
-  const savedOpenrouter = () => { reloadSecrets(); onConnectionsChanged?.(); };
-
-  // provedores (kie.ai, LiteLLM, …): a chave entra aqui; a base URL e os modelos
-  // vêm do preset (ou do que o usuário configurou em Conexões → Provedores).
-  const [prov, setProv] = useState<{ items: { slug: string; name: string; base_url: string; models: string[]; has_key: boolean }[]; presets: Record<string, { name: string; base_url: string; models?: string[] }> } | null>(null);
-  const loadProv = useCallback(async () => {
-    try { setProv(await api.get("/integrations/providers")); } catch { /* sem provedores */ }
-  }, []);
-  useEffect(() => { loadProv(); }, [loadProv]);
-  const savedProvider = () => { loadProv(); onConnectionsChanged?.(); };
-
-  const items = prov?.items ?? [];
-  const presets = prov?.presets ?? {};
-  const bySlug = new Map(items.map((i) => [i.slug, i]));
-  const providerRows: ProviderRow[] = [
-    ...Object.entries(presets).map(([slug, pr]) => {
-      const ex = bySlug.get(slug);
-      return { slug, name: pr.name, base_url: pr.base_url, models: pr.models ?? [], existing: ex ? { has_key: ex.has_key } : undefined };
-    }),
-    ...items.filter((i) => !presets[i.slug]).map((i) => ({ slug: i.slug, name: i.name, base_url: i.base_url, models: i.models, existing: { has_key: i.has_key } })),
-  ];
-
+function ApisPanel({ status, reloadSecrets, onBack }: { status: SecretStatus | null; reloadSecrets: () => void; onBack: () => void }) {
   return (
     <DetailView title="APIs" onBack={onBack}>
-      <Heading info="Provedores de modelos. A base URL e os modelos dos provedores customizados ficam em Conexões → Provedores; aqui você só cola a chave.">Provedores</Heading>
-      <SecretField label="Chave do OpenRouter" name="openrouter" configured={status?.openrouter ?? false} hint="Provedor de modelos (obrigatória para conversar)." onSaved={savedOpenrouter} />
-      {providerRows.map((r) => (
-        <ProviderKeyField key={r.slug} row={r} onSaved={savedProvider} />
-      ))}
+      {/* As chaves de LLM (OpenRouter, LiteLLM, personalizados) NÃO ficam mais aqui:
+          foram todas para Conexões → Provedores, junto com a URL e os modelos de cada
+          um. Aqui ficam só as chaves de SERVIÇOS (voz, pesquisa, finanças). */}
       <Heading>Voz</Heading>
       <SecretField label="Chave do provedor de voz" name="voice" configured={status?.voice ?? false} hint="TTS/STT — endpoint compatível com OpenAI (VOICE_BASE_URL). Use OpenAI ou um servidor local." onSaved={reloadSecrets} />
       <Heading>Pesquisa na web</Heading>

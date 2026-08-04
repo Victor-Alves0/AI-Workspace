@@ -31,6 +31,7 @@ from urllib.parse import urlparse
 
 from fastapi.concurrency import run_in_threadpool
 
+from .. import bg
 from ..config import get_settings
 from . import exec_service
 
@@ -104,6 +105,7 @@ class Job:
         self.proc = None                  # subprocess.Popen
         self._evt = threading.Event()     # setado pela thread leitora ao concluir
         self.waited = False               # algum wait_job já consumiu o resultado?
+        self._claimed = False             # o reaper já reivindicou este job p/ processar o wake?
         self.dispatched = False           # o wake já foi disparado/decidido?
         self.timed_out = False            # o watchdog matou por exceder o wall-clock?
 
@@ -206,10 +208,11 @@ def start_job(root: Path, command: str, *, chat_id: str | None, user_id: str,
     }
 
 
-async def wait_job(job_id: str, timeout: float | None = None) -> dict[str, Any]:
+async def wait_job(job_id: str, timeout: float | None = None,
+                   project_id: str | None = None) -> dict[str, Any]:
     """Aguarda o job concluir (até um teto), inline no turno. Se estourar o teto, devolve
     o status parcial `running` — o job segue vivo e ainda pode acordar um turno."""
-    job = _jobs.get(job_id)
+    job = _lookup(job_id, project_id)
     if job is None:
         return {"error": f"job '{job_id}' não encontrado (pode ter expirado)"}
     ceiling = float(get_settings().code_exec_bg_wait_ceiling_seconds)
@@ -227,8 +230,20 @@ async def wait_job(job_id: str, timeout: float | None = None) -> dict[str, Any]:
     return job.snapshot()
 
 
-def job_status(job_id: str) -> dict[str, Any]:
-    job = _jobs.get(job_id)
+def _lookup(job_id: str, project_id: str | None) -> Job | None:
+    """Resolve o job por id, ESCOPADO ao projeto quando `project_id` é dado: um id
+    existente de OUTRO projeto é tratado como inexistente (não vaza a saída). O lookup
+    por id é global, então sem este escopo qualquer id conhecido cruzaria projetos."""
+    job = _jobs.get((job_id or "").strip())
+    if job is None:
+        return None
+    if project_id is not None and str(job.project_id) != str(project_id):
+        return None
+    return job
+
+
+def job_status(job_id: str, project_id: str | None = None) -> dict[str, Any]:
+    job = _lookup(job_id, project_id)
     if job is None:
         return {"error": f"job '{job_id}' não encontrado (pode ter expirado)"}
     return job.snapshot()
@@ -307,8 +322,16 @@ async def _reaper() -> None:
     while True:
         try:
             for job in list(_jobs.values()):
-                if job._evt.is_set() and not job.dispatched and not job.waited:
-                    asyncio.create_task(_maybe_wake(job))
+                if job._evt.is_set() and not job._claimed and not job.waited:
+                    # REIVINDICA sincronamente (o loop é single-thread) ANTES de agendar:
+                    # `dispatched` só vira True lá no fim de `_maybe_wake` (após esperar o chat
+                    # ficar ocioso, até ~120s), então guardar por `dispatched` deixaria o reaper
+                    # criar uma task nova a cada 2s → N `_fire_wake` duplicados = N gerações de
+                    # modelo no mesmo chat. `_claimed` fecha a janela: 1 task por job.
+                    job._claimed = True
+                    # bg.spawn (não create_task nu): se o GC coletasse o wake, o job ficaria
+                    # _claimed sem nunca acordar o chat → o "wake que nunca chega" de volta.
+                    bg.spawn(_maybe_wake(job))
             # expira jobs concluídos antigos (evita crescer sem fim)
             now = time.monotonic()
             for jid, job in list(_jobs.items()):

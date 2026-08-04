@@ -83,6 +83,54 @@ def test_cancel_does_not_fire_on_queue():
     assert got["called"] is False   # cancelamento não drena a fila
 
 
+def test_start_single_flight_nunca_abre_2a_geracao():
+    """REGRESSÃO (dinheiro): dois caminhos que checaram 'sem geração ativa' e então
+    esperaram (awaits de setup) podiam ambos chamar `start` → 2 drivers no MESMO chat =
+    chamada de modelo dobrada + respostas intercaladas. Gatilho sem usuário: o reaper do
+    exec_jobs e o _ready_poller do preview disparam wakes independentes no mesmo chat.
+    `start` é single-flight: enquanto a 1ª está ativa, a 2ª devolve a MESMA geração e NÃO
+    consome o 2º source (nenhum 2º turno roda)."""
+    consumed = {"a": 0, "b": 0}
+    release = asyncio.Event()
+
+    async def on_finish(collected, emit):
+        pass
+
+    async def src_a():
+        consumed["a"] += 1
+        yield {"type": "token", "text": "A"}
+        await release.wait()                       # mantém a geração ATIVA
+        yield {"type": "done", "content": "A", "usage": None, "tool_events": None}
+
+    async def src_b():                             # não deve ser consumido enquanto A vive
+        consumed["b"] += 1
+        yield {"type": "done", "content": "B", "usage": None, "tool_events": None}
+
+    async def go():
+        cid = "chat-single-flight"
+        gen_mod._active.pop(cid, None)
+        try:
+            g1 = gen_mod.start(cid, src_a(), on_finish)
+            await asyncio.sleep(0)                  # deixa o driver de A consumir o 1º yield
+            g2 = gen_mod.start(cid, src_b(), on_finish)   # COLISÃO: A ainda ativa
+            assert g1 is g2, "start deve devolver a geração ativa, não abrir uma 2ª"
+            assert gen_mod._active.get(cid) is g1
+            assert consumed == {"a": 1, "b": 0}, f"B não podia rodar: {consumed}"
+            # depois que A termina, start abre normalmente (não fica travado p/ sempre)
+            release.set()
+            await g1.task
+            await asyncio.sleep(0.02)
+            g1.done = True                          # garante 'não-ativa' (TTL ainda no _active)
+            g3 = gen_mod.start(cid, src_b(), on_finish)
+            assert g3 is not g1, "com a anterior concluída, start deve abrir uma nova"
+            await asyncio.sleep(0.02)
+            assert consumed["b"] == 1
+        finally:
+            gen_mod._active.pop(cid, None)
+
+    asyncio.run(go())
+
+
 def test_send_message_routes_active_gen_to_enqueue():
     # regressão estrutural: o envio-durante-geração vai p/ enqueue, não abre 2ª geração
     from aiworkspace.chat import messages_routes as mr

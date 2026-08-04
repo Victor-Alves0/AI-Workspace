@@ -21,6 +21,7 @@ import math
 import operator
 import os
 import re
+import shlex
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Iterable
@@ -361,7 +362,7 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # Preview vivo: sobe um dev server/backend e o mantém no ar entre turnos p/ o usuário
     # abrir e testar o app rodando (com backend), não só ver o arquivo.
     {"path": "code.preview.serve", "name": "Pôr no Ar (Preview)", "description": "Sobe o app do projeto vinculado (dev server/backend) e o mantém no ar para o usuário abrir e testar rodando de verdade — não só como arquivo. Ligar/parar/ver logs; padrão localhost, ou expor na LAN a pedido.",
-     "model_desc": "Put the attached project's app ON THE AIR: start a long-running dev server/backend (npm run dev, python app.py, gradlew bootRun…) and keep it up across turns so the user can open and test the running app with its backend. Actions start/status/logs/stop/list; expose localhost (default) or lan. Requires execution enabled. Use when asked to 'run it'/'serve it'/'put it up to test'."},
+     "model_desc": "Put the attached project's app ON THE AIR: start a long-running dev server/backend (npm run dev, python app.py, gradlew bootRun…) and keep it up across turns so the user can open and test the running app with its backend. Actions start/status/logs/stop/list. Requires execution enabled. Use when asked to 'run it'/'serve it'/'put it up to test'."},
     # Tarefas/worktrees: cria uma branch isolada (worktree) por tarefa p/ o agente
     # trabalhar sem colidir com o `src` nem com outros agentes; lista/inspeciona o diff
     # e mescla/descarta. O merge normalmente é aprovado pelo humano na UI.
@@ -417,33 +418,184 @@ def _is_risky_exec(command: str) -> bool:
     return bool(_RISKY_EXEC_RE.search(command or ""))
 
 
-# Comandos que tendem a DEMORAR (baixam deps / instalam toolchain / buildam) — candidatos
-# a rodar em BACKGROUND p/ não estourar o timeout do exec. Heurística: o agente pode forçar
-# com background=true/false; isto só decide o modo "auto".
-_LONG_RUNNER_RE = re.compile(
-    r"(?:^|[;&|]|\s)(?:"
-    r"mise\s+(?:install|use)|asdf\s+install|sdk\s+install|"
-    r"mvn\b|gradle\b|\./gradlew\b|\./mvnw\b|lein\s+(?:deps|install|uberjar|test|run)|"
-    r"clojure\s+-[PXMA]|"
-    r"npm\s+(?:i|install|ci)|pnpm\s+(?:i|install)|yarn\s+(?:install|add)|bun\s+(?:i|install)|"
-    r"pip3?\s+install|pipx\s+install|poetry\s+(?:install|add)|uv\s+(?:pip\s+install|sync|add)|"
-    r"cargo\s+(?:build|install|test)|go\s+(?:build|install|test|mod\s+download)|"
-    r"make\b|cmake\b|docker\s+build|"
-    r"apt(?:-get)?\s+install|dpkg\s+-i|yum\s+install|dnf\s+install|apk\s+add|brew\s+install|"
-    r"gem\s+install|"
-    # suítes de teste/build que estouram o teto de CPU do run síncrono (SIGXCPU/exit 152)
-    r"(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:build|test|e2e|lint)|"
-    r"(?:\S*/)?bin/(?:test|build|test-agent)\S*|"
-    r"(?:\S*/)?(?:pytest|jest|vitest|mocha)\b|playwright\s+test|tox\b|nox\b|"
-    r"git\s+clone|wget\b"
-    r")\b",
-    re.IGNORECASE,
-)
+# Classificação de comando de shell (LONGO=build/install → background; SERVIDOR → preview).
+# ARMADILHA (bug real): um regex que casa o token em QUALQUER posição da linha dispara
+# dentro de ARGUMENTOS/aspas/nomes de arquivo — `cat vite.config.js`, `git commit -m
+# "npm run dev"`, `ls | grep uvicorn` viravam "servidor" (recusados!) ou "longo" (bg à toa).
+# Por isso classificamos pelo COMANDO REAL: tokeniza com shlex (aspas viram 1 token, o
+# conteúdo NÃO é comando), quebra por operadores de shell, tira prefixos VAR=val e wrappers,
+# e olha o executável + args posicionais — não texto solto. Ver test_command_classification.
+
+_CMD_SPLIT_OPS = {"|", "||", "&&", ";", "&", "(", ")"}
+
+
+def _cmd_basename(raw: str) -> str:
+    raw = raw.strip()
+    if raw.startswith("./"):
+        raw = raw[2:]
+    return raw.rsplit("/", 1)[-1]
+
+
+def _is_env_assignment(tok: str) -> bool:
+    return bool(re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", tok))
+
+
+def _split_commands(line: str) -> list[list[str]] | None:
+    """Tokeniza a linha (respeitando aspas) e a quebra em SUB-COMANDOS pelos operadores do
+    shell, removendo prefixos `VAR=val` e wrappers (env/nohup/time/exec). Cada sub-comando é
+    a lista de tokens do comando REAL (args entre aspas ficam como UM token, não viram
+    comando). Retorna [] p/ linha vazia; None se não der p/ parsear com segurança (aspas
+    desbalanceadas) — nesse caso o chamador é conservador (não classifica → não recusa/bg)."""
+    line = (line or "").strip()
+    if not line:
+        return []
+    try:
+        lex = shlex.shlex(line, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        toks = list(lex)
+    except Exception:  # noqa: BLE001 — aspas desbalanceadas (ValueError) ou qualquer azar do
+        return None    # tokenizador: conservador → não classifica (nunca recusa por isso)
+    cmds: list[list[str]] = []
+    cur: list[str] = []
+    for t in toks:
+        if t in _CMD_SPLIT_OPS or (t and all(c in "|&;()<>" for c in t)):
+            if cur:
+                cmds.append(cur)
+                cur = []
+            continue
+        cur.append(t)
+    if cur:
+        cmds.append(cur)
+    out: list[list[str]] = []
+    for c in cmds:
+        i = 0
+        while i < len(c) and (_is_env_assignment(c[i]) or c[i] in ("env", "nohup", "time", "exec")):
+            i += 1
+        if c[i:]:
+            out.append(c[i:])
+    return out
+
+
+def _subcmd_is_server(toks: list[str]) -> bool:
+    """Um único sub-comando SOBE UM SERVIDOR (fica no ar; nunca termina)? Ancorado no
+    comando + args posicionais — nunca em texto de argumento."""
+    if not toks:
+        return False
+    cmd = _cmd_basename(toks[0])
+    args = toks[1:]
+    a0 = args[0] if args else ""
+    if cmd in {"uvicorn", "gunicorn", "hypercorn", "daphne", "waitress-serve", "http-server"}:
+        return True
+    if cmd == "flask" and "run" in args[:2]:
+        return True
+    if cmd in {"npm", "pnpm", "yarn", "bun"}:
+        script = args[1] if (a0 == "run" and len(args) > 1) else a0
+        return script in {"dev", "start", "serve"}
+    if cmd == "next" and a0 in {"dev", "start"}:
+        return True
+    # vite serve por padrão; SÓ não é servidor quando é build/optimize (mesmo com flag antes)
+    if cmd == "vite" and "build" not in args and "optimize" not in args:
+        return True
+    if cmd == "ng" and a0 == "serve":
+        return True
+    if cmd in {"nuxt", "remix"} and a0 == "dev":
+        return True
+    if cmd == "astro" and a0 == "dev":
+        return True
+    if cmd == "gatsby" and a0 == "develop":
+        return True
+    if cmd == "react-scripts" and a0 == "start":
+        return True
+    if cmd == "webpack" and a0 == "serve":
+        return True
+    if cmd == "webpack-dev-server":
+        return True
+    if cmd == "rails" and a0 in {"s", "server"}:
+        return True
+    if cmd == "php" and (a0 == "-S" or (a0 == "artisan" and "serve" in args)):
+        return True
+    if cmd in {"python", "python3"} and (
+            ("manage.py" in args and "runserver" in args) or args[:2] == ["-m", "http.server"]):
+        return True
+    if cmd == "manage.py" and "runserver" in args:
+        return True
+    if cmd in {"gradlew", "mvnw", "mvn", "gradle"} and any(
+            re.search(r"(bootRun|jetty:run|tomcat:run|spring-boot:run|quarkus:dev)", a) for a in args):
+        return True
+    if cmd == "dotnet" and a0 in {"run", "watch"}:
+        return True
+    if cmd == "clojure" and any((":run" in a or "dev-start" in a) for a in args):
+        return True
+    if cmd == "lein" and a0 == "run":
+        return True
+    return False
+
+
+def _subcmd_is_long(toks: list[str]) -> bool:
+    """Um único sub-comando tende a DEMORAR (baixa deps / instala toolchain / builda /
+    suíte de teste)? Ancorado no comando + args posicionais."""
+    if not toks:
+        return False
+    raw = toks[0]
+    cmd = _cmd_basename(raw)
+    args = toks[1:]
+    a0 = args[0] if args else ""
+    if cmd in {"mvn", "mvnw", "gradle", "gradlew", "lein", "make", "cmake"}:
+        return True
+    if cmd in {"pytest", "jest", "vitest", "mocha", "tox", "nox", "playwright"}:
+        return True
+    if cmd == "wget":
+        return True
+    if cmd == "docker" and a0 == "build":
+        return True
+    if cmd == "clojure" and re.match(r"-[PXMA]", a0):
+        return True
+    if cmd in {"mise", "asdf", "sdk"} and a0 in {"install", "use"}:
+        return True
+    if cmd in {"npm", "pnpm", "yarn", "bun"}:
+        if a0 in {"i", "install", "ci", "add"}:
+            return True
+        script = args[1] if (a0 == "run" and len(args) > 1) else a0
+        return script in {"build", "test", "e2e", "lint"}
+    if cmd in {"pip", "pip3", "pipx"} and a0 == "install":
+        return True
+    if cmd == "poetry" and a0 in {"install", "add"}:
+        return True
+    if cmd == "uv" and (a0 in {"sync", "add"} or (a0 == "pip" and "install" in args)):
+        return True
+    if cmd == "cargo" and a0 in {"build", "install", "test"}:
+        return True
+    if cmd == "go" and (a0 in {"build", "install", "test"} or (a0 == "mod" and "download" in args)):
+        return True
+    if cmd == "git" and a0 == "clone":
+        return True
+    if cmd in {"apt", "apt-get", "dpkg", "yum", "dnf", "apk", "brew"} and a0 in {"install", "-i", "add"}:
+        return True
+    if cmd == "gem" and a0 == "install":
+        return True
+    if re.search(r"(^|/)bin/(test|build|e2e|test-agent)", raw):
+        return True
+    return False
 
 
 def _is_long_runner(command: str) -> bool:
-    """True se o comando tende a demorar (download/instalação/build) → auto-background."""
-    return bool(_LONG_RUNNER_RE.search(command or ""))
+    """True se o comando tende a demorar (download/instalação/build) → auto-background.
+    Classifica pelo comando real de cada sub-comando (não por texto em argumentos)."""
+    cmds = _split_commands(command)
+    if not cmds:  # [] (vazio) ou None (aspas quebradas) → conservador: não é longo
+        return False
+    return any(_subcmd_is_long(c) for c in cmds)
+
+
+def _looks_like_server(command: str) -> bool:
+    """True se o comando SOBE UM SERVIDOR (dev server/backend que fica no ar). Ancorado no
+    comando real → `cat vite.config.js`, `git commit -m "npm run dev"`, `ls | grep uvicorn`
+    NUNCA disparam (o token está num argumento/aspas, não é o comando). Conservador: linha
+    não-parseável → False (jamais recusa um comando por ambiguidade)."""
+    cmds = _split_commands(command)
+    if not cmds:
+        return False
+    return any(_subcmd_is_server(c) for c in cmds)
 
 
 # Comandos que NÃO funcionam no sandbox — ele roda sem privilégio (usuário 'app', uid
@@ -1803,6 +1955,21 @@ def _register_builtins(
             priv = _needs_root_exec(cmd)
             if priv:
                 return {"error": priv}
+            # SERVIDOR não é JOB: um dev server/backend fica no ar e nunca "termina", então
+            # como job de background o wake (que dispara na CONCLUSÃO) nunca viria, e no
+            # modo síncrono ele estouraria o timeout. Redireciona p/ code.preview.serve —
+            # que mantém o server no ar, tem `wait` (bloqueia até subir) e `wake_ready`
+            # (encerra o turno e acorda quando subir). Foi o bug do Metabase.
+            if _looks_like_server(cmd):
+                return {"error": (
+                    "esse comando SOBE UM SERVIDOR (fica no ar; não 'termina'). code.exec.run "
+                    "é para comandos que COMPLETAM (instalar/baixar/buildar/testar) — um servidor "
+                    "nunca conclui, então um job de background nunca te acordaria e uma espera "
+                    "nunca fecharia. Suba com code.preview.serve action=start "
+                    "(command=<este comando>, port=4001-4010, o app escutando em 0.0.0.0:<port>); "
+                    "depois use action=wait para bloquear até o app responder, OU action=wake_ready "
+                    "para encerrar o turno e ser ACORDADO quando ele subir."),
+                    "hint": "code.preview.serve"}
             # O SANDBOX é o isolamento: roda sem privilégio, com escopo no volume do projeto
             # e morto no timeout. Por isso NÃO nos intrometemos com um card de texto por
             # padrão — só confirmamos (qualquer comando, com aviso extra p/ install/baixa/
@@ -1899,14 +2066,16 @@ def _register_builtins(
             jid = (job_id or "").strip()
             if not jid:
                 return {"error": "informe job_id"}
+            # escopa ao projeto atual: um id existente de OUTRO projeto é tratado como
+            # inexistente (não vaza a saída) — o lookup por id é global.
             if act == "status":
-                return exec_jobs.job_status(jid)
+                return exec_jobs.job_status(jid, project_id=str(proj.id))
             if act == "wait":
                 try:
                     to = float(timeout) if timeout is not None else None
                 except (TypeError, ValueError):
                     to = None
-                return asyncio.run(exec_jobs.wait_job(jid, to))
+                return asyncio.run(exec_jobs.wait_job(jid, to, project_id=str(proj.id)))
             return {"error": f"ação desconhecida '{action}' (use wait/status/list)"}
 
     if want("code.preview.serve"):
@@ -1922,21 +2091,26 @@ def _register_builtins(
                 "dev' / 'python app.py' / 'gradlew bootRun', and the `port` it listens on), 'status' "
                 "(is it up yet? + recent logs), 'wait' (BLOCK until the server is up or crashes — ONE call "
                 "instead of polling status in a loop; heavy backends take minutes, just call wait again if "
-                "it returns still-starting), 'logs' (recent output, to "
+                "it returns still-starting), 'wake_ready' (DON'T block — register a wake and END your reply; "
+                "you'll be woken in a fresh turn when the server comes up or crashes, like the background-job "
+                "wake — best for slow backends so you don't sit blocking), 'logs' (recent output, to "
                 "debug a crash), 'request' (send an HTTP request to your OWN running preview and get the "
                 "raw status/headers/body back — use it to TEST/probe the running app end-to-end, e.g. hit "
                 "an API route; it runs from the server so it reaches the app in any environment, and it's "
                 "ANONYMOUS by default — no auth is added, so it's also how you verify what an unauthenticated "
-                "attacker can reach; it does NOT follow redirects), 'stop', 'list'. `expose`: 'localhost' (default, safe — only this machine / "
-                "the embedded preview panel) or 'lan' (reachable on the local network, e.g. to test on a "
-                "phone) — set 'lan' ONLY when the user asks to expose it on the network, and for frameworks "
-                "that need it also pass the host flag in the command (e.g. `vite --host 0.0.0.0`). The dev "
+                "attacker can reach; it does NOT follow redirects), 'stop', 'list'. WHO CAN REACH THE PREVIEW "
+                "is set by the DEPLOY (PREVIEW_BIND, default 127.0.0.1 = host machine only), NOT by you: the "
+                "`expose` param is informational and changes nothing — never tell the user a preview is "
+                "restricted or 'safe' based on it. The published port itself has NO authentication; the "
+                "authenticated way in (and the one to give for another device) is the proxy URL in "
+                "`preview_url`. Some frameworks still need the host flag in the command (e.g. `vite --host "
+                "0.0.0.0`) so they listen inside the container. The dev "
                 "server runs without the exec timeout (it's meant to stay up). Needs the same 'Permitir "
                 "execução' that code.exec.run needs. Prefer background installs (code.exec.run) BEFORE "
                 "starting the server."
             ),
             params={
-                "action": "string:r::start | status | wait | logs | request | stop | list",
+                "action": "string:r::start | status | wait | wake_ready | logs | request | stop | list",
                 "command": "string:o::start: the command that starts the server (e.g. 'npm run dev')",
                 "port": "number:o::start: the port the app listens on — MUST be in the published preview range (4001-4010); out-of-range is auto-remapped into it. The app must listen on 0.0.0.0:<port>.",
                 "expose": "string:o:localhost:start: informational only now — the preview always runs on its own published port, reachable on the host",
@@ -1948,7 +2122,7 @@ def _register_builtins(
                 "timeout": "number:o::wait: max seconds to block waiting for the server to come up (capped at 240)",
                 "confirm": "boolean:o::set true only after the user confirmed starting/exposing the server",
             },
-            returns=["id", "command", "port", "expose", "status", "preview_url",
+            returns=["id", "preview_id", "command", "port", "expose", "status", "preview_url",
                      "age_seconds", "exit_code", "logs", "previews", "note", "ok", "stopped", "error",
                      "http_status", "resp_headers", "body", "truncated", "url",
                      "kind", "question", "options", "allow_custom", "custom_label"],
@@ -1987,6 +2161,10 @@ def _register_builtins(
                 except (TypeError, ValueError):
                     to = 120
                 return preview_service.wait_ready(uid, pid, pvid, timeout=to)
+            if act in ("wake_ready", "notify_ready"):
+                if not pvid:
+                    return {"error": "informe preview_id (ou a porta) do preview a aguardar"}
+                return preview_service.watch_ready(uid, pid, pvid, toolctx.current_chat_id.get())
             if act == "request":
                 if not pvid:
                     return {"error": "informe preview_id (ou a porta) do preview a testar"}

@@ -143,7 +143,8 @@ async def delete_memory(memory_id: str, ctx: ApiContext = Depends(scoped("memory
     if memory_id not in {str(r["id"]) for r in rows}:
         raise ApiError("Memória não encontrada no escopo desta chave.", status=404,
                        code="memory_not_found")
-    ok = await run_in_threadpool(mem0_service.delete_memory, key, memory_id)
+    ok = await run_in_threadpool(
+        mem0_service.delete_memory, key, memory_id, str(ctx.user.id))
     return {"ok": bool(ok)}
 
 
@@ -159,7 +160,8 @@ async def clear_memories(
     )
     removed = 0
     for r in rows:
-        if await run_in_threadpool(mem0_service.delete_memory, key, str(r["id"])):
+        if await run_in_threadpool(
+                mem0_service.delete_memory, key, str(r["id"]), str(ctx.user.id)):
             removed += 1
     return {"ok": True, "deleted": removed}
 

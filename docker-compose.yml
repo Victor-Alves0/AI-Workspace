@@ -32,8 +32,15 @@ services:
         condition: service_healthy
     environment:
       APP_ENV: ${APP_ENV:-development}
-      APP_SECRET: ${APP_SECRET:?set APP_SECRET in .env}
-      ENABLE_SIGNUP: ${ENABLE_SIGNUP:-true}
+      # Segredo da app. PREFIRA APP_SECRET_FILE (abaixo): passado por env, ele fica
+      # legível em /proc/1/environ para QUALQUER comando que a IA executar no container
+      # (o _clean_env limpa o env do filho, mas não o /proc do PID 1). Ver
+      # docs/trust-model.md e SECURITY-secrets.md.
+      APP_SECRET: ${APP_SECRET:-}
+      APP_SECRET_FILE: ${APP_SECRET_FILE:-}
+      DATABASE_URL_FILE: ${DATABASE_URL_FILE:-}
+      # Cadastro NÃO tem chave de ambiente: quem decide é o admin no painel
+      # (app_config.signups_allowed — fechado por padrão). Ver docs/trust-model.md.
       WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-duckduckgo}
       SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
       VOICE_BASE_URL: ${VOICE_BASE_URL:-https://api.openai.com/v1}
@@ -71,6 +78,10 @@ services:
       # Cookies do yt-dlp (anti-bloqueio da transcrição). Descomente e ajuste o
       # caminho do host; depois no .env: TRANSCRIBE_COOKIES_DIR=/data/yt-cookies
       # - ./secrets/yt-cookies:/data/yt-cookies:ro
+      # Segredos por ARQUIVO (recomendado no perfil servidor): descomente e siga as
+      # instruções do .env.example. Mantém APP_SECRET fora de /proc/1/environ, onde
+      # qualquer comando executado pela IA conseguiria lê-lo. Ver docs/trust-model.md.
+      # - ./secrets:/run/secrets:ro
     ports:
       # host bind + porta configuráveis (o painel do admin diz quais valores pôr
       # no .env). Ex.: SERVER_BIND=127.0.0.1 SERVER_PORT=8000
@@ -78,7 +89,11 @@ services:
       # Codespace: previews "own-origin" — a IA sobe um app numa porta deste range,
       # publicada no host, pra apps completos (Metabase etc.) rodarem na RAIZ da própria
       # origem (login/redirect/SPA/websocket funcionam). DEVE bater com code_preview_port_*.
-      - "${PREVIEW_BIND:-0.0.0.0}:${PREVIEW_PORT_MIN:-4001}-${PREVIEW_PORT_MAX:-4010}:${PREVIEW_PORT_MIN:-4001}-${PREVIEW_PORT_MAX:-4010}"
+      # ATENÇÃO: a porta publicada NÃO tem autenticação — quem alcança o host abre o app.
+      # Por isso o padrão é 127.0.0.1 (só a própria máquina). De outros dispositivos, use
+      # o proxy AUTENTICADO: /codespace/preview/<porta>/. Só ponha PREVIEW_BIND=0.0.0.0 se
+      # aceitar previews abertos na sua rede. Ver docs/trust-model.md.
+      - "${PREVIEW_BIND:-127.0.0.1}:${PREVIEW_PORT_MIN:-4001}-${PREVIEW_PORT_MAX:-4010}:${PREVIEW_PORT_MIN:-4001}-${PREVIEW_PORT_MAX:-4010}"
 
   # Voz local (TTS) — Kokoro-FastAPI, endpoint OpenAI-compatível em :8880/v1.
   # OPT-IN: só sobe com `docker compose --profile voice up -d kokoro`.

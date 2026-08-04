@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, select
 
+from .. import bg
 from ..db import SessionLocal
 from ..models import Automation, Chat
 from . import runner
@@ -210,7 +211,7 @@ async def _tick() -> None:
     for aid in due:
         if runner.is_running(aid):
             continue  # já em execução (guard compartilhado) — próximo tick tenta
-        asyncio.create_task(_run_one(aid))
+        bg.spawn(_run_one(aid))  # referência forte: o GC não pode descartar a execução
 
 
 async def _loop() -> None:

@@ -44,18 +44,37 @@ from .turn_setup import (
 logger = logging.getLogger(__name__)
 
 
+_IDLE_WAIT_TRIES = 120   # ~120 × 1s: teto p/ esperar a geração corrente terminar
+
+
+async def _wait_idle(chat_id: str) -> bool:
+    """Espera o chat ficar sem geração ativa (teto curto). True = ocioso."""
+    import asyncio
+
+    for _ in range(_IDLE_WAIT_TRIES):
+        g = generation.get_active(chat_id)
+        if g is None or g.done:
+            return True
+        await asyncio.sleep(1.0)
+    return False
+
+
 async def resume_chat_turn(
     chat_id: str | None, injected_text: str, *,
     notify_title: str, notify_body: str = "",
     already_persisted: bool = False, notify: bool = True,
+    queued_texts: list[str] | None = None,
+    _attempt: int = 0,
 ) -> None:
     """Dispara um turno novo em `chat_id` com `injected_text` (nota do usuário). Se o chat
     já tem uma geração ativa, NÃO faz nada (o chamador — reaper — só chega aqui quando o
     chat está ocioso, mas checamos de novo por segurança).
 
-    `already_persisted=True` (drenagem de fila): as mensagens já estão no banco como
-    'user' no fim do histórico — não re-persiste; remove-as do histórico e usa o
-    `injected_text` (a junção delas) como entrada, reconstruindo um turno normal.
+    `already_persisted=True` (drenagem de fila): as mensagens já foram persistidas pela
+    rota de envio e já foram DRENADAS da fila pelo chamador — passe-as em `queued_texts`.
+    Não re-persiste: remove-as do histórico (por conteúdo) e usa a junção delas como
+    entrada. A idempotência vem da drenagem (`drain_queue` esvazia a lista), não de
+    inspecionar o banco.
     `notify=False` silencia a notificação (o usuário está presente, vendo ao vivo)."""
     if not chat_id:
         return
@@ -93,17 +112,34 @@ async def resume_chat_turn(
                 if m.role in ("user", "assistant") and m.content and not m.compacted
             ]
             if already_persisted:
-                # as mensagens enfileiradas já estão no fim como 'user' sem resposta.
-                # Reconstrói o input a partir do BANCO (não dos textos passados): assim é
-                # idempotente sob corrida — se duas continuações dispararem, a 2ª acha o
-                # fim já respondido (sem 'user' pendente) e SAI, sem duplicar o turno.
-                trailing = []
-                while convo and convo[-1].role == "user":
-                    trailing.insert(0, convo.pop())
-                if not trailing:
-                    return  # já respondido por outra continuação → nada a fazer
-                history = [{"role": m.role, "content": m.content} for m in convo]
-                injected_text = "\n\n".join((m.content or "") for m in trailing).strip()
+                # `texts` são as mensagens que o usuário enviou DURANTE a geração: a rota já
+                # as persistiu e quem chamou aqui já as DRENOU da fila. A drenagem
+                # (`drain_queue`) é o ponto de idempotência — ela esvazia a lista no loop
+                # single-thread, então quem drenar primeiro ganha e um segundo disparo
+                # recebe [] e nem chega aqui.
+                #
+                # Antes reconstruíamos a entrada pegando as mensagens 'user' do FIM do
+                # histórico. Isso NUNCA funcionava: a resposta do turno anterior é
+                # persistida ANTES desta continuação rodar, então o histórico fica
+                # [user, user_enfileirada, assistant] — a enfileirada não está no fim, a
+                # reconstrução voltava vazia e a mensagem do usuário era DESCARTADA em
+                # silêncio (o modo "fila" do steering nunca continuava).
+                texts = [t for t in (queued_texts or [injected_text]) if (t or "").strip()]
+                if not texts:
+                    return
+                # tira do histórico as mensagens que são a ENTRADA deste turno (casando o
+                # conteúdo, da mais recente p/ a mais antiga) — senão iriam duplicadas ao
+                # modelo: uma vez no histórico e outra como a pergunta atual.
+                restantes = list(convo)
+                for t in reversed(texts):
+                    alvo = t.strip()
+                    for i in range(len(restantes) - 1, -1, -1):
+                        m = restantes[i]
+                        if m.role == "user" and (m.content or "").strip() == alvo:
+                            restantes.pop(i)
+                            break
+                history = [{"role": m.role, "content": m.content} for m in restantes]
+                injected_text = "\n\n".join(texts).strip()
             else:
                 history = [{"role": m.role, "content": m.content} for m in convo]
                 # registra a nota como mensagem do usuário (transcrição legível do chat)
@@ -152,8 +188,8 @@ async def resume_chat_turn(
                 await emit({"type": "artifacts", "ids": arts_changed})
             if notify:
                 from ..push_service import send_to_user
-                import asyncio as _asyncio
-                _asyncio.create_task(send_to_user(user.id, notify_title, notify_body or content.strip(), "/"))
+                from .. import bg
+                bg.spawn(send_to_user(user.id, notify_title, notify_body or content.strip(), "/"))
 
         # steer/fila também valem na continuação (steering durante o wake, encadear filas)
         _genbox: dict = {}
@@ -163,8 +199,10 @@ async def resume_chat_turn(
             return g.drain_steer() if g is not None else []
 
         async def _on_queue(texts: list[str]) -> None:
+            # `texts` já vêm DRENADOS pelo driver (generation._driver) — passa a lista
+            # p/ o turno saber exatamente o que remover do histórico.
             await resume_chat_turn(
-                str(cid), "\n\n".join(texts),
+                str(cid), "\n\n".join(texts), queued_texts=list(texts),
                 notify_title=notify_title, already_persisted=True, notify=False,
             )
 
@@ -196,6 +234,36 @@ async def resume_chat_turn(
             memory=memory,
             media=media,
         )
+        # CLAIM atômico (fim do setup): entre o guard inicial (get_active lá em cima) e aqui
+        # houve muitos awaits (prepare_turn, auto-compactação, leituras de banco). Nesse meio
+        # tempo outra geração pode ter começado — outro wake (o reaper do exec_jobs e o
+        # _ready_poller do preview disparam independentemente no mesmo chat) OU um envio do
+        # usuário. Se começou, NÃO abrimos uma 2ª (custo dobrado): enfileiramos a nota na
+        # ativa → ela vira um turno de continuação ao fim (respondido lendo do banco), sem
+        # perder a mensagem nem duplicar o turno. get_active + generation.start abaixo são
+        # atômicos (loop single-thread, sem await entre eles); o start também é single-flight
+        # como rede de segurança. Resíduo raro: se a ativa foi aberta sem on_queue
+        # (continue/regenerate), a continuação não dispara — recuperável (o usuário reenvia).
+        existing = generation.get_active(str(cid))
+        if existing is not None and not existing.done:
+            if _attempt >= 1:
+                logger.warning("resume: chat %s seguiu ocupado; desisto do wake", cid)
+                return
+            # NÃO enfileirar aqui: `enqueue` é só memória (quem persiste é a rota de envio),
+            # e a continuação da fila reconstrói a entrada a partir do BANCO — uma nota não
+            # persistida sumiria em silêncio. Espera ficar ocioso e REFAZ o setup do zero:
+            # o histórico mudou (a resposta da geração corrente entrou), então reaproveitar
+            # o `source` já montado mandaria um histórico velho ao modelo.
+            logger.info("resume: geração ativa em %s no fim do setup — refazendo", cid)
+            if not await _wait_idle(str(cid)):
+                logger.warning("resume: chat %s ocupado além do teto; desisto do wake", cid)
+                return
+            await resume_chat_turn(
+                chat_id, injected_text, notify_title=notify_title, notify_body=notify_body,
+                already_persisted=already_persisted, notify=notify,
+                queued_texts=queued_texts, _attempt=_attempt + 1,
+            )
+            return
         _genbox["gen"] = generation.start(str(cid), source, _finish, on_queue=_on_queue)
     except Exception:  # noqa: BLE001 - wake é best-effort
         logger.exception("resume_chat_turn falhou (chat %s)", chat_id)

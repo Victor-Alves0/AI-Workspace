@@ -86,8 +86,14 @@ export default function MemoryView() {
     try {
       await api.put(`/memory/${id}`, { text: editText.trim() });
       setEditing(null);
+    } catch {
+      // o servidor pode recusar (memória inexistente/de outro dono, mem0 fora do ar).
+      // Recarrega p/ mostrar o estado REAL em vez de morrer numa promise rejeitada.
+      setEditing(null);
+    } finally {
       await loadItems();
-    } finally { setBusy(false); }
+      setBusy(false);
+    }
   }
 
   async function remove(m: MemoryItem) {
@@ -97,7 +103,8 @@ export default function MemoryView() {
       confirmLabel: "Excluir", danger: true,
     });
     if (!ok) return;
-    await api.del(`/memory/${m.id}`);
+    // idem saveEdit: uma recusa do servidor não pode virar promise rejeitada silenciosa
+    try { await api.del(`/memory/${m.id}`); } catch { /* recarrega abaixo */ }
     await Promise.all([loadItems(), loadScopes()]);
   }
 

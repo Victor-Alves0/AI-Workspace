@@ -22,13 +22,19 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
   );
 }
 
-/** Detalhe "Provedores" (Conexões): endpoints OpenAI-compatíveis (kie.ai, LiteLLM, …).
- *  Cada provedor tem nome + base URL + chave; os modelos entram em todos os seletores
- *  do sistema prefixados pelo provedor. Só provedores com chave listam modelos. */
+/** Detalhe "Provedores" (Conexões): HUB ÚNICO dos provedores de LLM — o OpenRouter
+ *  (embutido) e os endpoints OpenAI-compatíveis (LiteLLM, personalizados). As chaves
+ *  ficam todas aqui; antes a do OpenRouter morava em "APIs", separada das demais.
+ *  Os modelos entram em todos os seletores prefixados pelo provedor. */
 export default function ProvidersPanel({ onBack, onChanged }: { onBack: () => void; onChanged?: () => void }) {
   const [items, setItems] = useState<Provider[] | null>(null);
   const [presets, setPresets] = useState<Record<string, Preset>>({});
   const [editing, setEditing] = useState<Partial<Provider> & { api_key?: string } | null>(null);
+  // escolha do tipo ao adicionar (OpenRouter / LiteLLM / personalizado) e o form do
+  // OpenRouter, que é só a chave (não tem base URL nem lista de modelos p/ configurar).
+  const [choosing, setChoosing] = useState(false);
+  const [editingOpenrouter, setEditingOpenrouter] = useState(false);
+  const [orKey, setOrKey] = useState<boolean | null>(null); // chave do OpenRouter salva?
 
   const load = useCallback(async () => {
     try {
@@ -38,16 +44,22 @@ export default function ProvidersPanel({ onBack, onChanged }: { onBack: () => vo
     } catch {
       setItems([]);
     }
+    try {
+      const s = await api.get<Record<string, boolean>>("/settings/secrets");
+      setOrKey(!!s.openrouter);
+    } catch { setOrKey(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
 
   async function afterSave() {
     setEditing(null);
+    setChoosing(false);
+    setEditingOpenrouter(false);
     await load();
     onChanged?.(); // atualiza os seletores de modelo sem F5
   }
 
-  // presets ainda não adicionados (p/ o botão de atalho)
+  // presets ainda não adicionados (p/ o seletor de tipo)
   const addedSlugs = new Set((items ?? []).map((i) => i.slug));
   const availablePresets = Object.entries(presets).filter(([slug]) => !addedSlugs.has(slug));
 
@@ -63,58 +75,145 @@ export default function ProvidersPanel({ onBack, onChanged }: { onBack: () => vo
         </span>
         <div>
           <p className="text-sm font-semibold text-ink">Provedores</p>
-          <p className="text-xs text-muted">Endpoints compatíveis com OpenAI (kie.ai, LiteLLM, …)</p>
+          <p className="text-xs text-muted">Provedores de LLMs</p>
         </div>
       </div>
 
       {items == null ? (
         <div className="flex justify-center py-10"><Loader2 size={18} className="animate-spin text-muted" /></div>
+      ) : editingOpenrouter ? (
+        <OpenrouterForm configured={!!orKey} onCancel={() => setEditingOpenrouter(false)} onSaved={afterSave} />
       ) : editing ? (
-        <ProviderForm draft={editing} onCancel={() => setEditing(null)} onSaved={afterSave} />
+        <ProviderForm draft={editing} onCancel={() => { setEditing(null); setChoosing(false); }} onSaved={afterSave} />
+      ) : choosing ? (
+        <AddProviderChooser
+          presets={availablePresets}
+          onCancel={() => setChoosing(false)}
+          onOpenrouter={() => { setChoosing(false); setEditingOpenrouter(true); }}
+          onPreset={(slug, pr) => setEditing({ slug, name: pr.name, base_url: pr.base_url, models: pr.models ?? [], enabled: true, api_key: "" })}
+          onCustom={() => setEditing({ name: "", base_url: "", enabled: true, api_key: "" })}
+        />
       ) : (
         <div className="space-y-4 pt-4">
-          {items.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-border px-3 py-6 text-center text-sm text-muted">
-              Nenhum provedor. Adicione um endpoint compatível com OpenAI para usar seus modelos.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {items.map((p) => (
-                <li key={p.slug} className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5">
-                  <span className={`h-2 w-2 shrink-0 rounded-full ${p.enabled && p.has_key ? "bg-green-400" : "bg-surface2"}`} />
-                  <button onClick={() => setEditing({ ...p, api_key: "" })} className="min-w-0 flex-1 text-left">
-                    <p className="truncate text-sm text-ink">{p.name}</p>
-                    <p className="truncate text-xs text-muted">{p.base_url || "sem URL"}{p.has_key ? "" : " · sem chave"}</p>
-                  </button>
-                  <Trash2
-                    size={15}
-                    className="shrink-0 cursor-pointer text-muted transition-colors hover:text-red-400"
-                    onClick={async () => { await api.del(`/integrations/providers/${p.slug}`); await load(); onChanged?.(); }}
-                  />
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => setEditing({ name: "", base_url: "", enabled: true, api_key: "" })}
-              className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
-            >
-              <Plus size={15} /> Adicionar provedor
-            </button>
-            {availablePresets.map(([slug, pr]) => (
-              <button
-                key={slug}
-                onClick={() => setEditing({ slug, name: pr.name, base_url: pr.base_url, models: pr.models ?? [], enabled: true, api_key: "" })}
-                className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-ink-soft transition-colors hover:bg-surface2"
-              >
-                <Plus size={14} /> {pr.name}
+          <ul className="space-y-2">
+            {/* OpenRouter é o provedor EMBUTIDO: sem base URL/modelos p/ configurar,
+                só a chave. Fica na mesma lista p/ tudo de LLM viver num lugar só. */}
+            <li className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5">
+              <span className={`h-2 w-2 shrink-0 rounded-full ${orKey ? "bg-green-400" : "bg-surface2"}`} />
+              <button onClick={() => setEditingOpenrouter(true)} className="min-w-0 flex-1 text-left">
+                <p className="truncate text-sm text-ink">OpenRouter</p>
+                <p className="truncate text-xs text-muted">
+                  {orKey ? "chave configurada" : "sem chave · necessária para conversar"}
+                </p>
               </button>
+            </li>
+            {items.map((p) => (
+              <li key={p.slug} className="flex items-center gap-3 rounded-xl border border-border bg-surface px-3 py-2.5">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${p.enabled && p.has_key ? "bg-green-400" : "bg-surface2"}`} />
+                <button onClick={() => setEditing({ ...p, api_key: "" })} className="min-w-0 flex-1 text-left">
+                  <p className="truncate text-sm text-ink">{p.name}</p>
+                  <p className="truncate text-xs text-muted">{p.base_url || "sem URL"}{p.has_key ? "" : " · sem chave"}</p>
+                </button>
+                <Trash2
+                  size={15}
+                  className="shrink-0 cursor-pointer text-muted transition-colors hover:text-red-400"
+                  onClick={async () => { await api.del(`/integrations/providers/${p.slug}`); await load(); onChanged?.(); }}
+                />
+              </li>
             ))}
-          </div>
+          </ul>
+
+          <button
+            onClick={() => setChoosing(true)}
+            className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
+          >
+            <Plus size={15} /> Adicionar provedor
+          </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Escolha do TIPO ao adicionar: OpenRouter, os presets (LiteLLM) e o personalizado.
+ *  Em vez de largar o usuário num formulário vazio, mostra as opções reais e leva
+ *  direto ao que cada uma precisa — no OpenRouter, só a chave. */
+function AddProviderChooser({
+  presets, onCancel, onOpenrouter, onPreset, onCustom,
+}: {
+  presets: [string, Preset][];
+  onCancel: () => void;
+  onOpenrouter: () => void;
+  onPreset: (slug: string, pr: Preset) => void;
+  onCustom: () => void;
+}) {
+  const Card = ({ title, desc, onClick }: { title: string; desc: string; onClick: () => void }) => (
+    <button
+      onClick={onClick}
+      className="w-full rounded-xl border border-border bg-surface px-3 py-3 text-left transition-colors hover:bg-surface2"
+    >
+      <p className="text-sm text-ink">{title}</p>
+      <p className="text-xs text-muted">{desc}</p>
+    </button>
+  );
+  return (
+    <div className="space-y-2 pt-4">
+      <button onClick={onCancel} className="mb-1 flex items-center gap-1 text-sm text-muted transition-colors hover:text-ink">
+        <ChevronLeft size={16} /> Adicionar provedor
+      </button>
+      <Card title="OpenRouter" desc="Centenas de modelos com uma só chave. Só cole a chave." onClick={onOpenrouter} />
+      {presets.map(([slug, pr]) => (
+        <Card
+          key={slug}
+          title={pr.name}
+          desc={`Endpoint compatível com OpenAI · ${pr.base_url}`}
+          onClick={() => onPreset(slug, pr)}
+        />
+      ))}
+      <Card title="Personalizado" desc="Qualquer endpoint compatível com OpenAI: nome, URL e chave." onClick={onCustom} />
+    </div>
+  );
+}
+
+/** OpenRouter: provedor embutido — não tem base URL nem lista de modelos para
+ *  configurar, então o formulário é só a chave. Guardada como o segredo `openrouter`
+ *  (mesmo lugar de sempre), agora editável aqui em vez de na aba "APIs". */
+function OpenrouterForm({ configured, onCancel, onSaved }: {
+  configured: boolean; onCancel: () => void; onSaved: () => void;
+}) {
+  const [key, setKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+
+  async function save() {
+    if (!key.trim()) { setErr("Informe a chave."); return; }
+    setBusy(true); setErr("");
+    try {
+      await api.put("/settings/secrets/openrouter", { api_key: key.trim() });
+      onSaved();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Falha ao salvar.");
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="space-y-4 pt-4">
+      <button onClick={onCancel} className="flex items-center gap-1 text-sm text-muted transition-colors hover:text-ink">
+        <ChevronLeft size={16} /> OpenRouter
+      </button>
+      <div className="space-y-1.5">
+        <label className="text-sm text-ink-soft">Chave de API</label>
+        <input
+          type="password" value={key} onChange={(e) => setKey(e.target.value)}
+          placeholder={configured ? "•••••••• (guardada — cole outra para trocar)" : "cole a chave do OpenRouter"}
+          className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
+        />
+        <p className="text-xs text-muted">Pegue em openrouter.ai/keys. É a chave usada para conversar.</p>
+      </div>
+      <button onClick={save} disabled={busy} className="rounded-full bg-accent px-5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50">
+        {busy ? "Salvando…" : "Salvar"}
+      </button>
+      {err && <p className="flex items-start gap-1.5 text-sm text-red-400"><TriangleAlert size={15} className="mt-0.5 shrink-0" /> {err}</p>}
     </div>
   );
 }

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -351,7 +351,11 @@ async def update_memory(
     db: AsyncSession = Depends(get_db),
 ):
     key = await _key(db, user)
-    ok = await run_in_threadpool(mem0_service.update_memory, key, memory_id, body.text)
+    # str(user.id) é o ESCOPO de posse (o `key` é a chave do LLM, não autoriza nada)
+    ok = await run_in_threadpool(
+        mem0_service.update_memory, key, memory_id, body.text, str(user.id))
+    if not ok:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Memória não encontrada")
     return {"ok": ok}
 
 
@@ -362,7 +366,10 @@ async def delete_memory(
     db: AsyncSession = Depends(get_db),
 ):
     key = await _key(db, user)
-    ok = await run_in_threadpool(mem0_service.delete_memory, key, memory_id)
+    ok = await run_in_threadpool(
+        mem0_service.delete_memory, key, memory_id, str(user.id))
+    if not ok:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Memória não encontrada")
     return {"ok": ok}
 
 
@@ -379,7 +386,7 @@ async def bulk(
         return {"ok": True, "affected": 0}
     if body.action == "delete":
         def _del() -> int:
-            return sum(1 for m in ids if mem0_service.delete_memory(key, m))
+            return sum(1 for m in ids if mem0_service.delete_memory(key, m, str(user.id)))
         n = await run_in_threadpool(_del)
     elif body.action in ("disable", "enable"):
         n = await run_in_threadpool(

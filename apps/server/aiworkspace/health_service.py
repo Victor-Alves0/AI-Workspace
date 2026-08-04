@@ -237,5 +237,22 @@ def self_check() -> dict:
         results["memory"] = False
         record("memory", "no_op", severity="degraded", detail={"error": str(exc)})
 
+    # segredos no AMBIENTE + execução ligada: um comando executado pela IA (injeção de
+    # prompt basta) recupera APP_SECRET/DATABASE_URL de /proc/1/environ e, com eles, os
+    # tokens de integração de todos os usuários. Alarma p/ o admin em vez de depender de
+    # alguém lembrar. Some ao migrar p/ APP_SECRET_FILE. Ver docs/trust-model.md.
+    try:
+        s = get_settings()
+        leaking = s.secrets_in_env
+        results["secrets_from_file"] = not leaking
+        if leaking and s.allow_code_mode:
+            record("secrets", "in_env", severity="degraded", detail={
+                "vars": ",".join(leaking),
+                "reason": "segredo via ambiente fica legível em /proc/1/environ para "
+                          "comandos executados pela IA — use APP_SECRET_FILE/DATABASE_URL_FILE",
+            })
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("self-check de segredos falhou: %s", exc)
+
     logger.info("self-check de saúde: %s", results)
     return results

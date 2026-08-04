@@ -10,10 +10,18 @@ um servidor NUNCA termina, então:
   (sem thread de health dedicada);
 - um reaper mata previews velhos demais; o shutdown derruba todos.
 
-Exposição controlada pela IA (não pela UI): `expose="localhost"` (bind 127.0.0.1, padrão,
-seguro — só a própria máquina/o preview embutido) ou `"lan"` (bind 0.0.0.0 — alcançável na
-rede local, pra testar no celular/outro device). O usuário diz "roda em localhost" / "muda
-pra LAN" e a IA passa o parâmetro; a app "sabe" porque é instruída.
+EXPOSIÇÃO — quem decide é o DEPLOY, não a IA. Dentro do container o bind é SEMPRE
+0.0.0.0 (obrigatório: senão o Docker não encaminha a porta publicada). Quem alcança o
+preview é definido por `PREVIEW_BIND` no compose (padrão `127.0.0.1` = só a máquina do
+host). O parâmetro `expose` da tool é apenas INFORMATIVO — ele não muda bind nenhum.
+(Havia aqui a afirmação de que `expose="localhost"` fazia bind em 127.0.0.1 "seguro";
+era falsa e podia levar o operador a achar que um preview estava restrito quando não
+estava.) Há dois caminhos de acesso, e só um é autenticado:
+  - `/codespace/preview/<porta>/` — proxy AUTENTICADO (checa `port_owned_by`). Use este
+    de outros dispositivos; é o único seguro de expor.
+  - `http://<host>:<porta>/` — porta publicada, SEM autenticação, com own-origin (login/
+    redirect/SPA/websocket nativos). Só alcançável conforme `PREVIEW_BIND`.
+Ver docs/trust-model.md.
 
 Registro em memória por-processo (como `generation._active`/`exec_jobs`): um restart do
 servidor derruba os previews — o subprocesso também não sobreviveria.
@@ -363,6 +371,110 @@ def request_preview(user_id: str, project_id: str | None, preview_id: str,
 
 
 # --------------------------------------------------------------------------- #
+# Readiness -> WAKE: um servidor NÃO "termina", então o wake de conclusão do exec_jobs
+# não serve. Aqui a IA registra "me acorde quando o preview ficar 'up' (ou cair)" e ENCERRA
+# o turno; um poller no MAIN loop (subido no lifespan) observa o status e dispara um turno
+# novo via resume_chat_turn. Fecha a lacuna do bug do Metabase (a promessa de "continuo
+# monitorando sozinho" que nunca se cumpria porque o server nunca completa).
+# --------------------------------------------------------------------------- #
+_ready_watch: dict[str, dict] = {}   # preview_id -> {chat_id, user_id, deadline, dispatched}
+_READY_MAX_WAIT = 900                 # ~15 min: teto p/ um boot pesado (JVM/Metabase)
+
+
+def watch_ready(user_id: str, project_id: str | None, ident: str,
+                chat_id: str | None) -> dict[str, Any]:
+    """Registra um wake: quando o preview ficar 'up' (ou cair), um turno novo continua
+    sozinho. A IA chama isto e ENCERRA a resposta — em vez de bloquear no `wait`."""
+    if not (chat_id or "").strip():
+        return {"error": "sem chat p/ acordar aqui — use action=wait (bloqueia) neste contexto"}
+    pv = _find_owned(user_id, project_id, ident)
+    if pv is None:
+        return {"error": "preview não encontrado (ou não é seu) — suba com 'start' ou veja 'list'"}
+    st = pv.status()
+    if st == "up":
+        return {**pv.summary(with_logs=True, tail=8),
+                "note": "já está no ar — não precisa esperar, siga direto."}
+    if st in ("crashed", "stopped"):
+        return {**pv.summary(with_logs=True, tail=25),
+                "note": "o servidor já caiu/parou — veja os logs (erro real), não há o que aguardar."}
+    with _reg_lock:
+        _ready_watch[pv.id] = {
+            "chat_id": str(chat_id), "user_id": str(user_id),
+            "deadline": time.monotonic() + _READY_MAX_WAIT, "dispatched": False,
+        }
+    return {"ok": True, "preview_id": pv.id, "port": pv.port,
+            "note": f"combinado — vou te ACORDAR quando o servidor na porta {pv.port} ficar "
+                    "'up' (ou cair). Pode ENCERRAR sua resposta agora; você continua num turno "
+                    "novo assim que ele responder. (Backends pesados levam alguns minutos.)"}
+
+
+async def _ready_poller() -> None:
+    """No MAIN loop: observa os previews com wake pendente e acorda o chat quando o server
+    sobe/cai/estoura o teto. Espera a geração corrente ficar ociosa antes (evita 2 gerações
+    concorrentes, como o exec_jobs). Nunca levanta."""
+    import asyncio
+
+    while True:
+        try:
+            await asyncio.sleep(3)
+            if not _ready_watch:
+                continue
+            # import DENTRO do try: um tropeço de import (ciclo) não pode matar o poller
+            from ..chat import generation, resume
+            for pvid, w in list(_ready_watch.items()):
+                if w["dispatched"]:
+                    continue
+                pv = _previews.get(pvid)
+                if pv is None:                       # preview sumiu (parado/reaped) → desiste
+                    _ready_watch.pop(pvid, None)
+                    continue
+                st = pv.status()
+                expired = time.monotonic() >= w["deadline"]
+                if st == "starting" and not expired:
+                    continue
+                # não acorda enquanto o chat ainda gera (senão 2 gerações concorrentes)
+                gen = generation.get_active(w["chat_id"])
+                if gen is not None and not gen.done:
+                    continue                          # tenta no próximo ciclo
+                w["dispatched"] = True
+                _ready_watch.pop(pvid, None)
+                if st == "up":
+                    title = "Servidor no ar"
+                    note = (f"[Servidor no ar] O preview na porta {pv.port} respondeu (status 'up'). "
+                            "Continue de onde parou — ex.: teste os endpoints / feche o PoC.")
+                elif st in ("crashed", "stopped"):
+                    title = "Servidor caiu"
+                    verb = "caiu" if st == "crashed" else "foi parado"
+                    note = (f"[Servidor {verb}] O preview na porta {pv.port} {verb} antes de subir. "
+                            "Veja o erro real com code.preview.serve action=logs e corrija.")
+                else:                                 # expired ainda 'starting'
+                    title = "Servidor demorando"
+                    note = (f"[Servidor demorando] O preview na porta {pv.port} passou de "
+                            f"{_READY_MAX_WAIT // 60} min ainda subindo. Cheque os logs "
+                            "(action=logs): pode ser boot lento ou travado.")
+                try:
+                    await resume.resume_chat_turn(
+                        w["chat_id"], note, notify_title=title, notify_body=f"porta {pv.port}")
+                except Exception:  # noqa: BLE001 - wake é best-effort, nunca derruba o poller
+                    logger.exception("wake de readiness falhou (preview %s)", pvid)
+        except asyncio.CancelledError:  # pragma: no cover
+            raise
+        except Exception:  # noqa: BLE001
+            logger.warning("ready poller: erro no ciclo", exc_info=True)
+
+
+_ready_task = None
+
+
+def start_ready_poller() -> None:
+    global _ready_task
+    import asyncio
+
+    if _ready_task is None or _ready_task.done():
+        _ready_task = asyncio.create_task(_ready_poller())
+
+
+# --------------------------------------------------------------------------- #
 # Reaper + shutdown (subidos no lifespan, como o exec_jobs)
 # --------------------------------------------------------------------------- #
 async def _reaper() -> None:
@@ -404,7 +516,11 @@ async def shutdown() -> None:
         for pv in list(_previews.values()):
             _stop(pv)
         _previews.clear()
-    global _reaper_task
+    _ready_watch.clear()
+    global _reaper_task, _ready_task
     if _reaper_task is not None:
         _reaper_task.cancel()
         _reaper_task = None
+    if _ready_task is not None:
+        _ready_task.cancel()
+        _ready_task = None

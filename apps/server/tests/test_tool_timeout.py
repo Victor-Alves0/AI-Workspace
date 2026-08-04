@@ -42,6 +42,72 @@ def _text_chunk():
             "usage": {"prompt_tokens": 100, "completion_tokens": 6, "total_tokens": 106}}
 
 
+def test_is_selfbound_wait_reconhece_as_formas():
+    f = orch._is_selfbound_wait
+    # tool fixada, ponto e __; via execute_tool
+    assert f(("code.exec.jobs", {"action": "wait"}))
+    assert f(("code__exec__jobs", {"action": "wait"}))
+    assert f(("code.preview.serve", {"action": "wait"}))
+    assert f(("execute_tool", {"path": "code.exec.jobs", "params": {"action": "wait"}}))
+    # NÃO isenta: outras ações da mesma tool, ou outras tools
+    assert not f(("code.exec.jobs", {"action": "list"}))
+    assert not f(("code.preview.serve", {"action": "status"}))
+    assert not f(("code.flow.analyze", {"action": "taint"}))
+    assert not f(("execute_tool", {"path": "code.flow.analyze", "params": {"action": "wait"}}))
+    # robustez: formas estranhas não podem CRASHAR (devolvem False com segurança)
+    assert f(("code.exec.jobs", {"action": " WAIT "}))          # espaço + maiúscula
+    assert not f(())                                             # call vazio
+    assert not f(("code.exec.jobs", ["action", "wait"]))        # args não-dict
+
+
+def test_selfbound_wait_com_params_string_json():
+    """Se o dispatch passar `params` como STRING JSON (em vez de dict) via execute_tool, o
+    wait ainda tem que ser reconhecido como auto-limitado (senão o watchdog o mataria).
+    _is_selfbound_wait parseia o JSON. Entrada estranha (JSON inválido) → não isenta, sem crash."""
+    assert orch._is_selfbound_wait(
+        ("execute_tool", {"path": "code.exec.jobs", "params": '{"action":"wait"}'}))
+    # JSON inválido / tipos estranhos não podem crashar nem isentar indevidamente
+    assert not orch._is_selfbound_wait(
+        ("execute_tool", {"path": "code.exec.jobs", "params": "{lixo"}))
+    assert not orch._is_selfbound_wait(
+        ("execute_tool", {"path": "code.exec.jobs", "params": 123}))
+
+
+class _WaitSift:
+    """dispatch dorme > watchdog; grava a thread onde rodou (p/ checar o executor)."""
+    def __init__(self):
+        self.threads: dict = {}
+    def dispatch(self, name, args):
+        import threading
+        self.threads[args.get("action")] = threading.current_thread().name
+        time.sleep(2.0)
+        return '{"status":"running","note":"ainda subindo"}'
+
+
+def test_selfbound_wait_nao_e_morto_pelo_watchdog():
+    """code.exec.jobs/preview.serve action=wait BLOQUEIA de propósito (teto próprio) —
+    o watchdog de 120s NÃO pode abortá-lo (bug do Metabase: 6 waits mortos aos 120s)."""
+    d = orch._ToolDispatcher.__new__(orch._ToolDispatcher)
+    d.sift = _WaitSift()
+    s = orch.get_settings()
+    old = s.builtin_tool_timeout_seconds
+    s.builtin_tool_timeout_seconds = 1  # teto curto; o dispatch dorme 2s
+    try:
+        async def go():
+            # wait → ISENTO: espera os 2s e devolve o resultado real (não o erro de abort)
+            waited = await d._dispatch_tp("code.exec.jobs", {"action": "wait"})
+            # list → NÃO isento: é abortado pelo watchdog aos ~1s
+            listed = await d._dispatch_tp("code.exec.jobs", {"action": "list"})
+            return waited, listed
+        waited, listed = asyncio.run(go())
+    finally:
+        s.builtin_tool_timeout_seconds = old
+    assert "ainda subindo" in str(waited) and "abortada" not in str(waited), waited
+    assert "abortada" in str(listed), listed
+    # o wait rodou no executor DEDICADO (não esfomeia o dispatch das demais tools)
+    assert d.sift.threads.get("wait", "").startswith("selfbound-wait"), d.sift.threads
+
+
 def test_hung_builtin_is_aborted_and_turn_recovers():
     calls = {"n": 0}
 

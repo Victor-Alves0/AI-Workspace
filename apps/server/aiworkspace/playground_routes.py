@@ -203,7 +203,10 @@ async def run_benchmark(bid: uuid.UUID, body: RunIn, user: User = Depends(requir
     )
     db.add(run)
     await db.commit()
-    asyncio.create_task(bench_runner.run_benchmark(run.id))
+    # bg.spawn (não create_task nu): sem referência forte o GC poderia coletar a task e o
+    # benchmark ficaria "running" p/ sempre.
+    from . import bg
+    bg.spawn(bench_runner.run_benchmark(run.id))
     return {"run_id": str(run.id)}
 
 

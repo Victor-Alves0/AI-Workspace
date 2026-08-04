@@ -12,6 +12,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from . import bg
 from .admin_routes import router as admin_router
 from .analytics_routes import router as analytics_router
 from .api.deps import ApiError
@@ -76,7 +77,7 @@ async def lifespan(app: FastAPI):
     # ninguém ver. Em thread + task p/ não atrasar o readiness (mem0.warm bloqueia ~1-3s).
     try:
         from . import health_service
-        asyncio.create_task(run_in_threadpool(health_service.self_check))
+        bg.spawn(run_in_threadpool(health_service.self_check))
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível agendar o self-check de saúde (%s)", exc)
     if settings.secret_is_insecure:
@@ -126,8 +127,7 @@ async def lifespan(app: FastAPI):
     # (embedder + pgvector) leva ~1-3s na 1ª vez e, sem isto, esse custo caía no
     # PRIMEIRO turno de chat de cada usuário após um restart. Não bloqueia o boot.
     try:
-        import asyncio as _asyncio
-        _asyncio.create_task(_prewarm_memory())
+        bg.spawn(_prewarm_memory())
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível agendar o pré-aquecimento da memória (%s)", exc)
     # reaper dos worktrees isolados ociosos do Codespace (ciclo de vida das tarefas)
@@ -144,15 +144,18 @@ async def lifespan(app: FastAPI):
         exec_jobs.start_reaper()
         # durabilidade: destrava chats cujos jobs de background foram cortados por um
         # restart (o "wake que nunca chega"). Em background p/ não atrasar o readiness.
-        asyncio.create_task(exec_jobs.recover_orphans())
+        bg.spawn(exec_jobs.recover_orphans())
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível iniciar o reaper de exec_jobs (%s)", exc)
     # reaper dos previews (dev servers no ar): derruba os velhos/caídos.
     try:
         from .codespace import preview_service
         preview_service.start_reaper()
+        # poller de readiness: acorda o chat quando um preview aguardado fica 'up'/cai
+        # (o "me avise quando o servidor subir"). Ver preview_service.watch_ready.
+        preview_service.start_ready_poller()
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Não foi possível iniciar o reaper de previews (%s)", exc)
+        logger.warning("Não foi possível iniciar o reaper/poller de previews (%s)", exc)
     try:
         yield
     finally:
