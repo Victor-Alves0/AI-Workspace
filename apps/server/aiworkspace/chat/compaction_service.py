@@ -177,27 +177,8 @@ async def run_compaction(db: AsyncSession, user: User, chat: Chat, *,
 
 # --------------------------------------------------------------------------- #
 # Auto-compactação: dispara na entrada do turno quando o contexto passa do limiar
-# físico da janela OU do orçamento de latência configurado.
+# físico da janela do modelo.
 # --------------------------------------------------------------------------- #
-def _autocompact_reason(
-    last_tokens: int, *, window: int, threshold: float, latency_budget_tokens: int,
-) -> str | None:
-    """Devolve o motivo do checkpoint ou ``None`` se o contexto ainda é saudável.
-
-    A janela física continua sendo a proteção contra estouro. O orçamento de latência é
-    deliberadamente independente dela: em modelos de janela muito grande, esperar 75%
-    da janela transforma cada chamada em um prompt caro/lento muito antes de haver risco
-    de limite. ``0`` mantém o comportamento legado, só baseado na janela.
-    """
-    window_limit = max(1, int(float(threshold) * max(1, int(window))))
-    if last_tokens >= window_limit:
-        return "window"
-    latency_limit = max(0, int(latency_budget_tokens))
-    if latency_limit and last_tokens >= min(latency_limit, window_limit):
-        return "latency_budget"
-    return None
-
-
 async def _last_context_tokens(db: AsyncSession, chat_id) -> int:
     """Tamanho REAL do contexto (usage.context_tokens = prompt da 1ª chamada do último
     turno). NÃO usa prompt_tokens: ele é a SOMA cumulativa das iterações do loop agêntico
@@ -235,12 +216,8 @@ async def _model_window(db: AsyncSession, user: User, model: str) -> int:
 
 async def maybe_autocompact(db: AsyncSession, user: User, chat: Chat,
                             model_config: ModelConfig | None) -> bool:
-    """Compacta antes do turno ao passar o limite da janela ou de latência.
-
-    Mantém as últimas N mensagens. É best-effort: uma falha de resumo nunca bloqueia o
-    turno. O orçamento é uma política de desempenho, não uma perda de dados: o snapshot
-    restaurável da compactação segue sendo criado normalmente.
-    """
+    """Se o contexto passou do limiar da janela do modelo, compacta ANTES do turno
+    (mantendo as últimas N mensagens). Best-effort: nunca levanta."""
     s = get_settings()
     if not s.autocompact_enabled:
         return False
@@ -252,25 +229,16 @@ async def maybe_autocompact(db: AsyncSession, user: User, chat: Chat,
         # pode ser um snapshot antigo de antes de o preset ser editado.
         runtime_model = (model_config.base_model if model_config is not None else chat.model)
         window = await _model_window(db, user, runtime_model) or int(s.autocompact_fallback_window)
-        reason = _autocompact_reason(
-            last_tokens,
-            window=window,
-            threshold=float(s.autocompact_threshold),
-            latency_budget_tokens=int(s.autocompact_latency_budget_tokens),
-        )
-        if reason is None:
+        if last_tokens < float(s.autocompact_threshold) * window:
             return False
         res = await run_compaction(db, user, chat,
                                    keep_last=int(s.autocompact_keep_last),
                                    min_convo=max(3, int(s.autocompact_min_messages) - int(s.autocompact_keep_last)),
                                    model_config=model_config)
         if res:
-            logger.info(
-                "auto-compactação (%s): chat %s (%d tokens; janela=%d, orçamento=%d) "
-                "→ resumiu %d msgs",
-                reason, chat.id, last_tokens, window,
-                int(s.autocompact_latency_budget_tokens), res["compacted_count"],
-            )
+            logger.info("auto-compactação: chat %s (%d tokens > %.0f%% de %d) → resumiu %d msgs",
+                        chat.id, last_tokens, s.autocompact_threshold * 100, window,
+                        res["compacted_count"])
         return bool(res)
     except Exception:  # noqa: BLE001 - auto-compactação nunca quebra o turno
         logger.exception("auto-compactação falhou (chat %s)", chat.id)

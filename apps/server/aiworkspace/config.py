@@ -185,15 +185,11 @@ class Settings(BaseSettings):
     # watchdog de wall-clock dos jobs de background: mata a árvore após este tempo (2h),
     # substituindo o bound de wall-clock que o síncrono tem e o background não teria.
     code_exec_bg_max_seconds: int = 7200
-    # Auto-compactação: quando o contexto passa de threshold da janela do modelo OU do
-    # orçamento de latência, resume o histórico ANTIGO na entrada do turno e mantém as
-    # últimas keep_last mensagens. O segundo limite evita que modelos com janela enorme
-    # (ex.: 1M tokens) acumulem contexto demais antes de ficar perceptivelmente lentos.
-    # ``autocompact_latency_budget_tokens=0`` desliga só esse gatilho antecipado.
+    # Auto-compactação: quando o contexto passa de threshold da janela do modelo, resume
+    # o histórico ANTIGO na entrada do turno e mantém as últimas keep_last mensagens.
     # fallback_window = janela assumida se o modelo não expõe context_length.
     autocompact_enabled: bool = True
     autocompact_threshold: float = 0.75
-    autocompact_latency_budget_tokens: int = 64_000
     autocompact_keep_last: int = 8
     autocompact_min_messages: int = 12
     autocompact_fallback_window: int = 100_000
