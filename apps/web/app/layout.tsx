@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
+import NoContextMenu from "@/components/NoContextMenu";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -10,13 +11,13 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "AI Workspace",
+  title: "Singularity AI",
   description: "Seu workspace de IA local-first",
-  applicationName: "AI Workspace",
+  applicationName: "Singularity AI",
   // instalado pelo atalho ("Adicionar à tela de início") abre em janela própria
   appleWebApp: {
     capable: true,
-    title: "AI Workspace",
+    title: "Singularity AI",
     statusBarStyle: "black-translucent",
   },
 };
@@ -41,7 +42,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="pt-BR" className={inter.variable}>
-      <body><ConfirmProvider>{children}</ConfirmProvider></body>
+      <body>
+        <NoContextMenu />
+        <ConfirmProvider>{children}</ConfirmProvider>
+      </body>
     </html>
   );
 }

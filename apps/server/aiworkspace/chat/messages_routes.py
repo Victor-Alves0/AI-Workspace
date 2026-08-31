@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -713,5 +714,4 @@ async def continue_message(
     )
     gen = generation.start(str(chat_id), source, _finish)
     return _sse_stream(_subscribe(gen))
-
 

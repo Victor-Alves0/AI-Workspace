@@ -240,7 +240,7 @@ async def mcp_test(body: McpTestIn, user: User = Depends(require_admin)):
                 "params": {
                     "protocolVersion": "2025-03-26",
                     "capabilities": {},
-                    "clientInfo": {"name": "AI Workspace", "version": "0.1.0"},
+                    "clientInfo": {"name": "Singularity AI", "version": "0.1.0"},
                 },
             }
             msg, rheaders = await _mcp_post(client, url, headers, init)

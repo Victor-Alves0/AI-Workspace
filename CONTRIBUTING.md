@@ -1,4 +1,4 @@
-# Contributing to AI Workspace
+# Contributing to Singularity AI
 
 Thanks for your interest! This guide covers the basics for proposing changes.
 

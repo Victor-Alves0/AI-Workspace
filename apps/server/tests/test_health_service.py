@@ -28,6 +28,39 @@ def test_alarme_so_em_severidade_alta():
     assert "info" not in hs._ALARM_SEVERITIES and "warn" not in hs._ALARM_SEVERITIES
 
 
+def test_primeiro_alarme_dispara_mesmo_com_o_processo_recem_subido(monkeypatch):
+    """Regressão: o cooldown usa time.monotonic(), que conta desde o boot da máquina.
+
+    Com o sentinela "nunca alarmou" valendo 0.0, um processo com menos de 15 min de
+    vida caía em `now - 0.0 < 900` e ENGOLIA o primeiro alarme — silenciosamente, sem
+    log. A observabilidade ficava cega justo na janela de boot."""
+    inseridos: list = []
+    monkeypatch.setattr(hs, "_conn", lambda: (_ for _ in ()).throw(AssertionError("chegou no DB")))
+    monkeypatch.setattr(hs, "logger", _LoggerEspiao(inseridos))
+    monkeypatch.setattr(hs.time, "monotonic", lambda: 42.0)  # processo com 42s de vida
+    hs._last_alarm.clear()
+
+    hs._maybe_alarm("memory", "no_op", "degraded", {"error": "x"})
+    assert "memory:no_op" in hs._last_alarm, "o 1º alarme foi engolido pelo cooldown"
+
+    # e o SEGUNDO, aí sim, é silenciado pelo cooldown
+    marca = hs._last_alarm["memory:no_op"]
+    hs._maybe_alarm("memory", "no_op", "degraded", {"error": "x"})
+    assert hs._last_alarm["memory:no_op"] == marca
+
+
+class _LoggerEspiao:
+    """Coleta os warnings em vez de imprimir — o _maybe_alarm loga e engole exceções."""
+    def __init__(self, saida: list):
+        self.saida = saida
+
+    def warning(self, *a, **k):
+        self.saida.append(a)
+
+    def __getattr__(self, _):
+        return lambda *a, **k: None
+
+
 def test_record_bg_sem_loop_roda_inline(monkeypatch):
     # fora de um contexto async não há loop a proteger → record_bg cai no record() sync.
     calls: list = []

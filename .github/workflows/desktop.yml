@@ -100,11 +100,11 @@ jobs:
           args: ${{ steps.updater.outputs.args }}
           projectPath: desktop
           tagName: ${{ github.ref_name }}
-          releaseName: AI Workspace ${{ github.ref_name }}
+          releaseName: Singularity AI ${{ github.ref_name }}
           releaseBody: |
             Aplicativo desktop para Windows.
 
-            Instale e abra: o app carrega a interface do AI Workspace numa janela
+            Instale e abra: o app carrega a interface do Singularity AI numa janela
             nativa, com ícone na bandeja, "rodar em segundo plano" e "iniciar com o
             Windows" (Configurações -> Aplicativo).
 

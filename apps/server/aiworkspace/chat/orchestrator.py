@@ -1121,12 +1121,19 @@ def _merge_usage(total: dict[str, float], usage: dict) -> None:
         rt = details.get("reasoning_tokens")
         if isinstance(rt, (int, float)):
             total["reasoning_tokens"] = total.get("reasoning_tokens", 0) + rt
+    elif isinstance(usage.get("reasoning_tokens"), (int, float)):
+        # Adaptadores da Responses API normalizam estas métricas no topo.
+        total["reasoning_tokens"] = (
+            total.get("reasoning_tokens", 0) + usage["reasoning_tokens"]
+        )
     # tokens de ENTRADA lidos do cache do provedor (prompt caching)
     pdetails = usage.get("prompt_tokens_details")
     if isinstance(pdetails, dict):
         ct = pdetails.get("cached_tokens")
         if isinstance(ct, (int, float)):
             total["cached_tokens"] = total.get("cached_tokens", 0) + ct
+    elif isinstance(usage.get("cached_tokens"), (int, float)):
+        total["cached_tokens"] = total.get("cached_tokens", 0) + usage["cached_tokens"]
     cost = usage.get("cost")
     if cost is None and isinstance(usage.get("cost_details"), dict):
         cost = usage["cost_details"].get("upstream_inference_cost")
@@ -1819,8 +1826,16 @@ class _ToolDispatcher:
         # dispatch da SIFT também roda queries — as leituras/escritas de banco DELA
         with tracing.span(f"tool:{name}", kind="tool", tool=name,
                           arg_keys=sorted(args.keys())[:12]):
-            async for ev in self._run(name, args, tc):
-                yield ev
+            try:
+                async for ev in self._run(name, args, tc):
+                    yield ev
+            except Exception as exc:  # noqa: BLE001 - falha da tool volta ao modelo
+                # Uma integração indisponível não deve abortar o turno inteiro.
+                # Devolve um tool_result de erro para o modelo poder explicar, tentar
+                # outra ferramenta ou concluir com o que já tem. CancelledError não é
+                # capturado (BaseException), portanto "Parar" continua imediato.
+                logger.warning("Tool '%s' falhou: %s", name, exc)
+                self.result = {"error": f"a ferramenta '{name}' falhou: {exc}"}
             if isinstance(self.result, dict) and self.result.get("error"):
                 tracing.annotate(tool_error=str(self.result["error"])[:200])
 
@@ -2818,6 +2833,14 @@ async def run_turn(
                     auto_reasoning_off = False
                 continue
             logger.exception("Erro no streaming do OpenRouter")
+            # Alguns protocolos enviam o usage no envelope terminal e, logo depois,
+            # sinalizam ``incomplete``/``failed``. O ``return`` abaixo pula o caminho
+            # normal de merge; contabiliza agora para a persistência do parcial.
+            if usage:
+                _merge_usage(total_usage, usage)
+                if first_ctx_tokens is None and usage.get("prompt_tokens"):
+                    first_ctx_tokens = int(usage["prompt_tokens"])
+                yield {"type": "usage", "usage": usage}
             yield {"type": "error", "message": str(exc)}
             return
         finally:

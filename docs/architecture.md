@@ -1,6 +1,6 @@
 # Architecture
 
-AI Workspace is a monorepo with a **FastAPI backend** (async), a **Next.js frontend** and a
+Singularity AI is a monorepo with a **FastAPI backend** (async), a **Next.js frontend** and a
 **Tauri desktop shell**, orchestrated by **Docker Compose** and backed by **Postgres 16 with
 pgvector** for both relational and vector data.
 

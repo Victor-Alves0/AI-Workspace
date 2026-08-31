@@ -83,6 +83,65 @@ def test_cancel_does_not_fire_on_queue():
     assert got["called"] is False   # cancelamento não drena a fila
 
 
+def test_source_exception_is_preserved_for_persistence():
+    """Uma exceção levantada pelo source deve chegar ao ``on_finish``.
+
+    O SSE de erro pode não ter assinante (aba fechada); a persistência é o único
+    caminho que garante que o usuário veja por que a resposta parcial parou.
+    """
+    saved: dict = {}
+
+    async def on_finish(collected, emit):
+        saved.update(collected)
+
+    async def src():
+        yield {"type": "token", "text": "parcial"}
+        raise RuntimeError("provider caiu")
+
+    async def go():
+        cid = "chat-source-error"
+        gen_mod._active.pop(cid, None)
+        try:
+            g = gen_mod.start(cid, src(), on_finish)
+            await g.task
+            assert g.done is True
+            assert any(
+                e.get("type") == "error" and "provider caiu" in e.get("message", "")
+                for e in g.events
+            )
+        finally:
+            gen_mod._active.pop(cid, None)
+
+    asyncio.run(go())
+    assert saved["streamed"] == "parcial"
+    assert saved["error"] == "provider caiu"
+
+
+def test_usage_before_source_error_is_preserved():
+    saved: dict = {}
+
+    async def on_finish(collected, emit):
+        saved.update(collected)
+
+    async def src():
+        yield {"type": "usage", "usage": {
+            "prompt_tokens": 11, "completion_tokens": 3, "total_tokens": 14,
+        }}
+        raise RuntimeError("terminal incompleto")
+
+    async def go():
+        cid = "chat-usage-error"
+        gen_mod._active.pop(cid, None)
+        try:
+            await gen_mod.start(cid, src(), on_finish).task
+        finally:
+            gen_mod._active.pop(cid, None)
+
+    asyncio.run(go())
+    assert saved["usage"]["total_tokens"] == 14
+    assert saved["error"] == "terminal incompleto"
+
+
 def test_start_single_flight_nunca_abre_2a_geracao():
     """REGRESSÃO (dinheiro): dois caminhos que checaram 'sem geração ativa' e então
     esperaram (awaits de setup) podiam ambos chamar `start` → 2 drivers no MESMO chat =

@@ -1,7 +1,7 @@
 // Previne abrir um console extra no Windows em release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! Shell desktop do AI Workspace (instalador unico, sem Docker).
+//! Shell desktop do Singularity AI (instalador unico, sem Docker).
 //!
 //! O app EMBARCA o "motor" (Postgres + backend Python + frontend Node) como
 //! recursos e o supervisiona: ao abrir, sobe o motor por baixo (via o launcher
@@ -144,7 +144,7 @@ fn spawn_engine(app: &AppHandle) -> Option<u32> {
     let (engine, data) = engine_paths(app)?;
     let _ = std::fs::create_dir_all(&data);
     // `-File` com caminho ABSOLUTO quebra quando ha espaco no caminho de instalacao
-    // ("AI Workspace"): o powershell le so' ate o espaco e reclama que "AI" nao tem
+    // ("Singularity AI"): o powershell le so' ate o espaco e reclama que "AI" nao tem
     // extensao .ps1. Rodamos com o diretorio de trabalho na pasta do motor e
     // passamos o script pelo nome relativo (sem espaco). O -DataDir fica em
     // %APPDATA%\com.aiworkspace.app (sem espaco), entao e' seguro.
@@ -348,7 +348,7 @@ fn main() {
                 env!("CARGO_PKG_VERSION"),
             );
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("AI Workspace")
+                .title("Singularity AI")
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(380.0, 480.0)
                 .center()
@@ -381,7 +381,7 @@ fn main() {
 
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("AI Workspace")
+                .tooltip("Singularity AI")
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_tray_icon_event(|tray, event| {

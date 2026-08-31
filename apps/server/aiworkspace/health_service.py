@@ -101,8 +101,14 @@ def _maybe_alarm(capability: str, event: str, severity: str, detail: dict) -> No
     por (capability,event). Silencioso e à prova de falha."""
     key = f"{capability}:{event}"
     now = time.monotonic()
-    last = _last_alarm.get(key, 0.0)
-    if now - last < _ALARM_COOLDOWN_S:
+    # "nunca alarmou" é None, e NÃO 0.0. `time.monotonic()` conta desde o boot da
+    # máquina, então logo depois de subir ele vale poucas centenas de segundos —
+    # com o default 0.0, `now - last < 900` dava VERDADEIRO e o alarme era engolido
+    # durante os primeiros 15 minutos de vida do processo. Ou seja: a observabilidade
+    # ficava muda exatamente na janela em que mais se degrada (boot, self-check,
+    # configuração errada), e sem deixar rastro — nem log de erro.
+    last = _last_alarm.get(key)
+    if last is not None and now - last < _ALARM_COOLDOWN_S:
         return
     _last_alarm[key] = now
     try:

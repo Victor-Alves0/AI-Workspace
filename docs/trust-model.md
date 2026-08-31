@@ -1,4 +1,4 @@
-# Modelo de confiança do AI Workspace
+# Modelo de confiança do Singularity AI
 
 Este documento fixa **uma decisão de produto**, não uma aspiração. Ela determina o que
 precisa (e o que **não** precisa) ser isolado, e existe para impedir a deriva silenciosa
@@ -10,7 +10,7 @@ para um produto diferente.
 > Os usuários de uma instância são o dono e as pessoas que ele convidou (equipe, casa,
 > amigos). Eles **não** são adversários entre si.
 
-Corolário: o AI Workspace é **multiusuário**, e **não** é **multi-inquilino**.
+Corolário: o Singularity AI é **multiusuário**, e **não** é **multi-inquilino**.
 
 | | Multiusuário (o que somos) | Multi-inquilino (o que NÃO somos) |
 |---|---|---|

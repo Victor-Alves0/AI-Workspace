@@ -158,6 +158,96 @@ async def exchange_code(code: str, creds: dict[str, str]) -> dict[str, Any]:
     }
 
 
+# --------------------------------------------------------------------------- #
+# Device Flow — o caminho "botão", sem colar nada
+# --------------------------------------------------------------------------- #
+# Por que este fluxo e não o de sempre: o device flow NÃO usa client secret e NÃO
+# usa redirect_uri. Sobra só o `client_id`, que é público — dá para vir embutido no
+# build e valer para qualquer instalação (desktop, Docker, VPS), sem o admin ter que
+# registrar um OAuth App e sem cadastrar o endereço de retorno de cada máquina. Em
+# troca, o usuário digita um código curto no github.com/login/device.
+DEVICE_CODE_URI = "https://github.com/login/device/code"
+
+
+def device_client_id() -> str:
+    """Client ID embutido do device flow ('' = indisponível nesta instalação)."""
+    return (get_settings().github_device_client_id or "").strip()
+
+
+async def device_start(client_id: str) -> dict[str, Any]:
+    """Pede o par (device_code, user_code). {device_code, user_code,
+    verification_uri, interval, expires_in} ou {error}."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                DEVICE_CODE_URI,
+                headers={"Accept": "application/json"},
+                data={"client_id": client_id, "scope": " ".join(SCOPES)},
+            )
+    except Exception as exc:  # noqa: BLE001 - rede
+        return {"error": str(exc)}
+    if r.status_code != 200:
+        return {"error": f"HTTP {r.status_code}"}
+    j = r.json()
+    if j.get("error"):
+        # o mais comum aqui é o device flow não estar habilitado no OAuth App
+        return {"error": j.get("error_description") or j["error"]}
+    return {
+        "device_code": j.get("device_code", ""),
+        "user_code": j.get("user_code", ""),
+        "verification_uri": j.get("verification_uri") or "https://github.com/login/device",
+        "interval": int(j.get("interval") or 5),
+        "expires_in": int(j.get("expires_in") or 900),
+    }
+
+
+async def device_poll(client_id: str, device_code: str) -> dict[str, Any]:
+    """Uma tentativa de troca do device_code por token.
+
+    Retorna {status: "pending"} enquanto o usuário não autorizou, {status:
+    "slow_down", interval} quando o GitHub pede mais espaço entre as tentativas,
+    {status: "ok", ...dados da conta} no sucesso, {status: "error", error} no fim.
+    Quem repete é o chamador — aqui não há laço, para não segurar um worker."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                TOKEN_URI,
+                headers={"Accept": "application/json"},
+                data={
+                    "client_id": client_id,
+                    "device_code": device_code,
+                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                },
+            )
+    except Exception as exc:  # noqa: BLE001 - rede
+        return {"status": "error", "error": str(exc)}
+    if r.status_code != 200:
+        return {"status": "error", "error": f"HTTP {r.status_code}"}
+    tok = r.json()
+    err = tok.get("error")
+    if err == "authorization_pending":
+        return {"status": "pending"}
+    if err == "slow_down":
+        return {"status": "slow_down", "interval": int(tok.get("interval") or 10)}
+    if err:
+        # expired_token / access_denied / unsupported_grant_type — todos terminais
+        return {"status": "error", "error": tok.get("error_description") or err}
+
+    access = tok.get("access_token")
+    if not access:
+        return {"status": "error", "error": "no_access_token"}
+    info = await validate_pat(access)
+    return {
+        "status": "ok",
+        "access_token": access,
+        "refresh_token": tok.get("refresh_token") or "",
+        "expires_in": int(tok.get("expires_in") or 0),
+        "login": info.get("login", ""),
+        "avatar_url": info.get("avatar_url", ""),
+        "scopes": tok.get("scope", "") or info.get("scopes", ""),
+    }
+
+
 async def validate_pat(token: str) -> dict[str, Any]:
     """Valida um Personal Access Token via GET /user. Retorna {login, avatar_url,
     scopes} ou {error}. Os scopes vêm do header X-OAuth-Scopes (fine-grained não

@@ -1,6 +1,6 @@
 # Deployment and operations
 
-How to get AI Workspace running beyond `localhost`: local network, VPS, domain with HTTPS, plus
+How to get Singularity AI running beyond `localhost`: local network, VPS, domain with HTTPS, plus
 updates, backup/restore and secret rotation.
 
 ## Table of contents

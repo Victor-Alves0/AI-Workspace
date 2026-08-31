@@ -191,6 +191,16 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
                     collected["streamed"] += ev.get("text", "")
                 elif t == "reasoning":
                     collected["reasoning_streamed"] += ev.get("text", "")
+                elif t == "usage" and isinstance(ev.get("usage"), dict):
+                    # ``done`` normalmente traz o total consolidado e o substitui
+                    # abaixo. Se o provider falhar depois de reportar uso mas antes
+                    # do ``done``, conservar ao menos as métricas já recebidas evita
+                    # transformar uma chamada cobrada em uso zero.
+                    partial = collected.get("usage") or {}
+                    for key, value in ev["usage"].items():
+                        if isinstance(value, (int, float)):
+                            partial[key] = partial.get(key, 0) + value
+                    collected["usage"] = partial or None
                 elif t == "tool_call":
                     collected["tools_streamed"].append(
                         {"kind": "call", "name": ev.get("name"), "data": ev.get("arguments")}
@@ -212,7 +222,13 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
             raise
         except Exception as exc:  # noqa: BLE001 - erro no turno vira evento visível
             logger.exception("Geração falhou (chat %s)", chat_id)
-            await gen._append({"type": "error", "message": str(exc)})
+            # O evento SSE sozinho não basta: o assinante pode ter desconectado e o
+            # ``on_finish`` precisa do erro no estado acumulado para persistir um
+            # vestígio visível junto do texto parcial. Sem isto, uma exceção levantada
+            # pelo próprio gerador (em vez de convertida em evento ``error``) salvava
+            # uma resposta vazia ou fazia a resposta desaparecer por completo.
+            collected["error"] = str(exc)
+            await gen._append({"type": "error", "message": collected["error"]})
         await _finalize(gen, on_finish, collected)
         # fim de turno COMPLETO: se o usuário enfileirou (ou deixou steer não-consumido),
         # dispara a continuação. Não roda no cancelamento (CancelledError re-propaga antes).

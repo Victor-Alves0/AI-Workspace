@@ -25,6 +25,7 @@ from .turn_setup import (
     _artifacts_kwargs,
     _brain_setup,
     _code_mode,
+    _final_message_fields,
     _flag_budget,
     _mem_agent_id,
     _media_opts,
@@ -154,10 +155,12 @@ async def resume_chat_turn(
             media = await _media_opts(db, user, model_config)
 
         async def _finish(collected: dict, emit) -> None:
-            content = collected["content"] or (collected["streamed"] or "").strip()
-            if not content:
+            # Mesmo contrato do envio normal: preserva texto/raciocínio parcial e a
+            # causa da interrupção quando o provider falha ou o servidor reinicia.
+            # O caminho antigo descartava silenciosamente continuações sem ``done``.
+            content, reasoning = _final_message_fields(collected)
+            if not content and not collected.get("tools"):
                 return
-            reasoning = collected["reasoning"]
             rec = _usage_record(collected["usage"], model, model_config)
             _flag_budget(rec, model_config, user)
             arts_changed: list[str] = []

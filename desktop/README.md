@@ -1,6 +1,6 @@
-# AI Workspace — Desktop (Tauri)
+# Singularity AI — Desktop (Tauri)
 
-Aplicativo Windows que abre o AI Workspace numa janela nativa, com **ícone na
+Aplicativo Windows que abre o Singularity AI numa janela nativa, com **ícone na
 bandeja**, **"rodar em segundo plano"** e **"iniciar com o Windows"**.
 
 ## Como funciona

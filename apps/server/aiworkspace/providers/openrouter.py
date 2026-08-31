@@ -62,10 +62,16 @@ def _mark_content_cache(content: Any) -> Any:
         if not content:
             return content
         return [{"type": "text", "text": content, "cache_control": _CACHE_CONTROL}]
-    if isinstance(content, list) and content and isinstance(content[-1], dict):
-        new = list(content)
-        new[-1] = {**new[-1], "cache_control": _CACHE_CONTROL}
-        return new
+    if isinstance(content, list):
+        # Em mensagens multimodais o último bloco pode ser ``image_url``. Marcar
+        # esse bloco produz payload inválido em providers que só aceitam cache em
+        # texto. Procura de trás para frente, como promete o contrato da função.
+        for i in range(len(content) - 1, -1, -1):
+            part = content[i]
+            if isinstance(part, dict) and part.get("type") == "text":
+                new = list(content)
+                new[i] = {**part, "cache_control": _CACHE_CONTROL}
+                return new
     return content
 
 
@@ -352,7 +358,20 @@ async def stream_chat(
                     if data == "[DONE]":
                         break
                     try:
-                        yield json.loads(data)
+                        chunk = json.loads(data)
                     except json.JSONDecodeError:
                         continue
+                    # Alguns endpoints OpenAI-compatible reportam falha *dentro* do
+                    # SSE mantendo HTTP 200. Se repassarmos isso como um chunk comum,
+                    # o orchestrator o ignora e encerra com resposta vazia/``done``.
+                    # Transformar em exceção aciona o caminho de erro e a persistência
+                    # do parcial, em vez de deixar o chat parecendo travado.
+                    if isinstance(chunk, dict) and chunk.get("error"):
+                        err = chunk["error"]
+                        if isinstance(err, dict):
+                            msg = err.get("message") or err.get("code") or json.dumps(err)
+                        else:
+                            msg = str(err)
+                        raise RuntimeError(f"OpenRouter stream: {str(msg)[:300]}")
+                    yield chunk
             return

@@ -65,7 +65,7 @@ def _looks_portuguese(text: str) -> bool:
 
 
 def test_model_facing_prompts_are_english():
-    from aiworkspace.chat.compaction_routes import _COMPACT_INSTRUCTION
+    from aiworkspace.chat.compaction_service import _COMPACT_INSTRUCTION
 
     for name, text in (
         ("_VISION_DESCRIBE_PROMPT", orch._VISION_DESCRIBE_PROMPT),
@@ -80,7 +80,7 @@ def test_model_facing_prompts_are_english():
 
 def test_translated_prompts_keep_user_language_for_output():
     """Traduzir a INSTRUÇÃO não pode trocar o idioma da SAÍDA lida pelo usuário."""
-    from aiworkspace.chat.compaction_routes import _COMPACT_INSTRUCTION
+    from aiworkspace.chat.compaction_service import _COMPACT_INSTRUCTION
 
     assert "same language as the conversation" in _COMPACT_INSTRUCTION
     assert "same language as the conversation" in orch._VISION_DESCRIBE_PROMPT

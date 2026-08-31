@@ -1,6 +1,6 @@
 # Development
 
-How to run AI Workspace locally without Docker, how the code is organized and how to run the tests.
+How to run Singularity AI locally without Docker, how the code is organized and how to run the tests.
 
 ## Monorepo layout
 

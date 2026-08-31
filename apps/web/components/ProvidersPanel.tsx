@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, ChevronLeft, Loader2, Plus, RefreshCw, Server, Trash2, TriangleAlert } from "lucide-react";
-import { api, ApiError } from "@/lib/api";
+import { Check, ChevronLeft, Loader2, LogIn, Plus, RefreshCw, Server, Trash2, TriangleAlert } from "lucide-react";
+import { api, API_URL, ApiError } from "@/lib/api";
 
 interface Provider {
   slug: string;
@@ -184,6 +184,9 @@ function OpenrouterForm({ configured, onCancel, onSaved }: {
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // o caminho de colar a chave continua existindo, mas escondido: o botão de
+  // autorizar resolve o caso normal e evita o usuário caçar a chave no site.
+  const [manual, setManual] = useState(false);
 
   async function save() {
     if (!key.trim()) { setErr("Informe a chave."); return; }
@@ -201,18 +204,45 @@ function OpenrouterForm({ configured, onCancel, onSaved }: {
       <button onClick={onCancel} className="flex items-center gap-1 text-sm text-muted transition-colors hover:text-ink">
         <ChevronLeft size={16} /> OpenRouter
       </button>
+
+      {configured && (
+        <p className="flex items-center gap-1.5 text-sm text-green-400">
+          <Check size={15} className="shrink-0" /> Conectado.
+        </p>
+      )}
+
       <div className="space-y-1.5">
-        <label className="text-sm text-ink-soft">Chave de API</label>
-        <input
-          type="password" value={key} onChange={(e) => setKey(e.target.value)}
-          placeholder={configured ? "•••••••• (guardada — cole outra para trocar)" : "cole a chave do OpenRouter"}
-          className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
-        />
-        <p className="text-xs text-muted">Pegue em openrouter.ai/keys. É a chave usada para conversar.</p>
+        <button
+          onClick={() => { window.location.href = `${API_URL}/integrations/providers/openrouter/connect`; }}
+          className="flex items-center gap-2 rounded-full bg-accent px-5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
+        >
+          <LogIn size={15} /> {configured ? "Reconectar com OpenRouter" : "Conectar com OpenRouter"}
+        </button>
+        <p className="text-xs text-muted">
+          Você autoriza no site do OpenRouter e a chave volta pronta — não precisa procurar nem colar nada.
+        </p>
       </div>
-      <button onClick={save} disabled={busy} className="rounded-full bg-accent px-5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50">
-        {busy ? "Salvando…" : "Salvar"}
-      </button>
+
+      {!manual ? (
+        <button onClick={() => setManual(true)} className="text-xs text-muted underline transition-colors hover:text-ink">
+          Prefiro colar a chave manualmente
+        </button>
+      ) : (
+        <div className="space-y-3 border-t border-border pt-4">
+          <div className="space-y-1.5">
+            <label className="text-sm text-ink-soft">Chave de API</label>
+            <input
+              type="password" value={key} onChange={(e) => setKey(e.target.value)}
+              placeholder={configured ? "•••••••• (guardada — cole outra para trocar)" : "cole a chave do OpenRouter"}
+              className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
+            />
+            <p className="text-xs text-muted">Pegue em openrouter.ai/keys.</p>
+          </div>
+          <button onClick={save} disabled={busy} className="rounded-full border border-border px-5 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-hover disabled:opacity-50">
+            {busy ? "Salvando…" : "Salvar"}
+          </button>
+        </div>
+      )}
       {err && <p className="flex items-start gap-1.5 text-sm text-red-400"><TriangleAlert size={15} className="mt-0.5 shrink-0" /> {err}</p>}
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { api } from "@/lib/api";
 import { streamResume } from "@/lib/sse";
 import type { Chat, ToolEvent } from "@/lib/types";
@@ -71,6 +71,11 @@ export function useGeneration(getDeps: () => GenerationDeps) {
   // "Parar" durante a geração: como interromper o turno atual (cancel no servidor
   // p/ chats persistentes; abort local p/ temporários). null = nada para parar.
   const stopRef = useRef<(() => void) | null>(null);
+  // Só pode existir uma assinatura de retomada por página. Abrir o mesmo chat
+  // duas vezes rapidamente antes fazia dois leitores processarem os mesmos eventos
+  // (tools duplicadas e um leitor antigo limpando o estado do mais novo).
+  const resumeAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => resumeAbortRef.current?.abort(), []);
 
   function makeStreamHandler(getOwnerId?: () => string | null) {
     const deps = getDeps();
@@ -84,14 +89,25 @@ export function useGeneration(getDeps: () => GenerationDeps) {
     // (desativado em chats temporários — o servidor não injeta as instruções lá)
     const artsLive = deps.artifactsEnabled && !deps.temporary;
     // throttle: renderiza no MÁXIMO a cada ~70ms (não por token). Re-parsear o
-    // markdown inteiro a cada token travava a UI em respostas longas (O(n²)). Sem
-    // timer pendente — o tail final chega pelo reloadMessages ao fim do stream.
+    // markdown inteiro a cada token travava a UI em respostas longas (O(n²)). O
+    // timer de trailing flush é importante: reasoning/texto costuma parar logo antes
+    // de uma tool demorada; sem ele, o último trecho ficava invisível até a próxima
+    // etapa e dava a impressão de que o stream havia travado.
     let lastFlush = 0;
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    // O backend descarta o texto provisório emitido antes de uma tool e começa uma
+    // nova resposta na iteração seguinte. Mantemos o provisório visível enquanto a
+    // tool roda, mas o substituímos assim que chega o primeiro token pós-tool.
+    let resetTextOnNextToken = false;
     // Auto-abre o painel UMA vez por artefato (identifier). Sem isto, cada flush
     // reabria o painel — se o usuário fechasse durante a geração, o próximo flush
     // (~70ms) reabria. Guardamos o id já aberto; só reabrimos p/ um artefato NOVO.
     let autoOpenedId: string | null = null;
     const flush = () => {
+      if (flushTimer !== null) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+      }
       lastFlush = Date.now();
       if (!paint()) return;
       if (artsLive && state.acc.includes("<artifact")) {
@@ -109,9 +125,20 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       }
       setStreamingReasoning(state.reason);
     };
-    const maybeFlush = () => { if (Date.now() - lastFlush >= 70) flush(); };
+    const maybeFlush = () => {
+      const wait = 70 - (Date.now() - lastFlush);
+      if (wait <= 0) {
+        flush();
+      } else if (flushTimer === null) {
+        flushTimer = setTimeout(flush, wait);
+      }
+    };
     const handler = (ev: any) => {
       if (ev.type === "token") {
+        if (resetTextOnNextToken) {
+          state.acc = "";
+          resetTextOnNextToken = false;
+        }
         if (state.acc === "" && paint()) setGeneratingImage(false); // 1º token = respondendo em texto
         state.acc += ev.text;
         maybeFlush();
@@ -122,10 +149,15 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         // provider recusou o nível pedido; o backend rebaixou → o seletor reflete
         if (paint()) deps.onReasoningEffort?.(ev.effort);
       } else if (ev.type === "tool_call") {
+        // pinta imediatamente o último trecho de texto/raciocínio antes de trocar
+        // para a fase de ferramenta (que pode levar vários segundos).
+        flush();
+        resetTextOnNextToken = true;
         const t: ToolEvent = { kind: "call", name: ev.name, data: ev.arguments };
         state.tools.push(t);
         if (paint()) setToolEvents((x) => [...x, t]);
       } else if (ev.type === "tool_result") {
+        flush();
         const t: ToolEvent = { kind: "result", name: ev.name, data: ev.result };
         state.tools.push(t);
         if (paint()) {
@@ -150,6 +182,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       } else if (ev.type === "guard_reset") {
         // descarta a tentativa anterior — a resposta boa vem na próxima
         state.acc = ""; state.reason = ""; state.tools = [];
+        resetTextOnNextToken = false;
         if (paint()) {
           setToolEvents([]);
           setGeneratingImage(false);
@@ -165,6 +198,10 @@ export function useGeneration(getDeps: () => GenerationDeps) {
           setTranscribingAudio(false);
         }
         flush();
+      } else if (ev.type === "stopped") {
+        // garante que o parcial que ainda estava no throttle apareça antes de o
+        // chamador recarregar a mensagem persistida.
+        flush();
       } else if (ev.type === "artifacts") {
         // resposta persistida criou/atualizou artefatos: abre o último no painel
         if (!paint()) return;
@@ -172,21 +209,34 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         if (ids.length) deps.setArtifactOpen(ids[ids.length - 1]);
         setLiveArtifact(null);
       } else if (ev.type === "done") {
+        // `content` é autoritativo. Entre iterações de tools o backend zera o texto
+        // provisório ("vou pesquisar...") e redige a resposta final; concatenar todos
+        // os tokens no cliente deixava a UI presa/exibindo a etapa antiga até o SSE
+        // fechar. Aplicamos o snapshot final assim que ele chega.
+        if (typeof ev.content === "string") state.acc = ev.content;
+        if (typeof ev.reasoning?.text === "string") state.reason = ev.reasoning.text;
         // o `done` traz os tool_events DEFINITIVOS: os guardas (que não são streamados
         // como tool_call) e o custo em tokens de cada evento — só conhecido no fim do
         // turno. Substitui os montados durante o stream p/ o badge aparecer na hora,
         // sem esperar um F5.
-        const evs = (ev.tool_events ?? []) as ToolEvent[];
-        if (evs.length) {
+        if (Array.isArray(ev.tool_events)) {
+          const evs = ev.tool_events as ToolEvent[];
           state.tools = evs;
           if (paint()) setToolEvents(evs);
         }
+        flush();
       } else if (ev.type === "title") {
         // título gerado por IA na 1ª troca: atualiza o cabeçalho na hora
         if (paint()) deps.setActive((a) => (a && ev.title ? { ...a, title: ev.title } : a));
       }
     };
-    return { handler, state };
+    const dispose = () => {
+      if (flushTimer !== null) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
+      }
+    };
+    return { handler, state, dispose };
   }
 
   // Re-assina uma geração ainda em andamento no chat (ex.: o usuário deu F5 no
@@ -196,7 +246,10 @@ export function useGeneration(getDeps: () => GenerationDeps) {
   async function resumeStream(id: string) {
     const deps = getDeps();
     let started = false;
-    const { handler } = makeStreamHandler(() => id);
+    const { handler, dispose } = makeStreamHandler(() => id);
+    resumeAbortRef.current?.abort();
+    const controller = new AbortController();
+    resumeAbortRef.current = controller;
     try {
       await streamResume(id, (ev) => {
         if (ev.type === "idle") return;
@@ -214,10 +267,15 @@ export function useGeneration(getDeps: () => GenerationDeps) {
           }
         }
         handler(ev);
-      });
+      }, controller.signal);
     } catch {
       /* falha ao re-assinar: ignora — as mensagens persistidas já estão na tela */
     }
+    dispose();
+    // Uma retomada mais nova já assumiu o estado: a antiga não pode desligar o
+    // composer nem recarregar mensagens por cima dela ao terminar o abort.
+    if (resumeAbortRef.current !== controller) return;
+    resumeAbortRef.current = null;
     // ao encerrar, só mexe na UI/recarrega se o chat ainda está aberto — senão
     // sobrescreveria a tela do chat para onde o usuário navegou.
     if (started && deps.isActiveChat(id)) {

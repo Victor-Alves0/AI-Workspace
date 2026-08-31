@@ -1,4 +1,4 @@
-# Inicia o AI Workspace COMPLETO sem Docker: Postgres embarcado + backend (API) +
+# Inicia o Singularity AI COMPLETO sem Docker: Postgres embarcado + backend (API) +
 # frontend (interface web). Abre o navegador em http://localhost:3000.
 #
 # Nada e instalado no sistema: o banco, os caches de modelo e o segredo do app
@@ -195,7 +195,7 @@ try {
     if (-not $NoBrowser) { Start-Process "http://localhost:$WebPort" }
 
     Write-Host ""
-    Write-Host "==> AI Workspace no ar: http://localhost:$WebPort   (feche esta janela para encerrar)"
+    Write-Host "==> Singularity AI no ar: http://localhost:$WebPort   (feche esta janela para encerrar)"
     # bloqueia enquanto os servidores estiverem vivos
     Wait-Process -Id ($procs | ForEach-Object { $_.Id })
 }

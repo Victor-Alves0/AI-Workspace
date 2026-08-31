@@ -188,18 +188,25 @@ export default function CodespaceFileBrowser({
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const listRequestRef = useRef(0);
+  const searchRequestRef = useRef(0);
+  const openFileRequestRef = useRef(0);
 
   const [searchTick, setSearchTick] = useState(0);
 
   function loadEntries() {
+    const requestId = ++listRequestRef.current;
     setEntries(null);
     setListError("");
     api.get<{ entries?: CodespaceFileEntry[]; error?: string }>(
       `/codespace/projects/${projectId}/files?path=${encodeURIComponent(path)}&depth=1`,
     ).then((r) => {
+      if (listRequestRef.current !== requestId) return;
       if (r.error) setListError(r.error);
       else setEntries((r.entries ?? []).sort((a, b) => (a.kind === b.kind ? a.path.localeCompare(b.path) : a.kind === "dir" ? -1 : 1)));
-    }).catch(() => setListError("falha ao listar"));
+    }).catch(() => {
+      if (listRequestRef.current === requestId) setListError("falha ao listar");
+    });
   }
 
   /** recarrega a visão ATUAL após uma mudança (mover/renomear) — a listagem por
@@ -213,6 +220,19 @@ export default function CodespaceFileBrowser({
   useEffect(loadEntries, [projectId, path]);
 
   useEffect(() => {
+    // O mesmo componente é reutilizado ao trocar entre chats/projetos. Não deixa
+    // o arquivo do projeto anterior visível/editável sob o novo projectId.
+    openFileRequestRef.current += 1;
+    setSelected(null);
+    setContent("");
+    setContentMeta(null);
+    setEditing(false);
+    setLoadingContent(false);
+    setSaving(false);
+    setSaveError("");
+  }, [projectId]);
+
+  useEffect(() => {
     if (initialPath) openFile(initialPath);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPath]);
@@ -220,20 +240,29 @@ export default function CodespaceFileBrowser({
   // busca por nome (todo o projeto) — debounced; some ao esvaziar o campo.
   // `searchTick` força re-busca após mover/renomear (ver `refresh`).
   useEffect(() => {
+    const requestId = ++searchRequestRef.current;
     const q = query.trim();
     if (!q) { setSearchResults(null); setSearching(false); return; }
     setSearching(true);
     const t = setTimeout(() => {
       api.get<{ entries?: CodespaceFileEntry[]; error?: string }>(
         `/codespace/projects/${projectId}/files/search?q=${encodeURIComponent(q)}`,
-      ).then((r) => setSearchResults(r.entries ?? [])).catch(() => setSearchResults([])).finally(() => setSearching(false));
+      ).then((r) => {
+        if (searchRequestRef.current === requestId) setSearchResults(r.entries ?? []);
+      }).catch(() => {
+        if (searchRequestRef.current === requestId) setSearchResults([]);
+      }).finally(() => {
+        if (searchRequestRef.current === requestId) setSearching(false);
+      });
     }, 300);
     return () => clearTimeout(t);
   }, [query, projectId, searchTick]);
 
   async function openFile(p: string) {
+    const requestId = ++openFileRequestRef.current;
     setSelected(p);
     setEditing(false);
+    setSaving(false);
     setSaveError("");
     setLoadingContent(true);
     setContent("");
@@ -241,6 +270,7 @@ export default function CodespaceFileBrowser({
       const r = await api.get<{ content?: string; total_lines?: number; end_line?: number; error?: string }>(
         `/codespace/projects/${projectId}/files/content?path=${encodeURIComponent(p)}`,
       );
+      if (openFileRequestRef.current !== requestId) return;
       if (r.error) { setContent(`(${r.error})`); setContentMeta(null); }
       else {
         const clean = stripLineNumbers(r.content ?? "");
@@ -248,10 +278,12 @@ export default function CodespaceFileBrowser({
         setContentMeta({ total_lines: r.total_lines, truncated: !!r.total_lines && !!r.end_line && r.end_line < r.total_lines });
       }
     } catch {
-      setContent("(falha ao ler o arquivo)");
-      setContentMeta(null);
+      if (openFileRequestRef.current === requestId) {
+        setContent("(falha ao ler o arquivo)");
+        setContentMeta(null);
+      }
     } finally {
-      setLoadingContent(false);
+      if (openFileRequestRef.current === requestId) setLoadingContent(false);
     }
   }
 
@@ -285,17 +317,26 @@ export default function CodespaceFileBrowser({
 
   async function save() {
     if (!selected) return;
+    const requestId = openFileRequestRef.current;
+    const target = selected;
+    const nextContent = draft;
     setSaving(true);
     setSaveError("");
     try {
-      await api.put(`/codespace/projects/${projectId}/files/content`, { path: selected, content: draft });
-      setContent(draft);
-      setContentMeta((m) => (m ? { ...m, truncated: false } : m));
-      setEditing(false);
+      await api.put(`/codespace/projects/${projectId}/files/content`, { path: target, content: nextContent });
+      if (openFileRequestRef.current === requestId) {
+        setContent(nextContent);
+        setContentMeta((m) => (m ? { ...m, truncated: false } : m));
+        setEditing(false);
+      }
     } catch (e) {
-      setSaveError(e instanceof ApiError ? e.message : "Falha ao salvar");
+      if (openFileRequestRef.current === requestId) {
+        setSaveError(e instanceof ApiError ? e.message : "Falha ao salvar");
+      }
     } finally {
-      setSaving(false);
+      // Um save antigo não pode reabilitar os controles enquanto o arquivo novo
+      // ainda está sendo salvo.
+      if (openFileRequestRef.current === requestId) setSaving(false);
     }
   }
 

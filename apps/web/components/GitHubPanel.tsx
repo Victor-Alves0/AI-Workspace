@@ -1,8 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { Check, ChevronLeft, Github, Loader2, Plus, TriangleAlert, Trash2, Wifi } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, ChevronLeft, Copy, Github, Loader2, Plus, TriangleAlert, Trash2, Wifi } from "lucide-react";
 import { api, API_URL, ApiError } from "@/lib/api";
+import { copyText } from "@/lib/clipboard";
+import { openExternal } from "@/lib/desktop";
 import { useConfirm } from "./ConfirmDialog";
 
 interface Account {
@@ -14,15 +16,21 @@ interface Account {
 }
 interface GithubStatus {
   oauth_configured: boolean;
+  /** login por código (device flow) disponível — depende só de um client_id público */
+  device_available: boolean;
   is_admin: boolean;
   client_id: string;
   redirect_uri: string;
   accounts: Account[];
 }
 
-/** Tela de detalhe "GitHub" (aberta pelo card em Integrações): conecta contas via
- *  Personal Access Token (caminho principal) ou OAuth App (opcional, admin), e
- *  gerencia as contas conectadas que os modelos usam pela ferramenta GitHub. */
+/** Tela de detalhe "GitHub" (aberta pelo card em Integrações): conecta contas e
+ *  gerencia as que os modelos usam pela ferramenta GitHub.
+ *
+ *  Três caminhos, nesta ordem de preferência: LOGIN POR CÓDIGO (device flow — só
+ *  clicar, quando a instalação traz o client_id embutido), Personal Access Token
+ *  (recolhido) e OAuth App próprio (admin). O token deixou de ser o caminho
+ *  principal: colar credencial é o que estamos tirando da frente do usuário. */
 export default function GitHubPanel({ onBack }: { onBack: () => void }) {
   const confirm = useConfirm();
   const [st, setSt] = useState<GithubStatus | null>(null);
@@ -32,7 +40,7 @@ export default function GitHubPanel({ onBack }: { onBack: () => void }) {
     try {
       setSt(await api.get<GithubStatus>("/integrations/github"));
     } catch {
-      setSt({ oauth_configured: false, is_admin: false, client_id: "", redirect_uri: "", accounts: [] });
+      setSt({ oauth_configured: false, device_available: false, is_admin: false, client_id: "", redirect_uri: "", accounts: [] });
     }
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -67,7 +75,9 @@ export default function GitHubPanel({ onBack }: { onBack: () => void }) {
         <div className="flex justify-center py-10"><Loader2 size={18} className="animate-spin text-muted" /></div>
       ) : (
         <>
-          <PatConnect reload={load} />
+          {st.device_available && <DeviceConnect reload={load} />}
+
+          <PatConnect reload={load} startOpen={!st.device_available} />
 
           {st.is_admin && <OAuthAppConfig st={st} reload={load} />}
 
@@ -137,8 +147,134 @@ export default function GitHubPanel({ onBack }: { onBack: () => void }) {
   );
 }
 
+interface DeviceStart {
+  handle: string;
+  user_code: string;
+  verification_uri: string;
+  interval: number;
+  expires_in: number;
+}
+type PollOut =
+  | { status: "pending" }
+  | { status: "slow_down"; interval: number }
+  | { status: "ok"; login: string }
+  | { status: "error"; error: string };
+
+/** Login por código (device flow): o caminho de BOTÃO, sem token nenhum.
+ *
+ *  O usuário clica, recebe um código curto, digita no github.com/login/device e a
+ *  conta aparece conectada. Escolhido em vez do OAuth com redirect porque o device
+ *  flow não usa client secret nem callback registrado — ou seja, funciona em
+ *  qualquer instalação (desktop, Docker, VPS) sem ninguém cadastrar nada.
+ *
+ *  A repetição fica AQUI, e não num laço no servidor: o backend faz uma tentativa
+ *  por chamada, então nenhum worker fica preso os 15 minutos de validade do código. */
+function DeviceConnect({ reload }: { reload: () => Promise<void> }) {
+  const [flow, setFlow] = useState<DeviceStart | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [copied, setCopied] = useState(false);
+  // o timer é cancelado no unmount: fechar o painel no meio do fluxo não pode
+  // deixar uma sondagem rodando contra um componente que já saiu da tela.
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  async function start() {
+    setBusy(true); setErr("");
+    try {
+      const r = await api.post<DeviceStart>("/integrations/github/device/start");
+      setFlow(r);
+      copyText(r.user_code).then((ok) => setCopied(ok));
+      schedule(r.handle, r.interval);
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Falha ao iniciar o login");
+    } finally { setBusy(false); }
+  }
+
+  function schedule(handle: string, seconds: number) {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => { poll(handle, seconds); }, seconds * 1000);
+  }
+
+  async function poll(handle: string, seconds: number) {
+    let r: PollOut;
+    try {
+      r = await api.post<PollOut>("/integrations/github/device/poll", { handle });
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Falha ao concluir o login");
+      setFlow(null);
+      return;
+    }
+    if (r.status === "ok") {
+      setFlow(null);
+      await reload();
+      return;
+    }
+    if (r.status === "error") {
+      setErr(r.error === "expired" ? "O código expirou. Comece de novo." : r.error);
+      setFlow(null);
+      return;
+    }
+    // pending → mesma cadência; slow_down → a que o GitHub mandou
+    schedule(handle, r.status === "slow_down" ? r.interval : seconds);
+  }
+
+  function cancel() {
+    if (timer.current) clearTimeout(timer.current);
+    setFlow(null);
+  }
+
+  return (
+    <div className="mt-4">
+      <p className="mb-1 text-xs font-semibold text-ink">Entrar com GitHub</p>
+      <div className="space-y-2 rounded-xl border border-border bg-surface p-3">
+        {flow == null ? (
+          <>
+            <button onClick={start} disabled={busy}
+              className="flex items-center gap-2 rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Github size={13} />}
+              {busy ? "Abrindo…" : "Entrar com GitHub"}
+            </button>
+            <p className="text-[11px] text-muted">Autorize com um código curto — sem criar nem colar token.</p>
+          </>
+        ) : (
+          <>
+            <p className="text-[11px] text-muted">
+              1. Abra{" "}
+              {/* openExternal e não <a target="_blank">: no webview do desktop um link
+                  de nova janela simplesmente não faz nada (docs/desktop-updates.md). */}
+              <button onClick={() => openExternal(flow.verification_uri)} className="text-accent-hover underline">
+                {flow.verification_uri}
+              </button>
+              {" "}2. digite o código abaixo. Esta tela conclui sozinha.
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 rounded-lg border border-border bg-surface2 px-3 py-2 text-center font-mono text-lg tracking-[0.3em] text-ink">
+                {flow.user_code}
+              </code>
+              <button
+                onClick={async () => setCopied(await copyText(flow.user_code))}
+                className="shrink-0 rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink"
+                title="Copiar código"
+              >
+                {copied ? <Check size={15} className="text-green-500" /> : <Copy size={15} />}
+              </button>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-muted">
+              <Loader2 size={12} className="animate-spin" /> Esperando você autorizar…
+              <button onClick={cancel} className="ml-auto underline transition-colors hover:text-ink">Cancelar</button>
+            </div>
+          </>
+        )}
+        {err && <p className="flex items-start gap-1.5 text-[11px] text-red-400"><TriangleAlert size={12} className="mt-0.5 shrink-0" /> {err}</p>}
+      </div>
+    </div>
+  );
+}
+
 /** Conectar colando um Personal Access Token (fine-grained recomendado). */
-function PatConnect({ reload }: { reload: () => Promise<void> }) {
+function PatConnect({ reload, startOpen }: { reload: () => Promise<void>; startOpen: boolean }) {
+  const [open, setOpen] = useState(startOpen);
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -155,6 +291,14 @@ function PatConnect({ reload }: { reload: () => Promise<void> }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="mt-3 text-[11px] text-muted underline transition-colors hover:text-ink">
+        Prefiro colar um Personal Access Token
+      </button>
+    );
   }
 
   return (

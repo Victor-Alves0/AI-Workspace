@@ -131,8 +131,15 @@ async def add_memory(body: MemoryIn, ctx: ApiContext = Depends(scoped("memory:wr
 
 
 @router.delete("/memories/{memory_id}")
-async def delete_memory(memory_id: str, ctx: ApiContext = Depends(scoped("memory:write"))):
-    flt = _memory_filter(ctx, None)
+async def delete_memory(
+    memory_id: str,
+    user: str | None = None,
+    ctx: ApiContext = Depends(scoped("memory:write")),
+):
+    # No modo end_user o mesmo id de chave possui vários espaços independentes.
+    # A rota precisa do mesmo seletor `user` usado por list/clear/export; sem ele,
+    # `_memory_filter` sempre recusava a exclusão, mesmo para o dono da memória.
+    flt = _memory_filter(ctx, user)
     key = await _mem_key(ctx.db, ctx.user)
     # confirma que a memória pertence AO ESCOPO DESTA CHAVE antes de apagar: o id do
     # mem0 é global do usuário, então sem esta checagem uma chave restrita poderia

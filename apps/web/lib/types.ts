@@ -745,7 +745,7 @@ export type ChatEvent =
   | { type: "tool_call"; name: string; arguments: Record<string, unknown> }
   | { type: "tool_result"; name: string; result: unknown }
   | { type: "usage"; usage: Record<string, unknown> }
-  | { type: "done"; content: string; usage?: MessageUsage | null; tool_events?: ToolEvent[] | null }
+  | { type: "done"; content: string; usage?: MessageUsage | null; reasoning?: { text: string; seconds?: number } | null; tool_events?: ToolEvent[] | null }
   | { type: "reasoning"; text: string }
   // provider recusou o nível de raciocínio pedido; o backend rebaixou (o seletor reflete)
   | { type: "reasoning_effort"; effort: string }

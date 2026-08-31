@@ -172,7 +172,7 @@ async def delete_connection(conn_id: uuid.UUID, user: User = Depends(require_app
 
 class TestIn(BaseModel):
     chat_id: str = Field(default="", max_length=32)
-    text: str = Field(default="Mensagem de teste do AI Workspace ✅", max_length=2000)
+    text: str = Field(default="Mensagem de teste do Singularity AI ✅", max_length=2000)
 
 
 @router.post("/connections/{conn_id}/test")

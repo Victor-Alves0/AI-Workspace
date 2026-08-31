@@ -177,6 +177,9 @@ export default function ChatPage() {
   // este ref para saber, a QUALQUER instante, se ainda estão pintando o chat que
   // o usuário está vendo — sem isso, o parcial de um chat vaza para outro ao trocar.
   const activeIdRef = useRef<string | null>(null);
+  // Identifica a navegação mais recente. Sem isto, clicar A e depois B podia
+  // terminar em A quando o GET de A respondesse por último.
+  const selectChatRequestRef = useRef(0);
   const isActiveChat = (id: string | null) => (id ?? null) === activeIdRef.current;
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -631,6 +634,28 @@ export default function ChatPage() {
       selectChat(cid).catch(() => {});
       window.history.replaceState(null, "", "/chat");
     }
+    // volta de um fluxo OAuth: os callbacks redirecionam para /chat?<serviço>=connected
+    // (ou =error&reason=…). Sem isto o usuário autorizava e caía numa tela idêntica à
+    // que deixou, sem saber se deu certo. Vai direto no toast, e não pelo `notify`,
+    // porque confirmar uma ação que o usuário acabou de fazer não é "notificação"
+    // opcional — tem que aparecer mesmo com as notificações desligadas.
+    const SERVICOS: Record<string, string> = {
+      openrouter: "OpenRouter", google: "Google", github: "GitHub",
+      notion: "Notion", slack: "Slack",
+    };
+    for (const [param, nome] of Object.entries(SERVICOS)) {
+      const v = qs.get(param);
+      if (!v) continue;
+      const ok = v === "connected";
+      const id = Date.now() + Math.random();
+      setToasts((t) => [...t, {
+        id,
+        title: ok ? `${nome} conectado` : `Falha ao conectar ${nome}`,
+        body: ok ? undefined : (qs.get("reason") || undefined),
+      }]);
+      setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), ok ? 4500 : 9000);
+      break;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -755,6 +780,7 @@ export default function ChatPage() {
     const chat = await api.post<Chat>("/chats", { title: "Mesa-redonda", model: curModel, model_config_id: curCustomId });
     const full = { ...chat, mode: "roundtable" as const, participants: draftRt.participants, roundtable_config: draftRt.config, view_once: viewOnce };
     setActive(full);
+    activeIdRef.current = chat.id;
     setDraftRt(null);
     if (viewOnce) setTemporary(false); // agora é uma mesa view_once (persistida até sair)
     try {
@@ -896,6 +922,8 @@ export default function ChatPage() {
   }
 
   function goHome() {
+    selectChatRequestRef.current += 1; // invalida um selectChat ainda em voo
+    activeIdRef.current = null;
     leaveViewOnce();
     setActive(null);
     setDraftRt(null);
@@ -913,6 +941,8 @@ export default function ChatPage() {
   // abre o Espaço de Trabalho numa seção (Automações/Playground/Codespace/… viram
   // seções do Espaço; o "voltar" delas cai no hub). Remonta p/ resetar a subtela.
   function openWorkspace(section: WorkspaceSection | null) {
+    selectChatRequestRef.current += 1; // não deixa um GET anterior fechar o workspace
+    activeIdRef.current = active?.id ?? null;
     setEditModelTarget(null);
     setWorkspaceSection(section);
     setWorkspaceKey((k) => k + 1);
@@ -922,12 +952,14 @@ export default function ChatPage() {
 
   const reloadMessages = useCallback(async (chatId: string) => {
     const rows = await api.get<Message[]>(`/chats/${chatId}/messages`);
-    setMessages(rows);
+    // Poll/geração do chat anterior pode terminar depois de o usuário navegar.
+    if (activeIdRef.current === chatId) setMessages(rows);
   }, []);
 
   const reloadArtifacts = useCallback(async (chatId: string) => {
     try {
-      setChatArtifacts(await api.get<ChatArtifact[]>(`/chats/${chatId}/artifacts`));
+      const rows = await api.get<ChatArtifact[]>(`/chats/${chatId}/artifacts`);
+      if (activeIdRef.current === chatId) setChatArtifacts(rows);
     } catch {
       /* rota indisponível/erro transitório: mantém a lista atual */
     }
@@ -952,11 +984,24 @@ export default function ChatPage() {
   const showShareBtn = iface.chat_share !== false;   // botão compartilhar (topo direito)
 
   async function selectChat(id: string) {
+    const requestId = ++selectChatRequestRef.current;
+    // O ref pode apontar para outra navegação ainda em voo. Para restaurar após
+    // falha, use o chat realmente renderizado neste momento, não esse ref transitório.
+    const renderedActiveId = active?.id ?? null;
+    // Bloqueia imediatamente handlers do chat anterior enquanto o destino carrega.
+    activeIdRef.current = id;
     setTemporary(false);
     setWorkspaceOpen(false);
     leaveViewOnce(id);
     setDraftRt(null);
-    const detail = await api.get<Chat & { messages: Message[] }>(`/chats/${id}`);
+    let detail: Chat & { messages: Message[] };
+    try {
+      detail = await api.get<Chat & { messages: Message[] }>(`/chats/${id}`);
+    } catch (error) {
+      if (selectChatRequestRef.current === requestId) activeIdRef.current = renderedActiveId;
+      throw error;
+    }
+    if (selectChatRequestRef.current !== requestId) return;
     setActive(detail);
     // atualiza o espelho JÁ (antes do efeito pós-render) para que qualquer handler
     // de stream do chat anterior, ainda em voo, veja na hora que não é mais o ativo.
@@ -1174,7 +1219,7 @@ export default function ChatPage() {
     // se o usuário trocar de chat, o handler para de pintar (ver useGeneration).
     // Para rascunho, o id só existe após criar o chat abaixo — daí o getter.
     let ownerId: string | null = active?.id ?? null;
-    const { handler: onEvent, state } = makeStreamHandler(() => ownerId);
+    const { handler: onEvent, state, dispose: disposeStream } = makeStreamHandler(() => ownerId);
 
     // controles definidos na home (rascunho) têm prioridade sobre o do modelo custom
     const initialSystemPrompt = draftSystemPrompt || curCustom?.system_prompt || null;
@@ -1209,6 +1254,7 @@ export default function ChatPage() {
             model_config_id: curCustomId,
           });
           setActive(chat);
+          activeIdRef.current = chat.id;
           ownerId = chat.id; // rascunho virou chat real: o stream agora tem dono
         }
         // persistente: o servidor cancela a geração e salva o parcial
@@ -1244,6 +1290,7 @@ export default function ChatPage() {
       notify(e instanceof ApiError && e.status === 402 ? "Orçamento mensal atingido" : "Erro", msg);
       refreshBudget();
     } finally {
+      disposeStream();
       // limpa o estado de geração só se o usuário continua neste chat; se ele
       // trocou, quem manda na tela é o chat de destino (não zere o dele).
       if (isActiveChat(ownerId)) {
@@ -1319,7 +1366,7 @@ export default function ChatPage() {
       return m.slice(0, m[i].role === "user" ? i + 1 : i);
     });
     const cid = active.id;
-    const { handler, state } = makeStreamHandler(() => cid);
+    const { handler, state, dispose: disposeStream } = makeStreamHandler(() => cid);
     stopRef.current = () => { api.post(`/chats/${cid}/stop`).catch(() => {}); };
     try {
       await streamRegenerate(active.id, id, handler);
@@ -1332,6 +1379,7 @@ export default function ChatPage() {
       }
       if (state.acc) notify("Resposta pronta", state.acc.replace(/\s+/g, " ").slice(0, 90));
     } finally {
+      disposeStream();
       if (isActiveChat(cid)) {
         stopRef.current = null;
         setStreaming("");
@@ -1349,7 +1397,7 @@ export default function ChatPage() {
     setStreamingReasoning("");
     setToolEvents([]);
     const cid = active.id;
-    const { handler, state } = makeStreamHandler(() => cid);
+    const { handler, state, dispose: disposeStream } = makeStreamHandler(() => cid);
     stopRef.current = () => { api.post(`/chats/${cid}/stop`).catch(() => {}); };
     try {
       await streamContinue(active.id, id, handler);
@@ -1361,6 +1409,7 @@ export default function ChatPage() {
       }
       if (state.acc) notify("Resposta continuada", state.acc.replace(/\s+/g, " ").slice(0, 90));
     } finally {
+      disposeStream();
       if (isActiveChat(cid)) {
         stopRef.current = null;
         setStreaming("");

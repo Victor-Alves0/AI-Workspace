@@ -1359,8 +1359,8 @@ export default function MessageItem({
   if (isUser) {
     const atts = message.attachments ?? [];
     return (
-      <div className="mx-auto flex max-w-3xl justify-end">
-        <div className="group relative max-w-[85%]">
+      <div className="mx-auto flex w-full max-w-3xl justify-end">
+        <div className={`group relative ${editing ? "w-full max-w-none" : "max-w-[85%]"}`}>
           {editing ? (
             editor
           ) : (

@@ -1,4 +1,4 @@
-# Monta o "engine bundle" do AI Workspace para Windows (Etapa 1 do app SEM Docker):
+# Monta o "engine bundle" do Singularity AI para Windows (Etapa 1 do app SEM Docker):
 # Postgres + pgvector + Python embarcado + backend, num zip autocontido que sobe a
 # API sem nada instalado no SO.
 #

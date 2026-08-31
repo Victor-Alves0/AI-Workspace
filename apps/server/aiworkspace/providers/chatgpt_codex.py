@@ -184,6 +184,7 @@ async def stream_chat(
         headers["chatgpt-account-id"] = account_id
 
     tool_idx = 0
+    terminal = False
     timeout = httpx.Timeout(connect=15.0, write=30.0, read=300.0, pool=15.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
         async with client.stream("POST", BASE_URL, headers=headers, json=payload) as resp:
@@ -224,6 +225,7 @@ async def stream_chat(
                         }]}}]}
                         tool_idx += 1
                 elif et == "response.completed":
+                    terminal = True
                     r = ev.get("response") or {}
                     u = r.get("usage") or {}
                     finish = "tool_calls" if tool_idx else "stop"
@@ -238,10 +240,34 @@ async def stream_chat(
                             "cached_tokens": (u.get("input_tokens_details") or {}).get("cached_tokens", 0),
                         },
                     }
-                elif et in ("response.failed", "error"):
-                    msg = ((ev.get("response") or {}).get("error") or {}).get("message") \
-                        or ev.get("message") or "erro do backend do Codex"
+                elif et in ("response.failed", "response.incomplete", "error"):
+                    terminal = True
+                    r = ev.get("response") or {}
+                    u = r.get("usage") or {}
+                    if u:
+                        # Entrega a contabilidade antes do erro terminal; o
+                        # orchestrator preserva esse usage na resposta parcial.
+                        yield {
+                            "choices": [],
+                            "usage": {
+                                "prompt_tokens": u.get("input_tokens") or 0,
+                                "completion_tokens": u.get("output_tokens") or 0,
+                                "total_tokens": u.get("total_tokens") or 0,
+                                "reasoning_tokens": (u.get("output_tokens_details") or {}).get("reasoning_tokens", 0),
+                                "cached_tokens": (u.get("input_tokens_details") or {}).get("cached_tokens", 0),
+                            },
+                        }
+                    if et == "response.incomplete":
+                        reason = (r.get("incomplete_details") or {}).get("reason")
+                        msg = f"resposta incompleta ({reason or 'motivo desconhecido'})"
+                    else:
+                        msg = (r.get("error") or {}).get("message") \
+                            or ev.get("message") or "erro do backend do Codex"
                     raise RuntimeError(f"Codex: {str(msg)[:300]}")
+    if not terminal:
+        # Uma conexão encerrada graciosamente antes do envelope terminal não
+        # levanta erro no httpx. Sem esta guarda o app tratava o parcial como sucesso.
+        raise RuntimeError("Codex: stream encerrado sem evento terminal")
 
 
 async def complete(

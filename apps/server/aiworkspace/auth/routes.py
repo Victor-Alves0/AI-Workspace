@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import jwt
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import audit_service, twofa_service
@@ -25,6 +25,21 @@ from .security import (
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# Lock transacional global no banco. O valor é somente um namespace estável deste
+# fluxo; advisory locks não precisam corresponder a uma linha/tabela.
+_REGISTRATION_LOCK_ID = 0x41495752  # "AIWR"
+
+
+async def _lock_registration(db: AsyncSession) -> None:
+    """Serializa cadastro para a decisão atômica de quem é o primeiro admin.
+
+    `SELECT count(*)` sozinho permite que duas transações em uma instalação vazia
+    leiam zero ao mesmo tempo e ambas criem um administrador. O lock é liberado no
+    commit/rollback da própria sessão e também coordena múltiplos workers/processos.
+    """
+    await db.execute(text("SELECT pg_advisory_xact_lock(:lock_id)"),
+                     {"lock_id": _REGISTRATION_LOCK_ID})
 
 
 @router.get("/config")
@@ -66,6 +81,9 @@ async def register(
     db: AsyncSession = Depends(get_db),
 ):
     check_login_rate(request, body.email)
+    # Deve vir antes de toda leitura que decide se o cadastro é permitido e quem
+    # vira admin. Quem esperou pelo lock observa o commit anterior na próxima SQL.
+    await _lock_registration(db)
     if not await signups_allowed(db):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Cadastro desabilitado pelo admin")
 

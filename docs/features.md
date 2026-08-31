@@ -1,6 +1,6 @@
 # Features
 
-Full catalog of AI Workspace, grouped by area. Most features are configurable **per model**
+Full catalog of Singularity AI, grouped by area. Most features are configurable **per model**
 and/or **per user** in the interface.
 
 ## Chat and models

@@ -85,7 +85,7 @@ class Settings(BaseSettings):
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     # Identificação do app enviada ao OpenRouter (aparece no dashboard dele).
     # Nome = X-Title; URL = HTTP-Referer (evite localhost para não aparecer como tal).
-    openrouter_app_name: str = "AI Workspace"
+    openrouter_app_name: str = "Singularity AI"
     openrouter_app_url: str = "https://ai-workspace.app"
 
     # Web search
@@ -124,6 +124,19 @@ class Settings(BaseSettings):
     # User OAuth Token). Client ID/Secret ficam em app_settings (UI); só o redirect_uri
     # fica aqui e precisa bater com o cadastrado no app do Slack.
     slack_redirect_uri: str = "http://localhost:8000/integrations/slack/callback"
+
+    # OpenRouter (OAuth PKCE): ao contrário dos de cima, NÃO precisa registrar app
+    # nem cadastrar este endereço em lugar nenhum — o OpenRouter aceita qualquer
+    # callback (localhost em qualquer porta inclusive). O `state` assinado é
+    # acrescentado como último segmento do caminho.
+    openrouter_redirect_uri: str = (
+        "http://localhost:8000/integrations/providers/openrouter/callback"
+    )
+
+    # GitHub Device Flow: client_id de um OAuth App com "Device flow" habilitado.
+    # É PÚBLICO por definição (o device flow não usa client secret), então pode vir
+    # embutido no build. Vazio = a UI só oferece PAT / OAuth com credenciais próprias.
+    github_device_client_id: str = ""
 
     # Integração WhatsApp
     # Evolution API (caminho NÃO oficial, QR Code): serviço opt-in do compose

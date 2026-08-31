@@ -29,6 +29,11 @@ def _fernet() -> Fernet:
     kdf = HKDF(
         algorithm=hashes.SHA256(),
         length=32,
+        # ⚠️ NÃO RENOMEIE ESTE SALT. Ele entra na derivação da chave: mudar um byte
+        # muda a chave, e TODO segredo já cifrado no banco (tokens do Google, GitHub,
+        # Slack, Notion, Tuya, chaves de API) vira ilegível — sem erro claro, só
+        # falha de decrypt. O produto passou a se chamar "Singularity AI"; este
+        # literal continua com o nome antigo de propósito, e assim deve ficar.
         salt=b"ai-workspace-secret-encryption",
         info=b"fernet-key",
     )
@@ -135,6 +140,8 @@ def _backup_key() -> bytes:
     kdf = HKDF(
         algorithm=hashes.SHA256(),
         length=32,
+        # ⚠️ NÃO RENOMEIE (mesma razão do salt acima): mudar aqui torna ilegível
+        # todo backup já exportado — inclusive os que o usuário guardou para migrar.
         salt=b"ai-workspace-backup-encryption",
         info=b"backup-aes-ctr",
     )

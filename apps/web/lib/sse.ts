@@ -56,29 +56,48 @@ async function readSSE(res: Response, onEvent: (e: ChatEvent) => void): Promise<
   const decoder = new TextDecoder();
   let buffer = "";
 
+  const dispatch = (raw: string) => {
+    // SSE permite LF, CRLF ou CR e também permite que um evento tenha várias
+    // linhas `data:`. O parser anterior procurava apenas "\n\n": com um proxy
+    // normalizando a resposta para CRLF, nenhum evento era entregue e a UI
+    // parecia ficar eternamente travada no streaming.
+    const data = raw
+      .split(/\r\n|\r|\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).replace(/^ /, ""))
+      .join("\n");
+    if (!data) return;
+    try {
+      onEvent(JSON.parse(data) as ChatEvent);
+    } catch {
+      /* ignora payloads incompletos/malformados sem derrubar todo o stream */
+    }
+  };
+
+  const drain = (flushTail = false) => {
+    // Linha vazia encerra um evento. O tamanho do match importa porque CRLF usa
+    // quatro bytes; avançar sempre dois deixava "\r\n" no início do próximo.
+    const boundary = /\r\n\r\n|\n\n|\r\r/;
+    let match = boundary.exec(buffer);
+    while (match) {
+      dispatch(buffer.slice(0, match.index));
+      buffer = buffer.slice(match.index + match[0].length);
+      match = boundary.exec(buffer);
+    }
+    // Alguns servidores/proxies fecham a conexão logo após a última linha sem
+    // uma linha vazia final. No EOF, esse tail já não pode receber mais bytes.
+    if (flushTail && buffer.trim()) dispatch(buffer);
+    if (flushTail) buffer = "";
+  };
+
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-
-    // eventos separados por linha em branco; payload em "data: {...}"
-    let idx: number;
-    while ((idx = buffer.indexOf("\n\n")) !== -1) {
-      const raw = buffer.slice(0, idx);
-      buffer = buffer.slice(idx + 2);
-      for (const line of raw.split("\n")) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith("data:")) continue;
-        const json = trimmed.slice(5).trim();
-        if (!json) continue;
-        try {
-          onEvent(JSON.parse(json) as ChatEvent);
-        } catch {
-          /* ignore parse errors */
-        }
-      }
-    }
+    drain();
   }
+  buffer += decoder.decode();
+  drain(true);
 }
 
 // Envia uma mensagem num chat persistido e lê o stream SSE.

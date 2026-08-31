@@ -9,7 +9,10 @@
 
 from __future__ import annotations
 
+import json
+import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -19,11 +22,13 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from . import crypto
 from .auth.deps import require_admin, require_approved
 from .config import get_settings
 from .db import get_db
-from .integrations import elevenlabs_service, github_service, google_service, notion_service, ollama_service, providers_service, slack_service, spotify_service, tuya_service, vercel_service
+from .integrations import elevenlabs_service, github_service, google_service, notion_service, ollama_service, openrouter_oauth, providers_service, slack_service, spotify_service, tuya_service, vercel_service
 from .models import GithubAccount, GoogleAccount, NotionAccount, SlackAccount, User
+from .secrets_service import OPENROUTER_KEY, set_secret
 from .tools import sift_service
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
@@ -238,6 +243,8 @@ async def github_status(user: User = Depends(require_approved), db: AsyncSession
     accounts = await _gh_accounts(db, user.id)
     return {
         "oauth_configured": cfg is not None,
+        # login por código: só depende de um client_id público embutido no build
+        "device_available": bool(github_service.device_client_id()),
         "is_admin": user.role == "admin",
         "client_id": cfg["client_id"] if cfg else "",
         "redirect_uri": get_settings().github_redirect_uri,
@@ -297,6 +304,96 @@ async def github_connect_pat(
     await db.commit()
     sift_service.invalidate(str(user.id))
     return {"ok": True, "login": login}
+
+
+class GithubDevicePollIn(BaseModel):
+    handle: str
+
+
+@router.post("/github/device/start")
+async def github_device_start(user: User = Depends(require_approved)):
+    """Inicia o Device Flow: devolve o código que o usuário digita no GitHub.
+
+    O `device_code` NÃO volta em claro. Ele vai cifrado (junto do dono e de um
+    prazo) num `handle` opaco: quem tivesse o device_code e o client_id — que é
+    público — conseguiria reivindicar o token da autorização alheia."""
+    client_id = github_service.device_client_id()
+    if not client_id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Login por código do GitHub indisponível nesta instalação "
+            "(GITHUB_DEVICE_CLIENT_ID não configurado).",
+        )
+    r = await github_service.device_start(client_id)
+    if r.get("error"):
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"GitHub recusou: {r['error']}")
+    handle = crypto.encrypt(
+        json.dumps({
+            "device_code": r["device_code"],
+            "user_id": str(user.id),
+            "exp": int(time.time()) + r["expires_in"],
+        })
+    )
+    return {
+        "handle": handle,
+        "user_code": r["user_code"],
+        "verification_uri": r["verification_uri"],
+        "interval": r["interval"],
+        "expires_in": r["expires_in"],
+    }
+
+
+@router.post("/github/device/poll")
+async def github_device_poll(
+    body: GithubDevicePollIn,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    """Uma tentativa de conclusão. A UI repete respeitando o `interval`."""
+    client_id = github_service.device_client_id()
+    if not client_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Device flow indisponível.")
+    try:
+        data = json.loads(crypto.decrypt(body.handle))
+    except Exception:  # noqa: BLE001 - handle adulterado, de outra APP_SECRET, ou lixo
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sessão de login inválida.") from None
+    if data.get("user_id") != str(user.id):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Sessão de login de outro usuário.")
+    if int(data.get("exp") or 0) < time.time():
+        return {"status": "error", "error": "expired"}
+
+    r = await github_service.device_poll(client_id, data.get("device_code", ""))
+    if r.get("status") != "ok":
+        return r  # pending / slow_down / error — a UI decide se repete
+
+    login = r.get("login", "")
+    if not login:
+        return {"status": "error", "error": "no_login"}
+    expires = (
+        datetime.now(timezone.utc) + timedelta(seconds=r["expires_in"])
+        if r.get("expires_in") else None
+    )
+    existing = await db.scalar(
+        select(GithubAccount).where(GithubAccount.user_id == user.id, GithubAccount.login == login)
+    )
+    if existing is not None:
+        existing.token = r["access_token"]
+        existing.refresh_token = r.get("refresh_token", "")
+        existing.auth_type = "oauth"
+        existing.token_expires_at = expires
+        existing.scopes = r.get("scopes", "")
+        existing.avatar_url = r.get("avatar_url", "")
+        github_service.forget(str(existing.id))
+    else:
+        db.add(GithubAccount(
+            user_id=user.id, login=login, token=r["access_token"],
+            refresh_token=r.get("refresh_token", ""), auth_type="oauth",
+            token_expires_at=expires, scopes=r.get("scopes", ""),
+            avatar_url=r.get("avatar_url", ""),
+        ))
+    await db.commit()
+    sift_service.invalidate(str(user.id))
+    return {"status": "ok", "login": login}
 
 
 @router.get("/github/connect")
@@ -965,6 +1062,49 @@ async def providers_models(
 ):
     """Modelos de todos os provedores do usuário, no formato dos seletores (best-effort → [])."""
     return await providers_service.list_user_models(db, user.id)
+
+
+# --------------------------------------------------------------------------- #
+# OpenRouter — "Conectar" por OAuth PKCE (alternativa a colar a chave à mão).
+# Sem client secret e sem cadastro de callback: funciona em qualquer instalação.
+# --------------------------------------------------------------------------- #
+@router.get("/providers/openrouter/connect")
+async def openrouter_connect(user: User = Depends(require_approved)):
+    return RedirectResponse(openrouter_oauth.authorization_url(str(user.id)))
+
+
+@router.get("/providers/openrouter/callback/{state}")
+async def openrouter_callback(
+    state: str, code: str = "", error: str = "", db: AsyncSession = Depends(get_db)
+):
+    """Volta do OpenRouter: valida o state, troca o code e salva a chave do usuário.
+
+    O `state` vem no CAMINHO (ver openrouter_oauth): a URL de autorização não tem
+    parâmetro de state, então ele viaja dentro do próprio callback_url."""
+    web = get_settings().web_origin.split(",")[0].strip().rstrip("/")
+
+    def _back(kv: str) -> RedirectResponse:
+        return RedirectResponse(f"{web}/chat?{kv}")
+
+    if error:
+        return _back(f"openrouter=error&reason={error[:60]}")
+    parsed = openrouter_oauth.verify_state(state)
+    if not parsed or not code:
+        return _back("openrouter=error&reason=invalid_state")
+    user_id, jti = parsed
+
+    result = await openrouter_oauth.exchange_code(code, jti)
+    if result.get("error"):
+        return _back(f"openrouter=error&reason={result['error']}")
+
+    uid = uuid.UUID(user_id)
+    if await db.get(User, uid) is None:
+        return _back("openrouter=error&reason=user_not_found")
+    await set_secret(db, uid, OPENROUTER_KEY, result["key"])
+    await db.commit()
+    # a chave destrava os modelos do OpenRouter → a SIFT do usuário é remontada
+    sift_service.invalidate(user_id)
+    return _back("openrouter=connected")
 
 
 # --------------------------------------------------------------------------- #

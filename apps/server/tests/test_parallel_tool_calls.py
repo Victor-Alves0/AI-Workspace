@@ -141,6 +141,21 @@ async def test_single_call_still_uses_the_serial_path(monkeypatch):
     assert len(results) == 1 and results[0]["result"]["id"] == "a"
 
 
+async def test_single_tool_failure_becomes_result_and_turn_continues(monkeypatch):
+    """No caminho serial, exceção da integração não pode matar o stream."""
+    fake, state = _fake_stream([[_multi_tool_chunk(["a"])], [_final_chunk()]])
+    monkeypatch.setattr(orch.openrouter, "stream_chat", fake)
+    events = await _collect(run_turn(**_kwargs(SlowSift(fail={"a"}))))
+
+    results = [e for e in events if e["type"] == "tool_result"]
+    assert len(results) == 1
+    assert "boom" in results[0]["result"]["error"]
+    assert [e for e in events if e["type"] == "done"][0]["content"] == "pronto"
+    # O erro também volta ao modelo como resposta da tool, permitindo recuperação.
+    tool_msg = next(m for m in state["messages"][1] if m.get("role") == "tool")
+    assert "boom" in tool_msg["content"]
+
+
 async def test_parallelism_is_capped(monkeypatch):
     """O fan-out do modelo não pode virar uma rajada contra a API de terceiros."""
     monkeypatch.setattr(orch, "_MAX_PARALLEL_TOOLS", 2)

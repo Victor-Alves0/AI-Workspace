@@ -43,7 +43,7 @@ export default function PendingPage() {
         <p className="mt-2 text-sm text-muted">
           {rejected
             ? "Seu acesso foi recusado pelo administrador."
-            : "Sua conta foi criada e está aguardando a aprovação do administrador. Você poderá usar o AI Workspace assim que for aprovado."}
+            : "Sua conta foi criada e está aguardando a aprovação do administrador. Você poderá usar o Singularity AI assim que for aprovado."}
         </p>
         {user && <p className="mt-3 text-xs text-muted">{user.email}</p>}
 

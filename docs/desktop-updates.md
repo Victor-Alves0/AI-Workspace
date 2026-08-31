@@ -16,6 +16,40 @@ O instalador é NSIS com `installMode: currentUser` e o `identifier`
 (`com.aiworkspace.app`) é estável, então rodar um instalador novo sobre uma instalação
 existente **atualiza no lugar** — não cria uma segunda cópia nem pede desinstalação.
 
+> O `identifier` guarda o nome **antigo** de propósito. É ele que define
+> `app_data_dir()` — a pasta com o banco e os uploads. Trocá-lo para acompanhar o
+> rebrand faria cada instalação existente perder de vista os próprios dados (eles
+> continuariam no disco, órfãos, em `%APPDATA%\com.aiworkspace.app`).
+
+## Renomear o produto quebra a atualização no lugar (uma vez)
+
+`productName` mudou de "AI Workspace" para "Singularity AI". Isso **não** é inócuo:
+no template NSIS do Tauri a chave de desinstalação é derivada do PRODUCTNAME, não do
+identifier —
+
+```nsi
+!define UNINSTKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCTNAME}"
+StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"      ; installMode currentUser
+```
+
+— então o instalador novo procura por `...\Uninstall\Singularity AI`, não acha, e se
+comporta como **primeira instalação**. Consequência para quem já tinha o app:
+
+| | O que acontece |
+|---|---|
+| Dados (banco, uploads, config) | **preservados** — vivem sob o `identifier`, que não mudou |
+| Instalação antiga | **fica no disco**, em `%LOCALAPPDATA%\AI Workspace`, com entrada própria em "Aplicativos e recursos" |
+| Atalhos | passam a existir dois |
+
+Ou seja: ninguém perde nada, mas fica com **duas cópias instaladas**. Na primeira
+release com o nome novo, oriente a desinstalar "AI Workspace" pelo Windows — é
+seguro, porque o desinstalador só apaga a pasta de instalação, não os dados.
+
+Dá para automatizar com um `NSIS_HOOK_PREINSTALL` que roda o desinstalador antigo em
+silêncio, mas **não faça isso sem testar o instalador de verdade**: se os parâmetros
+de modo silencioso estiverem errados, o desinstalador antigo pode entender que deve
+apagar os dados do aplicativo — e aí a perda é permanente.
+
 ## 1. Atualização in-app (automática)
 
 `Configurações → Sobre` mostra "vX.Y.Z disponível" e o botão **Atualizar para vX.Y.Z**:

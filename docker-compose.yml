@@ -73,6 +73,21 @@ services:
       # Monte a pasta do host no volume abaixo e aponte TRANSCRIBE_COOKIES_DIR p/ ela.
       TRANSCRIBE_COOKIES_DIR: ${TRANSCRIBE_COOKIES_DIR:-}
       TRANSCRIBE_COOKIE_COOLDOWN_SECONDS: ${TRANSCRIBE_COOKIE_COOLDOWN_SECONDS:-1800}
+      # Redirects do OAuth. Estas linhas FALTAVAM: o .env.example documentava as
+      # quatro variáveis, mas sem constarem aqui elas nunca chegavam ao container —
+      # o server ficava preso no default localhost:8000. Numa VPS isso impedia
+      # Google/GitHub/Notion/Slack de funcionarem, porque o endereço de retorno
+      # jamais batia com o cadastrado no console do provedor.
+      # O default de cada uma é repetido aqui de propósito: `${VAR:-}` passaria
+      # uma string VAZIA quando a variável não existe no .env, e a vazia GANHA do
+      # default do config.py — trocaria um bug por outro.
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:8000/integrations/google/callback}
+      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:8000/integrations/github/callback}
+      NOTION_REDIRECT_URI: ${NOTION_REDIRECT_URI:-http://localhost:8000/integrations/notion/callback}
+      SLACK_REDIRECT_URI: ${SLACK_REDIRECT_URI:-http://localhost:8000/integrations/slack/callback}
+      OPENROUTER_REDIRECT_URI: ${OPENROUTER_REDIRECT_URI:-http://localhost:8000/integrations/providers/openrouter/callback}
+      # Client ID público do "Entrar com GitHub" por código (device flow).
+      GITHUB_DEVICE_CLIENT_ID: ${GITHUB_DEVICE_CLIENT_ID:-}
     volumes:
       # persiste modelos de embedding (fastembed/HF) e índices SIFT (.npz)
       # entre recriações do container — cold start rápido
@@ -149,7 +164,7 @@ services:
       DATABASE_CONNECTION_CLIENT_NAME: evolution
       CACHE_LOCAL_ENABLED: "true"
       CACHE_REDIS_ENABLED: "false"
-      CONFIG_SESSION_PHONE_CLIENT: AI Workspace
+      CONFIG_SESSION_PHONE_CLIENT: Singularity AI
       LOG_LEVEL: ERROR
     volumes:
       - evolution_instances:/evolution/instances

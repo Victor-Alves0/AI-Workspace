@@ -64,5 +64,5 @@ async def unsubscribe(body: SubIn, user: User = Depends(require_approved), db: A
 
 @router.post("/test")
 async def test_push(user: User = Depends(require_approved)):
-    sent = await push_service.send_to_user(user.id, "AI Workspace", "Notificação de teste 🔔", "/")
+    sent = await push_service.send_to_user(user.id, "Singularity AI", "Notificação de teste 🔔", "/")
     return {"ok": sent > 0, "sent": sent}

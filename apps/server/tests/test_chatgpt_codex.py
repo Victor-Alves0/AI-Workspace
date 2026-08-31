@@ -2,6 +2,11 @@
 (chat/completions ↔ Responses API). Puro/hermético — sem rede, sem DB."""
 from __future__ import annotations
 
+import json
+from typing import ClassVar
+
+import pytest
+
 from aiworkspace.integrations import chatgpt_service as cs
 from aiworkspace.providers import chatgpt_codex as cx
 
@@ -83,7 +88,6 @@ def test_build_payload_strips_prefix_and_sets_codex_contract():
 
 
 def test_api_key_sentinel_is_required():
-    import pytest
     with pytest.raises(RuntimeError, match="Assinaturas"):
         cx._user_id_from_key("sk-or-v1-abc")
     assert cx._user_id_from_key("codex:u-1") == "u-1"
@@ -94,3 +98,90 @@ def test_is_codex_model_prefix_rule():
     assert cx.is_codex_model("ollama/llama3") is False
     assert cx.is_codex_model("anthropic/claude-sonnet-4.5") is False
     assert cx.is_codex_model(None) is False
+
+
+class _FakeResponse:
+    status_code = 200
+
+    def __init__(self, events):
+        self.events = events
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def aiter_lines(self):
+        for event in self.events:
+            yield "data: " + json.dumps(event)
+        yield "data: [DONE]"
+
+
+class _FakeClient:
+    events: ClassVar[list[dict]] = []
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    def stream(self, *args, **kwargs):
+        return _FakeResponse(self.events)
+
+
+@pytest.fixture
+def fake_codex_stream(monkeypatch):
+    async def access(_user_id):
+        return "token", None
+
+    async def instructions():
+        return "instr"
+
+    monkeypatch.setattr(cs, "get_access", access)
+    monkeypatch.setattr(cs, "get_instructions", instructions)
+    monkeypatch.setattr(cx.httpx, "AsyncClient", _FakeClient)
+    _FakeClient.events = []
+    return _FakeClient
+
+
+@pytest.mark.asyncio
+async def test_incomplete_terminal_preserves_usage_then_raises(fake_codex_stream):
+    fake_codex_stream.events = [{
+        "type": "response.incomplete",
+        "response": {
+            "incomplete_details": {"reason": "max_output_tokens"},
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 4,
+                "total_tokens": 14,
+                "output_tokens_details": {"reasoning_tokens": 2},
+            },
+        },
+    }]
+    chunks = []
+    with pytest.raises(RuntimeError, match="max_output_tokens"):
+        async for chunk in cx.stream_chat(
+            "codex:user-1", "codex/gpt-5", [{"role": "user", "content": "oi"}]
+        ):
+            chunks.append(chunk)
+    assert chunks[-1]["usage"]["total_tokens"] == 14
+    assert chunks[-1]["usage"]["reasoning_tokens"] == 2
+
+
+@pytest.mark.asyncio
+async def test_missing_terminal_event_is_not_silent_success(fake_codex_stream):
+    fake_codex_stream.events = [{
+        "type": "response.output_text.delta", "delta": "parcial",
+    }]
+    chunks = []
+    with pytest.raises(RuntimeError, match="sem evento terminal"):
+        async for chunk in cx.stream_chat(
+            "codex:user-1", "codex/gpt-5", [{"role": "user", "content": "oi"}]
+        ):
+            chunks.append(chunk)
+    assert chunks[0]["choices"][0]["delta"]["content"] == "parcial"

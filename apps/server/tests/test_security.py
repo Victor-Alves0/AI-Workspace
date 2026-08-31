@@ -28,7 +28,10 @@ def test_totp_tolerates_spaces_and_bad_input():
 def test_provisioning_uri_and_qr():
     secret = twofa_service.new_secret()
     uri = twofa_service.provisioning_uri(secret, "user@x.com")
-    assert uri.startswith("otpauth://totp/") and "AI%20Workspace" in uri
+    # o issuer é só o RÓTULO exibido no app autenticador; a verificação usa apenas o
+    # segredo. Renomear o produto NÃO invalida um 2FA já cadastrado — quem já tinha
+    # continua vendo o nome antigo na lista do autenticador, e o código segue valendo.
+    assert uri.startswith("otpauth://totp/") and "Singularity%20AI" in uri
     assert twofa_service.qr_data_url(secret, "user@x.com").startswith("data:image/png;base64,")
 
 

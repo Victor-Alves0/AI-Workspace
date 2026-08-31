@@ -90,6 +90,26 @@ def test_compose_prompt_mode_list_enumerates():
 
 # ----------------------------- _finalize_usage --------------------------------
 
+def test_merge_usage_accepts_flat_responses_metrics():
+    """O adaptador da Responses API expõe reasoning/cache no topo do usage."""
+    total = {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+    }
+    orch._merge_usage(total, {
+        "prompt_tokens": 20,
+        "completion_tokens": 8,
+        "total_tokens": 28,
+        "reasoning_tokens": 5,
+        "cached_tokens": 7,
+    })
+    assert total["reasoning_tokens"] == 5
+    assert total["cached_tokens"] == 7
+
+
 def test_finalize_usage_input_breakdown_proportional():
     total = {"prompt_tokens": 100, "completion_tokens": 10, "reasoning_tokens": 0}
     orch._finalize_usage(

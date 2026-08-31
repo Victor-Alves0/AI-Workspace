@@ -68,7 +68,7 @@ export default function LoginPage() {
         <div className="flex flex-col items-center text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.png" alt="" className="mb-3 h-12 w-12 rounded-xl" />
-          <h1 className="text-xl font-semibold tracking-tight text-ink">AI Workspace</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-ink">Singularity AI</h1>
           <p className="mt-1 text-sm text-muted">
             {mode === "login" ? "Entre na sua conta" : "Crie sua conta"}
           </p>
@@ -126,6 +126,14 @@ export default function LoginPage() {
             {mode === "login" ? "Não tem conta? Cadastre-se" : "Já tem conta? Entrar"}
           </button>
         )}
+
+        {/* Exigido pelos consoles de OAuth (Google/Notion/Slack) e, mais que isso,
+            é onde o usuário espera achar: na tela em que ele cria a conta. */}
+        <p className="pt-1 text-center text-[11px] text-muted">
+          <a href="/privacy" className="transition-colors hover:text-ink-soft">Privacidade</a>
+          {" · "}
+          <a href="/terms" className="transition-colors hover:text-ink-soft">Termos</a>
+        </p>
       </form>
     </div>
   );

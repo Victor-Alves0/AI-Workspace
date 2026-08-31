@@ -1256,7 +1256,9 @@ def _rg_search(root: Path, scope: dict | None, query: str, glob: str, regex: boo
         results.append({
             "path": rel,
             "line": data.get("line_number"),
-            "text": ((data.get("lines") or {}).get("text") or "").rstrip("\n")[:_MAX_LINE_CHARS],
+            # O JSON do rg preserva o terminador nativo; no Windows ele é CRLF.
+            # Remover apenas ``\n`` vazava um ``\r`` invisível para o modelo/UI.
+            "text": ((data.get("lines") or {}).get("text") or "").rstrip("\r\n")[:_MAX_LINE_CHARS],
             **({"context": True} if kind == "context" else {}),
         })
 

@@ -450,8 +450,8 @@ export default function Sidebar({
       <div className="flex items-center justify-between px-3 py-3">
         <span className="flex items-center gap-2.5 font-semibold tracking-tight text-ink">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="AI Workspace" className="h-6 w-6 shrink-0 rounded-md" />
-          AI Workspace
+          <img src="/logo.png" alt="Singularity AI" className="h-6 w-6 shrink-0 rounded-md" />
+          Singularity AI
         </span>
         <div className="flex items-center gap-0.5">
           <button onClick={onSearch} title="Pesquisar" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">

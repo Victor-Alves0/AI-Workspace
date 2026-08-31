@@ -1,6 +1,6 @@
-# Documentation — AI Workspace
+# Documentation — Singularity AI
 
-Reference guide for AI Workspace. If you just want to get it running, start with the
+Reference guide for Singularity AI. If you just want to get it running, start with the
 [main README](../README.md); the pages below go deeper into each area.
 
 ## Index
@@ -15,7 +15,10 @@ Reference guide for AI Workspace. If you just want to get it running, start with
 | [deployment.md](deployment.md)       | LAN/VPS, domain + HTTPS, backup/restore, updates, `APP_SECRET` rotation |
 | [public-api.md](public-api.md)       | OpenAI-compatible API (`/v1`) and key management |
 | [security.md](security.md)           | Security model, attack surface and recommendations |
+| [trust-model.md](trust-model.md)     | Who is trusted with what; why the AI — not the user — is the untrusted actor (PT) |
+| [integration-auth.md](integration-auth.md) | How each integration authenticates: which ones are a button, which need a key, and why (PT) |
 | [desktop.md](desktop.md)             | Desktop app (Tauri): tray, autostart, build |
+| [desktop-updates.md](desktop-updates.md) | How a `.exe` user goes from one version to the next, without losing data (PT) |
 | [development.md](development.md)     | Running without Docker, tests, monorepo layout |
 
 ## Conventions
