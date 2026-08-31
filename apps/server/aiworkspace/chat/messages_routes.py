@@ -30,6 +30,7 @@ from .turn_setup import (
     _artifacts_kwargs,
     _clean_attachments,
     _code_mode,
+    _effective_chat_model,
     _final_message_fields,
     _flag_budget,
     _get_model_config,
@@ -76,10 +77,8 @@ async def ephemeral(
 ):
     """Chat temporário: streama um turno SEM persistir nada no banco."""
     settings = get_settings()
-    model = (body.get("model") or "").strip()
+    requested_model = (body.get("model") or "").strip()
     content = (body.get("content") or "").strip()
-    if not model:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Selecione um modelo")
     if not content and not body.get("attachments"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mensagem vazia")
     if len(content) > settings.max_message_chars:
@@ -89,9 +88,20 @@ async def ephemeral(
         )
     await budget_service.enforce_or_raise(db, user)  # orçamento pessoal (modo "pausar")
 
-    api_key, base_url = await _resolve_provider(db, user, model)
-
     model_config = await _get_model_config(db, body.get("model_config_id"), user)
+    if not requested_model and model_config is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Selecione um modelo")
+    # Um chat temporário também pode apontar para um preset. Não aceite a cópia
+    # de prompt/parâmetros que o cliente tinha antes de o preset ser editado.
+    if model_config is not None and model_config.base_model:
+        model = model_config.base_model
+        system_prompt = model_config.system_prompt
+        params = dict(model_config.params or {})
+    else:
+        model = requested_model
+        system_prompt = body.get("system_prompt")
+        params = dict(body.get("params") or {})
+    api_key, base_url = await _resolve_provider(db, user, model)
     guards = await _resolve_guards(db, user, model_config)  # guardas valem no temporário também
     sift = await get_sift_for_user(db, user.id, model_config)
     skills = await _load_skills(db, user, model_config, body.get("skill_ids") or [])
@@ -118,8 +128,8 @@ async def ephemeral(
             model=model,
             history=history,
             user_text=content,
-            chat_system_prompt=body.get("system_prompt"),
-            params=body.get("params") or {},
+            chat_system_prompt=system_prompt,
+            params=params,
             base_url=base_url,
             session=TurnSession(user_id=user_id, user_tz=_session_tz(user, user_tz)),
             sift=sift,
@@ -164,7 +174,7 @@ async def send_message(
     user_tz: str = Depends(_tz_from_header),
 ):
     chat = await _get_owned_chat(db, chat_id, user)
-    if not chat.model:
+    if not chat.model and not chat.model_config_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Selecione um modelo no chat")
     if not (body.content or "").strip() and not body.attachments:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mensagem vazia")
@@ -198,12 +208,16 @@ async def send_message(
                 )
         return {"queued": True, "steer": body.steer}
 
-    api_key, base_url = await _resolve_provider(db, user, chat.model)
+    # Modelo customizado é uma referência viva: as mudanças feitas no editor
+    # passam a valer neste turno, sem depender do snapshot salvo no chat.
+    model_config = await _get_model_config(db, chat.model_config_id, user)
+    model, system_prompt, params = _effective_chat_model(chat, model_config)
+    api_key, base_url = await _resolve_provider(db, user, model)
 
     # auto-compactação (modelo do Claude Code): se o contexto passou do limiar da janela do
     # modelo, resume o histórico ANTIGO agora — ANTES de montar o turno e de persistir a nova
     # mensagem — mantendo as últimas mensagens. Best-effort, só dispara quando grande.
-    await compaction_service.maybe_autocompact(db, user, chat, None)
+    await compaction_service.maybe_autocompact(db, user, chat, model_config)
 
     # histórico atual (antes da nova mensagem) no formato OpenAI
     rows = await db.scalars(
@@ -214,9 +228,6 @@ async def send_message(
         for m in rows
         if m.role in ("user", "assistant") and m.content and not m.compacted
     ]
-
-    # modelo personalizado do chat (define ferramentas + config por-modelo)
-    model_config = await _get_model_config(db, chat.model_config_id, user)
 
     # "@" no promptbox: roteia ESTE turno a outro agente (ModelConfig) sem alterar o
     # padrão do chat. Passa a valer o modelo/prompt/tools/skills DESSE agente.
@@ -259,11 +270,7 @@ async def send_message(
         model = agent_override.base_model
         api_key, base_url = await _resolve_provider(db, user, model)
         system_prompt = agent_override.system_prompt
-        params = agent_override.params or {}
-    else:
-        model = chat.model
-        system_prompt = chat.system_prompt
-        params = chat.params or {}
+        params = dict(agent_override.params or {})
     user_text = body.content
     user_id = str(user.id)
 
@@ -462,7 +469,7 @@ async def regenerate_message(
     e gera uma nova a partir do mesmo prompt do usuário."""
     chat = await _get_owned_chat(db, chat_id, user)
     await budget_service.enforce_or_raise(db, user)  # orçamento pessoal (modo "pausar")
-    api_key, base_url, model_config, sift, skills = await _prepare_turn(db, user, chat)
+    api_key, base_url, model_config, sift, skills, model, system_prompt, params = await _prepare_turn(db, user, chat)
 
     rows = await _ordered_messages(db, chat_id)
     idx = next((i for i, m in enumerate(rows) if m.id == message_id), None)
@@ -509,9 +516,6 @@ async def regenerate_message(
             await db.delete(m)
         await db.commit()
 
-    model = chat.model
-    system_prompt = chat.system_prompt
-    params = chat.params or {}
     user_id = str(user.id)
     arts_on = _artifacts_enabled(user)
 
@@ -599,7 +603,7 @@ async def continue_message(
     """Continua a última resposta do assistant, anexando ao conteúdo existente."""
     chat = await _get_owned_chat(db, chat_id, user)
     await budget_service.enforce_or_raise(db, user)  # orçamento pessoal (modo "pausar")
-    api_key, base_url, model_config, sift, skills = await _prepare_turn(db, user, chat)
+    api_key, base_url, model_config, sift, skills, model, system_prompt, params = await _prepare_turn(db, user, chat)
     # guardas de saída valem também na continuação (mesma resposta ao usuário) — sem
     # isto, um modelo com guarda de recusa/fundamentação ficava sem proteção só aqui.
     guards = await _resolve_guards(db, user, model_config)
@@ -623,9 +627,6 @@ async def continue_message(
         "sem repetir nada do que já foi escrito e sem preâmbulos."
     )
 
-    model = chat.model
-    system_prompt = chat.system_prompt
-    params = chat.params or {}
     user_id = str(user.id)
 
     arts_on = _artifacts_enabled(user)
@@ -714,4 +715,3 @@ async def continue_message(
     )
     gen = generation.start(str(chat_id), source, _finish)
     return _sse_stream(_subscribe(gen))
-

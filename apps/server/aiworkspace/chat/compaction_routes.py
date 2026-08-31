@@ -17,7 +17,7 @@ from ..auth.deps import require_approved
 from ..db import get_db
 from ..models import ChatCompaction, Message, User
 from .compaction_service import run_compaction, serialize_message, summary_content
-from .turn_setup import _get_owned_chat, _ordered_messages
+from .turn_setup import _get_model_config, _get_owned_chat, _ordered_messages
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -34,10 +34,11 @@ async def compact_chat(
     Manual = resume TUDO (keep_last=0); a auto-compactação usa o mesmo núcleo com
     keep_last (ver compaction_service)."""
     chat = await _get_owned_chat(db, chat_id, user)
-    if not chat.model:
+    if not chat.model and not chat.model_config_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Chat sem modelo definido")
     try:
-        res = await run_compaction(db, user, chat, keep_last=0, min_convo=3)
+        mc = await _get_model_config(db, chat.model_config_id, user)
+        res = await run_compaction(db, user, chat, keep_last=0, min_convo=3, model_config=mc)
     except Exception as exc:  # noqa: BLE001 - falha no resumo
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Falha ao resumir: {exc}")
     if res is None:
@@ -297,5 +298,3 @@ async def restore_compaction(
         db.add(note)
     await db.commit()
     return {"ok": True, "restored": 0}
-
-

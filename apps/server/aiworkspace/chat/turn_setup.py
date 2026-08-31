@@ -110,6 +110,29 @@ async def _get_model_config(
     return mc
 
 
+def _effective_chat_model(
+    chat: Chat, model_config: ModelConfig | None
+) -> tuple[str, str | None, dict]:
+    """Configuração que realmente governa um turno de chat.
+
+    ``Chat.model``, ``system_prompt`` e ``params`` existiam antes dos modelos
+    customizados e continuam sendo o fallback para chats comuns. Para um chat
+    vinculado a um ``ModelConfig``, porém, eles são apenas um snapshot legado do
+    momento da seleção. Usá-los no runtime fazia o chat ficar preso ao prompt,
+    aos parâmetros e até ao modelo-base antigos após editar o preset.
+
+    O UUID em ``model_config_id`` é a identidade estável; a configuração atual
+    desse registro é a fonte de verdade em todo novo turno.
+    """
+    if model_config is not None and model_config.base_model:
+        return (
+            model_config.base_model,
+            model_config.system_prompt,
+            dict(model_config.params or {}),
+        )
+    return chat.model, chat.system_prompt, dict(chat.params or {})
+
+
 def _usage_record(usage: dict | None, model: str, model_config: ModelConfig | None) -> dict:
     """Monta o registro ponta-a-ponta de uma mensagem: origem + tokens + custo."""
     u = usage or {}
@@ -218,17 +241,22 @@ async def _resolve_provider(db: AsyncSession, user: User, model: str) -> tuple[s
 
 
 async def _prepare_turn(db: AsyncSession, user: User, chat: Chat):
-    """Valida pré-requisitos e devolve (api_key, base_url, model_config, sift, skills)."""
-    if not chat.model:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Selecione um modelo no chat")
-    api_key, base_url = await _resolve_provider(db, user, chat.model)
+    """Prepara um turno e devolve também seus valores efetivos de runtime.
+
+    A tupla termina em ``(model, system_prompt, params)`` para que os caminhos
+    de regenerar, continuar e retomar não voltem a usar snapshots do ``Chat``.
+    """
     model_config = await _get_model_config(db, chat.model_config_id, user)
+    model, system_prompt, params = _effective_chat_model(chat, model_config)
+    if not model:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Selecione um modelo no chat")
+    api_key, base_url = await _resolve_provider(db, user, model)
     sift = await get_sift_for_user(
         db, user.id, model_config,
         codespace_project_id=str(chat.project_id) if chat.project_id else None,
     )
     skills = await _load_skills(db, user, model_config)
-    return api_key, base_url, model_config, sift, skills
+    return api_key, base_url, model_config, sift, skills, model, system_prompt, params
 
 
 def _sse(event: dict) -> str:
@@ -1126,5 +1154,4 @@ async def _ordered_messages(db: AsyncSession, chat_id: uuid.UUID) -> list[Messag
         select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at)
     )
     return list(rows)
-
 

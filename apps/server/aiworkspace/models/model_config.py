@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Boolean, ForeignKey, String, Text
+from sqlalchemy import Boolean, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,6 +13,12 @@ from ..db import Base
 
 class ModelConfig(Base):
     __tablename__ = "model_configs"
+    # O slug é o ID público do preset na API. ``NULL`` continua permitido para
+    # modelos que usam somente o UUID interno, mas dois IDs explícitos iguais do
+    # mesmo usuário fariam a API resolver "o primeiro" modelo encontrado.
+    __table_args__ = (
+        UniqueConstraint("user_id", "slug", name="uq_model_config_user_slug"),
+    )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), index=True

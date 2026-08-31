@@ -162,7 +162,6 @@ async def roundtable_run(
     # resolve cada participante (provedor + modelo custom + system) ANTES de streamar,
     # pois a `db` da request fecha ao retornar o StreamingResponse.
     resolved: list[dict] = []
-    names_list = [p.get("name") or "Modelo" for p in participants]
     for p in participants:
         model = p.get("model") or ""
         if not model:
@@ -173,17 +172,33 @@ async def roundtable_run(
                 mc = await _get_model_config(db, uuid.UUID(str(p["model_config_id"])), user)
             except (ValueError, TypeError):
                 mc = None
+        # Participantes customizados também são referências vivas: a mesa não
+        # deve conservar o modelo-base que estava salvo quando ela foi criada.
+        runtime_model = mc.base_model if mc is not None and mc.base_model else model
         try:
-            api_key, base_url = await _resolve_provider(db, user, model)
+            api_key, base_url = await _resolve_provider(db, user, runtime_model)
         except HTTPException:
             continue
+        runtime_participant = {
+            **p,
+            "model": runtime_model,
+            # O nome é apresentação, mas também entra no contexto da mesa. Atualiza
+            # junto com o preset para que reutilizar nomes não deixe a conversa com
+            # um rótulo antigo.
+            "name": mc.name if mc is not None else (p.get("name") or "Modelo"),
+        }
         resolved.append({
-            "p": p, "mc": mc, "api_key": api_key, "base_url": base_url,
-            "system": _rt_system(mc, p, names_list, p.get("name") or "Modelo"),
+            "p": runtime_participant, "mc": mc, "api_key": api_key, "base_url": base_url,
+            "system": "",  # preenchido após todos os nomes atuais serem conhecidos
             "params": (mc.params if mc else {}) or {},
+            "model": runtime_model,
         })
     if not resolved:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nenhum participante com provedor válido")
+
+    current_names = [r["p"]["name"] for r in resolved]
+    for r in resolved:
+        r["system"] = _rt_system(r["mc"], r["p"], current_names, r["p"]["name"])
 
     mod = None
     if policy == "moderator":
@@ -255,7 +270,7 @@ async def roundtable_run(
                 reasoning_obj = None
                 try:
                     async for ev in run_turn(
-                        api_key=r["api_key"], model=r["p"]["model"], history=history,
+                        api_key=r["api_key"], model=r["model"], history=history,
                         user_text=user_text, chat_system_prompt=r["system"], params=r["params"],
                         session=TurnSession(user_id=str(user.id), user_tz=user_tz, chat_id=cid),
                         base_url=r["base_url"], use_tools=False, use_context=True,
@@ -278,7 +293,7 @@ async def roundtable_run(
                 lp = sid
                 turns += 1
                 if text.strip():
-                    mid = await _rt_persist(chat_id, user, r["mc"], r["p"]["model"], sp, text, usage, reasoning_obj)
+                    mid = await _rt_persist(chat_id, user, r["mc"], r["model"], sp, text, usage, reasoning_obj)
                     convo.append({"role": "assistant", "content": text, "speaker": sid})
                     yield _sse({"type": "speaker_end", "speaker": sp, "message_id": str(mid)})
                 else:
@@ -304,4 +319,3 @@ async def roundtable_stop(
     await _get_owned_chat(db, chat_id, user)
     _roundtable_stop.add(str(chat_id))
     return {"ok": True}
-

@@ -84,7 +84,8 @@ async def _summarize(api_key: str, model: str, base_url: str | None,
 
 
 async def run_compaction(db: AsyncSession, user: User, chat: Chat, *,
-                         keep_last: int = 0, min_convo: int = 3) -> dict | None:
+                         keep_last: int = 0, min_convo: int = 3,
+                         model_config: ModelConfig | None = None) -> dict | None:
     """Compacta o contexto do chat. Resume as mensagens não-compactadas, mantendo as
     ÚLTIMAS `keep_last` intactas (0 = resume tudo, comportamento do /compact manual).
     Não-destrutivo: cria checkpoint restaurável, marca as antigas `compacted=True`, e
@@ -93,7 +94,10 @@ async def run_compaction(db: AsyncSession, user: User, chat: Chat, *,
     chat_id = chat.id
     # modelo auxiliar barato p/ resumir (Config → Chats) senão o modelo da conversa
     iface = (user.profile or {}).get("interface") or {}
-    summary_model = (iface.get("compact_model") or "").strip() or chat.model
+    summary_model = (
+        (iface.get("compact_model") or "").strip()
+        or (model_config.base_model if model_config is not None else chat.model)
+    )
     api_key, base_url = await _resolve_provider(db, user, summary_model)
 
     rows = await _ordered_messages(db, chat_id)
@@ -220,12 +224,16 @@ async def maybe_autocompact(db: AsyncSession, user: User, chat: Chat,
         last_tokens = await _last_context_tokens(db, chat.id)
         if last_tokens <= 0:
             return False
-        window = await _model_window(db, user, chat.model) or int(s.autocompact_fallback_window)
+        # Chat vinculado a preset usa o modelo-base ATUAL do ModelConfig; ``chat.model``
+        # pode ser um snapshot antigo de antes de o preset ser editado.
+        runtime_model = (model_config.base_model if model_config is not None else chat.model)
+        window = await _model_window(db, user, runtime_model) or int(s.autocompact_fallback_window)
         if last_tokens < float(s.autocompact_threshold) * window:
             return False
         res = await run_compaction(db, user, chat,
                                    keep_last=int(s.autocompact_keep_last),
-                                   min_convo=max(3, int(s.autocompact_min_messages) - int(s.autocompact_keep_last)))
+                                   min_convo=max(3, int(s.autocompact_min_messages) - int(s.autocompact_keep_last)),
+                                   model_config=model_config)
         if res:
             logger.info("auto-compactação: chat %s (%d tokens > %.0f%% de %d) → resumiu %d msgs",
                         chat.id, last_tokens, s.autocompact_threshold * 100, window,

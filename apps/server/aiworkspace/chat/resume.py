@@ -90,19 +90,16 @@ async def resume_chat_turn(
             if chat is None:
                 return
             user = await db.get(User, chat.user_id)
-            if user is None or not chat.model:
+            if user is None or (not chat.model and not chat.model_config_id):
                 return
             from ..budget_service import budget_state
             if (await budget_state(db, user)).get("blocked"):
                 logger.info("resume pausado: orçamento do usuário %s atingido", user.id)
                 return
-            api_key, base_url, model_config, sift, skills = await _prepare_turn(db, user, chat)
+            api_key, base_url, model_config, sift, skills, model, system_prompt, params = await _prepare_turn(db, user, chat)
             # guardas de saída valem no wake tanto quanto no send: é o trabalho autônomo
             # continuando — exatamente onde o guarda-juiz de fundamentação deve atuar.
             guards = await _resolve_guards(db, user, model_config)
-            model = chat.model
-            system_prompt = chat.system_prompt
-            params = chat.params or {}
             arts_on = _artifacts_enabled(user)
             # auto-compactação (Claude Code): encolhe o contexto antes de continuar se cresceu
             from . import compaction_service

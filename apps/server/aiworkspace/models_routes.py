@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from .auth.deps import require_approved
 from .db import get_db
@@ -21,7 +22,7 @@ router = APIRouter(prefix="/models", tags=["models"])
 class ModelIn(BaseModel):
     base_model: str
     name: str
-    slug: str | None = None
+    slug: str | None = Field(default=None, max_length=64)
     description: str | None = None
     avatar_url: str | None = None
     system_prompt: str | None = None
@@ -42,7 +43,7 @@ class ModelIn(BaseModel):
 class ModelUpdate(BaseModel):
     base_model: str | None = None
     name: str | None = None
-    slug: str | None = None
+    slug: str | None = Field(default=None, max_length=64)
     description: str | None = None
     avatar_url: str | None = None
     system_prompt: str | None = None
@@ -93,13 +94,56 @@ async def list_models(user: User = Depends(require_approved), db: AsyncSession =
     return list(rows)
 
 
+def _clean_slug(value: str | None) -> str | None:
+    """Normaliza o ID público sem transformar uma string vazia em colisão."""
+    cleaned = (value or "").strip()
+    return cleaned or None
+
+
+async def _ensure_slug_available(
+    db: AsyncSession, user: User, slug: str | None, *, except_id: uuid.UUID | None = None
+) -> None:
+    """Impede ambiguidade antes do commit e devolve um erro útil à UI."""
+    if slug is None:
+        return
+    found = await db.scalar(
+        select(ModelConfig.id).where(
+            ModelConfig.user_id == user.id,
+            ModelConfig.slug == slug,
+        )
+    )
+    if found is not None and found != except_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Já existe um modelo com o ID '@{slug}'. Escolha outro ID.",
+        )
+
+
+async def _commit_model(db: AsyncSession, *, slug: str | None) -> None:
+    """A constraint cobre duas gravações concorrentes após a verificação acima."""
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        if "uq_model_config_user_slug" in str(exc.orig):
+            shown = f" '@{slug}'" if slug else ""
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"Já existe um modelo com o ID{shown}. Escolha outro ID.",
+            ) from exc
+        raise
+
+
 @router.post("", response_model=ModelOut)
 async def create_model(
     body: ModelIn, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
 ):
-    mc = ModelConfig(user_id=user.id, **body.model_dump())
+    data = body.model_dump()
+    data["slug"] = _clean_slug(data.get("slug"))
+    await _ensure_slug_available(db, user, data["slug"])
+    mc = ModelConfig(user_id=user.id, **data)
     db.add(mc)
-    await db.commit()
+    await _commit_model(db, slug=data["slug"])
     await db.refresh(mc)
     return mc
 
@@ -119,9 +163,13 @@ async def update_model(
     db: AsyncSession = Depends(get_db),
 ):
     mc = await _owned(db, model_id, user)
-    for field, value in body.model_dump(exclude_unset=True).items():
+    data = body.model_dump(exclude_unset=True)
+    if "slug" in data:
+        data["slug"] = _clean_slug(data["slug"])
+        await _ensure_slug_available(db, user, data["slug"], except_id=mc.id)
+    for field, value in data.items():
         setattr(mc, field, value)
-    await db.commit()
+    await _commit_model(db, slug=mc.slug)
     await db.refresh(mc)
     return mc
 

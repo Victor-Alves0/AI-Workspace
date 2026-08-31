@@ -720,9 +720,15 @@ export default function ChatPage() {
   // modelo da resposta com um modelo custom), caindo no modelo atual do chat. Sem
   // isto o botão usava só o modelo selecionado, ignorando a voz configurada.
   const voiceFor = useCallback((m: Message): string | undefined => {
+    const configId = m.usage?.model_config_id;
+    const byId = configId ? customModels.find((c) => c.id === configId) : undefined;
     const name = m.usage?.model_name;
-    const byMsg = name ? customModels.find((c) => c.name === name) : undefined;
-    return (byMsg ?? curCustom)?.tts_voice ?? undefined;
+    // Mensagens antigas não têm model_config_id. Só usa nome como fallback se
+    // houver UMA correspondência; nomes repetidos jamais devem escolher a voz de
+    // outro preset por acidente.
+    const sameName = name ? customModels.filter((c) => c.name === name) : [];
+    const legacyByName = sameName.length === 1 ? sameName[0] : undefined;
+    return (byId ?? legacyByName ?? curCustom)?.tts_voice ?? undefined;
   }, [customModels, curCustom]);
 
   // ---------------------------------------------------------------------------
@@ -1086,6 +1092,8 @@ export default function ChatPage() {
     modelChosenRef.current = true;
     setCurModel(mc.base_model);
     setCurCustomId(mc.id);
+    // Mantém um snapshot para o fallback caso o preset seja apagado, mas o
+    // backend sempre usa o ModelConfig ATUAL enquanto model_config_id existir.
     if (active) await patchActive({ model: mc.base_model, system_prompt: mc.system_prompt, params: mc.params, model_config_id: mc.id });
   }
 
@@ -1719,15 +1727,26 @@ export default function ChatPage() {
   }
 
   // nível de raciocínio (thinking) — lido/gravado nos params do modelo
-  const activeParams = active ? active.params : draftParams;
+  // Em chats vinculados, o ModelConfig é a fonte de verdade. Assim, voltar de
+  // "Modelos" já mostra os parâmetros editados sem precisar recriar o chat.
+  const activeParams = active
+    ? (active.model_config_id && curCustom ? curCustom.params ?? {} : active.params)
+    : draftParams;
   const reasoningEffort: ReasoningEffort =
     ((activeParams?.reasoning as { effort?: ReasoningEffort } | undefined)?.effort) ?? "off";
   function setReasoningEffort(level: ReasoningEffort) {
     const base = { ...(activeParams ?? {}) };
     if (level === "off") delete base.reasoning;
     else base.reasoning = { effort: level };
-    if (active) patchActive({ params: base });
-    else setDraftParams(base);
+    if (active?.model_config_id && curCustom) {
+      api.patch<ModelConfig>(`/models/${curCustom.id}`, { params: base })
+        .then((updated) => setCustomModels((models) => models.map((m) => m.id === updated.id ? updated : m)))
+        .catch(() => {});
+    } else if (active) {
+      patchActive({ params: base });
+    } else {
+      setDraftParams(base);
+    }
   }
 
   // favoritos e fixados do seletor de modelos (persistidos no perfil do usuário)
@@ -2411,8 +2430,12 @@ export default function ChatPage() {
             {ctrlResize.divider}
             <Controls
               key={active?.id ?? "draft"}
-              systemPrompt={active ? active.system_prompt ?? "" : draftSystemPrompt}
-              params={active ? active.params : draftParams}
+              systemPrompt={active
+                ? (active.model_config_id && curCustom
+                  ? curCustom.system_prompt ?? ""
+                  : active.system_prompt ?? "")
+                : draftSystemPrompt}
+              params={activeParams}
               memory={active ? active.memory_config ?? null : undefined}
               memoryDefault={memoryDefault}
               hasProject={!!active?.folder_id}
@@ -2421,9 +2444,19 @@ export default function ChatPage() {
               onKnowledgeChange={active ? (cfg) => patchActive({ knowledge_config: cfg }) : undefined}
               brain={active ? active.brain_config ?? null : undefined}
               onBrainChange={active ? (cfg) => patchActive({ brain_config: cfg }) : undefined}
-              onSave={(sp, params) => {
-                if (active) patchActive({ system_prompt: sp, params });
-                else {
+              onSave={async (sp, params) => {
+                if (active?.model_config_id && curCustom) {
+                  // Com modelo custom, estes controles pertencem ao preset —
+                  // salvar no Chat criaria outro snapshot antigo e o próximo
+                  // turno ignoraria a alteração. Atualiza o preset ativo.
+                  const updated = await api.patch<ModelConfig>(`/models/${curCustom.id}`, {
+                    system_prompt: sp,
+                    params,
+                  });
+                  setCustomModels((models) => models.map((m) => m.id === updated.id ? updated : m));
+                } else if (active) {
+                  await patchActive({ system_prompt: sp, params });
+                } else {
                   setDraftSystemPrompt(sp ?? "");
                   setDraftParams(params);
                 }
