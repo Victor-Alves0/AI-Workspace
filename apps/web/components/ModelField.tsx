@@ -76,7 +76,7 @@ export default function ModelField({
         onClick={() => setOpen((v) => !v)}
         className={className || "flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none transition-colors hover:border-accent/50"}
       >
-        <span className={`truncate ${label ? "text-ink" : "text-muted"}`}>{label || placeholder}</span>
+        <span title={label || placeholder} className={`truncate ${label ? "text-ink" : "text-muted"}`}>{label || placeholder}</span>
         <ChevronDown size={16} className="shrink-0 text-muted" />
       </button>
 
@@ -129,7 +129,7 @@ export default function ModelField({
                     {r.name[0]?.toUpperCase()}
                   </span>
                 )}
-                <span className="flex-1 truncate text-sm text-ink">{r.name}</span>
+                <span title={r.name} className="flex-1 truncate text-sm text-ink">{r.name}</span>
                 {r.provider && (
                   <span className="shrink-0 rounded bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">{r.provider}</span>
                 )}

@@ -443,6 +443,15 @@ SEARCH_LANG_HINT = (
     "(user-created tools may be described in it)."
 )
 
+# A busca devolve candidatos (URLs + snippets), não o conteúdo da fonte. Esta
+# instrução só entra nos escopos que possuem a cadeia completa, montada pelo loader.
+WEB_RESEARCH_WORKFLOW = (
+    "WEB RESEARCH WORKFLOW: `web.search.query` finds candidate URLs and snippets; "
+    "when you need to answer from a source's actual content, follow up with "
+    "`web.page.read` on the promising URL. Do not treat a search snippet as if you "
+    "had read the full page."
+)
+
 
 # Ponte entre os DOIS mundos de ferramentas do turno: as do índice SIFT (descobertas
 # via search_tools) e as NATIVAS, injetadas direto no array de tools. Sem esta ponte o
@@ -1457,6 +1466,8 @@ def _assemble_tools_and_prompt(
         meta = "run_code" if code_mode else "execute_tool"
         custom = (sift_meta.get("sift_prompt") or "").strip() or DEFAULT_TOOL_PROMPT
         a.sift_prompt = _compose_tool_prompt(a.sift_prompt, catalog, mode, custom, meta)
+        if sift_meta.get("web_research_chain"):
+            a.sift_prompt += "\n\n" + WEB_RESEARCH_WORKFLOW
         # Codespace: postura de agente de código (agir com as tools, nunca fabricar
         # execução). scope.meta["codespace"] é montado pelo loader p/ chats de projeto.
         if sift_meta.get("codespace"):

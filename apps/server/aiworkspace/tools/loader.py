@@ -46,7 +46,9 @@ def tool_config(model_config: Any | None) -> dict:
     return tc if isinstance(tc, dict) else {}
 
 
-def _tool_catalog(tool_ids: list[str], rows: list[Any]) -> list[str]:
+def _tool_catalog(
+    tool_ids: list[str], rows: list[Any], effective_allow: list[str] | None = None,
+) -> list[str]:
     """Lista legível ("Nome — descrição") das ferramentas ativas do modelo.
 
     Injetada no system prompt para o modelo SABER o que existe — sem isso ele só
@@ -55,6 +57,7 @@ def _tool_catalog(tool_ids: list[str], rows: list[Any]) -> list[str]:
     builtins = {t["path"]: t for t in sift_service.BUILTIN_TOOLS}
     by_id = {str(t.id): t for t in rows}
     out: list[str] = []
+    listed_builtin_paths: set[str] = set()
     for tid in tool_ids or []:
         if not isinstance(tid, str) or not tid:
             continue
@@ -63,11 +66,22 @@ def _tool_catalog(tool_ids: list[str], rows: list[Any]) -> list[str]:
             if info:
                 # o catálogo é lido pelo MODELO => descrição em inglês (model_desc)
                 out.append(f"{info['name']} — {info.get('model_desc') or info['description']}")
+                listed_builtin_paths.add(info["path"])
         else:
             tool = by_id.get(tid)
             if tool is not None and tool.enabled:
                 desc = (tool.description or "").strip()
                 out.append(f"{tool.name or tool.path}" + (f" — {desc}" if desc else ""))
+    # Algumas tools formam uma cadeia inseparável. Quando uma companion é liberada
+    # automaticamente pelo escopo (ex.: buscar na web → ler a página encontrada),
+    # ela também precisa aparecer no catálogo, inclusive no modo "list".
+    for info in sift_service.BUILTIN_TOOLS:
+        if (
+            effective_allow
+            and info["path"] not in listed_builtin_paths
+            and _allow_match(info["path"], effective_allow)
+        ):
+            out.append(f"{info['name']} — {info.get('model_desc') or info['description']}")
     return out
 
 
@@ -123,6 +137,23 @@ _CODESPACE_ALL = (*_CODESPACE_READ, *_CODESPACE_WORK, "task.ledger.track", "http
 
 def _allow_match(path: str, allow: list[str]) -> bool:
     return any(path == a or (a.endswith(".*") and path.startswith(a[:-1])) for a in allow)
+
+
+# Ferramentas que só fazem sentido juntas. A seleção de "Pesquisa na Web" deve
+# permitir ler o URL retornado; caso contrário o modelo só vê snippets e pode
+# concluir, incorretamente, que não consegue verificar a fonte original.
+_TOOL_COMPANIONS: dict[str, tuple[str, ...]] = {
+    "web.search.query": ("web.page.read",),
+}
+
+
+def expand_tool_companions(allow: list[str]) -> list[str]:
+    """Inclui companions seguros das tools já permitidas, sem abrir outros grupos."""
+    expanded = set(allow)
+    for source, companions in _TOOL_COMPANIONS.items():
+        if _allow_match(source, allow):
+            expanded.update(companions)
+    return sorted(expanded)
 
 
 def codespace_allow(allow: list[str]) -> list[str]:
@@ -335,7 +366,11 @@ async def get_sift_for_user(
         return None  # SIFT ligada mas nada marcado => sem ferramentas
 
     rows = list(await db.scalars(select(Tool).where(Tool.user_id == user_id)))
-    allow = _allow_patterns(tool_ids, rows)
+    # Mantém uma visão efetiva separada para o catálogo antes de acrescentar as
+    # permissões automáticas do Codespace. Assim só companions explicitamente
+    # relacionados aparecem como parte do modelo normal.
+    effective_allow = expand_tool_companions(_allow_patterns(tool_ids, rows))
+    allow = effective_allow
     if in_codespace:
         allow = codespace_allow(allow)
     if not allow:
@@ -389,7 +424,11 @@ async def get_sift_for_user(
         # metadados p/ o orchestrator (scope.meta, oficial na SIFT >= 0.7 —
         # substituiu os antigos atributos injetados _aw_*): catálogo legível,
         # modo de exposição e prompt "quando usar"
-        scope.meta["catalog"] = _tool_catalog(tool_ids, rows)
+        scope.meta["catalog"] = _tool_catalog(tool_ids, rows, effective_allow)
+        scope.meta["web_research_chain"] = (
+            _allow_match("web.search.query", effective_allow)
+            and _allow_match("web.page.read", effective_allow)
+        )
         scope.meta["sift_mode"] = sift_config.get("mode") or "prompt"
         scope.meta["sift_prompt"] = sift_config.get("prompt") or ""
         # chat de projeto: o orchestrator usa isto p/ dar um teto de iterações maior

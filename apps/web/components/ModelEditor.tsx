@@ -1362,6 +1362,11 @@ export default function ModelEditor({
                   {toolIds.length > 0 && !codeMode && (
                     <p className="text-[11px] text-muted">Use “Gerenciar” para fixar (pin) as ferramentas mais usadas.</p>
                   )}
+                  {toolIds.includes("builtin:web.search.query") && !toolIds.includes("builtin:web.page.read") && (
+                    <p className="text-[11px] text-muted">
+                      Pesquisa na Web também libera <span className="text-ink-soft">Ler Página</span> para abrir os links encontrados e verificar a fonte completa.
+                    </p>
+                  )}
                 </div>
               </div>
             )}

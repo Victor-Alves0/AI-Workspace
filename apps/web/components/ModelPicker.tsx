@@ -120,7 +120,7 @@ export default function ModelPicker({
           // eslint-disable-next-line @next/next/no-img-element
           <img src={avatar} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
         )}
-        <span className="max-w-[140px] truncate sm:max-w-[240px]">{label || "Selecionar modelo"}</span>
+        <span title={label || "Selecionar modelo"} className="max-w-[140px] truncate sm:max-w-[240px]">{label || "Selecionar modelo"}</span>
         <ChevronDown size={18} className="shrink-0 text-muted" />
       </button>
 
@@ -181,7 +181,7 @@ export default function ModelPicker({
                       {r.name[0]?.toUpperCase()}
                     </span>
                   )}
-                  <span className="truncate text-sm text-ink">{r.name}</span>
+                  <span title={r.name} className="truncate text-sm text-ink">{r.name}</span>
                   {r.provider && (
                     <span className="shrink-0 rounded bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">{r.provider}</span>
                   )}

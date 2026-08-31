@@ -9,7 +9,7 @@ ação separada com confirmação).
 """
 from __future__ import annotations
 
-from aiworkspace.tools.loader import codespace_allow, codespace_pins
+from aiworkspace.tools.loader import _tool_catalog, codespace_allow, codespace_pins, expand_tool_companions
 
 _ALL = {
     "code.graph.query", "code.files.browse", "code.flow.analyze",
@@ -69,3 +69,21 @@ def test_wildcard_allow_pattern_counts_as_in_scope():
     pins = codespace_pins([], ["code.files.*"])
     assert "code.files.browse" in pins
     assert "code.files.write" in pins  # o wildcard do modelo JÁ dava permissão
+
+
+def test_web_search_brings_the_page_reader_companion():
+    """Busca retorna links; o modelo também precisa poder abrir o link retornado."""
+    allow = expand_tool_companions(["web.search.query"])
+    assert "web.search.query" in allow
+    assert "web.page.read" in allow
+
+
+def test_companions_do_not_open_an_unrelated_toolset():
+    assert expand_tool_companions(["utils.time.now"]) == ["utils.time.now"]
+
+
+def test_catalog_names_the_implicit_page_reader():
+    allow = expand_tool_companions(["web.search.query"])
+    catalog = _tool_catalog(["builtin:web.search.query"], [], allow)
+    assert any(entry.startswith("Pesquisa na Web") for entry in catalog)
+    assert any(entry.startswith("Ler Página") for entry in catalog)

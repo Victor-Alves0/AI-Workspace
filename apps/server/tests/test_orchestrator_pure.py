@@ -88,6 +88,13 @@ def test_compose_prompt_mode_list_enumerates():
     assert "Tool A — faz X" in out  # modo list injeta o catálogo
 
 
+def test_web_research_workflow_requires_reading_the_result_page():
+    """O modelo recebe uma regra explícita para não confundir snippet com fonte."""
+    assert "web.search.query" in orch.WEB_RESEARCH_WORKFLOW
+    assert "web.page.read" in orch.WEB_RESEARCH_WORKFLOW
+    assert "snippet" in orch.WEB_RESEARCH_WORKFLOW.lower()
+
+
 # ----------------------------- _finalize_usage --------------------------------
 
 def test_merge_usage_accepts_flat_responses_metrics():

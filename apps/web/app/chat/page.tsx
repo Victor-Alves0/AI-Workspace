@@ -1187,7 +1187,11 @@ export default function ChatPage() {
   async function send(textArg?: string) {
     // textArg vem dos seletores de opção (kind:"ask"); senão usa o campo de texto
     const override = typeof textArg === "string";
-    const text = (override ? textArg : input).trim();
+    // Preserve o valor EXATO para devolver ao composer se o servidor recusar a
+    // request (por exemplo 413 por limite de tamanho). `text` continua normalizado
+    // só para o payload/validação, sem perder espaços/quebras do rascunho do usuário.
+    const draftBeforeSend = input;
+    const text = (override ? textArg : draftBeforeSend).trim();
     // mesa-redonda: a mensagem do usuário GUIA a conversa; roda os participantes.
     // (funciona no rascunho: runRoundtable cria o chat no 1º envio)
     if (isRoundtable) {
@@ -1211,11 +1215,14 @@ export default function ChatPage() {
     if (!override) setAttachments([]);
     const turnAgentId = override ? null : agentId;
     if (!override) setAgentId(null);
-    const turnRefDocIds = override ? [] : refDocs.map((r) => r.id);
+    const turnRefDocs = override ? [] : refDocs;
+    const turnRefDocIds = turnRefDocs.map((r) => r.id);
     if (!override) setRefDocs([]);
-    const turnRefChatIds = override ? [] : refChats.map((r) => r.id);
+    const turnRefChats = override ? [] : refChats;
+    const turnRefChatIds = turnRefChats.map((r) => r.id);
     if (!override) setRefChats([]);
-    setMessages((m) => [...m, { id: `tmp-${Date.now()}`, role: "user", content: text, attachments: turnAttachments, created_at: new Date().toISOString() }]);
+    const temporaryMessageId = `tmp-${Date.now()}`;
+    setMessages((m) => [...m, { id: temporaryMessageId, role: "user", content: text, attachments: turnAttachments, created_at: new Date().toISOString() }]);
     setAtBottom(true); // enviar re-engata o auto-scroll (acompanhar a resposta)
     setStreaming("");
     setStreamingReasoning("");
@@ -1293,8 +1300,20 @@ export default function ChatPage() {
     } catch (e) {
       // orçamento pessoal estourado (modo "pausar") ou outra falha ao iniciar o turno
       const msg = e instanceof ApiError ? e.message : "Falha ao enviar a mensagem";
-      setMessages((m) => m.filter((x) => !x.id.startsWith("tmp-"))); // desfaz o balão otimista
-      if (!override) setInput(text); // devolve o texto pro composer
+      // Desfaz somente o balão deste envio. Outras mensagens otimistas podem
+      // existir em chats que o usuário abriu em seguida e não devem sumir.
+      setMessages((m) => m.filter((x) => x.id !== temporaryMessageId));
+      if (!override && isActiveChat(ownerId)) {
+        // Não atropela um novo texto/chip que o usuário tenha montado enquanto a
+        // request falhava. Se o composer segue vazio, devolve tudo que foi tirado
+        // dele para este turno — principalmente o rascunho grande e editável.
+        setInput((current) => current || draftBeforeSend);
+        setAttachedSkillIds((current) => current.length ? current : turnSkillIds);
+        setAttachments((current) => current.length ? current : turnAttachments);
+        setAgentId((current) => current ?? turnAgentId);
+        setRefDocs((current) => current.length ? current : turnRefDocs);
+        setRefChats((current) => current.length ? current : turnRefChats);
+      }
       notify(e instanceof ApiError && e.status === 402 ? "Orçamento mensal atingido" : "Erro", msg);
       refreshBudget();
     } finally {

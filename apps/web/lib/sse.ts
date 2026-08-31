@@ -1,4 +1,4 @@
-import { API_URL, refreshSession } from "./api";
+import { API_URL, ApiError, refreshSession } from "./api";
 import { beacon } from "./trace";
 import type { ChatEvent } from "./types";
 
@@ -48,8 +48,11 @@ async function readSSE(res: Response, onEvent: (e: ChatEvent) => void): Promise<
     } catch {
       /* ignore */
     }
+    // Um 413/4xx acontece ANTES de o stream começar. Além de informar a UI,
+    // propague-o para quem enviou a mensagem: o composer precisa restaurar o
+    // rascunho que tinha sido removido de forma otimista.
     onEvent({ type: "error", message: detail });
-    return;
+    throw new ApiError(res.status, detail);
   }
 
   const reader = res.body.getReader();
