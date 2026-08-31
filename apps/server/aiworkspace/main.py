@@ -380,7 +380,10 @@ def create_app() -> FastAPI:
             return JSONResponse(status_code=500, content={"detail": "Erro interno"})
 
         metrics.record(request.method, request.url.path, response.status_code, ms)
-        if trace_id:
+        # Uma geração SSE em background possui trace próprio que dura até o
+        # ``done``. Não o sobrescreva com o trace HTTP, que fecha ao devolver os
+        # headers e só mede o setup da assinatura.
+        if trace_id and "X-Trace-Id" not in response.headers:
             response.headers["X-Trace-Id"] = trace_id
         if request.url.path.startswith("/v1"):
             response.headers.update(_API_CORS)

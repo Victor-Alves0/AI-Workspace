@@ -185,12 +185,15 @@ class Settings(BaseSettings):
     # watchdog de wall-clock dos jobs de background: mata a árvore após este tempo (2h),
     # substituindo o bound de wall-clock que o síncrono tem e o background não teria.
     code_exec_bg_max_seconds: int = 7200
-    # Auto-compactação (modelo do Claude Code): quando o contexto passa de threshold da
-    # janela do modelo, resume o histórico ANTIGO na entrada do turno e mantém as últimas
-    # keep_last mensagens. Ligado por padrão; quando dispara, ECONOMIZA (encolhe os turnos
-    # seguintes). fallback_window = janela assumida se o modelo não expõe context_length.
+    # Auto-compactação: quando o contexto passa de threshold da janela do modelo OU do
+    # orçamento de latência, resume o histórico ANTIGO na entrada do turno e mantém as
+    # últimas keep_last mensagens. O segundo limite evita que modelos com janela enorme
+    # (ex.: 1M tokens) acumulem contexto demais antes de ficar perceptivelmente lentos.
+    # ``autocompact_latency_budget_tokens=0`` desliga só esse gatilho antecipado.
+    # fallback_window = janela assumida se o modelo não expõe context_length.
     autocompact_enabled: bool = True
     autocompact_threshold: float = 0.75
+    autocompact_latency_budget_tokens: int = 64_000
     autocompact_keep_last: int = 8
     autocompact_min_messages: int = 12
     autocompact_fallback_window: int = 100_000
@@ -241,6 +244,16 @@ class Settings(BaseSettings):
     # segura o contexto por chamada é o _trim_tool_results; o histórico entre requests é
     # papel da compactação.
     codespace_max_tool_iterations: int = 150
+
+    # Orçamento temporário dos resultados de tools no loop agêntico. O resultado
+    # completo continua no evento/persistência; só resultados ANTIGOS são reduzidos no
+    # prompt reenviado ao modelo, com marcador explícito e início+fim preservados. Isso
+    # impede que pesquisas/páginas grandes deixem iterações normais cada vez mais lentas.
+    # 0 desliga a redução por orçamento. Codespace mantém uma janela maior e a política
+    # histórica de reter mais resultados recentes.
+    tool_result_context_budget_chars: int = 60_000
+    tool_result_context_keep_last: int = 2
+    tool_result_context_excerpt_chars: int = 4_000
 
     # Cache do índice SIFT (.npz por usuário) — string vazia desabilita.
     # A SIFT valida por hash de conteúdo+modelo, então cache velho é ignorado.

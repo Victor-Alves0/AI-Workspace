@@ -66,6 +66,25 @@ def test_nested_trace_is_reused_not_restarted():
     assert len(outer.spans) == 1
 
 
+def test_detached_trace_replaces_parent_context_and_flushes_once(monkeypatch):
+    """Trabalho em background não pode anexar spans ao trace HTTP já encerrado."""
+    submitted = []
+    monkeypatch.setattr(sink, "submit", submitted.append)
+    detached = tracing.new_trace("chat:generation", kind="chat", chat_id="c1")
+    with tracing.start_trace("POST /chats", kind="http") as request_trace:
+        with tracing.activate_trace(detached) as active:
+            assert active is detached
+            assert tracing.current_trace() is detached
+            assert tracing.get_open_trace(detached.id) is detached
+            with tracing.span("llm:model", kind="llm"):
+                pass
+        assert tracing.current_trace() is request_trace
+        assert tracing.get_open_trace(detached.id) is None
+    assert submitted == [detached, request_trace]
+    assert detached.spans[0].trace_id == detached.id
+    assert detached.attrs["chat_id"] == "c1"
+
+
 def test_span_without_trace_is_noop():
     """span() fora de um trace mede mas não persiste — não pode quebrar."""
     assert tracing.current_trace() is None

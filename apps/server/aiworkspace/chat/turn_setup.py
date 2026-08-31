@@ -1134,11 +1134,17 @@ async def _prepare_attachments(raw: Any, model_config: ModelConfig | None) -> li
     return out
 
 
-def _sse_stream(gen):
+def _sse_stream(gen, *, trace_id: str | None = None):
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    # Para gerações destacadas, o trace útil é o do driver inteiro, não o trace
+    # curtíssimo do POST que apenas abriu a assinatura SSE. O middleware preserva
+    # este header quando já estiver presente.
+    if trace_id:
+        headers["X-Trace-Id"] = trace_id
     return StreamingResponse(
         gen,
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers=headers,
     )
 
 
@@ -1154,4 +1160,3 @@ async def _ordered_messages(db: AsyncSession, chat_id: uuid.UUID) -> list[Messag
         select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at)
     )
     return list(rows)
-

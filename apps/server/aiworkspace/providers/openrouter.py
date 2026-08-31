@@ -306,7 +306,11 @@ async def stream_chat(
     _RESERVED = {"model", "messages", "stream", "stream_options", "usage", "tools", "tool_choice"}
     safe_params = {k: v for k, v in (params or {}).items() if k not in _RESERVED}
     if compat:
+        # Preferências de roteamento são extensão do OpenRouter. Nunca as envie a
+        # endpoints OpenAI-compatíveis (Ollama/LiteLLM), que podem rejeitar todo o
+        # request por um único campo desconhecido.
         safe_params.pop("reasoning", None)  # não é padrão OpenAI
+        safe_params.pop("provider", None)
     # Prompt caching: só no OpenRouter (compat/Ollama pode rejeitar conteúdo em blocos).
     # Marca o prefixo estável (system + tools + fim do histórico) — o maior ganho está
     # no loop agêntico, onde esse prefixo se repete a cada iteração.

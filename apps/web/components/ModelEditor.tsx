@@ -613,6 +613,47 @@ export default function ModelEditor({
   const avatarFileRef = useRef<HTMLInputElement>(null);
   const [avatarErr, setAvatarErr] = useState<string | null>(null);
 
+  // Preferências de rota pertencem aos parâmetros do OpenRouter. Mantemos um
+  // atalho tipado aqui para que o usuário não precise descobrir a estrutura
+  // `provider` no JSON avançado; quaisquer outras chaves continuam intactas.
+  const providerPrefs = useMemo<Record<string, unknown>>(() => {
+    try {
+      const parsed = JSON.parse(paramsStr || "{}");
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        && parsed.provider && typeof parsed.provider === "object" && !Array.isArray(parsed.provider)
+        ? parsed.provider as Record<string, unknown>
+        : {};
+    } catch {
+      return {};
+    }
+  }, [paramsStr]);
+  const providerSort = typeof providerPrefs.sort === "string" ? providerPrefs.sort : "";
+  const providerOrder = Array.isArray(providerPrefs.order)
+    ? providerPrefs.order.filter((item): item is string => typeof item === "string").join(", ")
+    : "";
+  const providerFallbacks = providerPrefs.allow_fallbacks !== false;
+
+  function updateProviderPrefs(patch: Record<string, unknown | undefined>) {
+    try {
+      const parsed = JSON.parse(paramsStr || "{}");
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+      const next = { ...(parsed as Record<string, unknown>) };
+      const provider = next.provider && typeof next.provider === "object" && !Array.isArray(next.provider)
+        ? { ...(next.provider as Record<string, unknown>) }
+        : {};
+      for (const [key, value] of Object.entries(patch)) {
+        if (value === undefined) delete provider[key];
+        else provider[key] = value;
+      }
+      if (Object.keys(provider).length) next.provider = provider;
+      else delete next.provider;
+      setParamsStr(JSON.stringify(next, null, 2));
+      setErr(null);
+    } catch {
+      setErr("Corrija o JSON dos parâmetros antes de alterar o roteamento");
+    }
+  }
+
   async function pickAvatar(e: React.ChangeEvent<HTMLInputElement>) {
     setAvatarErr(null);
     const file = e.target.files?.[0];
@@ -1003,13 +1044,55 @@ export default function ModelEditor({
                 {showAdvanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Parâmetros de geração (JSON)
               </button>
               {showAdvanced && (
-                <textarea
-                  rows={4}
-                  value={paramsStr}
-                  onChange={(e) => setParamsStr(e.target.value)}
-                  placeholder='{ "temperature": 0.7, "top_p": 0.9, "max_tokens": 2048 }'
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs text-ink outline-none transition-colors focus:border-accent placeholder:text-muted"
-                />
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-border bg-surface/50 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium text-ink">Roteamento OpenRouter</p>
+                        <p className="text-xs text-muted">Escolha consistência ou priorize velocidade. Não é enviado a modelos locais.</p>
+                      </div>
+                      <select
+                        value={providerSort}
+                        onChange={(e) => updateProviderPrefs({ sort: e.target.value || undefined })}
+                        className="rounded-md border border-border bg-bg px-2 py-1.5 text-xs text-ink outline-none focus:border-accent"
+                        aria-label="Prioridade de roteamento do OpenRouter"
+                      >
+                        <option value="">Padrão balanceado</option>
+                        <option value="latency">Menor latência</option>
+                        <option value="throughput">Maior vazão</option>
+                        <option value="price">Menor preço</option>
+                      </select>
+                    </div>
+                    <label className="mt-3 block text-xs text-muted">
+                      Ordem de provedores (slugs separados por vírgula)
+                      <input
+                        value={providerOrder}
+                        onChange={(e) => {
+                          const order = e.target.value.split(",").map((value) => value.trim()).filter(Boolean);
+                          updateProviderPrefs({ order: order.length ? order : undefined });
+                        }}
+                        placeholder="ex.: deepinfra/turbo, together"
+                        className="mt-1 w-full rounded-md border border-border bg-bg px-2 py-1.5 font-mono text-xs text-ink outline-none focus:border-accent placeholder:text-muted"
+                      />
+                    </label>
+                    <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-muted">
+                      <input
+                        type="checkbox"
+                        checked={providerFallbacks}
+                        onChange={(e) => updateProviderPrefs({ allow_fallbacks: e.target.checked ? undefined : false })}
+                        className="accent-accent"
+                      />
+                      Permitir fallback se o provedor preferido estiver indisponível
+                    </label>
+                  </div>
+                  <textarea
+                    rows={4}
+                    value={paramsStr}
+                    onChange={(e) => setParamsStr(e.target.value)}
+                    placeholder='{ "temperature": 0.7, "top_p": 0.9, "max_tokens": 2048 }'
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs text-ink outline-none transition-colors focus:border-accent placeholder:text-muted"
+                  />
+                </div>
               )}
             </div>
           </Section>

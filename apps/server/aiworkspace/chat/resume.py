@@ -264,6 +264,10 @@ async def resume_chat_turn(
                 queued_texts=queued_texts, _attempt=_attempt + 1,
             )
             return
-        _genbox["gen"] = generation.start(str(cid), source, _finish, on_queue=_on_queue)
+        _genbox["gen"] = generation.start(
+            str(cid), source, _finish, on_queue=_on_queue,
+            trace_user_id=user_id,
+            trace_attrs={"model": model, "turn_kind": "resume", "has_tools": bool(sift)},
+        )
     except Exception:  # noqa: BLE001 - wake é best-effort
         logger.exception("resume_chat_turn falhou (chat %s)", chat_id)

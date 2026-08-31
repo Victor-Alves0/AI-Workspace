@@ -18,6 +18,10 @@ export interface SubagentChip {
   mem?: boolean;
 }
 
+/** Fase visível da geração. Os nomes descrevem apenas o que o cliente sabe; o
+ * backend não inventa uma "tool" ou provider quando ainda está preparando a chamada. */
+export type StreamPhase = "idle" | "preparing" | "thinking" | "tool" | "streaming";
+
 /** Estado acumulado de UMA geração (fora do React p/ não re-renderizar por token). */
 export interface StreamState {
   acc: string;
@@ -68,6 +72,9 @@ export function useGeneration(getDeps: () => GenerationDeps) {
   const [guardNote, setGuardNote] = useState<GuardNote | null>(null);
   const [liveArtifact, setLiveArtifact] = useState<StreamArtifact | null>(null);
   const [sending, setSending] = useState(false);
+  // Mantém uma explicação curta durante intervalos sem tokens. Isso evita que uma
+  // espera legítima por contexto/provider pareça um stream morto.
+  const [streamPhase, setStreamPhase] = useState<StreamPhase>("idle");
   // "Parar" durante a geração: como interromper o turno atual (cancel no servidor
   // p/ chats persistentes; abort local p/ temporários). null = nada para parar.
   const stopRef = useRef<(() => void) | null>(null);
@@ -140,9 +147,11 @@ export function useGeneration(getDeps: () => GenerationDeps) {
           resetTextOnNextToken = false;
         }
         if (state.acc === "" && paint()) setGeneratingImage(false); // 1º token = respondendo em texto
+        if (paint()) setStreamPhase("streaming");
         state.acc += ev.text;
         maybeFlush();
       } else if (ev.type === "reasoning") {
+        if (paint()) setStreamPhase("thinking");
         state.reason += ev.text;
         maybeFlush();
       } else if (ev.type === "reasoning_effort") {
@@ -155,12 +164,18 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         resetTextOnNextToken = true;
         const t: ToolEvent = { kind: "call", name: ev.name, data: ev.arguments };
         state.tools.push(t);
-        if (paint()) setToolEvents((x) => [...x, t]);
+        if (paint()) {
+          setStreamPhase("tool");
+          setToolEvents((x) => [...x, t]);
+        }
       } else if (ev.type === "tool_result") {
         flush();
         const t: ToolEvent = { kind: "result", name: ev.name, data: ev.result };
         state.tools.push(t);
         if (paint()) {
+          // A ferramenta terminou, mas o próximo passo ainda é uma nova chamada ao
+          // modelo com seu resultado no contexto.
+          setStreamPhase("preparing");
           setToolEvents((x) => [...x, t]);
           setGeneratingImage(false); // a imagem (ou o erro) chegou
           setConsultingKnowledge(false); // os trechos/fontes chegaram
@@ -178,12 +193,16 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         else if (ev.status === "done") setSubagents((s) => s.filter((x) => x.name !== ev.agent));
       } else if (ev.type === "guard") {
         // um Guarda de saída detectou algo e vai refazer a resposta
-        if (paint()) setGuardNote({ name: ev.name, action: ev.action, fallback_model: ev.fallback_model });
+        if (paint()) {
+          setStreamPhase("preparing");
+          setGuardNote({ name: ev.name, action: ev.action, fallback_model: ev.fallback_model });
+        }
       } else if (ev.type === "guard_reset") {
         // descarta a tentativa anterior — a resposta boa vem na próxima
         state.acc = ""; state.reason = ""; state.tools = [];
         resetTextOnNextToken = false;
         if (paint()) {
+          setStreamPhase("preparing");
           setToolEvents([]);
           setGeneratingImage(false);
           setConsultingKnowledge(false);
@@ -259,6 +278,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
           // (ele pode ter trocado de chat antes do 1º evento chegar).
           if (deps.isActiveChat(id)) {
             setSending(true);
+            setStreamPhase("preparing");
             setStreaming("");
             setStreamingReasoning("");
             setToolEvents([]);
@@ -283,6 +303,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       setStreaming("");
       setStreamingReasoning("");
       setLiveArtifact(null);
+      setStreamPhase("idle");
       setSending(false);
       await deps.reloadMessages(id);
       await deps.reloadArtifacts(id);
@@ -306,6 +327,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
     guardNote, setGuardNote,
     liveArtifact, setLiveArtifact,
     sending, setSending,
+    streamPhase, setStreamPhase,
     stopRef,
     makeStreamHandler,
     resumeStream,

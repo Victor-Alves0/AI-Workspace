@@ -384,9 +384,13 @@ async def send_message(
     )
     # a geração roda em background (desacoplada da request); a resposta abaixo é
     # só um assinante do buffer. F5/desconexão mata o assinante, não a geração.
-    gen = generation.start(str(chat_id), source, _finish, on_queue=_on_queue)
+    gen = generation.start(
+        str(chat_id), source, _finish, on_queue=_on_queue,
+        trace_user_id=user_id,
+        trace_attrs={"model": model, "turn_kind": "message", "has_tools": bool(sift)},
+    )
     _genbox["gen"] = gen
-    return _sse_stream(_subscribe(gen))
+    return _sse_stream(_subscribe(gen), trace_id=gen.trace_id)
 
 
 @router.post("/{chat_id}/stop")
@@ -419,7 +423,7 @@ async def resume_stream(
             yield _sse({"type": "idle"})
 
         return _sse_stream(idle())
-    return _sse_stream(_subscribe(gen))
+    return _sse_stream(_subscribe(gen), trace_id=gen.trace_id)
 
 
 @router.patch("/{chat_id}/messages/{message_id}", response_model=MessageOut)
@@ -588,8 +592,12 @@ async def regenerate_message(
         media=await _media_opts(db, user, model_config, attachments=user_attachments),
         subagent=_subagent_opts(sub_specs, sub_conf, sub_runner),
     )
-    gen = generation.start(str(chat_id), source, _finish)
-    return _sse_stream(_subscribe(gen))
+    gen = generation.start(
+        str(chat_id), source, _finish,
+        trace_user_id=user_id,
+        trace_attrs={"model": model, "turn_kind": "regenerate", "has_tools": bool(sift)},
+    )
+    return _sse_stream(_subscribe(gen), trace_id=gen.trace_id)
 
 
 @router.post("/{chat_id}/messages/{message_id}/continue")
@@ -713,5 +721,9 @@ async def continue_message(
         memory=_memory_opts(chat, model_config, user),
         media=await _media_opts(db, user, model_config),
     )
-    gen = generation.start(str(chat_id), source, _finish)
-    return _sse_stream(_subscribe(gen))
+    gen = generation.start(
+        str(chat_id), source, _finish,
+        trace_user_id=user_id,
+        trace_attrs={"model": model, "turn_kind": "continue", "has_tools": bool(sift)},
+    )
+    return _sse_stream(_subscribe(gen), trace_id=gen.trace_id)

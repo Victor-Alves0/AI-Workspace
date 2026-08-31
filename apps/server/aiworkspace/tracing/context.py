@@ -25,6 +25,10 @@ _MAX_ATTR_LEN = 2000
 
 _current_trace: ContextVar["Trace | None"] = ContextVar("obs_current_trace", default=None)
 _current_span: ContextVar["Span | None"] = ContextVar("obs_current_span", default=None)
+# Traces de longa duração ainda não chegaram ao sink. Permite que um beacon do
+# browser (normalmente emitido no primeiro token) seja anexado antes do ``done``.
+# É somente um índice local/best-effort; o trace continua sendo a fonte persistida.
+_open_traces: dict[str, "Trace"] = {}
 
 
 def _now() -> float:
@@ -146,6 +150,11 @@ def trace_id_of_current() -> str | None:
     return t.id if t is not None else None
 
 
+def get_open_trace(trace_id: str) -> Trace | None:
+    """Devolve um trace ainda em execução, se ele pertence a este processo."""
+    return _open_traces.get(trace_id)
+
+
 def set_trace_user(user_id: str | None) -> None:
     """Amarra o trace corrente a um usuário (chamado quando a auth resolve, já
     depois do middleware ter aberto o trace sem saber quem era)."""
@@ -178,6 +187,50 @@ def record_error(exc: BaseException) -> None:
         tr.error = msg[:_MAX_ATTR_LEN]
 
 
+def new_trace(name: str, *, kind: str, user_id: str | None = None,
+              method: str = "", path: str = "", **attrs: Any) -> Trace:
+    """Cria um trace ainda *desanexado* do contexto atual.
+
+    Gerações de chat continuam depois que a request SSE devolve os headers. Elas
+    não podem herdar o trace HTTP já fechado; por isso o driver cria este trace
+    antes de entrar na task e o ativa somente durante a sua vida inteira.
+    """
+    tr = Trace(id=uuid.uuid4().hex, name=name[:200], kind=kind,
+               started_wall=time.time(), _t0=_now(), user_id=user_id,
+               method=method, path=path[:300])
+    tr.set(**attrs)
+    return tr
+
+
+@contextmanager
+def activate_trace(tr: Trace) -> Iterator[Trace]:
+    """Ativa e fecha um trace previamente criado, mesmo sob outro trace.
+
+    Diferente de :func:`start_trace`, isto troca deliberadamente o contexto.
+    É apropriado para trabalho destacado (``asyncio.Task``) cujo ciclo de vida
+    não coincide com a request que o iniciou.
+    """
+    tok_t = _current_trace.set(tr)
+    tok_s = _current_span.set(None)
+    _open_traces[tr.id] = tr
+    err = ""
+    try:
+        yield tr
+    except BaseException as exc:  # noqa: BLE001 - espelha start_trace
+        err = f"{type(exc).__name__}: {exc}"
+        raise
+    finally:
+        tr.close(err)
+        _current_span.reset(tok_s)
+        _current_trace.reset(tok_t)
+        _open_traces.pop(tr.id, None)
+        try:
+            from . import sink
+            sink.submit(tr)
+        except Exception:  # noqa: BLE001 - telemetria nunca derruba o fluxo
+            pass
+
+
 # --------------------------------------------------------------------------- #
 # Abertura de trace e span
 # --------------------------------------------------------------------------- #
@@ -194,26 +247,9 @@ def start_trace(name: str, *, kind: str, user_id: str | None = None,
         yield existing
         return
 
-    tr = Trace(id=uuid.uuid4().hex, name=name[:200], kind=kind,
-               started_wall=time.time(), _t0=_now(), user_id=user_id,
-               method=method, path=path[:300])
-    tok_t = _current_trace.set(tr)
-    tok_s = _current_span.set(None)
-    err = ""
-    try:
+    tr = new_trace(name, kind=kind, user_id=user_id, method=method, path=path)
+    with activate_trace(tr):
         yield tr
-    except BaseException as exc:  # noqa: BLE001 - anota e re-levanta
-        err = f"{type(exc).__name__}: {exc}"
-        raise
-    finally:
-        tr.close(err)
-        _current_span.reset(tok_s)
-        _current_trace.reset(tok_t)
-        try:
-            from . import sink
-            sink.submit(tr)
-        except Exception:  # noqa: BLE001 - telemetria nunca derruba o fluxo
-            pass
 
 
 @contextmanager

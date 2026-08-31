@@ -238,29 +238,67 @@ def _sanitize_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-# Trim de contexto no loop agêntico longo (Codespace). Mantém intactos os últimos N
-# resultados de tool; os anteriores, se grandes, são encolhidos — no loop de código
-# uma leitura de arquivo de 10 iterações atrás é reenviada a cada volta, inflando o
-# input. Preserva role+tool_call_id (o pareamento com o tool_call NÃO quebra).
+# Retenção de contexto no loop agêntico. O resultado completo da ferramenta permanece
+# no evento e na persistência; só a cópia temporária reenviada ao modelo é reduzida.
+# Mantemos os últimos N intactos e, nos antigos, preservamos início + fim com um marcador
+# explícito. Isso evita perda silenciosa e permite ao modelo chamar a ferramenta de novo
+# com um escopo mais específico caso precise do conteúdo integral.
 _TRIM_KEEP_LAST = 6
 _TRIM_MAX_CHARS = 2000
 _TRIM_MARKER = (
-    "\n\n…[resultado antigo truncado para poupar contexto — chame a ferramenta de novo "
-    "se precisar do conteúdo completo]"
+    "\n\n…[resultado anterior reduzido explicitamente para caber no orçamento de contexto; "
+    "início e fim foram preservados. Chame a ferramenta de novo com um escopo mais "
+    "específico se precisar do conteúdo completo]…\n\n"
 )
 
 
-def _trim_tool_results(messages: list[dict[str, Any]]) -> None:
-    """Encolhe IN-PLACE o conteúdo de mensagens role=tool ANTIGAS e grandes (mantém as
-    últimas `_TRIM_KEEP_LAST` intactas). Só muda o que vai ao modelo neste turno — o
-    histórico persistido (tool_events) não é afetado. Idempotente."""
+def _tool_result_excerpt(content: str, max_chars: int) -> str:
+    """Cria um excerto explícito, estável e idempotente para o contexto do modelo."""
+    if len(content) <= max_chars or _TRIM_MARKER in content:
+        return content
+    available = max(0, max_chars - len(_TRIM_MARKER))
+    # Preservar também o final importa para erros, totais, URLs e conclusões que muitas
+    # ferramentas só colocam após uma listagem extensa.
+    head_len = (available * 2) // 3
+    tail_len = available - head_len
+    return content[:head_len] + _TRIM_MARKER + (content[-tail_len:] if tail_len else "")
+
+
+def _trim_tool_results(
+    messages: list[dict[str, Any]], *, keep_last: int = _TRIM_KEEP_LAST,
+    max_chars: int = _TRIM_MAX_CHARS, total_limit_chars: int = 0,
+    trim_all_old: bool = False,
+) -> int:
+    """Reduz resultados antigos de tools no prompt temporário, nunca no histórico.
+
+    No chat normal a redução só começa quando a soma das saídas passa o orçamento;
+    Codespace preserva sua política mais agressiva para muitas leituras. A função retorna
+    quantos resultados foram reduzidos para telemetria/log, e é idempotente.
+    """
     tool_idxs = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
-    if len(tool_idxs) <= _TRIM_KEEP_LAST:
-        return
-    for i in tool_idxs[:-_TRIM_KEEP_LAST]:
+    keep_last = max(0, int(keep_last))
+    candidates = tool_idxs[:-keep_last] if keep_last else tool_idxs
+    if not candidates:
+        return 0
+    total_chars = sum(
+        len(c) for m in messages if m.get("role") == "tool"
+        if isinstance((c := m.get("content")), str)
+    )
+    limit = max(0, int(total_limit_chars))
+    if not trim_all_old and (not limit or total_chars <= limit):
+        return 0
+    changed = 0
+    for i in candidates:
+        if not trim_all_old and total_chars <= limit:
+            break
         c = messages[i].get("content")
-        if isinstance(c, str) and len(c) > _TRIM_MAX_CHARS and not c.endswith(_TRIM_MARKER):
-            messages[i] = {**messages[i], "content": c[:_TRIM_MAX_CHARS] + _TRIM_MARKER}
+        if not isinstance(c, str) or len(c) <= max_chars or _TRIM_MARKER in c:
+            continue
+        excerpt = _tool_result_excerpt(c, max(1, int(max_chars)))
+        messages[i] = {**messages[i], "content": excerpt}
+        total_chars -= len(c) - len(excerpt)
+        changed += 1
+    return changed
 
 
 # Tarefas em background (fora do caminho crítico da resposta). Guardamos as refs
@@ -2722,9 +2760,32 @@ async def run_turn(
         # modelo que continua chamando tools até o teto encerra o loop com texto vazio.
         if _iter > 0 and _iter >= max_iters - 1:
             tools = None
-        # loop longo de código: encolhe leituras de arquivo obsoletas antes de reenviar
-        if _in_codespace and _iter > 0:
-            _trim_tool_results(messages)
+        # Antes de reenviar o prompt, limita resultados ANTIGOS de tools. Em chats
+        # normais só atua ao cruzar o orçamento de contexto; Codespace conserva a
+        # retenção histórica mais larga e reduz toda leitura antiga grande. Em ambos os
+        # casos, a UI/persistência continuam com o resultado completo.
+        if _iter > 0:
+            _trimmed = _trim_tool_results(
+                messages,
+                keep_last=(
+                    _TRIM_KEEP_LAST if _in_codespace
+                    else int(settings.tool_result_context_keep_last)
+                ),
+                max_chars=(
+                    _TRIM_MAX_CHARS if _in_codespace
+                    else int(settings.tool_result_context_excerpt_chars)
+                ),
+                total_limit_chars=(
+                    int(settings.tool_result_context_budget_chars) * 2
+                    if _in_codespace else int(settings.tool_result_context_budget_chars)
+                ),
+                trim_all_old=_in_codespace,
+            )
+            if _trimmed:
+                logger.info(
+                    "contexto de tools reduzido: chat=%s iter=%d resultados=%d codespace=%s",
+                    chat_id, _iter, _trimmed, _in_codespace,
+                )
         # anti-spin: repetição sem progresso = trava. NÃO re-chama o modelo no histórico
         # poluído de tool_calls (é o que PERPETUA a trava de formato — ele copia o padrão).
         # Sintetiza a resposta em prompt LIMPO agora e encerra o loop. Ataca a causa em vez

@@ -73,6 +73,51 @@ def test_shape_knowledge_splits_model_vs_ui():
     assert event["sources"] == [{"n": 1}]
 
 
+# ----------------------- retenção de resultados de tools ----------------------
+
+def test_tool_result_context_budget_keeps_recent_full_results():
+    """Ao exceder o orçamento, só resultados antigos do prompt são reduzidos.
+
+    A cópia original usada como evento/persistência não passa por esta função; aqui
+    validamos a cópia temporária enviada à próxima iteração do modelo.
+    """
+    old = "INICIO-" + ("a" * 9_000) + "-FIM"
+    recent_a = "RECENTE-A-" + ("b" * 30_000)
+    recent_b = "RECENTE-B-" + ("c" * 30_000)
+    messages = [
+        {"role": "tool", "tool_call_id": "old", "content": old},
+        {"role": "tool", "tool_call_id": "a", "content": recent_a},
+        {"role": "tool", "tool_call_id": "b", "content": recent_b},
+    ]
+
+    changed = orch._trim_tool_results(
+        messages, keep_last=2, max_chars=1_000, total_limit_chars=60_000,
+    )
+
+    assert changed == 1
+    assert messages[1]["content"] == recent_a
+    assert messages[2]["content"] == recent_b
+    excerpt = messages[0]["content"]
+    assert "orçamento de contexto" in excerpt
+    assert excerpt.startswith("INICIO-") and excerpt.endswith("-FIM")
+    assert len(excerpt) <= 1_000
+
+
+def test_tool_result_context_budget_does_not_reduce_without_pressure():
+    original = "resultado útil " * 1_000
+    messages = [
+        {"role": "tool", "tool_call_id": "old", "content": original},
+        {"role": "tool", "tool_call_id": "recent", "content": "recente"},
+    ]
+
+    changed = orch._trim_tool_results(
+        messages, keep_last=1, max_chars=100, total_limit_chars=50_000,
+    )
+
+    assert changed == 0
+    assert messages[0]["content"] == original
+
+
 # --------------------------- _compose_tool_prompt -----------------------------
 
 def test_compose_prompt_mode_prompt_no_catalog():

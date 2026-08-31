@@ -9,8 +9,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 
+from aiworkspace import tracing
 from aiworkspace.chat import generation as gen_mod
 from aiworkspace.chat.generation import Generation
+from aiworkspace.tracing import sink
 
 
 def test_enqueue_partitions_steer_and_queue():
@@ -188,6 +190,56 @@ def test_start_single_flight_nunca_abre_2a_geracao():
             gen_mod._active.pop(cid, None)
 
     asyncio.run(go())
+
+
+def test_generation_trace_cobre_driver_e_mede_primeiros_eventos(monkeypatch):
+    """O trace do POST fecha cedo; a task deve usar um trace próprio até done."""
+    submitted = []
+    monkeypatch.setattr(sink, "submit", submitted.append)
+
+    async def on_finish(collected, emit):
+        pass
+
+    async def src():
+        with tracing.span("llm:test", kind="llm", iteration=0):
+            yield {"type": "reasoning", "text": "pensando"}
+            yield {"type": "token", "text": "oi"}
+            yield {"type": "tool_call", "name": "search"}
+            yield {"type": "tool_result", "name": "search", "result": {"ok": True}}
+        yield {
+            "type": "done", "content": "oi", "usage": {
+                "prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12,
+            }, "tool_events": None,
+        }
+
+    async def go():
+        cid = "chat-trace-generation"
+        gen_mod._active.pop(cid, None)
+        try:
+            with tracing.start_trace("POST /chats", kind="http") as request_trace:
+                g = gen_mod.start(
+                    cid, src(), on_finish, trace_user_id="user-1",
+                    trace_attrs={"model": "example/model", "turn_kind": "message"},
+                )
+                assert g.trace is not request_trace
+                assert g.trace_id == g.trace.id
+                await g.task
+            return g.trace, request_trace
+        finally:
+            gen_mod._active.pop(cid, None)
+
+    trace, request_trace = asyncio.run(go())
+    assert trace in submitted
+    assert request_trace in submitted
+    assert trace.attrs["server_ttft_ms"] >= 0
+    assert trace.attrs["first_reasoning_ms"] >= 0
+    assert trace.attrs["llm_iterations"] == 1
+    assert trace.attrs["tool_calls"] == 1
+    assert trace.attrs["tool_results"] == 1
+    assert trace.attrs["total_tokens"] == 12
+    assert trace.attrs["outcome"] == "done"
+    assert trace.user_id == "user-1"
+    assert request_trace.spans == []
 
 
 def test_send_message_routes_active_gen_to_enqueue():

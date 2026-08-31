@@ -1,6 +1,6 @@
 "use client";
 
-import { isValidElement, memo, useState } from "react";
+import { isValidElement, memo, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
@@ -110,6 +110,10 @@ function MdImage({ src, alt }: { src: string; alt: string }) {
 // ("uma Wikipédia escrita no chat"). Renderizamos só um prefixo e deixamos o
 // usuário expandir o resto sob demanda.
 const CLAMP_LIMIT = 8000;
+// Durante o stream, os primeiros parágrafos já estão fechados e não precisam ser
+// parseados novamente. Só a cauda muda a cada flush; deixá-la pequena mantém a UI
+// responsiva mesmo quando a resposta cresce por vários milhares de caracteres.
+const STREAMING_TAIL_LIMIT = 2400;
 
 /**
  * Estabiliza markdown PARCIAL durante o streaming: enquanto os tokens chegam, uma
@@ -130,6 +134,53 @@ function stabilizeStream(md: string): string {
   }
   return md;
 }
+
+/** Divide o texto em uma parte Markdown estável e uma cauda ainda mutável.
+ * A divisão é só em quebra de parágrafo e nunca dentro de uma cerca de código,
+ * preservando os blocos Markdown usuais enquanto só a cauda é reprocessada. */
+function splitStreamingMarkdown(md: string): { stable: string; tail: string } {
+  if (md.length <= STREAMING_TAIL_LIMIT) return { stable: "", tail: md };
+  const beforeTail = md.slice(0, md.length - STREAMING_TAIL_LIMIT);
+  const boundary = beforeTail.lastIndexOf("\n\n");
+  if (boundary < 0) return { stable: "", tail: md };
+  const stable = md.slice(0, boundary + 2);
+  // Uma cerca aberta precisa permanecer na mesma árvore que seu fechamento. Em
+  // respostas com um único bloco enorme, o clamp ainda limita o trabalho a 8k.
+  if ((stable.match(/^ {0,3}```/gm) || []).length % 2 !== 0) return { stable: "", tail: md };
+  return { stable, tail: md.slice(boundary + 2) };
+}
+
+function MarkdownRenderer({ content, fast }: { content: string; fast: boolean }) {
+  const shown = fast ? stabilizeStream(content) : content;
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      // detect: realça também blocos SEM tag de linguagem (```` sem "python") —
+      // o hljs adivinha entre as linguagens comuns. Com tag, usa a declarada.
+      rehypePlugins={fast ? [] : [[rehypeHighlight, { detect: true }]]}
+      components={{
+        pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+        table: ({ children }) => (
+          <div className="md-table-wrap">
+            <table>{children}</table>
+          </div>
+        ),
+        a: ({ children, href }) => {
+          const h = previewHref(href);
+          return <a href={h} target="_blank" rel="noreferrer noopener">{children}</a>;
+        },
+        img: ({ src, alt }) => {
+          const url = typeof src === "string" && src.startsWith("/") ? `${API_URL}${src}` : src;
+          return <MdImage src={typeof url === "string" ? url : ""} alt={alt ?? ""} />;
+        },
+      }}
+    >
+      {shown}
+    </ReactMarkdown>
+  );
+}
+
+const StableMarkdownRenderer = memo(MarkdownRenderer);
 
 /**
  * Markdown das mensagens do assistente: GFM (tabelas, listas de tarefas,
@@ -159,45 +210,14 @@ function Markdown({
         return content.slice(0, cut > CLAMP_LIMIT / 2 ? cut : CLAMP_LIMIT);
       })()
     : content;
-  // no streaming (`fast`), fecha delimitadores abertos p/ o texto não "piscar"
-  const shown = fast ? stabilizeStream(clamped) : clamped;
+  const streamingParts = useMemo(
+    () => fast ? splitStreamingMarkdown(clamped) : { stable: "", tail: clamped },
+    [clamped, fast],
+  );
   return (
     <div className={`md ${className}`}>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        // detect: realça também blocos SEM tag de linguagem (```` sem "python") —
-        // o hljs adivinha entre as linguagens comuns. Com tag, usa a declarada.
-        rehypePlugins={fast ? [] : [[rehypeHighlight, { detect: true }]]}
-        components={{
-          pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-          table: ({ children }) => (
-            <div className="md-table-wrap">
-              <table>{children}</table>
-            </div>
-          ),
-          a: ({ children, href }) => {
-            // links de preview do Codespace (/codespace/preview/<porta>/) abrem o app na
-            // PRÓPRIA ORIGEM/porta publicada (http://<host>:<porta>/) — o app roda na raiz,
-            // então login/redirect/SPA/websocket funcionam. http:// (o dev server é http)
-            // e nova guia (não iframe: apps como Metabase mandam X-Frame-Options: DENY).
-            const h = previewHref(href);
-            return (
-              <a href={h} target="_blank" rel="noreferrer noopener">
-                {children}
-              </a>
-            );
-          },
-          // imagens inline (ex.: da Base de Conhecimento, URL assinada relativa —
-          // "/knowledge/docs/…"): a URL vem do SERVIDOR, então resolve no host da
-          // API, não no do front (em dev são portas diferentes)
-          img: ({ src, alt }) => {
-            const url = typeof src === "string" && src.startsWith("/") ? `${API_URL}${src}` : src;
-            return <MdImage src={typeof url === "string" ? url : ""} alt={alt ?? ""} />;
-          },
-        }}
-      >
-        {shown}
-      </ReactMarkdown>
+      {streamingParts.stable && <StableMarkdownRenderer content={streamingParts.stable} fast />}
+      <MarkdownRenderer content={streamingParts.tail} fast={fast} />
       {isLong && (
         <button
           onClick={() => setExpanded(true)}

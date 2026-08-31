@@ -24,6 +24,7 @@ from .auth.deps import require_admin, require_approved
 from .config import get_settings
 from .db import get_db
 from .models import ObsSpan, ObsTrace, User
+from . import tracing
 from .tracing import sink
 
 router = APIRouter(prefix="/observability", tags=["observability"])
@@ -296,6 +297,28 @@ async def client_beacon(
             tid = uuid.UUID(beacon.trace_id)
         except ValueError:
             tid = None
+    # O beacon de primeiro token chega enquanto um trace de geração ainda está
+    # aberto, antes de o sink fazer o batch no Postgres. Anexa diretamente ao
+    # trace em memória para ele ser persistido junto no ``done``; assim TTFT não
+    # cai num trace avulso por uma corrida normal do streaming.
+    active = tracing.get_open_trace(beacon.trace_id) if beacon.trace_id else None
+    if active is not None and str(active.user_id) == str(user.id):
+        # O TTFT do browser também inclui o setup HTTP anterior ao driver. Para
+        # posicionar o span no waterfall do trace de geração, use o TTFT do
+        # servidor (já anotado antes de emitir o token); o valor do navegador
+        # permanece em attrs para mostrar a diferença rede/renderização.
+        server_offset_ms = float(active.attrs.get("server_ttft_ms") or beacon.ttfb_ms or 0)
+        started_wall = active.started_wall + max(0.0, server_offset_ms) / 1000
+        client_span = tracing.Span(
+            id=uuid.uuid4().hex, trace_id=active.id, parent_id=None,
+            name=f"client:{beacon.action}"[:200], kind="client",
+            started_wall=started_wall, _t0=0.0,
+            duration_ms=round(beacon.total_ms, 2),
+            status="ok" if beacon.ok else "error", attrs=attrs,
+        )
+        active.add_span(client_span)
+        return {"ok": True, "attached": True, "pending": True}
+
     target = await db.get(ObsTrace, tid) if tid is not None else None
     if target is not None and str(target.user_id) != str(user.id):
         target = None  # trace de outra pessoa: cai no trace só-cliente abaixo

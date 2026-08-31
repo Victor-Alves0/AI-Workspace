@@ -19,9 +19,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import AsyncIterator, Awaitable, Callable
+from typing import Any, AsyncIterator, Awaitable, Callable
 
-from .. import bg
+from .. import bg, tracing
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +41,12 @@ OnFinish = Callable[[Collected, EmitFn], Awaitable[None]]
 class Generation:
     """Uma geração em andamento: buffer ordenado + notificação de novos eventos."""
 
-    def __init__(self, chat_id: str):
+    def __init__(self, chat_id: str, *, trace: tracing.Trace | None = None):
         self.chat_id = chat_id
+        # Trace próprio da geração. O trace da request fecha assim que devolvemos
+        # os headers do SSE, enquanto este só fecha depois do ``done``/persistência.
+        self.trace = trace
+        self.trace_id = trace.id if trace is not None else None
         self.events: list[dict] = []
         self.done = False
         self.task: asyncio.Task | None = None
@@ -126,7 +130,9 @@ def get_active(chat_id: str) -> Generation | None:
 
 
 def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
-          on_queue: Callable[[list[str]], Awaitable[None]] | None = None) -> Generation:
+          on_queue: Callable[[list[str]], Awaitable[None]] | None = None,
+          *, trace_user_id: str | None = None,
+          trace_attrs: dict[str, Any] | None = None) -> Generation:
     """Inicia uma geração em background e devolve o ``Generation``.
 
     ``source`` é o gerador de eventos do turno (``run_turn``). O driver consome
@@ -159,10 +165,19 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
         except Exception:  # noqa: BLE001 - observação nunca derruba o caminho quente
             pass
         return existing
-    gen = Generation(chat_id)
+    trace = tracing.new_trace(
+        "chat:generation", kind="chat", user_id=trace_user_id,
+        chat_id=chat_id, **(trace_attrs or {}),
+    )
+    gen = Generation(chat_id, trace=trace)
     _active[chat_id] = gen
 
-    async def _driver() -> None:
+    async def _run_driver() -> None:
+        started = time.monotonic()
+        first_token_ms: float | None = None
+        first_reasoning_ms: float | None = None
+        tool_calls = 0
+        tool_results = 0
         collected: Collected = {
             "content": "",
             "usage": None,
@@ -181,6 +196,20 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
         try:
             async for ev in source:
                 t = ev.get("type")
+                elapsed_ms = round((time.monotonic() - started) * 1000, 3)
+                if t == "token" and first_token_ms is None:
+                    first_token_ms = elapsed_ms
+                    # TTFT do servidor: início do driver até o primeiro token de
+                    # texto visível. O beacon do browser continua medindo o trecho
+                    # adicional de rede/renderização.
+                    tracing.annotate(server_ttft_ms=first_token_ms)
+                elif t == "reasoning" and first_reasoning_ms is None:
+                    first_reasoning_ms = elapsed_ms
+                    tracing.annotate(first_reasoning_ms=first_reasoning_ms)
+                elif t == "tool_call":
+                    tool_calls += 1
+                elif t == "tool_result":
+                    tool_results += 1
                 if t == "done":
                     collected["content"] = ev.get("content", "")
                     collected["usage"] = ev.get("usage")
@@ -219,6 +248,10 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
                 collected["error"] = gen.interrupted_reason
             await gen._append({"type": "stopped"})
             await _finalize(gen, on_finish, collected)
+            _annotate_generation_trace(
+                started, first_token_ms, first_reasoning_ms, tool_calls, tool_results,
+                collected, outcome="stopped",
+            )
             raise
         except Exception as exc:  # noqa: BLE001 - erro no turno vira evento visível
             logger.exception("Geração falhou (chat %s)", chat_id)
@@ -230,6 +263,10 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
             collected["error"] = str(exc)
             await gen._append({"type": "error", "message": collected["error"]})
         await _finalize(gen, on_finish, collected)
+        _annotate_generation_trace(
+            started, first_token_ms, first_reasoning_ms, tool_calls, tool_results,
+            collected, outcome="error" if collected["error"] else "done",
+        )
         # fim de turno COMPLETO: se o usuário enfileirou (ou deixou steer não-consumido),
         # dispara a continuação. Não roda no cancelamento (CancelledError re-propaga antes).
         leftover = gen.drain_queue() + gen.drain_steer()
@@ -238,8 +275,50 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
             # mensagem que o usuário enviou durante o turno — não pode ser coletada pelo GC.
             bg.spawn(on_queue(leftover))
 
+    async def _driver() -> None:
+        # ``create_task`` copia o ContextVar do request HTTP. Trocamos
+        # explicitamente para o trace independente, evitando anexar spans de LLM a
+        # um trace que já foi fechado/enfileirado quando o SSE devolveu headers.
+        with tracing.activate_trace(trace):
+            await _run_driver()
+
     gen.task = asyncio.create_task(_driver())
     return gen
+
+
+def _annotate_generation_trace(
+    started: float,
+    first_token_ms: float | None,
+    first_reasoning_ms: float | None,
+    tool_calls: int,
+    tool_results: int,
+    collected: Collected,
+    *,
+    outcome: str,
+) -> None:
+    """Consolida métricas do turno sem registrar conteúdo do usuário/modelo."""
+    tr = tracing.current_trace()
+    if tr is None:
+        return
+    llm_spans = [sp for sp in tr.spans if sp.kind == "llm"]
+    tool_spans = [sp for sp in tr.spans if sp.kind == "tool"]
+    usage = collected.get("usage") if isinstance(collected.get("usage"), dict) else {}
+    tr.set(
+        outcome=outcome,
+        generation_ms=round((time.monotonic() - started) * 1000, 3),
+        server_ttft_ms=first_token_ms,
+        first_reasoning_ms=first_reasoning_ms,
+        llm_iterations=len(llm_spans),
+        llm_ms=round(sum(sp.duration_ms for sp in llm_spans), 3),
+        tool_calls=tool_calls,
+        tool_results=tool_results,
+        tool_executions=len(tool_spans),
+        output_chars=len(collected.get("content") or collected.get("streamed") or ""),
+        prompt_tokens=usage.get("prompt_tokens"),
+        completion_tokens=usage.get("completion_tokens"),
+        total_tokens=usage.get("total_tokens"),
+        cached_tokens=usage.get("cached_tokens"),
+    )
 
 
 async def _finalize(gen: Generation, on_finish: OnFinish, collected: Collected) -> None:

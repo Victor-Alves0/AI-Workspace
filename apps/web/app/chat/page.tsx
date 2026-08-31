@@ -201,7 +201,7 @@ export default function ChatPage() {
     toolEvents, setToolEvents, generatingImage, setGeneratingImage,
     consultingKnowledge, setConsultingKnowledge, transcribingAudio, setTranscribingAudio,
     subagents, setSubagents, guardNote, setGuardNote, liveArtifact, setLiveArtifact,
-    sending, setSending, stopRef, makeStreamHandler, resumeStream, handleStop,
+    sending, setSending, streamPhase, setStreamPhase, stopRef, makeStreamHandler, resumeStream, handleStop,
   } = gen;
   // mantém o espelho do chat ativo em dia (cobre todos os setActive de uma vez)
   useEffect(() => { activeIdRef.current = active?.id ?? null; }, [active?.id]);
@@ -1208,6 +1208,7 @@ export default function ChatPage() {
     }
     if (!override) setInput("");
     setSending(true);
+    setStreamPhase("preparing");
     // clique numa opção não consome skills/anexos pendentes do usuário
     const turnSkillIds = override ? [] : attachedSkillIds;
     if (!override) setAttachedSkillIds([]);
@@ -1326,6 +1327,7 @@ export default function ChatPage() {
         setStreamingReasoning("");
         setGeneratingImage(false);
         setLiveArtifact(null);
+        setStreamPhase("idle");
         setSending(false);
       }
       refreshBudget(); // atualiza o gasto do mês (mantém o banner em dia)
@@ -1381,6 +1383,7 @@ export default function ChatPage() {
   async function regenerateMessage(id: string) {
     if (!active || sending) return;
     setSending(true);
+    setStreamPhase("preparing");
     setStreaming("");
     setStreamingReasoning("");
     setToolEvents([]);
@@ -1412,6 +1415,7 @@ export default function ChatPage() {
         setStreaming("");
         setStreamingReasoning("");
         setLiveArtifact(null);
+        setStreamPhase("idle");
         setSending(false);
       }
     }
@@ -1420,6 +1424,7 @@ export default function ChatPage() {
   async function continueMessage(id: string) {
     if (!active || sending) return;
     setSending(true);
+    setStreamPhase("preparing");
     setStreaming("");
     setStreamingReasoning("");
     setToolEvents([]);
@@ -1442,6 +1447,7 @@ export default function ChatPage() {
         setStreaming("");
         setStreamingReasoning("");
         setLiveArtifact(null);
+        setStreamPhase("idle");
         setSending(false);
       }
     }
@@ -2334,7 +2340,7 @@ export default function ChatPage() {
                       reasoningLive={!streaming}
                       toolEvents={toolEvents.length ? toolEvents : undefined}
                       toolsLive={sending}
-                      status={statusFor({ sending, streaming, streamingReasoning, generatingImage, consultingKnowledge, transcribingAudio, toolEvents })}
+                      status={statusFor({ sending, phase: streamPhase, streaming, streamingReasoning, generatingImage, consultingKnowledge, transcribingAudio, toolEvents })}
                       footer={generatingImage ? <GeneratingImage /> : consultingKnowledge ? <ConsultingKnowledge /> : transcribingAudio ? <TranscribingAudio /> : undefined}
                     />
                   ) : (
@@ -2619,11 +2625,10 @@ function prettyTool(name: string): string {
 }
 
 /** "O que a IA está fazendo agora" — uma linha de status estável durante a geração,
- *  para que pausas/transições nunca pareçam travamento. Retorna null quando um
- *  indicador dedicado (rodapé de imagem/conhecimento/áudio, caret do texto, bloco de
- *  raciocínio) já cobre a fase. */
+ *  para que pausas/transições nunca pareçam travamento. Os rodapés dedicados de
+ *  imagem/conhecimento/áudio continuam tendo prioridade sobre a fase genérica. */
 function statusFor(f: {
-  sending: boolean; streaming: string; streamingReasoning: string;
+  sending: boolean; phase: import("./useGeneration").StreamPhase; streaming: string; streamingReasoning: string;
   generatingImage: boolean; consultingKnowledge: boolean; transcribingAudio: boolean;
   toolEvents: ToolEvent[];
 }): string | null {
@@ -2631,9 +2636,11 @@ function statusFor(f: {
   if (f.generatingImage || f.consultingKnowledge || f.transcribingAudio) return null;
   const last = f.toolEvents.length ? f.toolEvents[f.toolEvents.length - 1] : null;
   if (last && last.kind === "call") return `Executando — ${prettyTool(last.name)}…`;
-  if (f.streaming) return null;          // o texto visível já flui (caret indica)
-  if (f.streamingReasoning) return null; // o bloco de raciocínio já diz "Pensando…"
-  return "Trabalhando…";                 // pausa entre etapas: sinaliza que segue ativo
+  if (f.phase === "preparing") return "Preparando contexto e aguardando o provider…";
+  if (f.phase === "thinking") return "Raciocinando…";
+  if (f.phase === "tool") return "Executando ferramenta…";
+  if (f.phase === "streaming") return "Respondendo…";
+  return "Trabalhando…"; // fallback para retomada de stream sem evento classificável
 }
 
 function MessageBubble({
