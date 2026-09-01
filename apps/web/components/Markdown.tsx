@@ -150,14 +150,27 @@ function splitStreamingMarkdown(md: string): { stable: string; tail: string } {
   return { stable, tail: md.slice(boundary + 2) };
 }
 
-function MarkdownRenderer({ content, fast }: { content: string; fast: boolean }) {
+/** Tabelas GFM ainda abertas exigem o parser reavaliar a grade inteira a cada delta.
+ * Depois de algumas linhas, exibimos a tabela provisoriamente como texto monoespaçado;
+ * no fim da resposta ela volta a ser a tabela formatada normal. */
+function isStreamingTable(md: string): boolean {
+  const active = md.slice(md.lastIndexOf("\n\n") + 2);
+  const rows = active.split("\n").filter((line) => line.includes("|"));
+  return rows.length >= 4 && rows.some((line) => /^\s*\|?\s*:?-{2,}/.test(line));
+}
+
+function MarkdownRenderer({ content, fast, plain = false }: { content: string; fast: boolean; plain?: boolean }) {
+  if (plain) {
+    return <pre className="my-3 overflow-x-auto whitespace-pre-wrap font-mono text-[13px] leading-6 text-ink-soft">{content}</pre>;
+  }
   const shown = fast ? stabilizeStream(content) : content;
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      // detect: realça também blocos SEM tag de linguagem (```` sem "python") —
-      // o hljs adivinha entre as linguagens comuns. Com tag, usa a declarada.
-      rehypePlugins={fast ? [] : [[rehypeHighlight, { detect: true }]]}
+      // O autodetect percorre várias gramáticas por bloco e congelava respostas
+      // grandes ao encerrar o stream. Blocos com linguagem declarada continuam
+      // realçados; os sem linguagem ficam em texto monoespaçado previsível.
+      rehypePlugins={fast ? [] : [rehypeHighlight]}
       components={{
         pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
         table: ({ children }) => (
@@ -214,10 +227,11 @@ function Markdown({
     () => fast ? splitStreamingMarkdown(clamped) : { stable: "", tail: clamped },
     [clamped, fast],
   );
+  const renderTableAsText = fast && isStreamingTable(streamingParts.tail);
   return (
     <div className={`md ${className}`}>
       {streamingParts.stable && <StableMarkdownRenderer content={streamingParts.stable} fast />}
-      <MarkdownRenderer content={streamingParts.tail} fast={fast} />
+      <MarkdownRenderer content={streamingParts.tail} fast={fast} plain={renderTableAsText} />
       {isLong && (
         <button
           onClick={() => setExpanded(true)}

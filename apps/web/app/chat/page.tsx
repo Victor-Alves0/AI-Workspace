@@ -40,6 +40,8 @@ import type { ChatActions } from "@/components/ChatItem";
 import { SHORTCUTS, eventToCombo, resolveBinding, comboHasModifier, type ShortcutMap } from "@/lib/shortcuts";
 import { useGeneration } from "./useGeneration";
 
+type RoundtableStream = { speaker: Speaker; content: string; reasoning: string };
+
 // varre os resultados de ferramenta em busca de um artefato "kind:ask" (o seletor
 // de opções). Recursivo (execute_tool no topo ou run_code aninhado em `output`).
 function findAskInNode(node: unknown, depth = 0): AskSpec | null {
@@ -215,8 +217,15 @@ export default function ChatPage() {
   const [agentId, setAgentId] = useState<string | null>(null);
   // mesa-redonda: rodando + fala em streaming do participante atual
   const [rtRunning, setRtRunning] = useState(false);
-  const [rtStreaming, setRtStreaming] = useState<{ speaker: Speaker; content: string; reasoning: string } | null>(null);
+  const [rtStreaming, setRtStreaming] = useState<RoundtableStream | null>(null);
   const rtAbort = useRef<AbortController | null>(null);
+  // Mesa-redonda usa um SSE próprio e antes atualizava React por token. Espelhamos
+  // o acumulador em ref e pintamos no mesmo ritmo do chat normal.
+  const rtLiveRef = useRef<RoundtableStream | null>(null);
+  const rtFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (rtFlushTimerRef.current !== null) clearTimeout(rtFlushTimerRef.current);
+  }, []);
 
   // seleção de modelo (vale para home e para o chat ativo)
   const [curModel, setCurModel] = useState("");
@@ -377,6 +386,11 @@ export default function ChatPage() {
   const [wakeStatus, setWakeStatus] = useState<"off" | "starting" | "on" | "error">("off");
   const wakeRef = useRef<{ handle: WakeHandle | null; on: boolean }>({ handle: null, on: false });
   const scrollRef = useRef<HTMLDivElement>(null);
+  // O scroll é agendado em um frame, não a cada delta. A pausa durante a seleção
+  // protege o intervalo que o usuário está arrastando para copiar.
+  const stickFrameRef = useRef<number | null>(null);
+  const lastStickyHeightRef = useRef(-1);
+  const selectingTextRef = useRef(false);
   // botão "ir até o fim": visível só quando o usuário rolou p/ cima
   const [atBottom, setAtBottom] = useState(true);
   // id da última mensagem cujo seletor de opções (kind:ask) foi dispensado
@@ -386,12 +400,16 @@ export default function ChatPage() {
   const onScrollArea = () => {
     const el = scrollRef.current;
     if (!el) return;
-    setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
+    const next = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    setAtBottom((current) => current === next ? current : next);
   };
   const scrollToBottom = () => {
     const el = scrollRef.current;
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   };
+  useEffect(() => () => {
+    if (stickFrameRef.current !== null) cancelAnimationFrame(stickFrameRef.current);
+  }, []);
 
   // "digita" o texto da sugestão no promptbox, caractere a caractere
   function typeSuggestion(text: string) {
@@ -576,12 +594,26 @@ export default function ChatPage() {
   // puxava o usuário de volta pro fundo a cada evento.
   const stickToBottom = useCallback(() => {
     if (!pollRef.current.atBottom) return;
+    if (selectingTextRef.current) return;
     // usuário selecionando texto: rolar agora arrasta o conteúdo sob o cursor e
     // desfaz a seleção (impossível copiar enquanto a IA responde) — pausa o grude
     const sel = typeof window !== "undefined" ? window.getSelection() : null;
     if (sel && !sel.isCollapsed) return;
-    const el = scrollRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight });
+    if (stickFrameRef.current !== null) return;
+    stickFrameRef.current = requestAnimationFrame(() => {
+      stickFrameRef.current = null;
+      if (!pollRef.current.atBottom || selectingTextRef.current) return;
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed) return;
+      const el = scrollRef.current;
+      if (!el) return;
+      const height = el.scrollHeight;
+      // Evita uma escrita no scroll (e a sincronização de layout resultante) se
+      // a altura não mudou desde a última pintura acompanhada.
+      if (height === lastStickyHeightRef.current) return;
+      lastStickyHeightRef.current = height;
+      el.scrollTop = height;
+    });
   }, []);
   useEffect(() => {
     stickToBottom();
@@ -850,27 +882,50 @@ export default function ChatPage() {
   }
 
   function makeRtHandler() {
+    const flush = () => {
+      if (rtFlushTimerRef.current !== null) {
+        clearTimeout(rtFlushTimerRef.current);
+        rtFlushTimerRef.current = null;
+      }
+      setRtStreaming(rtLiveRef.current ? { ...rtLiveRef.current } : null);
+    };
+    const queuePaint = () => {
+      if (rtFlushTimerRef.current === null) rtFlushTimerRef.current = setTimeout(flush, 70);
+    };
     return (ev: any) => {
       if (ev.type === "speaker_start") {
-        setRtStreaming({ speaker: ev.speaker, content: "", reasoning: "" });
+        rtLiveRef.current = { speaker: ev.speaker, content: "", reasoning: "" };
+        flush();
         setAtBottom(true);
       } else if (ev.type === "token") {
-        setRtStreaming((s) => (s ? { ...s, content: s.content + (ev.text || "") } : s));
+        const current = rtLiveRef.current;
+        if (current) {
+          current.content += ev.text || "";
+          queuePaint();
+        }
       } else if (ev.type === "reasoning") {
-        setRtStreaming((s) => (s ? { ...s, reasoning: s.reasoning + (ev.text || "") } : s));
+        const current = rtLiveRef.current;
+        if (current) {
+          current.reasoning += ev.text || "";
+          queuePaint();
+        }
       } else if (ev.type === "speaker_end") {
-        setRtStreaming((s) => {
-          // turno vazio (o backend não persistiu): não adiciona bolha vazia
-          if (s && s.content.trim()) {
-            setMessages((m) => [...m, {
-              id: ev.message_id || `a-${Date.now()}`, role: "assistant", content: s.content,
-              reasoning: s.reasoning ? { text: s.reasoning } : null, speaker: ev.speaker,
-              created_at: new Date().toISOString(),
-            }]);
-          }
-          return null;
-        });
+        const current = rtLiveRef.current;
+        flush();
+        // turno vazio (o backend não persistiu): não adiciona bolha vazia
+        if (current?.content.trim()) {
+          setMessages((m) => [...m, {
+            id: ev.message_id || `a-${Date.now()}`, role: "assistant", content: current.content,
+            reasoning: current.reasoning ? { text: current.reasoning } : null, speaker: ev.speaker,
+            created_at: new Date().toISOString(),
+          }]);
+        }
+        rtLiveRef.current = null;
+        setRtStreaming(null);
       } else if (ev.type === "error") {
+        rtLiveRef.current = null;
+        if (rtFlushTimerRef.current !== null) clearTimeout(rtFlushTimerRef.current);
+        rtFlushTimerRef.current = null;
         setRtStreaming(null);
       }
     };
@@ -897,6 +952,9 @@ export default function ChatPage() {
       );
     } catch { /* abortado / rede */ }
     finally {
+      rtLiveRef.current = null;
+      if (rtFlushTimerRef.current !== null) clearTimeout(rtFlushTimerRef.current);
+      rtFlushTimerRef.current = null;
       setRtRunning(false);
       setRtStreaming(null);
       rtAbort.current = null;
@@ -2200,7 +2258,14 @@ export default function ChatPage() {
                     da medição escondia o fim do conteúdo ("o scroll morre").
                     O pb-14 só afasta a última linha do gradiente; é constante e não
                     depende de medição nenhuma. */}
-                <div ref={scrollRef} onScroll={onScrollArea} className="flex-1 space-y-5 overflow-y-auto px-4 pb-14 pt-6 [scroll-padding-bottom:5rem]">
+                <div
+                  ref={scrollRef}
+                  onScroll={onScrollArea}
+                  onPointerDown={(event) => { if (event.button === 0) selectingTextRef.current = true; }}
+                  onPointerUp={() => { selectingTextRef.current = false; }}
+                  onPointerCancel={() => { selectingTextRef.current = false; }}
+                  className="flex-1 space-y-5 overflow-y-auto px-4 pb-14 pt-6 [scroll-padding-bottom:5rem]"
+                >
                   {temporary && (
                     <div className="mx-auto w-fit rounded-full border border-border bg-surface px-4 py-1.5 text-center text-xs text-muted">
                       Chat temporário — não será salvo

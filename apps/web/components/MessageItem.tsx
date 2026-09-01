@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Loader2, Mail, MessageSquarePlus, Pencil, Play, RotateCcw, Send, ShieldAlert, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench } from "lucide-react";
 import type { BrainNoteEvent, ChartSpec, ChatArtifact, DeepResearch, Message, SkillProposal, StockQuote, ToolEvent } from "@/lib/types";
 import { api, ApiError, API_URL } from "@/lib/api";
@@ -110,6 +110,7 @@ function toolArtifacts(events: ToolEvent[]): Artifact[] {
 // web, leitura de página). Viram a barra "Fontes" e linkificam os [n] do texto.
 // ---------------------------------------------------------------------------
 type Source = { title: string; url: string };
+const EMPTY_TOOL_EVENTS: ToolEvent[] = [];
 
 function collectSources(events: ToolEvent[]): Source[] {
   const out: Source[] = [];
@@ -1299,13 +1300,20 @@ export default function MessageItem({
   const [remSaved, setRemSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
-  const toolEvents = message.tool_events ?? [];
+  const toolEvents = message.tool_events ?? EMPTY_TOOL_EVENTS;
   const usedTools = toolEvents.length > 0;
   // guardas de saída que agiram nesta resposta (fluxo no painel de ferramentas)
-  const guardEvents = toolEvents.filter((e) => e.kind === "guard");
+  const guardEvents = useMemo(() => toolEvents.filter((e) => e.kind === "guard"), [toolEvents]);
   const usedMemories = message.memories_used ?? [];
-  const artifacts = toolArtifacts(toolEvents);
-  const sources = isUser ? [] : collectSources(toolEvents);
+  // O ChatPage pinta o trecho em streaming com frequência. As mensagens já salvas
+  // não mudam nesse ciclo, então não revarremos recursivamente seus resultados de
+  // tools para fontes/artefatos a cada delta.
+  const artifacts = useMemo(() => toolArtifacts(toolEvents), [toolEvents]);
+  const sources = useMemo(() => isUser ? [] : collectSources(toolEvents), [isUser, toolEvents]);
+  const displayContent = useMemo(
+    () => linkifyCitations(message.content, sources),
+    [message.content, sources],
+  );
 
   async function copy() {
     try {
@@ -1467,7 +1475,7 @@ export default function MessageItem({
         {message.reasoning?.text && (
           <ReasoningBlock text={message.reasoning.text} seconds={message.reasoning.seconds} />
         )}
-        {editing ? editor : <AssistantBody content={linkifyCitations(message.content, sources)} artifacts={artifacts} chatArtifacts={chatArtifacts} onOpenArtifact={onOpenArtifact} />}
+        {editing ? editor : <AssistantBody content={displayContent} artifacts={artifacts} chatArtifacts={chatArtifacts} onOpenArtifact={onOpenArtifact} />}
         {!editing && sources.length > 0 && <SourcesBar sources={sources} />}
         {!editing && usedTools && toolsEnabled && (
           <ToolEventsPanel events={toolEvents} open={showTools} onOpenChange={setShowTools} />

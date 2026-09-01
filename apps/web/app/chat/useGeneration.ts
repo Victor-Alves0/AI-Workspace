@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { startTransition, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { api } from "@/lib/api";
 import { streamResume } from "@/lib/sse";
 import type { Chat, ToolEvent } from "@/lib/types";
@@ -102,6 +102,17 @@ export function useGeneration(getDeps: () => GenerationDeps) {
     // etapa e dava a impressão de que o stream havia travado.
     let lastFlush = 0;
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    // Enquanto o usuário seleciona texto, React não pode substituir a árvore do
+    // Markdown sob o cursor: a seleção salta ou desaparece. O stream continua
+    // acumulando em `state`; pausamos só a pintura e aplicamos o último estado
+    // assim que a seleção é liberada.
+    let pendingPaint = false;
+    let selectionGesture = false;
+    const hasTextSelection = () => {
+      if (typeof window === "undefined") return false;
+      const selection = window.getSelection();
+      return !!selection && !selection.isCollapsed && selection.rangeCount > 0;
+    };
     // O backend descarta o texto provisório emitido antes de uma tool e começa uma
     // nova resposta na iteração seguinte. Mantemos o provisório visível enquanto a
     // tool roda, mas o substituímos assim que chega o primeiro token pós-tool.
@@ -117,20 +128,30 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       }
       lastFlush = Date.now();
       if (!paint()) return;
-      if (artsLive && state.acc.includes("<artifact")) {
-        const { text, live } = splitStreamArtifacts(state.acc);
-        setStreaming(text);
-        if (live) {
-          setLiveArtifact(live);
-          if (live.identifier !== autoOpenedId) {
-            autoOpenedId = live.identifier;
-            deps.setArtifactOpen(live.identifier);
-          }
-        }
-      } else {
-        setStreaming(state.acc);
+      if (selectionGesture || hasTextSelection()) {
+        pendingPaint = true;
+        return;
       }
-      setStreamingReasoning(state.reason);
+      pendingPaint = false;
+      // Texto/raciocínio no stream não bloqueia a digitação nem interações como
+      // copiar/expandir painel. Eventos de tool continuam urgentes e são pintados
+      // fora desta transição.
+      startTransition(() => {
+        if (artsLive && state.acc.includes("<artifact")) {
+          const { text, live } = splitStreamArtifacts(state.acc);
+          setStreaming(text);
+          if (live) {
+            setLiveArtifact(live);
+            if (live.identifier !== autoOpenedId) {
+              autoOpenedId = live.identifier;
+              deps.setArtifactOpen(live.identifier);
+            }
+          }
+        } else {
+          setStreaming(state.acc);
+        }
+        setStreamingReasoning(state.reason);
+      });
     };
     const maybeFlush = () => {
       const wait = 70 - (Date.now() - lastFlush);
@@ -140,6 +161,24 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         flushTimer = setTimeout(flush, wait);
       }
     };
+    const onSelectionChange = () => {
+      if (pendingPaint && !selectionGesture && !hasTextSelection()) maybeFlush();
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button === 0) selectionGesture = true;
+    };
+    const onPointerUp = () => {
+      selectionGesture = false;
+      if (pendingPaint && !hasTextSelection()) maybeFlush();
+    };
+    if (typeof document !== "undefined") {
+      document.addEventListener("selectionchange", onSelectionChange);
+      // Captura o começo do arrasto, antes mesmo de o browser formar uma seleção.
+      // Sem isso, um flush que cai no primeiro pixel do arrasto ainda desloca o texto.
+      document.addEventListener("pointerdown", onPointerDown, true);
+      document.addEventListener("pointerup", onPointerUp, true);
+      document.addEventListener("pointercancel", onPointerUp, true);
+    }
     const handler = (ev: any) => {
       if (ev.type === "token") {
         if (resetTextOnNextToken) {
@@ -250,6 +289,12 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       }
     };
     const dispose = () => {
+      if (typeof document !== "undefined") {
+        document.removeEventListener("selectionchange", onSelectionChange);
+        document.removeEventListener("pointerdown", onPointerDown, true);
+        document.removeEventListener("pointerup", onPointerUp, true);
+        document.removeEventListener("pointercancel", onPointerUp, true);
+      }
       if (flushTimer !== null) {
         clearTimeout(flushTimer);
         flushTimer = null;
