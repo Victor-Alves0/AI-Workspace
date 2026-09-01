@@ -80,4 +80,4 @@ por QR Code.
 Procure PKCE ou device flow antes de aceitar um campo de chave. Se o serviço tiver
 os dois, prefira PKCE quando houver navegador (redirect é menos passos) e device
 flow quando o retorno for problema. Se só houver chave, deixe isso explícito na tela
-— o usuário merece saber que a fricção é do provedor, não do Singularity AI.
+— o usuário merece saber que a fricção é do provedor, não do AI Workspace.

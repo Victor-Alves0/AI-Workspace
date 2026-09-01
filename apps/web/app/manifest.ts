@@ -4,8 +4,8 @@ import type { MetadataRoute } from "next";
 // janela própria (standalone), sem a barra do navegador — cara de app nativo.
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Singularity AI",
-    short_name: "Singularity AI",
+    name: "AI Workspace",
+    short_name: "AI Workspace",
     description: "Seu workspace de IA local-first",
     start_url: "/",
     display: "standalone",

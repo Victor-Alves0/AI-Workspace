@@ -4,7 +4,7 @@ name = "aiworkspace-server"
 # pacote instalado) e os arquivos do desktop são sincronizados por scripts/set_version.py.
 # O teste tests/test_version_sync.py falha se algum deles divergir.
 version = "0.5.0"
-description = "Singularity AI — backend FastAPI (chat, SIFT tools, mem0 memory, OpenRouter)"
+description = "AI Workspace — backend FastAPI (chat, SIFT tools, mem0 memory, OpenRouter)"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",

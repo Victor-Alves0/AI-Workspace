@@ -109,7 +109,7 @@ export default function SharedChatPage() {
             ))}
           </div>
         )}
-        <p className="mt-10 text-center text-xs text-muted">Compartilhado via Singularity AI</p>
+        <p className="mt-10 text-center text-xs text-muted">Compartilhado via AI Workspace</p>
       </main>
     </div>
   );

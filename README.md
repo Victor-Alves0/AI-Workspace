@@ -1,6 +1,6 @@
 <div align="center">
 
-# Singularity AI
+# AI Workspace
 
 **A self-hosted, local-first AI workspace — multi-model chat with tools, long-term memory, automations, integrations and a desktop app, all running on _your_ infrastructure.**
 
@@ -13,7 +13,7 @@
 
 ---
 
-**Singularity AI** is an OpenWebUI-style AI platform built to **own its own data**: you chat with
+**AI Workspace** is an OpenWebUI-style AI platform built to **own its own data**: you chat with
 any model, give it tools and memory, create automations and integrate with your services — and
 none of it leaves your machine except the call to the model provider and whatever **you** tell
 the tools to do. Secrets are stored **encrypted at rest** in the database.

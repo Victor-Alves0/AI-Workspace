@@ -92,7 +92,7 @@ export default function OnboardingModal({ user, onClose, onDone }: {
         <div className="px-5 pb-5">
           {view === "welcome" && (
             <div className="space-y-3 py-2">
-              <h2 className="text-xl font-semibold text-ink">Bem-vindo ao Singularity AI 👋</h2>
+              <h2 className="text-xl font-semibold text-ink">Bem-vindo ao AI Workspace 👋</h2>
               <p className="text-sm leading-6 text-muted">
                 É o <span className="text-ink-soft">seu</span> workspace de IA: você usa a sua própria chave de API e todas as
                 configurações ficam guardadas só na sua conta. Vamos deixar tudo pronto em menos de um minuto.

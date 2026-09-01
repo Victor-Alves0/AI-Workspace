@@ -31,7 +31,7 @@ def test_provisioning_uri_and_qr():
     # o issuer é só o RÓTULO exibido no app autenticador; a verificação usa apenas o
     # segredo. Renomear o produto NÃO invalida um 2FA já cadastrado — quem já tinha
     # continua vendo o nome antigo na lista do autenticador, e o código segue valendo.
-    assert uri.startswith("otpauth://totp/") and "Singularity%20AI" in uri
+    assert uri.startswith("otpauth://totp/") and "AI%20Workspace" in uri
     assert twofa_service.qr_data_url(secret, "user@x.com").startswith("data:image/png;base64,")
 
 

@@ -22,7 +22,7 @@ export default function LegalPage({ file }: { file: "privacy" | "terms" }) {
     <main className="mx-auto min-h-dvh max-w-3xl px-5 py-12">
       <Markdown content={md} />
       <p className="mt-12 border-t border-border pt-5 text-xs text-muted">
-        <a href="/" className="transition-colors hover:text-ink">Singularity AI</a>
+        <a href="/" className="transition-colors hover:text-ink">AI Workspace</a>
         {" · "}
         <a href="/privacy" className="transition-colors hover:text-ink">Privacidade</a>
         {" · "}

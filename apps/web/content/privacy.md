@@ -1,10 +1,10 @@
-# Política de Privacidade — Singularity AI
+# Política de Privacidade — AI Workspace
 
 **Última atualização:** 4 de agosto de 2026
 
 ## Em uma frase
 
-O Singularity AI é um aplicativo **auto-hospedado**. Ele roda no computador ou no
+O AI Workspace é um aplicativo **auto-hospedado**. Ele roda no computador ou no
 servidor de quem o instalou, e seus dados ficam nessa máquina. Nós não operamos um
 serviço central, não recebemos cópia dos seus dados e não temos acesso a eles.
 

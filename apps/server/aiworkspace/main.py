@@ -330,7 +330,7 @@ async def _run_traced(request: Request, call_next, start: float, traced: bool):
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="Singularity AI API", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="AI Workspace API", version="0.1.0", lifespan=lifespan)
 
     app.add_middleware(
         CORSMiddleware,

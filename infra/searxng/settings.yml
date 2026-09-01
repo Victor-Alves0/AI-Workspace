@@ -1,4 +1,4 @@
-# SearXNG — metabuscador self-hosted usado pela Pesquisa na Web do Singularity AI.
+# SearXNG — metabuscador self-hosted usado pela Pesquisa na Web do AI Workspace.
 # Sobe opt-in: `docker compose --profile search up -d`.
 # O backend consulta GET /search?format=json, então o formato JSON PRECISA estar
 # ligado (search.formats abaixo) e o limiter DESLIGADO (uso interno na rede do
@@ -6,7 +6,7 @@
 use_default_settings: true
 
 general:
-  instance_name: "Singularity AI Search"
+  instance_name: "AI Workspace Search"
   # não divulga esta instância publicamente
   donation_url: false
   contact_url: false

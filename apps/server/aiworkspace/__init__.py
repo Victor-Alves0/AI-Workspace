@@ -1,4 +1,4 @@
-"""Singularity AI backend package."""
+"""AI Workspace backend package."""
 
 from pathlib import Path
 

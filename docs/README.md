@@ -1,6 +1,6 @@
-# Documentation — Singularity AI
+# Documentation — AI Workspace
 
-Reference guide for Singularity AI. If you just want to get it running, start with the
+Reference guide for AI Workspace. If you just want to get it running, start with the
 [main README](../README.md); the pages below go deeper into each area.
 
 ## Index

@@ -32,7 +32,7 @@ def _fernet() -> Fernet:
         # ⚠️ NÃO RENOMEIE ESTE SALT. Ele entra na derivação da chave: mudar um byte
         # muda a chave, e TODO segredo já cifrado no banco (tokens do Google, GitHub,
         # Slack, Notion, Tuya, chaves de API) vira ilegível — sem erro claro, só
-        # falha de decrypt. O produto passou a se chamar "Singularity AI"; este
+        # falha de decrypt. O produto passou a se chamar "AI Workspace"; este
         # literal continua com o nome antigo de propósito, e assim deve ficar.
         salt=b"ai-workspace-secret-encryption",
         info=b"fernet-key",

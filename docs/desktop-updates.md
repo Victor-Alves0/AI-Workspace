@@ -23,7 +23,7 @@ existente **atualiza no lugar** — não cria uma segunda cópia nem pede desins
 
 ## Renomear o produto quebra a atualização no lugar (uma vez)
 
-`productName` mudou de "AI Workspace" para "Singularity AI". Isso **não** é inócuo:
+O `productName` atual é "AI Workspace". Alterar esse nome em futuras versões não é inócuo:
 no template NSIS do Tauri a chave de desinstalação é derivada do PRODUCTNAME, não do
 identifier —
 
@@ -32,7 +32,7 @@ identifier —
 StrCpy $INSTDIR "$LOCALAPPDATA\${PRODUCTNAME}"      ; installMode currentUser
 ```
 
-— então o instalador novo procura por `...\Uninstall\Singularity AI`, não acha, e se
+— então o instalador novo procura por uma chave de desinstalação com o novo nome, não acha, e se
 comporta como **primeira instalação**. Consequência para quem já tinha o app:
 
 | | O que acontece |

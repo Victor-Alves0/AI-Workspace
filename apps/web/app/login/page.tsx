@@ -68,7 +68,7 @@ export default function LoginPage() {
         <div className="flex flex-col items-center text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.png" alt="" className="mb-3 h-12 w-12 rounded-xl" />
-          <h1 className="text-xl font-semibold tracking-tight text-ink">Singularity AI</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-ink">AI Workspace</h1>
           <p className="mt-1 text-sm text-muted">
             {mode === "login" ? "Entre na sua conta" : "Crie sua conta"}
           </p>

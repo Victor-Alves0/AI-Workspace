@@ -1,6 +1,6 @@
 # Desktop app (Windows)
 
-A native app that opens Singularity AI in its own window, with a **tray icon**, **"run in the
+A native app that opens AI Workspace in its own window, with a **tray icon**, **"run in the
 background"** and **"start with Windows"**. Built with [Tauri](https://tauri.app/).
 
 ## What it adds

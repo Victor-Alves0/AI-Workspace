@@ -164,7 +164,7 @@ services:
       DATABASE_CONNECTION_CLIENT_NAME: evolution
       CACHE_LOCAL_ENABLED: "true"
       CACHE_REDIS_ENABLED: "false"
-      CONFIG_SESSION_PHONE_CLIENT: Singularity AI
+      CONFIG_SESSION_PHONE_CLIENT: AI Workspace
       LOG_LEVEL: ERROR
     volumes:
       - evolution_instances:/evolution/instances

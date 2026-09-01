@@ -79,7 +79,7 @@ def _push_one(sub: dict, payload: str, private_pem: str) -> int:
 async def send_to_user(user_id, title: str, body: str, url: str = "/") -> int:
     """Envia uma notificação push a TODOS os dispositivos inscritos do usuário.
     Poda inscrições mortas (404/410). Best-effort (nunca levanta). Retorna nº enviado."""
-    payload = json.dumps({"title": title or "Singularity AI", "body": (body or "")[:400], "url": url or "/"})
+    payload = json.dumps({"title": title or "AI Workspace", "body": (body or "")[:400], "url": url or "/"})
     sent = 0
     try:
         async with SessionLocal() as db:

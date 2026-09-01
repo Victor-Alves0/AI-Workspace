@@ -1141,7 +1141,7 @@ function DesktopTab() {
       </Row>
       <Row
         label="Iniciar com o Windows"
-        info="Abre o Singularity AI automaticamente quando você liga o computador."
+        info="Abre o AI Workspace automaticamente quando você liga o computador."
       >
         <Toggle
           on={s.autostart}
@@ -1181,7 +1181,7 @@ function AboutTab() {
   return (
     <div>
       <Heading>Sobre</Heading>
-      <p className="text-base font-semibold text-ink">Singularity AI</p>
+      <p className="text-base font-semibold text-ink">AI Workspace</p>
       <p className="mt-1 text-sm text-ink-soft">
         Versão: {info?.version ?? "—"}
         {info?.update_available && info.latest_version && (
@@ -1197,7 +1197,7 @@ function AboutTab() {
       {info?.update_available && info.release_url && (
         <DesktopUpdateNotice releaseUrl={info.release_url} version={info.latest_version} />
       )}
-      <p className="mt-5 text-xs text-muted">Copyright (c) 2026 Singularity AI. All rights reserved.</p>
+      <p className="mt-5 text-xs text-muted">Copyright (c) 2026 AI Workspace. All rights reserved.</p>
       {/* openExternal, e não <a target="_blank">: no webview do Tauri o link de nova
           janela não faz nada (docs/desktop-updates.md). */}
       <p className="mt-1 text-xs text-muted">
@@ -2164,4 +2164,3 @@ function ApisPanel({ status, reloadSecrets, onBack }: { status: SecretStatus | n
     </DetailView>
   );
 }
-

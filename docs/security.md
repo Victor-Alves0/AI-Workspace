@@ -1,6 +1,6 @@
 # Security
 
-Singularity AI stores sensitive secrets (API keys, OAuth/bot tokens) and can execute
+AI Workspace stores sensitive secrets (API keys, OAuth/bot tokens) and can execute
 model-generated code. This page describes the security model and the operational recommendations.
 
 ## Authentication and session

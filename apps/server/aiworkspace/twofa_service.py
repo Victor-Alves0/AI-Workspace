@@ -13,7 +13,7 @@ import io
 import pyotp
 import qrcode
 
-_ISSUER = "Singularity AI"
+_ISSUER = "AI Workspace"
 
 
 def new_secret() -> str:

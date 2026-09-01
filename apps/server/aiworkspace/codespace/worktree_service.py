@@ -333,7 +333,7 @@ async def open_pr(user_id: str, task_id: str, *, title: str = "", body: str = ""
                 pr = await run_in_threadpool(
                     github_service.create_pr, token, repo,
                     (title or t.title or t.branch)[:120], t.branch, proj.branch,
-                    body or "PR aberto pelo Codespace (Singularity AI).",
+                    body or "PR aberto pelo Codespace (AI Workspace).",
                 )
             except Exception as exc:  # noqa: BLE001
                 return {"error": f"não consegui abrir o PR: {str(exc)[:300]}"}

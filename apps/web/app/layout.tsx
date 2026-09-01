@@ -11,13 +11,13 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Singularity AI",
+  title: "AI Workspace",
   description: "Seu workspace de IA local-first",
-  applicationName: "Singularity AI",
+  applicationName: "AI Workspace",
   // instalado pelo atalho ("Adicionar à tela de início") abre em janela própria
   appleWebApp: {
     capable: true,
-    title: "Singularity AI",
+    title: "AI Workspace",
     statusBarStyle: "black-translucent",
   },
 };

@@ -85,7 +85,7 @@ class Settings(BaseSettings):
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     # Identificação do app enviada ao OpenRouter (aparece no dashboard dele).
     # Nome = X-Title; URL = HTTP-Referer (evite localhost para não aparecer como tal).
-    openrouter_app_name: str = "Singularity AI"
+    openrouter_app_name: str = "AI Workspace"
     openrouter_app_url: str = "https://ai-workspace.app"
 
     # Web search

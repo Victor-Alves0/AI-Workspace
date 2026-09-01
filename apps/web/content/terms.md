@@ -1,17 +1,17 @@
-# Termos de Serviço — Singularity AI
+# Termos de Serviço — AI Workspace
 
 **Última atualização:** 4 de agosto de 2026
 
 ## O que é este documento
 
-O Singularity AI é um software **auto-hospedado**: ele roda na máquina de quem o
+O AI Workspace é um software **auto-hospedado**: ele roda na máquina de quem o
 instala. Estes termos valem para o uso do software. Não existe um serviço central
 operado por nós — se você usa a instalação de outra pessoa ou empresa, as regras de
 uso daquele ambiente são definidas por quem o administra.
 
 ## Uso do software
 
-Você pode instalar e usar o Singularity AI para fins pessoais ou internos da sua
+Você pode instalar e usar o AI Workspace para fins pessoais ou internos da sua
 organização. Você é responsável por:
 
 - manter a sua instalação atualizada e configurada com segurança;

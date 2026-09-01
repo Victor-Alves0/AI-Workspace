@@ -1,4 +1,4 @@
-# Monta o "engine bundle" do Singularity AI para Windows (Etapa 1 do app sem Docker).
+# Monta o "engine bundle" do AI Workspace para Windows (Etapa 1 do app sem Docker).
 #
 # Produz uma pasta autocontida com Python embarcado + backend instalado + Postgres 16
 # + pgvector, que o Start-AIWorkspace.ps1 sobe sem depender de nada instalado no SO.

@@ -1,6 +1,6 @@
 """Bateria de ESCOPO DE AUTORIZAÇÃO: pega "resolve recurso por id sem checar dono".
 
-Por que existe (ver docs/trust-model.md): o Singularity AI é multiusuário num único domínio
+Por que existe (ver docs/trust-model.md): o AI Workspace é multiusuário num único domínio
 de confiança. Vazamento entre usuários não é "defesa contra usuário malicioso" — é higiene,
 e é a classe de bug MAIS fácil de introduzir sem perceber, porque nada obriga a lembrar.
 Aconteceu de verdade: `code.exec.jobs` resolvia `job_id` num dicionário global e devolvia a

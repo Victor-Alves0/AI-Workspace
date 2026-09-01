@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-If you've found a security vulnerability in Singularity AI, **do not open a public issue**.
+If you've found a security vulnerability in AI Workspace, **do not open a public issue**.
 Instead:
 
 - Use GitHub's **[Report a vulnerability](https://github.com/Victor-Alves0/AI-Workspace/security/advisories/new)**

@@ -1,6 +1,6 @@
 # Public API
 
-Singularity AI exposes an **OpenAI-compatible** API at `/v1`. An OpenAI client or SDK works by
+AI Workspace exposes an **OpenAI-compatible** API at `/v1`. An OpenAI client or SDK works by
 changing only the `base_url` and the key — no adapter.
 
 ## Authentication
