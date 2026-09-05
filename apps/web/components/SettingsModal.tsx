@@ -32,6 +32,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  TerminalSquare,
   UserCog,
   CircleUserRound,
   X,
@@ -72,6 +73,7 @@ import SlackChannelPanel from "./SlackChannelPanel";
 import ElevenLabsPanel from "./ElevenLabsPanel";
 import VercelPanel from "./VercelPanel";
 import SpotifyPanel from "./SpotifyPanel";
+import RemoteTerminalPanel from "./RemoteTerminalPanel";
 import HiggsfieldPanel from "./HiggsfieldPanel";
 import SubscriptionsPanel from "./SubscriptionsPanel";
 import OllamaPanel from "./OllamaPanel";
@@ -646,6 +648,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                 <VercelPanel onBack={() => setIntegView(null)} />
               ) : integView === "spotify" ? (
                 <SpotifyPanel onBack={() => setIntegView(null)} />
+              ) : integView === "remote" ? (
+                <RemoteTerminalPanel onBack={() => setIntegView(null)} />
               ) : (
                 <div>
                   <Heading>Integrações</Heading>
@@ -769,6 +773,16 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       </span>
                       <span className="text-sm font-medium text-ink">Spotify</span>
                       <span className="text-xs leading-4 text-muted">Música: buscar e tocar</span>
+                    </button>
+                    <button
+                      onClick={() => setIntegView("remote")}
+                      className="group flex flex-col items-center gap-2.5 rounded-2xl border border-border bg-surface px-4 py-7 text-center transition-all duration-150 hover:border-accent/40 hover:bg-hover"
+                    >
+                      <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
+                        <TerminalSquare size={22} />
+                      </span>
+                      <span className="text-sm font-medium text-ink">Remote Terminal</span>
+                      <span className="text-xs leading-4 text-muted">Terminal nas suas máquinas</span>
                     </button>
                     {[
                       { name: "Google Drive", icon: <SiGoogledrive size={22} /> },

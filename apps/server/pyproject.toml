@@ -18,7 +18,11 @@ dependencies = [
     "argon2-cffi>=23.1",
     "pyjwt>=2.10",
     "cryptography>=44.0",
-    "httpx>=0.28",
+    # [socks] = socksio: proxy SOCKS5 na saída. Necessário para o Remote Terminal
+    # falar com a máquina do usuário por um túnel (Tor/SSH -D/Shadowsocks) sem
+    # expor o IP do servidor — sem o extra, um proxy socks5:// falharia no import
+    # e o killswitch recusaria a conexão em vez de sair direto.
+    "httpx[socks]>=0.28",
     "python-multipart>=0.0.12",
     "ddgs>=6.0",
     # extração de texto de anexos (integração "Extração de Texto")

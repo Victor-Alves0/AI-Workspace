@@ -41,6 +41,11 @@ The AI discovers and executes tools on demand. Categories: **native**, **Codespa
   CPU/memory/time limits).
 - **Messaging agency**: the AI acts on your WhatsApp/Telegram/Discord connections
   (list/read/send).
+- **Remote Terminal**: a real shell on **your own machines** (a VPS, the home server) through
+  an installed agent — run commands, launch long jobs, read logs. Outbound traffic can be
+  sealed through a proxy on both legs (workspace→machine and the machine's own commands),
+  each with a killswitch that refuses rather than falling back to the direct route. See
+  [remote-terminal.md](remote-terminal.md).
 
 Tools live under **Workspace → Tools** and are attachable per model.
 
@@ -102,6 +107,8 @@ Tools live under **Workspace → Tools** and are attachable per model.
   activation).
 - **Tuya / Smart Life**: smart home via HMAC (automatic device discovery, per-model gating).
 - **GitHub**: read and write (with confirmation), via PAT or OAuth.
+- **Remote Terminal**: your own machines (VPS, home server) via the installed agent, with
+  per-machine token, TLS pinning and egress policy.
 - **Subscriptions**: use ChatGPT/Codex by login (OAuth), where applicable.
 
 ## Interface and experience

@@ -55,6 +55,29 @@ Mitigations:
 > sandbox (network off, `hidepid`, nsjail/gVisor) and delivering secrets by file. In a
 > **single-user self-hosted** install (the common case), the risk is your own code.
 
+## Remote Terminal (your own machines)
+
+The Remote Terminal tool gives the AI a **real shell on a machine you own**, through an
+agent you install there. It is the widest capability in the product, so the defaults are
+deliberately narrow:
+
+- The agent authenticates every call with a **per-machine bearer token** (constant-time
+  compare) over TLS; the workspace pins the agent's self-signed certificate by default.
+- Commands run as a **dedicated non-root user**, not as whoever installed the agent.
+- **Confirmation is on by default per machine** — unlike the Codespace sandbox, the default
+  here is to ask.
+- Outbound traffic can be **sealed through a proxy** on both legs — the workspace→machine
+  connection and the machine's own command egress — each with a killswitch that **refuses
+  rather than falling back to the direct route**. A fallback would leak exactly the address
+  the proxy exists to hide, silently.
+
+Two limits worth knowing before you enable it: the sealed mode filters by **uid**, so `sudo`
+(uid 0) escapes it — the installer refuses `--grant-sudo` together with `--force-egress`;
+and a machine reachable from the internet should have its agent port restricted (firewall,
+`--bind 127.0.0.1` behind a tunnel, or `allow_cidrs`).
+
+See [remote-terminal.md](remote-terminal.md).
+
 ## Production hardening
 
 - `APP_ENV=production` makes the server **refuse to start** with a weak/short `APP_SECRET`.

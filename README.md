@@ -81,6 +81,8 @@ desktop app with a tray icon.
 - Charts, diagrams (Mermaid/Excalidraw), financial quotes, date/time
 - **Video/audio transcription** (YouTube + ~1800 sites)
 - **Python code** written by the AI, executed in an **isolated sandbox**
+- **Remote Terminal**: a real shell on **your own machines** (VPS, home server) through an
+  installed agent, with outbound traffic optionally sealed through a proxy + killswitch
 
 **Content & media**
 - **Artifacts** (code/docs/HTML/SVG/Mermaid/CSV) in a dedicated window, with versions
@@ -225,6 +227,7 @@ In this version the app does **not** embed the server — keep the stack running
 | [docs/deployment.md](docs/deployment.md)     | VPS, LAN, HTTPS, backup/restore, updates, secret rotation |
 | [docs/public-api.md](docs/public-api.md)     | OpenAI-compatible API + key management |
 | [docs/security.md](docs/security.md)         | Security model and recommendations |
+| [docs/remote-terminal.md](docs/remote-terminal.md) | Remote Terminal: agent, egress proxy and killswitch |
 | [docs/desktop.md](docs/desktop.md)           | Desktop app (Tauri) |
 | [docs/development.md](docs/development.md)    | Running without Docker, tests, project layout |
 | [CONTRIBUTING.md](CONTRIBUTING.md)           | How to contribute |

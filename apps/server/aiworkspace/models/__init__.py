@@ -34,6 +34,7 @@ from .exec_job import ExecJob
 from .task_ledger import TaskLedger
 from .api_key import ApiKey, ApiRequest
 from .trace import ObsTrace, ObsSpan
+from .remote_host import RemoteHost
 
 __all__ = [
     "AuditEvent",
@@ -90,4 +91,5 @@ __all__ = [
     "ApiRequest",
     "ObsTrace",
     "ObsSpan",
+    "RemoteHost",
 ]

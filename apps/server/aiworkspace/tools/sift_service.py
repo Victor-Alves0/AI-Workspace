@@ -203,6 +203,24 @@ class SpotifyConfig:
 
 
 @dataclass
+class RemoteConfig:
+    """Config da tool Remote Terminal (terminal de máquinas remotas com agente).
+
+    `hosts` = [{"id","slug","name","status","egress_mode"}] das máquinas LIBERADAS neste
+    modelo (vazio = nenhuma → 'nenhuma máquina'). Token, certificado e URLs de proxy NÃO
+    viajam aqui: são resolvidos ao vivo por máquina a cada chamada, como no Google/GitHub —
+    a instância SIFT é cacheada por-usuário e ficaria com credencial velha na memória.
+
+    `require_confirm` é o piso: cada máquina ainda pode exigir confirmação por conta
+    própria (`confirm_required`), porque rodar comando numa VPS real é mais sensível que
+    o sandbox do Codespace."""
+    user_id: str = ""
+    require_confirm: bool = True
+    hosts: list = field(default_factory=list)
+    ops: dict = field(default_factory=dict)
+
+
+@dataclass
 class MessagingConfig:
     """Config por-modelo da tool de mensagens (agir nas conexões de chat do usuário:
     WhatsApp/Telegram/Discord). Nada de token/instância aqui — resolvidos ao vivo por
@@ -374,6 +392,13 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # montando um grafo TIPADO e persistido, consultável e visualizável.
     {"path": "investigation.graph.manage", "name": "Grafo de Investigação", "description": "Monta um grafo à medida que você investiga algo sem o código-fonte — um alvo na rede, um binário, um comportamento: registra hosts, portas, serviços, endpoints, funções e achados como nós ligados, que ficam consultáveis e visuais.",
      "model_desc": "Build a TYPED, persistent graph as you investigate something you don't have source for — a network target (recon), a binary (reverse engineering), or observed behavior. YOU are the extractor: probe with code.exec.run (curl/httpx/python sockets), the headless browser, http.session, deep_search, then record what you find here as linked nodes (host, port, service, endpoint, form, param, function, import, string, syscall, behavior, finding). It persists, is queryable ('which endpoints take POST without auth?') and renders on a canvas. The codegraph covers source you HAVE; this covers everything else. Use it whenever an investigation would otherwise leave findings as loose prose."},
+    # Remote Terminal: terminal de uma máquina REAL do usuário (VPS, servidor de casa)
+    # via o agente instalado nela. Diferente do code.exec.run (sandbox do servidor, sem
+    # privilégio): aqui o comando roda na máquina dele, com a rede dela. A saída dos
+    # comandos pode ser selada por proxy com killswitch — a tool relata o estado, nunca
+    # o esconde, porque é isso que decide se um comando pode vazar o IP real.
+    {"path": "remote.terminal.run", "name": "Remote Terminal", "description": "Roda comandos no terminal das suas máquinas remotas (VPS, servidor de casa) pelo agente instalado nelas — administrar, instalar, depurar e ver logs, com a saída de rede podendo sair por proxy com killswitch.",
+     "model_desc": "A real SHELL on the user's own remote machines (VPS, home server) through the installed agent — NOT the server sandbox. Actions: 'hosts' (list the machines and their status/egress policy — do this first when unsure which machine), 'run' (execute a command and get stdout+exit code), 'start' (launch a long command in the background, returns job_id), 'job' (status/output of a background job; pass wait=<seconds> to block until it finishes), 'kill' (stop a job), 'egress' (report the machine's outbound policy and run a LEAK TEST). Commands run as a dedicated non-root user by default. When the machine has a sealed egress policy, everything the command touches goes through the proxy and a firewall drops anything else — if the proxy is down the command is REFUSED rather than leaking the real IP, and you get that reason back verbatim: report it to the user instead of retrying blindly. Use for real sysadmin work; a bad exit code means the command failed — read the output and fix."},
 ]
 # NOTA: "perguntar opções" (kind:"ask") é uma PRIMITIVA de sistema (tools/interaction.py),
 # não uma tool equipável — qualquer ferramenta a usa via `ask_options(...)` (ex.: o Lembrete
@@ -652,6 +677,7 @@ _INTEGRATION_PREFIXES: dict[str, str] = {
     "elevenlabs.": "ElevenLabs",
     "vercel.": "Vercel",
     "spotify.": "Spotify",
+    "remote.": "Remote Terminal",
 }
 
 
@@ -972,6 +998,7 @@ def _register_builtins(
     elevenlabs_cfg: "ElevenLabsConfig | None" = None,
     vercel_cfg: "VercelConfig | None" = None,
     spotify_cfg: "SpotifyConfig | None" = None,
+    remote_cfg: "RemoteConfig | None" = None,
 ) -> None:
     """Registra as ferramentas de sistema. `allowed=None` = todas; caso contrário
     apenas os paths presentes no conjunto."""
@@ -3993,6 +4020,219 @@ def _register_builtins(
             except Exception as exc:  # noqa: BLE001
                 return {"error": str(exc)}
 
+    # ----------------------------------------------------------------------- #
+    # Remote Terminal — shell nas máquinas do próprio usuário (VPS, servidor de casa)
+    # ----------------------------------------------------------------------- #
+    if want("remote.terminal.run"):
+        from ..remote import agent_client as _agent
+        from ..remote import service as _remote
+
+        rt_confirm = True if remote_cfg is None else bool(remote_cfg.require_confirm)
+        rt_hosts = list(remote_cfg.hosts) if remote_cfg else []
+        rt_ops = remote_cfg.ops if remote_cfg else {}
+        rt_uid = (remote_cfg.user_id if remote_cfg else user_id) or ""
+
+        def _rt_on(cap: str) -> bool:
+            return rt_ops.get(cap, True) is not False
+
+        def _rt_truthy(v: Any) -> bool:
+            if v is True:
+                return True
+            return isinstance(v, str) and v.strip().lower() in ("true", "1", "yes", "sim", "on")
+
+        def _rt_pick(ref: str) -> tuple[dict | None, dict | None]:
+            """Escolhe a máquina entre as LIBERADAS neste modelo e carrega a config.
+
+            A escolha nunca é chutada: com várias máquinas e sem `host`, devolve um
+            seletor para o usuário. Rodar o comando certo na máquina errada é o tipo
+            de engano que não dá para desfazer."""
+            if not rt_hosts:
+                return None, {"error": "nenhuma máquina remota liberada para este modelo. "
+                                       "O usuário conecta uma em Configurações → Integrações "
+                                       "→ Remote Terminal e a libera na engrenagem da ferramenta."}
+            key = (ref or "").strip().lower()
+            chosen = None
+            if key:
+                chosen = next(
+                    (h for h in rt_hosts
+                     if key in (str(h.get("id", "")).lower(), (h.get("slug") or "").lower(),
+                                (h.get("name") or "").strip().lower())),
+                    None,
+                )
+                if chosen is None:
+                    names = ", ".join(h.get("slug") or "" for h in rt_hosts)
+                    return None, {"error": f"máquina '{ref}' não encontrada ou não liberada "
+                                           f"para este modelo. Disponíveis: {names}"}
+            elif len(rt_hosts) == 1:
+                chosen = rt_hosts[0]
+            else:
+                from .interaction import ask_options
+                return None, ask_options(
+                    "Em qual máquina devo rodar?",
+                    [{"label": h.get("name") or h.get("slug") or "",
+                      "value": f"Use a máquina {h.get('slug')}",
+                      "hint": h.get("status") or ""} for h in rt_hosts],
+                    allow_custom=False,
+                )
+            payload, err = asyncio.run(_remote.resolve_standalone(rt_uid, str(chosen.get("id"))))
+            if payload is None:
+                return None, {"error": err or "máquina indisponível"}
+            return payload, None
+
+        def _rt_guard(chosen: dict, summary: str, confirm: Any) -> dict | None:
+            """Confirmação antes de agir numa máquina de verdade.
+
+            O piso é POR-MÁQUINA (`confirm_required`), não o toggle global: aqui o
+            comando roda numa VPS do usuário, com a rede e os dados dela, não num
+            sandbox descartável — o padrão tem que ser perguntar. Em turno autônomo
+            (automação/canal) não há quem confirme, então executa direto, igual às
+            demais ferramentas."""
+            need = bool(chosen.get("confirm_required")) or rt_confirm
+            if not need or _rt_truthy(confirm) or toolctx.background.get():
+                return None
+            from .interaction import ask_options
+            return ask_options(
+                summary,
+                [
+                    {"label": "Confirmar", "value": "Sim, confirmo — refaça a ação agora com confirm=true."},
+                    {"label": "Cancelar", "value": "Cancele, não execute o comando."},
+                ],
+                allow_custom=False,
+            )
+
+        def _rt_call(chosen: dict, coro_factory) -> dict[str, Any]:
+            """Chama o agente e ANOTA o desfecho no status da máquina.
+
+            Erros do agente viram `{"error": ...}` legível em vez de exceção: proxy fora
+            do ar ou killswitch mordendo são respostas ESPERADAS aqui, e o modelo precisa
+            lê-las para contar ao usuário o que houve — não para tentar de novo às cegas."""
+            try:
+                data = asyncio.run(coro_factory())
+            except _agent.RemoteBlocked as exc:
+                asyncio.run(_remote.mark_seen_standalone(chosen["id"], False, str(exc)))
+                return {"error": str(exc), "blocked": True}
+            except _agent.RemoteError as exc:
+                asyncio.run(_remote.mark_seen_standalone(chosen["id"], False, str(exc)))
+                return {"error": str(exc)}
+            except Exception as exc:  # noqa: BLE001
+                return {"error": str(exc)[:300]}
+            asyncio.run(_remote.mark_seen_standalone(chosen["id"], True))
+            return data if isinstance(data, dict) else {"error": "resposta inesperada do agente"}
+
+        @sift.tool(
+            "remote.terminal.run",
+            description=(
+                "A real SHELL on the user's OWN remote machines (a VPS, a home server) via the "
+                "agent installed there — this is NOT the server sandbox: the command runs on "
+                "their machine, with their network and their installed software. "
+                "Actions: 'hosts' (list the machines with status and egress policy — call this "
+                "FIRST when you don't know which machine, or to check one is online); "
+                "'run' (execute `command`, get output + exit_code); "
+                "'start' (launch a long command detached — returns job_id — for installs, "
+                "builds and downloads that would blow the timeout); "
+                "'job' (status/output of a job; pass wait=<seconds> to block until it ends); "
+                "'kill' (stop a job); "
+                "'egress' (report the machine's outbound network policy; test=true runs a LEAK "
+                "TEST that proves whether traffic really is sealed through the proxy). "
+                "Pass `host` (the machine's slug) whenever more than one exists. Commands run as "
+                "a dedicated non-root user unless the owner configured otherwise. "
+                "If the machine has a sealed egress policy and the proxy is down, the command is "
+                "REFUSED with the reason — relay that reason to the user; do NOT retry blindly "
+                "and do NOT suggest turning the killswitch off. A non-zero exit_code means the "
+                "command failed: read the output and fix it."
+            ),
+            params={
+                "action": "string:o::hosts | run | start | job | kill | egress (default: run)",
+                "host": "string:o::which machine (its slug, from action=hosts). Required when the user has more than one",
+                "command": "string:o::the shell command to run (required for run/start)",
+                "cwd": "string:o::working directory on the remote machine (default: the machine's configured one)",
+                "timeout": "number:o::seconds to wait for `run` (default: the machine's setting)",
+                "job_id": "string:o::the job returned by action=start (job/kill)",
+                "wait": "number:o::action=job — block up to N seconds until the job finishes",
+                "test": "boolean:o::action=egress — run the leak test instead of only reporting",
+                "confirm": "boolean:o::set true only after the user confirmed running on that machine",
+            },
+            returns=["ok", "hosts", "exit_code", "output", "seconds", "truncated", "timed_out",
+                     "job_id", "jobs", "status", "egress", "checks", "problems", "verdict",
+                     "blocked", "error", "note", "host", "command",
+                     "kind", "question", "options", "allow_custom", "custom_label"],
+            risk=True,
+            examples=["run df -h on my vps", "restart nginx on the server",
+                      "check the logs of my container on the vps",
+                      "install docker on the vps in the background",
+                      "is my vps traffic really going through the proxy?"],
+        )
+        def _remote_terminal(action: str = "", host: str = "", command: str = "",
+                             cwd: str = "", timeout: Any = None, job_id: str = "",
+                             wait: Any = None, test: Any = None,
+                             confirm: Any = None) -> dict[str, Any]:
+            act = (action or "run").strip().lower()
+            if act == "hosts":
+                rows = asyncio.run(_remote.list_standalone(rt_uid))
+                by_slug = {r["host"]: r for r in rows}
+                out = [by_slug[h["slug"]] for h in rt_hosts if h.get("slug") in by_slug]
+                return {"ok": True, "hosts": out,
+                        "note": ("nenhuma máquina liberada para este modelo" if not out else
+                                 "use o campo 'host' com o slug para escolher")}
+            if act not in ("run", "start", "job", "kill", "egress"):
+                return {"error": f"unknown action '{action}' (use hosts/run/start/job/kill/egress)"}
+            if not _rt_on(act if act in ("run", "start") else "manage"):
+                return {"error": f"a operação '{act}' está desativada nas configurações "
+                                 "desta ferramenta."}
+            chosen, block = _rt_pick(host)
+            if block is not None:
+                return block
+            assert chosen is not None
+            cfg = chosen["cfg"]
+            label = chosen["slug"]
+
+            if act == "egress":
+                if _rt_truthy(test):
+                    return {"host": label, **_rt_call(chosen, lambda: _agent.test_egress(cfg))}
+                return {"host": label, **_rt_call(chosen, lambda: _agent.get_egress(cfg))}
+            if act == "job":
+                if not (job_id or "").strip():
+                    return {"host": label, **_rt_call(chosen, lambda: _agent.list_jobs(cfg))}
+                secs = _rt_int(wait, 0, 0, 600)
+                jid = job_id.strip()
+                return {"host": label, **_rt_call(
+                    chosen, lambda: _agent.job_status(cfg, jid, wait=secs))}
+            if act == "kill":
+                if not (job_id or "").strip():
+                    return {"error": "informe `job_id` para action=kill"}
+                jid = job_id.strip()
+                return {"host": label, **_rt_call(chosen, lambda: _agent.kill_job(cfg, jid))}
+
+            cmd = (command or "").strip()
+            if not cmd:
+                return {"error": "informe `command` — o comando a rodar na máquina"}
+            verb = "Rodar em segundo plano" if act == "start" else "Rodar"
+            blocked = _rt_guard(chosen, f"{verb} na máquina '{chosen['name']}':\n`{cmd[:200]}`",
+                                confirm)
+            if blocked is not None:
+                return blocked
+            wd = cwd or chosen.get("workdir") or ""
+            sh = chosen.get("shell") or ""
+            if act == "start":
+                return {"host": label, **_rt_call(
+                    chosen, lambda: _agent.start_job(cfg, cmd, cwd=wd, shell=sh))}
+            tmo = _rt_int(timeout, int(chosen.get("timeout_seconds") or 120), 5, 900)
+            data = _rt_call(chosen, lambda: _agent.exec_command(
+                cfg, cmd, cwd=wd, timeout=tmo, shell=sh))
+            if "exit_code" in data:
+                data["ok"] = data.get("exit_code") == 0
+            return {"host": label, "command": cmd[:400], **data}
+
+
+def _rt_int(value: Any, default: int, lo: int, hi: int) -> int:
+    """Inteiro tolerante para os parâmetros numéricos da tool: o modelo manda tanto
+    número quanto string, e um valor esquisito não pode virar exceção no meio do turno."""
+    try:
+        n = int(float(value))
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(n, hi))
+
 
 # --------------------------------------------------------------------------- #
 # Ferramentas do usuário (código dinâmico)
@@ -4038,6 +4278,7 @@ def _signature(
     elevenlabs_cfg: "ElevenLabsConfig | None" = None,
     vercel_cfg: "VercelConfig | None" = None,
     spotify_cfg: "SpotifyConfig | None" = None,
+    remote_cfg: "RemoteConfig | None" = None,
 ) -> tuple:
     rows = tuple(
         sorted(
@@ -4140,6 +4381,12 @@ def _signature(
         elc,
         vlc,
         spc,
+        # Remote Terminal: máquinas liberadas + ops + piso de confirmação. Endereço e
+        # token NÃO entram (resolvidos ao vivo): trocar o token não deve rebuildar o
+        # índice, mas liberar/remover uma máquina deve.
+        ((remote_cfg.require_confirm, tuple(sorted(remote_cfg.ops.items())),
+          tuple(sorted(str(h.get("id")) for h in remote_cfg.hosts)))
+         if remote_cfg else ()),
     )
 
 
@@ -4193,6 +4440,7 @@ def build_user_sift(
     elevenlabs_cfg: "ElevenLabsConfig | None" = None,
     vercel_cfg: "VercelConfig | None" = None,
     spotify_cfg: "SpotifyConfig | None" = None,
+    remote_cfg: "RemoteConfig | None" = None,
 ) -> Sift | None:
     """Constrói a instância SIFT completa do usuário (builtins + tools dele).
 
@@ -4217,7 +4465,7 @@ def build_user_sift(
             on_result=_record_call,
             index_cache=_index_cache_path(user_id),
         )
-        _register_builtins(sift, search_cfg, None, finance_cfg, deep_cfg, user_id, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg)
+        _register_builtins(sift, search_cfg, None, finance_cfg, deep_cfg, user_id, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg, remote_cfg)
         for t in tool_rows:
             if not t.enabled:
                 continue
@@ -4259,12 +4507,13 @@ def get_user_sift(
     elevenlabs_cfg: "ElevenLabsConfig | None" = None,
     vercel_cfg: "VercelConfig | None" = None,
     spotify_cfg: "SpotifyConfig | None" = None,
+    remote_cfg: "RemoteConfig | None" = None,
 ) -> Sift | None:
-    sig = _signature(tool_rows, search_cfg, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg)
+    sig = _signature(tool_rows, search_cfg, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg, remote_cfg)
     cached = _cache.get(user_id)
     if cached is not None and cached[0] == sig:
         return cached[1]
-    sift = build_user_sift(tool_rows, search_cfg, user_id, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg)
+    sift = build_user_sift(tool_rows, search_cfg, user_id, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg, remote_cfg)
     _cache[user_id] = (sig, sift)
     return sift
 
@@ -4436,6 +4685,27 @@ def spotify_config_from_secrets(creds: tuple[str, str] | None) -> "SpotifyConfig
     if not creds or not creds[0] or not creds[1]:
         return None
     return SpotifyConfig(conn={"id": creds[0], "secret": creds[1]})
+
+
+def remote_config_from_hosts(
+    user_id: str, hosts: list[dict] | None = None, remote_prefs: dict | None = None,
+    *, confirm_actions: bool = False,
+) -> "RemoteConfig":
+    """Config da tool Remote Terminal. `hosts` = máquinas LIBERADAS neste modelo
+    ([{"id","slug","name","status","egress_mode"}]); vazio → a tool existe mas responde
+    'nenhuma máquina liberada'.
+
+    `require_confirm` aqui é só o piso vindo do toggle global (Configurações →
+    Segurança). A confirmação de verdade é POR-MÁQUINA (`RemoteHost.confirm_required`,
+    ligada por padrão): quem decide se comandar aquela VPS pede aval é o dono dela, não
+    uma preferência global que também vale para marcar um evento na agenda."""
+    p = remote_prefs or {}
+    return RemoteConfig(
+        user_id=user_id,
+        require_confirm=bool(confirm_actions),
+        hosts=list(hosts or []),
+        ops=p.get("ops") if isinstance(p.get("ops"), dict) else {},
+    )
 
 
 def github_config_from_secrets(

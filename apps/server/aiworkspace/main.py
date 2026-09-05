@@ -48,6 +48,7 @@ from .models_routes import router as models_router
 from .observability import install_logging, metrics
 from .observability_routes import router as observability_router
 from .prompts_routes import router as prompts_router
+from .remote_routes import router as remote_router
 from .settings_routes import router as settings_router
 from .skills_routes import router as skills_router
 from .tools_routes import router as tools_router
@@ -432,6 +433,7 @@ def create_app() -> FastAPI:
     app.include_router(knowledge_router)
     app.include_router(codespace_router)
     app.include_router(investigation_router)
+    app.include_router(remote_router)
     app.include_router(brain_router)
     app.include_router(share_router)
     app.include_router(telegram_router)

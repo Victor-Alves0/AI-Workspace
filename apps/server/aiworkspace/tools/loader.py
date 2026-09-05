@@ -325,7 +325,27 @@ async def _assemble_configs(db: AsyncSession, user_id: uuid.UUID, model_config: 
         from ..integrations import spotify_service
         sp_creds = await spotify_service.get_creds(db, str(user_id))
         spotify_cfg = sift_service.spotify_config_from_secrets(sp_creds)
-    return cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg
+    # Remote Terminal: máquinas do usuário com agente instalado, filtradas pelas
+    # liberadas neste modelo (tools_cfg.remote.hosts; vazio = todas). Token, certificado
+    # e proxies NÃO entram na config — resolvidos ao vivo por máquina em cada chamada.
+    # Só busca as máquinas se o modelo de fato equipou a tool (evita I/O à toa).
+    remote_cfg = None
+    if any(tid == f"{_BUILTIN_PREFIX}remote.terminal.run" for tid in tool_ids):
+        from ..models import RemoteHost
+        from ..remote import service as remote_service
+        rt_prefs = tools_cfg.get("remote") or {}
+        rt_allowed = {str(x) for x in (rt_prefs.get("hosts") or [])}
+        rt_rows = list(await db.scalars(select(RemoteHost).where(RemoteHost.user_id == user_id)))
+        rt_hosts = [
+            {"id": str(h.id), "slug": h.slug, "name": h.name, "status": h.status or "unknown",
+             "egress_mode": remote_service.normalize_egress(h.egress)["mode"]}
+            for h in rt_rows
+            if h.enabled and (not rt_allowed or str(h.id) in rt_allowed)
+        ]
+        remote_cfg = sift_service.remote_config_from_hosts(
+            str(user_id), rt_hosts, rt_prefs, confirm_actions=confirm_actions
+        )
+    return cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg, remote_cfg
 
 
 async def build_full_sift_for_user(db: AsyncSession, user_id: uuid.UUID):
@@ -333,9 +353,9 @@ async def build_full_sift_for_user(db: AsyncSession, user_id: uuid.UUID):
     Debug de Tools chamar qualquer ferramenta direto (`sift.execute_tool(path, params)`).
     Usa as configs globais do usuário (sem gating por-modelo). None se a SIFT falhar."""
     rows = list(await db.scalars(select(Tool).where(Tool.user_id == user_id)))
-    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg = await _assemble_configs(db, user_id, None, [])
+    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg, remote_cfg = await _assemble_configs(db, user_id, None, [])
     return await run_in_threadpool(
-        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg
+        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg, remote_cfg
     )
 
 
@@ -376,11 +396,11 @@ async def get_sift_for_user(
     if not allow:
         return None
 
-    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg = await _assemble_configs(
+    cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg, remote_cfg = await _assemble_configs(
         db, user_id, model_config, tool_ids
     )
     full = await run_in_threadpool(
-        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg
+        sift_service.get_user_sift, str(user_id), rows, cfg, fin_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg, remote_cfg
     )
     if full is None:
         return None

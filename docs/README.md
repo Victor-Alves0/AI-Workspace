@@ -17,6 +17,7 @@ Reference guide for AI Workspace. If you just want to get it running, start with
 | [security.md](security.md)           | Security model, attack surface and recommendations |
 | [trust-model.md](trust-model.md)     | Who is trusted with what; why the AI — not the user — is the untrusted actor (PT) |
 | [integration-auth.md](integration-auth.md) | How each integration authenticates: which ones are a button, which need a key, and why (PT) |
+| [remote-terminal.md](remote-terminal.md) | Terminal nas suas máquinas (VPS): agente, proxy de saída e killswitch (PT) |
 | [desktop.md](desktop.md)             | Desktop app (Tauri): tray, autostart, build |
 | [desktop-updates.md](desktop-updates.md) | How a `.exe` user goes from one version to the next, without losing data (PT) |
 | [development.md](development.md)     | Running without Docker, tests, monorepo layout |

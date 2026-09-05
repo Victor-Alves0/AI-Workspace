@@ -1,0 +1,16 @@
+# Scripts que rodam em Linux precisam sair do clone com LF, sempre.
+#
+# O repositório é mantido no Windows (core.autocrlf=true): sem esta regra, o checkout
+# converte o arquivo para CRLF e o shell do alvo morre já na primeira linha com
+# "bad interpreter: /usr/bin/env bash^M" — um erro que não parece ter nada a ver com
+# fim de linha e custa caro para diagnosticar numa VPS.
+*.sh          text eol=lf
+entrypoint.sh text eol=lf
+
+# O agente do Remote Terminal é copiado para a máquina do usuário e executado direto
+# pelo shebang; vale a mesma regra dos scripts.
+apps/remote-agent/aiw_remote_agent.py text eol=lf
+
+# Dockerfiles e configs consumidos dentro de containers Linux.
+Dockerfile     text eol=lf
+*.Dockerfile   text eol=lf

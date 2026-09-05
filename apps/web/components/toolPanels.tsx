@@ -634,3 +634,70 @@ export function MessagingToolPanel({ value, onChange }: PanelProps) {
     </div>
   );
 }
+
+/* ------------------------------ Remote Terminal --------------------------- */
+/** Config POR-MODELO do Remote Terminal: quais máquinas este modelo alcança e o que
+ *  pode fazer nelas. A confirmação de verdade é POR-MÁQUINA (em Integrações → Remote
+ *  Terminal); o toggle daqui é um piso adicional — um modelo pode exigir aval mesmo
+ *  numa máquina marcada como "não perguntar". */
+export function RemoteTerminalToolPanel({ value, onChange }: PanelProps) {
+  const g = value ?? {};
+  const gSet = (k: string, v: any) => onChange({ ...g, [k]: v });
+  const confirm = g.require_confirm !== false;
+  const ops: Record<string, boolean> = g.ops && typeof g.ops === "object" ? g.ops : {};
+  const opOn = (cap: string) => ops[cap] !== false;
+  const toggleOp = (cap: string) => gSet("ops", { ...ops, [cap]: !opOn(cap) });
+
+  const [hosts, setHosts] = useState<{ id: string; name: string; slug: string; status: string; egress: { mode: string } }[]>([]);
+  useEffect(() => {
+    api.get<{ hosts: any[] }>("/remote/hosts").then((s) => setHosts(s.hosts || [])).catch(() => {});
+  }, []);
+  const allIds = hosts.map((h) => h.id);
+  const sel: string[] = Array.isArray(g.hosts) ? g.hosts : [];
+  const effective = sel.length === 0 ? allIds : sel;
+  const toggleHost = (id: string) => {
+    const cur = sel.length === 0 ? allIds : sel;
+    const next = cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+    gSet("hosts", next.length === allIds.length ? [] : next);
+  };
+
+  return (
+    <div>
+      <p className="text-xs leading-5 text-muted">
+        Este modelo roda comandos no terminal das suas máquinas remotas. Não é o sandbox do servidor: é a
+        máquina de verdade, com a rede dela. Conecte e configure a saída de rede em Configurações →
+        Integrações → Remote Terminal.
+      </p>
+      <Heading>Máquinas liberadas</Heading>
+      <div className="rounded-xl border border-border bg-surface px-3 py-1">
+        {hosts.length === 0 ? (
+          <p className="py-2 text-xs text-muted">Nenhuma máquina conectada. Adicione uma em Configurações → Integrações → Remote Terminal.</p>
+        ) : (
+          <>
+            {hosts.map((h, i) => (
+              <label key={h.id} className={`flex cursor-pointer items-center gap-2.5 py-2 text-sm ${i > 0 ? "border-t border-border" : ""}`}>
+                <input type="checkbox" checked={effective.includes(h.id)} onChange={() => toggleHost(h.id)}
+                  className="h-4 w-4 shrink-0 accent-accent" />
+                <span className="min-w-0 flex-1 truncate text-ink">{h.name} <span className="text-muted">({h.slug})</span></span>
+                <span className={`shrink-0 text-xs ${h.status === "online" ? "text-green-400" : h.status === "blocked" ? "text-amber-400" : "text-muted"}`}>{h.status}</span>
+              </label>
+            ))}
+            <p className="border-t border-border py-2 text-xs text-muted">Todas marcadas = este modelo pode usar qualquer máquina.</p>
+          </>
+        )}
+      </div>
+      <Heading>Ações</Heading>
+      <div className="rounded-xl border border-border bg-surface px-3 py-1">
+        <Row label="Rodar comandos" sub="Executar e esperar a saída"><Toggle on={opOn("run")} onClick={() => toggleOp("run")} /></Row>
+        <div className="border-t border-border"><Row label="Comandos em segundo plano" sub="Instalações e builds longos (job_id)"><Toggle on={opOn("start")} onClick={() => toggleOp("start")} /></Row></div>
+        <div className="border-t border-border"><Row label="Consultar jobs e política de rede" sub="Status de jobs, matar job e teste de vazamento"><Toggle on={opOn("manage")} onClick={() => toggleOp("manage")} /></Row></div>
+      </div>
+      <Heading>Segurança</Heading>
+      <div className="rounded-xl border border-border bg-surface px-3 py-1">
+        <Row label="Sempre pedir confirmação" sub="Vale mesmo nas máquinas configuradas para não perguntar. Cada máquina tem seu próprio pedido de confirmação.">
+          <Toggle on={confirm} onClick={() => gSet("require_confirm", !confirm)} />
+        </Row>
+      </div>
+    </div>
+  );
+}
