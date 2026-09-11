@@ -141,6 +141,24 @@ async def test_search_knowledge_gate_off():
     assert "não está ativa" in result["error"]
 
 
+async def test_search_knowledge_excludes_previously_sent_media(monkeypatch):
+    seen = "9e0066b8-e9b5-45de-a600-445435a6c76b"
+    captured = {}
+
+    async def fake_search_multi(user_id, base_ids, query, ks, default_k, *, exclude_doc_ids):
+        captured["excluded"] = exclude_doc_ids
+        return []
+
+    monkeypatch.setattr(orch.kb_retrieval, "search_multi", fake_search_multi)
+    d = _mk(
+        kb_tool_on=True, kb_bases=["base"], user_text="manda outro vídeo",
+        seen_kb_doc_ids={seen},
+    )
+    _, result = await _drain(d, "search_knowledge", {"query": "vídeo"})
+    assert captured["excluded"] == [seen]
+    assert "Do not resend" in result["_model"]
+
+
 async def test_delegate_disabled():
     d = _mk(subagents_on=False)
     _, result = await _drain(d, "delegate", {"agent": "a", "task": "t"})

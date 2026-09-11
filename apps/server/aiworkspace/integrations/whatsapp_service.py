@@ -656,7 +656,7 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
         # resposta dividida em segmentos ORDENADOS (texto/imagem da KB): entrega
         # "mensagem, imagem, mensagem" na ordem em que a mídia aparece — em vez de todo
         # o texto e só depois as imagens (no chat o front renderia o markdown inline).
-        segments = await channel_media.split_content_media(content)
+        segments = await channel_media.split_content_media(content, user_id=str(user.id))
         seg_media = [s for s in segments if s["type"] == "media"]
 
         # uma resposta SÓ com imagem é legítima ("me faz um gráfico disso"): não é
@@ -680,26 +680,38 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
             db.add(ev_row)
         thread.last_message_at = datetime.now(timezone.utc)
 
-        try:
-            # o BANCO guarda a resposta crua (o chat do app renderiza markdown); o
-            # WhatsApp recebe a versão que ele sabe desenhar — tabelas/headings/links
-            # viram texto legível. Entrega na ORDEM dos segmentos: texto, imagem, texto.
-            for seg in segments:
+        # O BANCO guarda a resposta crua (o chat do app renderiza markdown); o
+        # WhatsApp recebe a versão que ele sabe desenhar — tabelas/headings/links
+        # viram texto legível. Entrega na ORDEM dos segmentos: texto, imagem, texto.
+        # Uma mídia rejeitada pelo gateway não deve engolir o texto que vem depois.
+        delivery_errors: list[str] = []
+        for seg in segments:
+            try:
                 if seg["type"] == "text":
                     t = wa_format.to_whatsapp(seg["text"])
                     if t.strip():
                         await _deliver(conn, m["jid"], t)
                 else:
                     await _send_media(conn, m["jid"], seg)
-            # gráficos/imagens geradas: no fim (não têm posição no texto)
-            if tool_media:
-                for item in tool_media:
-                    await _send_media(conn, m["jid"], item)
+            except Exception as exc:  # noqa: BLE001 - tenta entregar os próximos blocos
+                delivery_errors.append(_err_text(exc))
+                logger.warning("whatsapp: segmento falhou (%s): %s", conn.id, exc)
+        # gráficos/imagens geradas: no fim (não têm posição no texto)
+        for item in tool_media:
+            try:
+                await _send_media(conn, m["jid"], item)
+            except Exception as exc:  # noqa: BLE001 - uma mídia não bloqueia as demais
+                delivery_errors.append(_err_text(exc))
+                logger.warning("whatsapp: mídia de tool falhou (%s): %s", conn.id, exc)
+
+        if delivery_errors:
+            conn.state = {
+                **(conn.state or {}),
+                "last_error": "Falha ao enviar mídia/mensagem: " + " | ".join(delivery_errors)[:1200],
+            }
+        else:
             conn.state = {**(conn.state or {}), "last_error": None,
                           "last_event_at": datetime.now(timezone.utc).isoformat()}
-        except Exception as exc:  # noqa: BLE001 - resposta gerada mas não entregue
-            conn.state = {**(conn.state or {}), "last_error": f"Falha ao enviar: {_err_text(exc)}"}
-            logger.warning("whatsapp: envio falhou (%s): %s", conn.id, exc)
         await db.commit()
 
 

@@ -97,7 +97,10 @@ def _media_text(filename: str, label: str) -> str:
     `_meta_prefix`, como nos demais docs. Os BYTES nunca são decodificados — era isso
     que gerava megabytes de lixo binário e travava a indexação."""
     stem = re.sub(r"\.[a-z0-9]+$", "", (filename or "").strip(), flags=re.I)
-    words = re.sub(r"[-_.+%#0-9]+", " ", stem).split()
+    # Números fazem parte da IDENTIDADE de coleções (`clip 1`, `clip 2`, `clip 3`).
+    # Removê-los fazia todas essas mídias receberem exatamente o mesmo embedding e,
+    # em empates determinísticos, a busca devolvia sempre o mesmo arquivo.
+    words = re.sub(r"[-_.+%#]+", " ", stem).split()
     return f"{label}: " + (" ".join(words) if words else (filename or label.lower()))
 
 

@@ -7,6 +7,7 @@ cerquilhas cruas. Estes testes fixam as duas garantias."""
 from __future__ import annotations
 
 import struct
+from types import SimpleNamespace
 from typing import ClassVar
 
 from aiworkspace.chart_render import render_chart
@@ -153,6 +154,14 @@ def test_kb_image_markdown_is_recognized():
     assert m.group(1) == doc and m.group(2) == "abc.def"
 
 
+def test_kb_tokenless_markdown_is_recognized_for_channel_owner_resolution():
+    """O modelo recebe a URL curta; o canal a autoriza pelo dono do turno."""
+    doc = "9e0066b8-e9b5-45de-a600-445435a6c76b"
+    m = channel_media._KB_IMG_RE.search(f"![video](/knowledge/docs/{doc}/raw)")
+    assert m is not None
+    assert m.group(1) == doc and m.group(2) is None
+
+
 def test_kb_document_link_is_recognized():
     """Documento usa link Markdown comum, mas também precisa virar anexo no canal."""
     doc = "9e0066b8-e9b5-45de-a600-445435a6c76b"
@@ -163,8 +172,9 @@ def test_kb_document_link_is_recognized():
 async def test_split_content_media_preserves_file_order(monkeypatch):
     doc = "9e0066b8-e9b5-45de-a600-445435a6c76b"
 
-    async def fake_doc_media(doc_id: str, token: str):
+    async def fake_doc_media(doc_id: str, token: str, user_id: str | None = None):
         assert doc_id == doc and token == "token"
+        assert user_id == "owner"
         return {
             "data": b"pdf", "mime": "application/pdf", "filename": "manual.pdf",
             "caption": "",
@@ -172,11 +182,43 @@ async def test_split_content_media_preserves_file_order(monkeypatch):
 
     monkeypatch.setattr(channel_media, "_kb_doc_media", fake_doc_media)
     segments = await channel_media.split_content_media(
-        f"Antes\n\n[manual.pdf](/knowledge/docs/{doc}/raw?t=token)\n\nDepois"
+        f"Antes\n\n[manual.pdf](/knowledge/docs/{doc}/raw?t=token)\n\nDepois",
+        user_id="owner",
     )
     assert [seg["type"] for seg in segments] == ["text", "media", "text"]
     assert segments[1]["mime"] == "application/pdf"
     assert segments[1]["filename"] == "manual.pdf"
+
+
+async def test_tokenless_kb_media_requires_and_scopes_to_turn_owner(monkeypatch):
+    doc = "9e0066b8-e9b5-45de-a600-445435a6c76b"
+    owner = "899b7395-7336-41c1-ae96-c57800627a51"
+    captured = {}
+
+    class FakeScalars:
+        def first(self):
+            return SimpleNamespace(data=b"video", mime="video/mp4", filename="clip.mp4")
+
+    class FakeDb:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def scalars(self, stmt):
+            captured["sql"] = str(stmt)
+            captured["params"] = stmt.compile().params
+            return FakeScalars()
+
+    monkeypatch.setattr(channel_media, "SessionLocal", FakeDb)
+    # Sem token e sem dono: saída do modelo não ganha acesso arbitrário ao banco.
+    assert await channel_media._kb_doc_media(doc, None) is None
+
+    item = await channel_media._kb_doc_media(doc, None, user_id=owner)
+    assert item and item["data"] == b"video" and item["mime"] == "video/mp4"
+    assert "knowledge_docs.user_id" in captured["sql"]
+    assert owner in {str(value) for value in captured["params"].values()}
 
 
 def test_sift_view_does_not_touch_the_db_object():

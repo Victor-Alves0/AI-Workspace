@@ -1,7 +1,6 @@
 """Envio de anexos nas duas implementações de WhatsApp."""
 from __future__ import annotations
 
-import base64
 from typing import ClassVar
 
 from aiworkspace.integrations import telegram_api, whatsapp_service
@@ -43,19 +42,21 @@ class _Client:
 
 async def test_evolution_uses_document_media_type(monkeypatch):
     _Client.calls = []
-    monkeypatch.setattr(evolution, "_client", lambda: _Client())
+    monkeypatch.setattr(evolution.httpx, "AsyncClient", _Client)
     await evolution.send_media("inst", "5511999", b"pdf", "application/pdf", "manual.pdf")
-    payload = _Client.calls[0]["json"]
-    assert payload["mediatype"] == "document"
-    assert payload["fileName"] == "manual.pdf"
-    assert base64.b64decode(payload["media"]) == b"pdf"
+    call = _Client.calls[0]
+    assert call["data"]["mediatype"] == "document"
+    assert call["data"]["fileName"] == "manual.pdf"
+    assert call["files"]["file"] == ("manual.pdf", b"pdf", "application/pdf")
+    assert "media" not in call["data"]
 
 
 async def test_evolution_uses_video_media_type(monkeypatch):
     _Client.calls = []
-    monkeypatch.setattr(evolution, "_client", lambda: _Client())
+    monkeypatch.setattr(evolution.httpx, "AsyncClient", _Client)
     await evolution.send_media("inst", "5511999", b"video", "video/mp4", "demo.mp4")
-    assert _Client.calls[0]["json"]["mediatype"] == "video"
+    assert _Client.calls[0]["data"]["mediatype"] == "video"
+    assert _Client.calls[0]["files"]["file"] == ("demo.mp4", b"video", "video/mp4")
 
 
 async def test_official_uploads_then_sends_document(monkeypatch):

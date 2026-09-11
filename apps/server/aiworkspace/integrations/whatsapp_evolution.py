@@ -11,7 +11,6 @@ levar ao banimento do número — a UI avisa; use um número descartável/secund
 
 from __future__ import annotations
 
-import base64
 import logging
 from typing import Any
 
@@ -22,6 +21,9 @@ from ..config import get_settings
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(30.0, connect=10.0)
+# Arquivos da KB podem chegar a 200 MB. O upload tem uma janela própria para não
+# tornar lentas as chamadas pequenas (texto, presença, estado da instância).
+_MEDIA_TIMEOUT = httpx.Timeout(180.0, connect=10.0)
 
 
 def configured() -> bool:
@@ -117,8 +119,9 @@ async def send_media(instance: str, jid: str, data: bytes, mime: str,
                      filename: str, caption: str = "") -> dict[str, Any]:
     """Envia imagem, vídeo ou documento como MÍDIA de verdade.
 
-    A Evolution aceita o arquivo em base64 no campo `media`. O `mediatype` precisa
-    acompanhar o MIME; usar sempre `image` fazia vídeos e documentos falharem.
+    A rota da Evolution v2 aceita `multipart/form-data` com o campo `file`. Usá-lo
+    evita inflar vídeos em ~33% com Base64 dentro de JSON e evita as falhas/timeout
+    observadas com arquivos maiores. O `mediatype` precisa acompanhar o MIME.
     """
     mime = mime or "application/octet-stream"
     if mime.startswith("image/"):
@@ -129,18 +132,36 @@ async def send_media(instance: str, jid: str, data: bytes, mime: str,
         media_type = "audio"
     else:
         media_type = "document"
-    payload = {
+    fields = {
         "number": jid,
         "mediatype": media_type,
         "mimetype": mime,
-        "media": base64.b64encode(data).decode(),
         "fileName": filename,
     }
     if caption:
-        payload["caption"] = caption
-    async with _client() as c:
-        r = await c.post(f"/message/sendMedia/{instance}", json=payload)
-        r.raise_for_status()
+        fields["caption"] = caption
+    # Cliente separado: `_client()` usa o timeout curto adequado a texto/presença.
+    s = get_settings()
+    async with httpx.AsyncClient(
+        base_url=s.evolution_api_url.rstrip("/"),
+        headers={"apikey": s.evolution_api_key},
+        timeout=_MEDIA_TIMEOUT,
+    ) as c:
+        r = await c.post(
+            f"/message/sendMedia/{instance}",
+            data=fields,
+            files={"file": (filename, data, mime)},
+        )
+        try:
+            r.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            # `HTTPStatusError` sozinho omite justamente a mensagem útil devolvida
+            # pela Evolution. Ela fica em `last_error` da conexão para diagnóstico.
+            detail = (r.text or "").strip().replace("\n", " ")[:600]
+            suffix = f": {detail}" if detail else ""
+            raise RuntimeError(
+                f"Evolution sendMedia falhou (HTTP {r.status_code}){suffix}"
+            ) from exc
         return r.json()
 
 

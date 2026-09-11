@@ -768,7 +768,9 @@ def _search_knowledge_tool() -> dict[str, Any]:
                 "files, including when they ask you to show/send a photo, image or video, or to look in a "
                 "named folder. Results are numbered and note each item's location (in: folder/filename); "
                 "image and video items include ready-to-paste markdown that DISPLAYS/PLAYS the media. "
-                "You choose how many to pull via `limit`. If a search misses, retry with different words, "
+                "When the user asks for ANOTHER/MORE/DIFFERENT item, set `exclude_previous=true`; the "
+                "server will omit knowledge files already shown in this conversation. You may also pass "
+                "specific `exclude_doc_ids`. You choose how many to pull via `limit`. If a search misses, retry with different words, "
                 "a bigger `limit`, or action 'list' to see the folders — never conclude the file is absent "
                 "after a single query."
             ),
@@ -788,6 +790,22 @@ def _search_knowledge_tool() -> dict[str, Any]:
                             "how many items to retrieve (search 1-30; list up to 200). Raise it to browse "
                             "more of what exists; lower it to save context. You decide."
                         ),
+                    },
+                    "exclude_previous": {
+                        "type": "boolean",
+                        "description": (
+                            "Set true when the user asks for another/more/different files or media. "
+                            "Excludes every knowledge document already linked in this conversation."
+                        ),
+                    },
+                    "exclude_doc_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "specific knowledge document UUIDs to omit from search/list results",
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "list only: zero-based pagination offset (default 0)",
                     },
                 },
                 "required": [],
@@ -948,6 +966,52 @@ _KB_DOC_MD_RE = re.compile(
     r"(?:https?://[^/\s)]+)?/knowledge/docs/(?P<doc_id>[0-9a-fA-F-]{36})/raw"
     r"(?:\?t=[^)\s\"'<>]*)?\s*\)"
 )
+
+_DIFFERENT_ITEM_RE = re.compile(
+    r"\b(?:outr[oa]s?|diferentes?|pr[oó]xim[oa]s?|another|others?|different|next\s+one|"
+    r"something\s+else)\b",
+    re.IGNORECASE,
+)
+_MORE_ITEM_RE = re.compile(
+    r"\b(?:tem|t[eê]m|manda|mande|envia|envie|mostra|mostre|quero|show|send|any)\s+mais\b|"
+    r"\b(?:show|send|any)\s+more\b",
+    re.IGNORECASE,
+)
+_MEDIA_WORD_RE = re.compile(
+    r"\b(?:arquivos?|fotos?|imagens?|v[ií]deos?|m[ií]dias?|files?|photos?|images?|videos?|media)\b",
+    re.IGNORECASE,
+)
+
+
+def _requests_different_knowledge_item(text: str) -> bool:
+    """Pedido explícito por novidade, sem classificador/LLM extra.
+
+    Termos fortes (`outro`, `different`) bastam. `mais/more` só conta em frases de
+    envio/exibição e, para evitar que "mais detalhes" exclua a fonte atual, exige uma
+    referência a arquivo/mídia ou uma continuação curta como "tem mais?".
+    """
+    value = " ".join((text or "").split())
+    if _DIFFERENT_ITEM_RE.search(value):
+        return True
+    if not _MORE_ITEM_RE.search(value):
+        return False
+    return bool(_MEDIA_WORD_RE.search(value)) or len(value.split()) <= 4
+
+
+def _knowledge_doc_ids_from_history(history: list[dict[str, Any]]) -> set[str]:
+    """UUIDs de arquivos da KB explicitamente ligados/embutidos pelo assistant."""
+    out: set[str] = set()
+    for message in history or []:
+        if message.get("role") != "assistant":
+            continue
+        content = message.get("content")
+        if not isinstance(content, str):
+            continue
+        for match in _KB_IMG_RE.finditer(content):
+            doc_id = _canonical_doc_id(match.group(1))
+            if doc_id:
+                out.add(doc_id)
+    return out
 
 
 async def _existing_kb_doc_ids(ids: set[str], user_id: str | None = None) -> set[str]:
@@ -1392,6 +1456,7 @@ async def _gather_context(
     session: TurnSession,
     memory: MemoryOpts,
     knowledge: dict[str, Any] | None,
+    exclude_doc_ids: set[str] | None = None,
     ref_docs: list[dict[str, Any]] | None,
     ref_chats: list[dict[str, Any]] | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
@@ -1437,7 +1502,10 @@ async def _gather_context(
         try:
             with tracing.span("knowledge:auto", kind="rag", bases=len(g.kb_bases_auto), k=g.kb_k):
                 # cada base traz o SEU número de trechos (g.kb_ks), com g.kb_k de padrão
-                auto_kres = await kb_retrieval.search_multi(user_id, g.kb_bases_auto, user_text, g.kb_ks, g.kb_k)
+                auto_kres = await kb_retrieval.search_multi(
+                    user_id, g.kb_bases_auto, user_text, g.kb_ks, g.kb_k,
+                    exclude_doc_ids=sorted(exclude_doc_ids or set()),
+                )
         except Exception as exc:  # noqa: BLE001
             logger.warning("busca na base de conhecimento falhou: %s", exc)
             auto_kres = []
@@ -1448,6 +1516,19 @@ async def _gather_context(
                 "Trechos recuperados dos documentos do usuário (numerados por fonte). Baseie a "
                 "resposta neles quando pertinente e CITE a fonte usada com [n]. Se a resposta "
                 "não estiver nos trechos, diga que não encontrou na base.\n\n" + _blk
+            )
+            if exclude_doc_ids:
+                g.knowledge_block += (
+                    "\n\nPreviously shown knowledge files were excluded because the user requested "
+                    "a different item. Use only a NEW result above; do not resend an older file."
+                )
+        elif exclude_doc_ids:
+            g.knowledge_block = (
+                "## Base de conhecimento\n"
+                "The user requested a different knowledge file/media item. Files already shown in "
+                "this conversation were excluded and no new match was found. Do NOT resend an older "
+                "file; say that no additional matching item was found or call `search_knowledge` "
+                "with a broader query/list action."
             )
         g.auto_knowledge_event = {
             "kind": "knowledge", "query": user_text[:200],
@@ -1951,6 +2032,9 @@ class _ToolDispatcher:
     subagent_pass_context: bool
     subagent_worker_memory: bool
     run_subagent: Any
+    # docs explicitamente enviados em turnos anteriores; usados quando o usuário pede
+    # "outro/mais/diferente" para a busca não devolver o mesmo item de novo.
+    seen_kb_doc_ids: set[str] = field(default_factory=set)
     # imagens que o usuário anexou NESTE turno — usadas como contexto de EDIÇÃO
     # pelo generate_image (estilo nano-banana: anexa imagem + "mude X").
     input_images: list[str] = field(default_factory=list)
@@ -2078,6 +2162,15 @@ class _ToolDispatcher:
             return
         action = str(args.get("action") or "search").strip().lower()
         limit_arg = args.get("limit")
+        explicit_excluded = {
+            doc_id
+            for value in list(args.get("exclude_doc_ids") or [])[:200]
+            if (doc_id := _canonical_doc_id(str(value)))
+        }
+        exclude_previous = bool(args.get("exclude_previous")) or _requests_different_knowledge_item(
+            self.user_text
+        )
+        excluded = explicit_excluded | (self.seen_kb_doc_ids if exclude_previous else set())
 
         # ---- navegação: lista os arquivos (com pasta/tipo) p/ o modelo escolher ----
         if action == "list":
@@ -2086,10 +2179,17 @@ class _ToolDispatcher:
                 lim = max(1, min(int(limit_arg), 200)) if limit_arg else 200
             except (TypeError, ValueError):
                 lim = 200
+            try:
+                offset = max(0, min(int(args.get("offset") or 0), 100_000))
+            except (TypeError, ValueError):
+                offset = 0
             label = f"lista {folder}" if folder else "lista de arquivos"
             yield {"type": "knowledge", "status": "start", "query": label[:120]}
             try:
-                lres = await kb_retrieval.list_index(self.user_id, self.kb_bases, folder, lim)
+                lres = await kb_retrieval.list_index(
+                    self.user_id, self.kb_bases, folder, lim,
+                    offset=offset, exclude_doc_ids=sorted(excluded),
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("search_knowledge(list) falhou: %s", exc)
                 lres = []
@@ -2099,9 +2199,19 @@ class _ToolDispatcher:
                 + (f" (folder '{folder}')" if folder else "")
                 + " — each item notes its location (in: folder/filename); image/video items include "
                 + "ready-to-paste markdown to show them:\n\n" + _blk
+                + (
+                    "\n\nPreviously shown/specified files were excluded. Choose only from the NEW "
+                    "items above; do not reuse an older file."
+                    if excluded else ""
+                )
                 if lres else
-                (f"No files in folder '{folder}'." if folder else "No files match.")
-                + " Try action 'list' without a folder to see everything, or 'search' by meaning."
+                (
+                    "No NEW files match after excluding previously shown/specified items. Do not "
+                    "resend an excluded file; tell the user there are no additional matches."
+                    if excluded else
+                    (f"No files in folder '{folder}'." if folder else "No files match.")
+                    + " Try action 'list' without a folder to see everything, or 'search' by meaning."
+                )
             )
             self.result = {
                 "kind": "knowledge", "query": label[:200],
@@ -2117,14 +2227,19 @@ class _ToolDispatcher:
         try:
             if limit_arg:
                 k = max(1, min(int(limit_arg), 30))
-                kres = await kb_retrieval.search(self.user_id, self.kb_bases, query, k)
+                kres = await kb_retrieval.search(
+                    self.user_id, self.kb_bases, query, k,
+                    exclude_doc_ids=sorted(excluded),
+                )
             else:
                 kres = await kb_retrieval.search_multi(
-                    self.user_id, self.kb_bases, query, self.kb_ks, self.kb_k
+                    self.user_id, self.kb_bases, query, self.kb_ks, self.kb_k,
+                    exclude_doc_ids=sorted(excluded),
                 )
         except (TypeError, ValueError):
             kres = await kb_retrieval.search_multi(
-                self.user_id, self.kb_bases, query, self.kb_ks, self.kb_k
+                self.user_id, self.kb_bases, query, self.kb_ks, self.kb_k,
+                exclude_doc_ids=sorted(excluded),
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("search_knowledge falhou: %s", exc)
@@ -2135,11 +2250,22 @@ class _ToolDispatcher:
         # semântica virava "você não tem esse arquivo" (bug observado).
         model_txt = (
             "Passages from the user's knowledge base (cite the one you use with [n]):\n\n" + _blk
+            + (
+                "\n\nPreviously shown/specified files were excluded. Use only a NEW result above; "
+                "do not reuse an older file."
+                if excluded else ""
+            )
             if kres else
-            "No passage matched THIS query. That does not mean the file is absent — "
-            "retry with different wording (synonyms, the file's own language, a broader "
-            "term), a larger `limit`, or action 'list' to browse the folders, before "
-            "telling the user it doesn't exist."
+            (
+                "No NEW passage matched after excluding previously shown/specified files. Do not "
+                "resend an excluded file; broaden the query/list once, then tell the user when no "
+                "additional match exists."
+                if excluded else
+                "No passage matched THIS query. That does not mean the file is absent — "
+                "retry with different wording (synonyms, the file's own language, a broader "
+                "term), a larger `limit`, or action 'list' to browse the folders, before "
+                "telling the user it doesn't exist."
+            )
         )
         self.result = {
             "kind": "knowledge", "query": query[:200],
@@ -2616,11 +2742,20 @@ async def run_turn(
     toolctx.current_codespace_project_id.set(session.codespace_project_id)
     toolctx.current_codespace_worktree.set(session.codespace_worktree)
 
+    # Arquivos da KB que já foram enviados aparecem como links no conteúdo persistido.
+    # Se o usuário pedir "outro/mais/diferente", eles são excluídos já na recuperação
+    # automática — antes do modelo — e também ficam disponíveis à tool sob demanda.
+    seen_kb_doc_ids = _knowledge_doc_ids_from_history(history) if use_context else set()
+    auto_excluded_kb_ids = (
+        seen_kb_doc_ids if _requests_different_knowledge_item(user_text) else set()
+    )
+
     # 1. contexto do turno: memória (mem0) + Base de Conhecimento (auto) + "#"refs
     g = _GatheredContext()
     async for ev in _gather_context(
         g, api_key=api_key, user_text=user_text, session=session,
-        memory=_mem, knowledge=knowledge, ref_docs=ref_docs, ref_chats=ref_chats,
+        memory=_mem, knowledge=knowledge, exclude_doc_ids=auto_excluded_kb_ids,
+        ref_docs=ref_docs, ref_chats=ref_chats,
     ):
         yield ev
     mem_items, memories = g.mem_items, g.memories
@@ -2659,6 +2794,7 @@ async def run_turn(
         genimage_on=genimage_on, genimage=genimage,
         input_images=[a["url"] for a in (_md.attachments or []) if a.get("type") == "image" and a.get("url")],
         kb_tool_on=kb_tool_on, kb_bases=kb_bases, kb_k=kb_k, kb_ks=kb_ks, user_text=user_text,
+        seen_kb_doc_ids=seen_kb_doc_ids,
         brain_on=asm.brain_on, brain_write=asm.brain_write,
         brain_ids=[str(b) for b in _brain_cfg.get("brains") or []],
         brain_names=[str(n) for n in _brain_cfg.get("names") or []],

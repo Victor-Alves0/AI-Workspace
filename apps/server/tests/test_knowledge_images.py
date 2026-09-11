@@ -31,9 +31,9 @@ def test_image_bytes_are_never_decoded():
     assert "�" not in out          # nenhum replacement char (lixo binário)
 
 
-def test_image_text_cleans_separators_and_numbers():
+def test_image_text_cleans_separators_but_preserves_sequence_numbers():
     assert _image_text("GFYFGczWEAAVEMx.jpg") == "Imagem: GFYFGczWEAAVEMx"
-    assert _image_text("a_b-c.10.png") == "Imagem: a b c"
+    assert _image_text("a_b-c.10.png") == "Imagem: a b c 10"
     assert _image_text("") == "Imagem: imagem"
 
 

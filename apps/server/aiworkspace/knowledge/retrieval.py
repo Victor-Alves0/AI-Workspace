@@ -29,6 +29,7 @@ _SEARCH = sql_text(
     "JOIN knowledge_docs d ON d.id = c.doc_id "
     "LEFT JOIN knowledge_folders f ON f.id = d.folder_id "
     "WHERE c.user_id = :uid AND c.base_id = ANY(:bids) "
+    "  AND c.doc_id <> ALL(CAST(:exclude AS uuid[])) "
     "ORDER BY c.embedding <=> CAST(:emb AS vector) "
     "LIMIT :k"
 )
@@ -41,6 +42,7 @@ _SEARCH_DOCS = sql_text(
     "JOIN knowledge_docs d ON d.id = c.doc_id "
     "LEFT JOIN knowledge_folders f ON f.id = d.folder_id "
     "WHERE c.user_id = :uid AND c.base_id = ANY(:bids) AND c.doc_id = ANY(:dids) "
+    "  AND c.doc_id <> ALL(CAST(:exclude AS uuid[])) "
     "ORDER BY c.embedding <=> CAST(:emb AS vector) "
     "LIMIT :k"
 )
@@ -86,6 +88,7 @@ def _row_to_hit(r) -> dict:
 async def search(
     user_id, base_ids: list[str], query: str, k: int = 6,
     doc_ids: list[str] | None = None,
+    exclude_doc_ids: list[str] | None = None,
 ) -> list[dict]:
     """Top-`k` trechos mais relevantes das `base_ids` para `query`.
 
@@ -106,16 +109,24 @@ async def search(
     if lit is None:
         return []
     dids = _uuids(doc_ids or [])
+    excluded = _uuids(exclude_doc_ids or [])
     try:
         async with SessionLocal() as db:
             if dids:
                 res = await db.execute(
                     _SEARCH_DOCS,
-                    {"emb": lit, "uid": uid, "bids": bids, "dids": dids, "k": max(1, int(k))},
+                    {
+                        "emb": lit, "uid": uid, "bids": bids, "dids": dids,
+                        "exclude": excluded, "k": max(1, int(k)),
+                    },
                 )
             else:
                 res = await db.execute(
-                    _SEARCH, {"emb": lit, "uid": uid, "bids": bids, "k": max(1, int(k))}
+                    _SEARCH,
+                    {
+                        "emb": lit, "uid": uid, "bids": bids,
+                        "exclude": excluded, "k": max(1, int(k)),
+                    },
                 )
             rows = res.mappings().all()
     except Exception as exc:  # noqa: BLE001
@@ -127,6 +138,7 @@ async def search(
 async def search_multi(
     user_id, base_ids: list[str], query: str,
     ks: dict[str, int] | None = None, default_k: int = 6,
+    exclude_doc_ids: list[str] | None = None,
 ) -> list[dict]:
     """Como `search`, mas com k POR BASE (`ks`: {base_id: k}). Cada base traz o
     seu próprio número de trechos; o resultado é a UNIÃO, ordenada por score
@@ -143,12 +155,16 @@ async def search_multi(
     lit = await _embed_query(q)
     if lit is None:
         return []
+    excluded = _uuids(exclude_doc_ids or [])
     out: list[dict] = []
     try:
         async with SessionLocal() as db:
             for b in bids:
                 k = max(1, int(ks.get(str(b), default_k) or default_k))
-                res = await db.execute(_SEARCH, {"emb": lit, "uid": uid, "bids": [b], "k": k})
+                res = await db.execute(
+                    _SEARCH,
+                    {"emb": lit, "uid": uid, "bids": [b], "exclude": excluded, "k": k},
+                )
                 out.extend(_row_to_hit(r) for r in res.mappings().all())
     except Exception as exc:  # noqa: BLE001
         logger.warning("knowledge search_multi falhou: %s", exc)
@@ -162,13 +178,16 @@ _LIST = sql_text(
     "FROM knowledge_docs d "
     "LEFT JOIN knowledge_folders f ON f.id = d.folder_id "
     "WHERE d.user_id = :uid AND d.base_id = ANY(:bids) AND d.status = 'ready' "
+    "  AND d.id <> ALL(CAST(:exclude AS uuid[])) "
+    "  AND (:folder = '' OR lower(coalesce(f.name, '')) = :folder) "
     "ORDER BY f.name NULLS FIRST, d.filename "
-    "LIMIT :k"
+    "LIMIT :k OFFSET :offset"
 )
 
 
 async def list_index(
     user_id, base_ids: list[str], folder: str | None = None, limit: int = 200,
+    offset: int = 0, exclude_doc_ids: list[str] | None = None,
 ) -> list[dict]:
     """Lista os arquivos das bases (navegação/browse), com pasta e tipo — sem embedding.
 
@@ -184,9 +203,13 @@ async def list_index(
     except (ValueError, TypeError):
         return []
     want = (folder or "").strip().lower()
+    excluded = _uuids(exclude_doc_ids or [])
     try:
         async with SessionLocal() as db:
-            res = await db.execute(_LIST, {"uid": uid, "bids": bids, "k": max(1, min(int(limit), 500))})
+            res = await db.execute(_LIST, {
+                "uid": uid, "bids": bids, "folder": want, "exclude": excluded,
+                "k": max(1, min(int(limit), 500)), "offset": max(0, int(offset)),
+            })
             rows = res.mappings().all()
     except Exception as exc:  # noqa: BLE001
         logger.warning("knowledge list_index falhou: %s", exc)
@@ -194,8 +217,6 @@ async def list_index(
     out: list[dict] = []
     for r in rows:
         fol = (r["folder"] or "")
-        if want and want != fol.lower():
-            continue
         out.append({
             "chunk_id": "", "doc_id": str(r["doc_id"]),
             "filename": r["filename"] or "documento", "folder": fol,

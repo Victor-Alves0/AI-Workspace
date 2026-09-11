@@ -51,9 +51,28 @@ def test_search_knowledge_exposes_limit():
     assert "limit" in props, "a IA precisa poder escolher quantos trechos ver"
     assert props["limit"]["type"] == "integer"
     assert "query" in props  # continua sendo o parâmetro de busca
+    assert props["exclude_previous"]["type"] == "boolean"
+    assert props["exclude_doc_ids"]["type"] == "array"
+    assert props["offset"]["type"] == "integer"
     # nada é obrigatório: a ação 'list' navega pastas/arquivos SEM query (por isso
     # `query` deixou de ser required), e `limit` sempre foi escolha da IA.
     assert spec["function"]["parameters"]["required"] == []
+
+
+def test_another_media_request_is_detected_without_excluding_detail_followups():
+    assert orch._requests_different_knowledge_item("manda outro vídeo")
+    assert orch._requests_different_knowledge_item("tem mais?")
+    assert orch._requests_different_knowledge_item("show me a different image")
+    assert not orch._requests_different_knowledge_item("me dê mais detalhes sobre esse vídeo")
+
+
+def test_seen_knowledge_ids_only_come_from_assistant_history():
+    doc = "9e0066b8-e9b5-45de-a600-445435a6c76b"
+    history = [
+        {"role": "user", "content": f"![não conta](/knowledge/docs/{doc}/raw)"},
+        {"role": "assistant", "content": f"![enviado](/knowledge/docs/{doc}/raw?t=x)"},
+    ]
+    assert orch._knowledge_doc_ids_from_history(history) == {doc}
 
 
 # --------------------------------------------------------------------------- #

@@ -144,25 +144,43 @@ def _id_from_url(url: str) -> uuid.UUID | None:
 
 # Arquivo da Base de Conhecimento embutido na resposta como markdown
 # (`![imagem](/knowledge/docs/<id>/raw?t=<token>)` ou
-# `[arquivo](/knowledge/docs/<id>/raw?t=<token>)`). No chat o front renderiza/abre;
+# `[arquivo](/knowledge/docs/<id>/raw)`). No chat o front renderiza/abre;
 # no canal o contato receberia um LINK local inútil — aqui ele vira mídia de verdade.
 # O `!` é OPCIONAL: modelos às vezes degradam o `![img](url)` para um link `[img](url)`
 # (o prompt do canal proíbe links) — sem tolerar isso, a imagem sumia e o `[img](link)`
 # vazava como texto. Aceitamos ambos e sempre entregamos a mídia.
 _KB_IMG_RE = re.compile(
-    r"!?\[[^\]\n]*\]\((?:https?://[^/\s)]+)?/knowledge/docs/([0-9a-fA-F-]{36})/raw\?t=([^\s)]+)\)"
+    r"!?\[[^\]\n]*\]\((?:https?://[^/\s)]+)?/knowledge/docs/([0-9a-fA-F-]{36})/raw"
+    r"(?:\?t=([^\s)]+))?\)"
 )
 
 
-async def _kb_doc_media(doc_id: str, token: str) -> dict[str, Any] | None:
-    """Valida o token assinado (a resposta do modelo não é confiável) e devolve
-    {data, mime, filename, caption} do arquivo da KB, ou None."""
+async def _kb_doc_media(
+    doc_id: str, token: str | None, user_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Resolve um arquivo da KB sem confiar na saída do modelo.
+
+    Links finais assinados são validados como antes. O modelo, porém, recebe links
+    curtos sem token para economizar contexto; nesses casos o canal só pode resolver
+    o arquivo quando conhece o usuário dono do turno e a query é escopada por ele.
+    """
     from ..knowledge.links import verify_doc_token
-    if not verify_doc_token(doc_id, token):
+    signed = bool(token) and verify_doc_token(doc_id, token or "")
+    try:
+        parsed_doc_id = uuid.UUID(doc_id)
+        parsed_user_id = uuid.UUID(user_id) if user_id else None
+    except (ValueError, TypeError, AttributeError):
+        return None
+    if not signed and parsed_user_id is None:
         return None
     try:
         async with SessionLocal() as db:
-            d = await db.get(KnowledgeDoc, uuid.UUID(doc_id))
+            stmt = select(KnowledgeDoc).where(KnowledgeDoc.id == parsed_doc_id)
+            # Quando há usuário do turno, escopamos SEMPRE por ele — até um link
+            # assinado copiado de outra conta não pode atravessar o canal atual.
+            if parsed_user_id is not None:
+                stmt = stmt.where(KnowledgeDoc.user_id == parsed_user_id)
+            d = (await db.scalars(stmt)).first()
             if d is None or not d.data:
                 return None
             mime = d.mime or "application/octet-stream"
@@ -173,14 +191,16 @@ async def _kb_doc_media(doc_id: str, token: str) -> dict[str, Any] | None:
         return None
 
 
-async def extract_content_images(text: str) -> tuple[str, list[dict[str, Any]]]:
+async def extract_content_images(
+    text: str, user_id: str | None = None,
+) -> tuple[str, list[dict[str, Any]]]:
     """Extrai os arquivos da KB do texto da resposta → (texto sem os markdowns,
     [{data, mime, filename, caption}]). Para canais que entregam texto e mídia em
     blocos separados (o WhatsApp usa `split_content_media`, que preserva a ordem)."""
     media: list[dict[str, Any]] = []
     out = text or ""
     for m in _KB_IMG_RE.finditer(text or ""):
-        item = await _kb_doc_media(m.group(1), m.group(2))
+        item = await _kb_doc_media(m.group(1), m.group(2), user_id=user_id)
         if item is None:
             continue
         media.append(item)
@@ -188,7 +208,9 @@ async def extract_content_images(text: str) -> tuple[str, list[dict[str, Any]]]:
     return (re.sub(r"\n{3,}", "\n\n", out).strip(), media) if media else (text or "", media)
 
 
-async def split_content_media(text: str) -> list[dict[str, Any]]:
+async def split_content_media(
+    text: str, user_id: str | None = None,
+) -> list[dict[str, Any]]:
     """Divide a resposta em segmentos ORDENADOS para entregar "texto, imagem, texto"
     na ordem em que a mídia aparece — em vez de todo o texto e depois toda a mídia.
 
@@ -199,7 +221,7 @@ async def split_content_media(text: str) -> list[dict[str, Any]]:
     segs: list[dict[str, Any]] = []
     pos = 0
     for m in _KB_IMG_RE.finditer(src):
-        item = await _kb_doc_media(m.group(1), m.group(2))
+        item = await _kb_doc_media(m.group(1), m.group(2), user_id=user_id)
         if item is None:
             continue  # não resolveu → deixa o markdown no texto, não corta
         before = src[pos:m.start()]
