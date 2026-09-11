@@ -38,6 +38,61 @@ async def send_text(phone_number_id: str, access_token: str, to: str, text: str)
         return r.json()
 
 
+def _media_type(mime: str) -> str:
+    """Tipo de mensagem aceito pela Cloud API para um MIME arbitrário."""
+    top = (mime or "").split("/", 1)[0].lower()
+    return top if top in {"image", "video", "audio"} else "document"
+
+
+async def send_media(
+    phone_number_id: str,
+    access_token: str,
+    to: str,
+    data: bytes,
+    mime: str,
+    filename: str,
+    caption: str = "",
+) -> dict[str, Any]:
+    """Faz upload dos bytes e envia a mídia pelo WhatsApp Cloud API oficial.
+
+    A API oficial não aceita os bytes diretamente em `/messages`: primeiro cria-se
+    uma mídia em `/{phone_number_id}/media`, depois referencia-se o `media_id`.
+    """
+    mime = mime or "application/octet-stream"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    upload_timeout = httpx.Timeout(90.0, connect=10.0)
+    async with httpx.AsyncClient(timeout=upload_timeout) as c:
+        uploaded = await c.post(
+            f"{GRAPH_BASE}/{phone_number_id}/media",
+            headers=headers,
+            data={"messaging_product": "whatsapp", "type": mime},
+            files={"file": (filename or "arquivo", data, mime)},
+        )
+        uploaded.raise_for_status()
+        media_id = str((uploaded.json() or {}).get("id") or "")
+        if not media_id:
+            raise RuntimeError("WhatsApp Cloud API não retornou o id da mídia")
+
+        kind = _media_type(mime)
+        media: dict[str, Any] = {"id": media_id}
+        if caption and kind != "audio":
+            media["caption"] = caption[:1024]
+        if kind == "document":
+            media["filename"] = filename or "arquivo"
+        sent = await c.post(
+            f"{GRAPH_BASE}/{phone_number_id}/messages",
+            headers=headers,
+            json={
+                "messaging_product": "whatsapp",
+                "to": to.split("@")[0],
+                "type": kind,
+                kind: media,
+            },
+        )
+        sent.raise_for_status()
+        return sent.json()
+
+
 def valid_signature(app_secret: str, body: bytes, header: str | None) -> bool:
     """Valida o X-Hub-Signature-256 da Meta. Sem app_secret configurado, aceita
     (a URL já carrega um token aleatório próprio)."""

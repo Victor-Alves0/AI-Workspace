@@ -276,6 +276,20 @@ async def _send_reply(conn: WhatsAppConnection, jid: str, text: str) -> None:
         await evolution.send_text(conn.instance, jid, text)
 
 
+async def _send_media(conn: WhatsAppConnection, jid: str, item: dict[str, Any]) -> None:
+    """Entrega mídia tanto pela Evolution quanto pela Cloud API oficial."""
+    if conn.provider == "official":
+        await official.send_media(
+            conn.phone_number_id, conn.access_token, jid, item["data"], item["mime"],
+            item["filename"], item.get("caption", ""),
+        )
+    else:
+        await evolution.send_media(
+            conn.instance, jid, item["data"], item["mime"], item["filename"],
+            item.get("caption", ""),
+        )
+
+
 # --------------------------------------------------------------------------- #
 # Modo humanizador: "digitando…", atraso proporcional e quebra em várias
 # mensagens — em vez de despejar um bloco só de texto instantâneo.
@@ -563,15 +577,17 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
         genimage = await _genimage_config(db, user, mc)
         who = m.get("sender_name") or _digits(m["jid"])
         extra_parts = [
-            f"You are replying on WhatsApp (connection '{conn.label or conn.phone}') to "
-            f"{who}. Answer as a WhatsApp message: concise, plain text (WhatsApp only "
-            f"renders *bold*, _italic_ and ```code```; do NOT use headings, tables, or "
-            f"markdown links [text](url)). "
-            f"EXCEPTION — media: when a tool gives you an image/video to show, or a "
-            f"knowledge-base result says to 'paste exactly ![name](url)', include that "
-            f"![...](...) markdown EXACTLY as given — do not shorten, rewrite or drop the "
-            f"URL. It is delivered to the contact as a real photo/video, NOT as a link; "
-            f"charts and generated images are delivered the same way. Match the contact's language."
+            (
+                f"You are replying on WhatsApp (connection '{conn.label or conn.phone}') to "
+                f"{who}. Answer as a WhatsApp message: concise, plain text (WhatsApp only "
+                f"renders *bold*, _italic_ and ```code```; do NOT use headings, tables, or "
+                f"markdown links [text](url)). "
+                f"EXCEPTION — media: when a tool gives you media to show, or a knowledge-base "
+                f"result says to paste an image/video/file link exactly, include that markdown "
+                f"EXACTLY as given — do not shorten, rewrite or drop the "
+                f"URL. It is delivered to the contact as real media/a file, NOT as a link; "
+                f"charts and generated images are delivered the same way. Match the contact's language."
+            )
         ]
         # prompt adicional configurado para ESTE número conectado
         if (conn.system_prompt or "").strip():
@@ -664,9 +680,6 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
             db.add(ev_row)
         thread.last_message_at = datetime.now(timezone.utc)
 
-        # mídia só pela Evolution: a Cloud API oficial exige subir o arquivo antes
-        # (upload → media_id) e isso ainda não está implementado
-        can_media = conn.provider == "evolution"
         try:
             # o BANCO guarda a resposta crua (o chat do app renderiza markdown); o
             # WhatsApp recebe a versão que ele sabe desenhar — tabelas/headings/links
@@ -676,21 +689,12 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
                     t = wa_format.to_whatsapp(seg["text"])
                     if t.strip():
                         await _deliver(conn, m["jid"], t)
-                elif can_media:
-                    await evolution.send_media(
-                        conn.instance, m["jid"], seg["data"], seg["mime"],
-                        seg["filename"], seg.get("caption", ""),
-                    )
+                else:
+                    await _send_media(conn, m["jid"], seg)
             # gráficos/imagens geradas: no fim (não têm posição no texto)
-            if tool_media and can_media:
+            if tool_media:
                 for item in tool_media:
-                    await evolution.send_media(
-                        conn.instance, m["jid"], item["data"], item["mime"],
-                        item["filename"], item["caption"],
-                    )
-            skipped = (len(seg_media) + len(tool_media)) if not can_media else 0
-            if skipped:
-                logger.info("whatsapp: %d mídia(s) não enviadas (provider oficial)", skipped)
+                    await _send_media(conn, m["jid"], item)
             conn.state = {**(conn.state or {}), "last_error": None,
                           "last_event_at": datetime.now(timezone.utc).isoformat()}
         except Exception as exc:  # noqa: BLE001 - resposta gerada mas não entregue

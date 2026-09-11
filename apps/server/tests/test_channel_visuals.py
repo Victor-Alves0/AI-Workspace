@@ -3,14 +3,15 @@
 Antes disto: a IA chamava `chart.render.plot`, o artefato era descartado em silêncio e
 ela ainda dizia "segue o gráfico abaixo"; e as tabelas/headings chegavam como canos e
 cerquilhas cruas. Estes testes fixam as duas garantias."""
+
 from __future__ import annotations
 
 import struct
+from typing import ClassVar
 
 from aiworkspace.chart_render import render_chart
 from aiworkspace.integrations import channel_media
 from aiworkspace.integrations.wa_format import to_whatsapp
-
 
 # ----------------------------- markdown → WhatsApp ---------------------------
 
@@ -152,14 +153,42 @@ def test_kb_image_markdown_is_recognized():
     assert m.group(1) == doc and m.group(2) == "abc.def"
 
 
+def test_kb_document_link_is_recognized():
+    """Documento usa link Markdown comum, mas também precisa virar anexo no canal."""
+    doc = "9e0066b8-e9b5-45de-a600-445435a6c76b"
+    link = f"[manual.pdf](/knowledge/docs/{doc}/raw?t=abc.def)"
+    assert channel_media._KB_IMG_RE.search(link)
+
+
+async def test_split_content_media_preserves_file_order(monkeypatch):
+    doc = "9e0066b8-e9b5-45de-a600-445435a6c76b"
+
+    async def fake_doc_media(doc_id: str, token: str):
+        assert doc_id == doc and token == "token"
+        return {
+            "data": b"pdf", "mime": "application/pdf", "filename": "manual.pdf",
+            "caption": "",
+        }
+
+    monkeypatch.setattr(channel_media, "_kb_doc_media", fake_doc_media)
+    segments = await channel_media.split_content_media(
+        f"Antes\n\n[manual.pdf](/knowledge/docs/{doc}/raw?t=token)\n\nDepois"
+    )
+    assert [seg["type"] for seg in segments] == ["text", "media", "text"]
+    assert segments[1]["mime"] == "application/pdf"
+    assert segments[1]["filename"] == "manual.pdf"
+
+
 def test_sift_view_does_not_touch_the_db_object():
     """Filtrar as tools do canal nao pode PERSISTIR no modelo do usuario."""
     class FakeMC:
         tools_enabled = True
-        tool_ids = ["builtin:diagram.excalidraw.render", "builtin:chart.render.plot"]
-        sift_config = {"mode": "prompt"}
+        tool_ids: ClassVar[list[str]] = [
+            "builtin:diagram.excalidraw.render", "builtin:chart.render.plot",
+        ]
+        sift_config: ClassVar[dict] = {"mode": "prompt"}
         code_mode = True
-        filter_config = {"tools": {}}
+        filter_config: ClassVar[dict] = {"tools": {}}
 
     mc = FakeMC()
     view = channel_media.sift_view(mc)

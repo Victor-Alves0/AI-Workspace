@@ -3,11 +3,11 @@
 Antes: imagem caía no decode utf-8 tolerante → megabytes de lixo binário iam para o
 chunking/embedding e a indexação morria sem marcar erro — o doc ficava PRESO em
 "Indexando" (12 imagens ao vivo). E não havia como a IA mostrar a imagem no chat."""
+
 from __future__ import annotations
 
 from aiworkspace.chat.orchestrator import _knowledge_block_and_sources
-from aiworkspace.knowledge.ingest import extract_text, is_image, _image_text
-
+from aiworkspace.knowledge.ingest import _image_text, extract_text, is_image
 
 # ------------------------------- ingestão ------------------------------------
 
@@ -46,10 +46,12 @@ def _res(**kw):
     return {**base, **kw}
 
 
-def test_text_results_unchanged():
+def test_text_result_teaches_model_to_attach_original_file():
     blk, src = _knowledge_block_and_sources([_res()])
     # cada item nota sua localização "(in: [pasta/]arquivo)" p/ a IA atender pedidos por pasta
-    assert blk == "[1] (in: doc.txt) trecho"
+    assert blk.startswith("[1] (in: doc.txt) trecho")
+    assert "SEND/ATTACH" in blk
+    assert "[doc.txt](/knowledge/docs/d1/raw?t=" in blk
     assert src[0]["title"] == "doc.txt" and "/knowledge/docs/d1/raw?t=" in src[0]["url"]
 
 

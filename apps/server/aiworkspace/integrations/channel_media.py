@@ -142,9 +142,10 @@ def _id_from_url(url: str) -> uuid.UUID | None:
     return None
 
 
-# Imagem da Base de Conhecimento embutida na resposta como markdown
-# (`![nome](/knowledge/docs/<id>/raw?t=<token>)`). No chat o front renderiza; no
-# canal o contato receberia um LINK local inútil — aqui ela vira mídia de verdade.
+# Arquivo da Base de Conhecimento embutido na resposta como markdown
+# (`![imagem](/knowledge/docs/<id>/raw?t=<token>)` ou
+# `[arquivo](/knowledge/docs/<id>/raw?t=<token>)`). No chat o front renderiza/abre;
+# no canal o contato receberia um LINK local inútil — aqui ele vira mídia de verdade.
 # O `!` é OPCIONAL: modelos às vezes degradam o `![img](url)` para um link `[img](url)`
 # (o prompt do canal proíbe links) — sem tolerar isso, a imagem sumia e o `[img](link)`
 # vazava como texto. Aceitamos ambos e sempre entregamos a mídia.
@@ -155,7 +156,7 @@ _KB_IMG_RE = re.compile(
 
 async def _kb_doc_media(doc_id: str, token: str) -> dict[str, Any] | None:
     """Valida o token assinado (a resposta do modelo não é confiável) e devolve
-    {data, mime, filename, caption} da imagem/vídeo da KB, ou None."""
+    {data, mime, filename, caption} do arquivo da KB, ou None."""
     from ..knowledge.links import verify_doc_token
     if not verify_doc_token(doc_id, token):
         return None
@@ -164,9 +165,7 @@ async def _kb_doc_media(doc_id: str, token: str) -> dict[str, Any] | None:
             d = await db.get(KnowledgeDoc, uuid.UUID(doc_id))
             if d is None or not d.data:
                 return None
-            mime = d.mime or ""
-            if not (mime.startswith("image/") or mime.startswith("video/")):
-                return None
+            mime = d.mime or "application/octet-stream"
             return {"data": bytes(d.data), "mime": mime,
                     "filename": d.filename or "arquivo", "caption": ""}
     except Exception as exc:  # noqa: BLE001 - o texto segue mesmo sem a mídia
@@ -175,7 +174,7 @@ async def _kb_doc_media(doc_id: str, token: str) -> dict[str, Any] | None:
 
 
 async def extract_content_images(text: str) -> tuple[str, list[dict[str, Any]]]:
-    """Extrai as imagens da KB do texto da resposta → (texto sem os markdowns,
+    """Extrai os arquivos da KB do texto da resposta → (texto sem os markdowns,
     [{data, mime, filename, caption}]). Para canais que entregam texto e mídia em
     blocos separados (o WhatsApp usa `split_content_media`, que preserva a ordem)."""
     media: list[dict[str, Any]] = []

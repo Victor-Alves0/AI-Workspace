@@ -921,7 +921,12 @@ def _knowledge_block_and_sources(results: list[dict]) -> tuple[str, list[dict[st
                 f"To SHOW/PLAY this video in your reply, paste exactly: ![{name}]({sources[idx[did]-1]['url']})"
             )
         else:
-            lines.append(f"[{idx[did]}]{loc} {r.get('text') or ''}")
+            name = r.get("filename") or "arquivo"
+            lines.append(
+                f"[{idx[did]}]{loc} {r.get('text') or ''}. "
+                f"If the user asks you to SEND/ATTACH the original file, paste exactly: "
+                f"[{name}]({sources[idx[did]-1]['url']})"
+            )
     return "\n\n".join(lines), sources
 
 

@@ -390,8 +390,9 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
             if out_text:
                 await _deliver(conn, token, m["tg_chat_id"], out_text)
             for item in media:
-                await telegram_api.send_photo(
-                    token, m["tg_chat_id"], item["data"], item["filename"], item["caption"],
+                await telegram_api.send_media(
+                    token, m["tg_chat_id"], item["data"], item["filename"], item["mime"],
+                    item["caption"],
                 )
             conn.state = {**(conn.state or {}), "last_error": None,
                           "last_event_at": datetime.now(timezone.utc).isoformat()}

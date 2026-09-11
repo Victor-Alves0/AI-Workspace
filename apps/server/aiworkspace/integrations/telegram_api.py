@@ -26,7 +26,7 @@ async def _call(token: str, method: str, *, timeout: float = 30.0, **params: Any
         r = await client.post(url, json={k: v for k, v in params.items() if v is not None})
     try:
         data = r.json()
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         raise TelegramError(f"resposta inválida ({r.status_code})") from exc
     if not data.get("ok"):
         raise TelegramError(data.get("description") or f"HTTP {r.status_code}")
@@ -66,14 +66,29 @@ async def send_message(token: str, chat_id: str, text: str) -> dict[str, Any]:
 async def send_photo(token: str, chat_id: str, data: bytes, filename: str,
                      caption: str = "") -> dict[str, Any]:
     """Envia uma imagem (gráfico/imagem gerada) como FOTO — multipart, não JSON."""
-    url = _BASE.format(token=token, method="sendPhoto")
+    return await send_media(token, chat_id, data, filename, "image/png", caption)
+
+
+async def send_media(token: str, chat_id: str, data: bytes, filename: str,
+                     mime: str, caption: str = "") -> dict[str, Any]:
+    """Envia imagem, vídeo, áudio ou documento pelo método multipart adequado."""
+    mime = mime or "application/octet-stream"
+    if mime.startswith("image/"):
+        kind, method = "photo", "sendPhoto"
+    elif mime.startswith("video/"):
+        kind, method = "video", "sendVideo"
+    elif mime.startswith("audio/"):
+        kind, method = "audio", "sendAudio"
+    else:
+        kind, method = "document", "sendDocument"
     form = {"chat_id": chat_id}
     if caption:
         form["caption"] = caption[:1024]  # teto de legenda do Telegram
     async with httpx.AsyncClient(timeout=60.0) as client:
-        r = await client.post(url, data=form, files={"photo": (filename, data, "image/png")})
+        url = _BASE.format(token=token, method=method)
+        r = await client.post(url, data=form, files={kind: (filename, data, mime)})
     if r.status_code != 200:
-        raise TelegramError(f"sendPhoto falhou (HTTP {r.status_code})")
+        raise TelegramError(f"{method} falhou (HTTP {r.status_code})")
     return r.json()
 
 

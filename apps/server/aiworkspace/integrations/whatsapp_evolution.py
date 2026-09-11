@@ -115,11 +115,23 @@ async def send_text(instance: str, jid: str, text: str, delay_ms: int = 0) -> di
 
 async def send_media(instance: str, jid: str, data: bytes, mime: str,
                      filename: str, caption: str = "") -> dict[str, Any]:
-    """Envia uma imagem (gráfico renderizado, imagem gerada) como MÍDIA de verdade.
-    A Evolution aceita o arquivo em base64 no campo `media`."""
+    """Envia imagem, vídeo ou documento como MÍDIA de verdade.
+
+    A Evolution aceita o arquivo em base64 no campo `media`. O `mediatype` precisa
+    acompanhar o MIME; usar sempre `image` fazia vídeos e documentos falharem.
+    """
+    mime = mime or "application/octet-stream"
+    if mime.startswith("image/"):
+        media_type = "image"
+    elif mime.startswith("video/"):
+        media_type = "video"
+    elif mime.startswith("audio/"):
+        media_type = "audio"
+    else:
+        media_type = "document"
     payload = {
         "number": jid,
-        "mediatype": "image",
+        "mediatype": media_type,
         "mimetype": mime,
         "media": base64.b64encode(data).decode(),
         "fileName": filename,
