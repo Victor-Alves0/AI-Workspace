@@ -4,7 +4,7 @@ import { isValidElement, memo, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
-import { Check, Copy, ImageOff } from "lucide-react";
+import { Check, Copy, File, ImageOff } from "lucide-react";
 import { API_URL, previewHref } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 
@@ -65,17 +65,36 @@ function CodeBlock({ children }: { children?: React.ReactNode }) {
  *  que abre a imagem em nova aba. */
 const _VIDEO_ALT_RE = /\.(mp4|webm|mov|m4v|ogv|mkv)\s*$/i;
 
-function MdImage({ src, alt }: { src: string; alt: string }) {
-  const [broken, setBroken] = useState(false);
+function MdImage({ src, alt, streaming = false }: { src: string; alt: string; streaming?: boolean }) {
+  // O `done` troca a URL provisória (copiada pelo modelo) por outra reassinada pelo
+  // servidor. Guardar apenas um booleano fazia o erro da URL antiga sobreviver à
+  // troca: o player bom nunca era tentado e ficava preso no chip de mídia quebrada.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  const broken = !!src && failedSrc === src;
+  // A rota curta que chega nos tokens ainda não tem a assinatura final. Não dispara
+  // um request que inevitavelmente daria 403 nem marca a mídia como quebrada; o evento
+  // `done` troca `src` pelo endereço assinado e então o player é carregado normalmente.
+  if (streaming && src.includes("/knowledge/docs/")) {
+    return (
+      <span
+        className="my-2 inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs text-muted"
+        title="A mídia será carregada quando a resposta terminar"
+      >
+        <File size={14} className="shrink-0" />
+        <span className="max-w-[240px] truncate">{alt || "Preparando mídia…"}</span>
+      </span>
+    );
+  }
   // vídeos da Base de Conhecimento chegam como ![clip.mp4](url): o nome (alt)
   // termina numa extensão de vídeo → renderiza um player em vez de <img>.
   if (src && !broken && _VIDEO_ALT_RE.test(alt || "")) {
     return (
       <video
+        key={src}
         src={src}
         controls
         preload="metadata"
-        onError={() => setBroken(true)}
+        onError={() => setFailedSrc(src)}
         className="my-2 max-h-96 max-w-full rounded-xl border border-border"
       />
     );
@@ -100,7 +119,7 @@ function MdImage({ src, alt }: { src: string; alt: string }) {
       src={src}
       alt={alt}
       loading="lazy"
-      onError={() => setBroken(true)}
+      onError={() => setFailedSrc(src)}
       className="my-2 max-h-96 max-w-full rounded-xl border border-border object-contain"
     />
   );
@@ -184,7 +203,7 @@ function MarkdownRenderer({ content, fast, plain = false }: { content: string; f
         },
         img: ({ src, alt }) => {
           const url = typeof src === "string" && src.startsWith("/") ? `${API_URL}${src}` : src;
-          return <MdImage src={typeof url === "string" ? url : ""} alt={alt ?? ""} />;
+          return <MdImage src={typeof url === "string" ? url : ""} alt={alt ?? ""} streaming={fast} />;
         },
       }}
     >

@@ -901,6 +901,10 @@ def _knowledge_block_and_sources(results: list[dict]) -> tuple[str, list[dict[st
         if did not in idx:
             idx[did] = len(sources) + 1
             sources.append({"title": r.get("filename") or "documento", "url": sign_doc_url(did)})
+        # O modelo não precisa receber/repetir o JWT longo da fonte. A rota curta é
+        # estável e muito menos propensa a ser truncada; `_resign_kb_images` acrescenta
+        # um token novo ao snapshot final antes de ele ser emitido e persistido.
+        model_url = f"/knowledge/docs/{did}/raw"
         # localização (pasta/arquivo) p/ o modelo saber ONDE o item vive e poder
         # atender pedidos por pasta ("a foto da pasta Gatos").
         folder = (r.get("folder") or "").strip()
@@ -910,7 +914,7 @@ def _knowledge_block_and_sources(results: list[dict]) -> tuple[str, list[dict[st
             name = r.get("filename") or "imagem"
             lines.append(
                 f"[{idx[did]}] IMAGE{loc} — {r.get('text') or name}. "
-                f"To SHOW this image in your reply, paste exactly: ![{name}]({sources[idx[did]-1]['url']})"
+                f"To SHOW this image in your reply, paste exactly: ![{name}]({model_url})"
             )
         elif (r.get("mime") or "").startswith("video/"):
             # o front renderiza <video> quando o `alt` do markdown termina com uma
@@ -918,35 +922,41 @@ def _knowledge_block_and_sources(results: list[dict]) -> tuple[str, list[dict[st
             name = r.get("filename") or "video.mp4"
             lines.append(
                 f"[{idx[did]}] VIDEO{loc} — {r.get('text') or name}. "
-                f"To SHOW/PLAY this video in your reply, paste exactly: ![{name}]({sources[idx[did]-1]['url']})"
+                f"To SHOW/PLAY this video in your reply, paste exactly: ![{name}]({model_url})"
             )
         else:
             name = r.get("filename") or "arquivo"
             lines.append(
                 f"[{idx[did]}]{loc} {r.get('text') or ''}. "
                 f"If the user asks you to SEND/ATTACH the original file, paste exactly: "
-                f"[{name}]({sources[idx[did]-1]['url']})"
+                f"[{name}]({model_url})"
             )
     return "\n\n".join(lines), sources
 
 
-# Imagens da Base de Conhecimento que o modelo "cola" na resposta vêm com um token
-# assinado longo (~150 chars). Modelos às vezes ADULTERAM/TRUNCAM esse token ao
-# reproduzi-lo → o /raw responde 403 e a imagem renderiza QUEBRADA no chat (a borda
-# + o alt/nome do arquivo). Reassinamos server-side toda URL /knowledge/docs/<uuid>/raw
-# na resposta final: o doc_id (mais curto/robusto) é o que importa; o token é gerado
-# fresco aqui, então a imagem sempre carrega — mesmo que o modelo tenha estragado o dele.
-_KB_IMG_RE = re.compile(r"/knowledge/docs/([0-9a-fA-F-]{36})/raw(?:\?t=[^)\s\"'<>]*)?")
-# imagem markdown INTEIRA (`![alt](url)`) apontando p/ um doc da KB — para remover por
-# completo as imagens ALUCINADAS (senão sobra `![alt]()` quebrado ou o link no canal).
-_KB_IMG_MD_RE = re.compile(
-    r"!\[[^\]]*\]\(\s*/knowledge/docs/([0-9a-fA-F-]{36})/raw(?:\?t=[^)\s\"'<>]*)?\s*\)"
+# Mídias/arquivos da Base de Conhecimento que o modelo "cola" na resposta vêm com um
+# token assinado longo (~150 chars). Modelos às vezes ADULTERAM/TRUNCAM o token — ou
+# até um caractere do UUID — ao reproduzi-lo. No primeiro caso basta reassinar; no
+# segundo reconciliamos o nome exibido com as fontes que ESTE turno realmente recuperou.
+# Isso recupera a mídia sem transformar UUID alucinado em link autorizado.
+_KB_IMG_RE = re.compile(
+    r"(?:https?://[^/\s)]+)?/knowledge/docs/([0-9a-fA-F-]{36})/raw"
+    r"(?:\?t=[^)\s\"'<>]*)?"
+)
+_KB_DOC_MD_RE = re.compile(
+    r"(?P<embed>!)?\[(?P<label>[^\]\n]*)\]\(\s*"
+    r"(?:https?://[^/\s)]+)?/knowledge/docs/(?P<doc_id>[0-9a-fA-F-]{36})/raw"
+    r"(?:\?t=[^)\s\"'<>]*)?\s*\)"
 )
 
 
-async def _existing_kb_doc_ids(ids: set[str]) -> set[str]:
-    """Subconjunto dos doc_ids que EXISTEM e têm bytes. Ids malformados ou inexistentes
-    (imagens que o modelo alucinou) ficam de fora — não devem virar link assinado."""
+async def _existing_kb_doc_ids(ids: set[str], user_id: str | None = None) -> set[str]:
+    """Docs que existem, têm bytes e pertencem ao usuário do turno.
+
+    O filtro de proprietário é obrigatório no caminho real: reassinar uma URL é emitir
+    uma capability de leitura, então apenas conhecer o UUID de outro usuário nunca pode
+    ser suficiente. ``None`` só mantém o helper fácil de isolar em testes unitários.
+    """
     from sqlalchemy import func
 
     from ..models import KnowledgeDoc
@@ -958,31 +968,104 @@ async def _existing_kb_doc_ids(ids: set[str]) -> set[str]:
             continue
     if not parsed:
         return set()
+    owner: uuid.UUID | None = None
+    if user_id is not None:
+        try:
+            owner = uuid.UUID(user_id)
+        except (ValueError, TypeError, AttributeError):
+            return set()
     async with SessionLocal() as db:
-        rows = await db.execute(
-            select(KnowledgeDoc.id).where(
-                KnowledgeDoc.id.in_(parsed), func.octet_length(KnowledgeDoc.data) > 0
-            )
+        stmt = select(KnowledgeDoc.id).where(
+            KnowledgeDoc.id.in_(parsed), func.octet_length(KnowledgeDoc.data) > 0
         )
+        if owner is not None:
+            stmt = stmt.where(KnowledgeDoc.user_id == owner)
+        rows = await db.execute(stmt)
         return {str(r) for r in rows.scalars()}
 
 
-async def _resign_kb_images(text: str) -> str:
-    """Reassina (token fresco) as URLs de imagem da KB na resposta — MAS só as que
-    apontam p/ um doc REAL. O `sign_doc_url` assina qualquer id, então sem esta checagem
-    um doc_id ALUCINADO pelo modelo vira um link com token válido que dá 404 ao abrir.
-    Imagens de docs inexistentes são REMOVIDAS inteiras (site não mostra bloco quebrado,
-    canal não vaza o markdown como texto)."""
+def _canonical_doc_id(value: str) -> str | None:
+    try:
+        return str(uuid.UUID(value))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _knowledge_source_index(
+    tool_events: list[dict[str, Any]] | None,
+) -> tuple[set[str], dict[str, str]]:
+    """Fontes confiáveis do turno e títulos que identificam um único documento.
+
+    A URL em ``sources`` foi criada pelo próprio servidor a partir do resultado da
+    busca/listagem da KB; portanto ela é a âncora segura para reparar um UUID que o
+    modelo copiou com um caractere errado. Títulos repetidos são deliberadamente
+    ignorados para nunca escolher o arquivo errado por adivinhação.
+    """
+    trusted: set[str] = set()
+    by_label: dict[str, set[str]] = {}
+    for event in tool_events or []:
+        if event.get("kind") != "result" or event.get("name") != "knowledge":
+            continue
+        data = event.get("data")
+        if not isinstance(data, dict):
+            continue
+        for source in data.get("sources") or []:
+            if not isinstance(source, dict):
+                continue
+            match = _KB_IMG_RE.search(str(source.get("url") or ""))
+            doc_id = _canonical_doc_id(match.group(1)) if match else None
+            if not doc_id:
+                continue
+            trusted.add(doc_id)
+            label = " ".join(str(source.get("title") or "").split()).casefold()
+            if label:
+                by_label.setdefault(label, set()).add(doc_id)
+    unique_labels = {label: next(iter(ids)) for label, ids in by_label.items() if len(ids) == 1}
+    return trusted, unique_labels
+
+
+async def _resign_kb_images(
+    text: str, tool_events: list[dict[str, Any]] | None = None,
+    user_id: str | None = None,
+) -> str:
+    """Reconcilia e reassina URLs de documentos da KB antes do ``done``.
+
+    UUIDs presentes nas fontes recuperadas são confiáveis. Os demais ainda precisam
+    existir no banco; se o UUID foi adulterado, só o reparamos quando o label Markdown
+    identifica de forma inequívoca uma fonte do próprio turno. Referências realmente
+    alucinadas são removidas por inteiro, sem deixar ``![nome]()`` ou ``[nome]()``.
+    """
     if not text or "/knowledge/docs/" not in text:
         return text
-    ids = set(_KB_IMG_RE.findall(text))
-    if not ids:
+    matches = list(_KB_IMG_RE.finditer(text))
+    if not matches:
         return text
-    valid = await _existing_kb_doc_ids(ids)
-    # 1) remove o markdown inteiro das imagens alucinadas (doc inexistente)
-    text = _KB_IMG_MD_RE.sub(lambda m: m.group(0) if m.group(1) in valid else "", text)
-    # 2) reassina as URLs válidas restantes; apaga URLs órfãs de doc inexistente
-    return _KB_IMG_RE.sub(lambda m: sign_doc_url(m.group(1)) if m.group(1) in valid else "", text)
+    trusted, by_label = _knowledge_source_index(tool_events)
+    ids = {doc_id for m in matches if (doc_id := _canonical_doc_id(m.group(1)))}
+    valid = trusted | await _existing_kb_doc_ids(ids - trusted, user_id)
+
+    def replace_markdown(match: re.Match[str]) -> str:
+        label = match.group("label")
+        doc_id = _canonical_doc_id(match.group("doc_id"))
+        if doc_id not in valid:
+            key = " ".join(label.split()).casefold()
+            doc_id = by_label.get(key)
+        if not doc_id:
+            return ""
+        prefix = "!" if match.group("embed") else ""
+        return f"{prefix}[{label}](/knowledge/docs/{doc_id}/raw)"
+
+    # Primeiro troca a expressão Markdown inteira: assim um UUID adulterado pode ser
+    # recuperado pelo nome, e um inventado some sem deixar sintaxe quebrada na mensagem.
+    text = _KB_DOC_MD_RE.sub(replace_markdown, text)
+
+    # URLs avulsas (fora de Markdown) não têm label para reconciliação: somente docs
+    # que já foram validados/recuperados recebem um token novo.
+    def replace_url(match: re.Match[str]) -> str:
+        doc_id = _canonical_doc_id(match.group(1))
+        return sign_doc_url(doc_id) if doc_id in valid else ""
+
+    return _KB_IMG_RE.sub(replace_url, text)
 
 
 async def _save_generated_image(
@@ -3162,7 +3245,7 @@ async def run_turn(
 
     # reassina URLs de imagem da KB antes de emitir/persistir (token pode ter sido
     # adulterado pelo modelo) — garante que a imagem carregue no chat
-    assistant_text = await _resign_kb_images(assistant_text)
+    assistant_text = await _resign_kb_images(assistant_text, tool_events, user_id)
     yield {
         "type": "done",
         "content": assistant_text,
