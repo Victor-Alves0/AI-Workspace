@@ -43,7 +43,7 @@ function CodeBlock({ children }: { children?: React.ReactNode }) {
 
   return (
     <div className="relative my-3 rounded-xl border border-border">
-      <div className="sticky top-0 z-10 flex items-center justify-between rounded-t-xl border-b border-border bg-surface px-3 py-1.5 shadow-sm">
+      <div className="sticky top-0 z-20 flex items-center justify-between rounded-t-xl border-b border-border bg-surface px-3 py-1.5 shadow-sm">
         <span className="font-mono text-[11px] uppercase tracking-wider text-muted">
           {lang || "código"}
         </span>
@@ -234,7 +234,11 @@ function Markdown({
   fast?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const isLong = clamp && !expanded && content.length > CLAMP_LIMIT;
+  // Streaming nunca deve ser truncado: além de esconder justamente o output mais
+  // recente, o tamanho muda a cada delta e fazia o botão aparecer/piscar no meio da
+  // geração. A guarda vive aqui para continuar correta mesmo se um caller passar
+  // `clamp` por engano no futuro.
+  const isLong = clamp && !fast && !expanded && content.length > CLAMP_LIMIT;
   // corta num limite de parágrafo p/ não deixar uma cerca de código aberta
   const clamped = isLong
     ? (() => {

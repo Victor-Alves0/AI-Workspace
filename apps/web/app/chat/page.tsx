@@ -655,10 +655,21 @@ export default function ChatPage() {
   // responsabilidade do navegador. Não reintroduzir — era a origem do bug recorrente
   // "o scroll morre antes do fim" (qualquer atraso da medição escondia o fim).
   const hasConversation = messages.length > 0 || !!streaming || rtRunning || !!rtStreaming;
-  // As três mensagens mais recentes permanecem completas e com layout exato. O
-  // clamp/content-visibility serve para o histórico antigo, não para a conversa atual.
+  // A cauda da conversa E as três respostas mais recentes da IA permanecem completas
+  // e com layout exato. Contar só `slice(-3)` deixava, na prática, apenas uma resposta
+  // da IA sem clamp porque as mensagens do usuário também ocupavam essas posições.
   const recentFullMessageIds = useMemo(
-    () => new Set(messages.slice(-3).map((m) => m.id)),
+    () => {
+      const ids = new Set(messages.slice(-3).map((m) => m.id));
+      let assistantCount = 0;
+      for (let i = messages.length - 1; i >= 0 && assistantCount < 3; i -= 1) {
+        const message = messages[i];
+        if (message.role !== "assistant" || message.is_summary) continue;
+        ids.add(message.id);
+        assistantCount += 1;
+      }
+      return ids;
+    },
     [messages],
   );
 
