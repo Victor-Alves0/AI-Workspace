@@ -26,21 +26,32 @@ function browserSpeak(text: string): Promise<void> {
   if (pt) u.voice = pt;
   u.lang = pt?.lang ?? "pt-BR";
   return new Promise<void>((resolve) => {
-    u.onend = () => resolve();
-    u.onerror = () => resolve();
+    const done = () => {
+      if (_currentBrowserResolve === done) _currentBrowserResolve = null;
+      resolve();
+    };
+    _currentBrowserResolve = done;
+    u.onend = done;
+    u.onerror = done;
     window.speechSynthesis.speak(u);
   });
 }
 
 // Áudio em reprodução no momento (para o barge-in do modo voz poder cortá-lo).
 let _currentAudio: HTMLAudioElement | null = null;
+let _currentBrowserResolve: (() => void) | null = null;
+let _speechGeneration = 0;
 
 // Interrompe qualquer fala em curso (servidor ou navegador). Usado quando o usuário
 // volta a falar (barge-in) ou encerra o modo voz.
 export function stopSpeaking(): void {
+  _speechGeneration += 1;
   if (typeof window !== "undefined" && "speechSynthesis" in window) {
     try { window.speechSynthesis.cancel(); } catch { /* noop */ }
   }
+  const finishBrowserSpeech = _currentBrowserResolve;
+  _currentBrowserResolve = null;
+  finishBrowserSpeech?.();
   if (_currentAudio) {
     try { _currentAudio.pause(); } catch { /* noop */ }
     _currentAudio = null;
@@ -51,6 +62,10 @@ export function stopSpeaking(): void {
 // OpenAI); qualquer falha cai na voz do navegador. Resolve quando a fala TERMINA
 // (não só quando começa) — o modo voz espera isso antes de voltar a ouvir.
 export async function speak(text: string, voice?: string): Promise<void> {
+  // Cancela uma leitura anterior e guarda a geração desta chamada. Se o usuário
+  // apertar Parar enquanto o TTS ainda está baixando, os bytes não começam a tocar.
+  stopSpeaking();
+  const generation = _speechGeneration;
   try {
     const res = await fetch(`${API_URL}/voice/tts`, {
       method: "POST",
@@ -60,6 +75,7 @@ export async function speak(text: string, voice?: string): Promise<void> {
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? "TTS falhou");
     const blob = await res.blob();
+    if (generation !== _speechGeneration) return;
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     _currentAudio = audio;
@@ -67,9 +83,14 @@ export async function speak(text: string, voice?: string): Promise<void> {
       audio.onended = () => { URL.revokeObjectURL(url); if (_currentAudio === audio) _currentAudio = null; resolve(); };
       audio.onerror = () => { URL.revokeObjectURL(url); if (_currentAudio === audio) _currentAudio = null; resolve(); };
       audio.onpause = () => { URL.revokeObjectURL(url); resolve(); };  // barge-in
-      audio.play().catch(() => resolve());
+      audio.play().catch(() => {
+        URL.revokeObjectURL(url);
+        if (_currentAudio === audio) _currentAudio = null;
+        resolve();
+      });
     });
   } catch {
+    if (generation !== _speechGeneration) return;
     await browserSpeak(text);
   }
 }

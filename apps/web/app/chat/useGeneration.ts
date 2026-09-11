@@ -38,6 +38,8 @@ export interface GenerationDeps {
   reloadMessages: (id: string) => Promise<void>;
   reloadArtifacts: (id: string) => Promise<void>;
   refreshChats: () => void;
+  /** Preserva o scroll ao substituir o balão ao vivo pela mensagem persistida. */
+  prepareStreamLanding: () => void;
   // true se `id` ainda é o chat que o usuário está vendo (checado ao vivo). Os
   // handlers de stream só pintam o estado global quando o dono deles está ativo.
   isActiveChat: (id: string | null) => boolean;
@@ -345,12 +347,13 @@ export function useGeneration(getDeps: () => GenerationDeps) {
     // sobrescreveria a tela do chat para onde o usuário navegou.
     if (started && deps.isActiveChat(id)) {
       stopRef.current = null;
+      deps.prepareStreamLanding();
+      await deps.reloadMessages(id);
       setStreaming("");
       setStreamingReasoning("");
       setLiveArtifact(null);
       setStreamPhase("idle");
       setSending(false);
-      await deps.reloadMessages(id);
       await deps.reloadArtifacts(id);
       deps.refreshChats();
     }

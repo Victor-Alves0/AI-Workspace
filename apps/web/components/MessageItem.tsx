@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Loader2, Mail, MessageSquarePlus, Pencil, Play, RotateCcw, Send, ShieldAlert, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench } from "lucide-react";
+import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Loader2, Mail, MessageSquarePlus, Pencil, Play, RotateCcw, Send, ShieldAlert, Square, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench } from "lucide-react";
 import type { BrainNoteEvent, ChartSpec, ChatArtifact, DeepResearch, Message, SkillProposal, StockQuote, ToolEvent } from "@/lib/types";
 import { api, ApiError, API_URL } from "@/lib/api";
 import { fmtHM, fmtDayShort } from "@/lib/format";
@@ -731,12 +731,13 @@ function ArtifactChip({
 /** Corpo da mensagem da IA: primeiro separa os cartões de ARTEFATO DE CHAT
  *  ([[artifact:slug]]), depois os marcadores de artefatos de ferramenta. */
 function AssistantBody({
-  content, artifacts, chatArtifacts = [], onOpenArtifact,
+  content, artifacts, chatArtifacts = [], onOpenArtifact, clampContent = true,
 }: {
   content: string;
   artifacts: Artifact[];
   chatArtifacts?: ChatArtifact[];
   onOpenArtifact?: (identifier: string) => void;
+  clampContent?: boolean;
 }) {
   CHAT_ART_RE.lastIndex = 0;
   if (CHAT_ART_RE.test(content)) {
@@ -746,7 +747,7 @@ function AssistantBody({
     const seen = new Set<string>();
     while ((m = CHAT_ART_RE.exec(content))) {
       const before = content.slice(last, m.index);
-      if (before.trim()) nodes.push(<ToolMarkedBody key={`s${seg++}`} content={before} artifacts={[]} />);
+      if (before.trim()) nodes.push(<ToolMarkedBody key={`s${seg++}`} content={before} artifacts={[]} clampContent={clampContent} />);
       const ident = m[1].toLowerCase();
       if (!seen.has(ident)) {
         seen.add(ident);
@@ -762,18 +763,18 @@ function AssistantBody({
       last = m.index + m[0].length;
     }
     const tail = content.slice(last);
-    if (tail.trim() || artifacts.length) nodes.push(<ToolMarkedBody key={`s${seg++}`} content={tail} artifacts={artifacts} />);
+    if (tail.trim() || artifacts.length) nodes.push(<ToolMarkedBody key={`s${seg++}`} content={tail} artifacts={artifacts} clampContent={clampContent} />);
     return <>{nodes}</>;
   }
-  return <ToolMarkedBody content={content} artifacts={artifacts} />;
+  return <ToolMarkedBody content={content} artifacts={artifacts} clampContent={clampContent} />;
 }
 
 /** Markdown + artefatos de FERRAMENTA, interleaved nos marcadores [[chart]] etc. */
-function ToolMarkedBody({ content, artifacts }: { content: string; artifacts: Artifact[] }) {
+function ToolMarkedBody({ content, artifacts, clampContent }: { content: string; artifacts: Artifact[]; clampContent: boolean }) {
   if (!artifacts.length || !new RegExp(MARKER_SRC, "i").test(content)) {
     return (
       <>
-        <Markdown content={content} clamp />
+        <Markdown content={content} clamp={clampContent} />
         {artifacts.map((a, i) => renderArtifact(a, i))}
       </>
     );
@@ -792,13 +793,13 @@ function ToolMarkedBody({ content, artifacts }: { content: string; artifacts: Ar
   let last = 0, seg = 0, m: RegExpExecArray | null;
   while ((m = re.exec(content))) {
     const text = content.slice(last, m.index);
-    if (text.trim()) nodes.push(<Markdown key={`t${seg++}`} content={text} clamp />);
+    if (text.trim()) nodes.push(<Markdown key={`t${seg++}`} content={text} clamp={clampContent} />);
     const idx = take(m[1].toLowerCase());
     if (idx >= 0) nodes.push(renderArtifact(artifacts[idx], `a${idx}`));
     last = m.index + m[0].length;
   }
   const tail = content.slice(last);
-  if (tail.trim()) nodes.push(<Markdown key={`t${seg++}`} content={tail} clamp />);
+  if (tail.trim()) nodes.push(<Markdown key={`t${seg++}`} content={tail} clamp={clampContent} />);
   // artefatos sem marcador correspondente vão para o fim
   artifacts.forEach((a, i) => { if (!used.has(i)) nodes.push(renderArtifact(a, `a${i}`)); });
   return <>{nodes}</>;
@@ -1054,11 +1055,13 @@ function IconButton({
   title,
   onClick,
   disabled,
+  active = false,
   children,
 }: {
   title: string;
   onClick: () => void;
   disabled?: boolean;
+  active?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -1066,7 +1069,8 @@ function IconButton({
       title={title}
       onClick={onClick}
       disabled={disabled}
-      className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+      aria-pressed={active || undefined}
+      className={`rounded-lg p-1.5 transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 ${active ? "bg-accent/15 text-accent-hover" : "text-muted"}`}
     >
       {children}
     </button>
@@ -1252,6 +1256,7 @@ function UsagePanel({ u }: { u: NonNullable<Message["usage"]> }) {
 export default function MessageItem({
   message,
   onSpeak,
+  speaking = false,
   onEdit,
   onRegenerate,
   onContinue,
@@ -1265,9 +1270,11 @@ export default function MessageItem({
   bare = false,
   chatArtifacts,
   onOpenArtifact,
+  clampContent = true,
 }: {
   message: Message;
-  onSpeak: (content: string) => void;
+  onSpeak: () => void;
+  speaking?: boolean;
   onEdit: (id: string, content: string) => Promise<void>;
   onRegenerate: (id: string) => void;
   onContinue: (id: string) => void;
@@ -1289,6 +1296,8 @@ export default function MessageItem({
   /** artefatos de chat (janela dedicada) — p/ os cartões [[artifact:slug]] */
   chatArtifacts?: ChatArtifact[];
   onOpenArtifact?: (identifier: string) => void;
+  /** Mensagens recentes ficam completas; só o histórico antigo é compactado. */
+  clampContent?: boolean;
 }) {
   const isUser = message.role === "user";
   const [editing, setEditing] = useState(false);
@@ -1475,7 +1484,7 @@ export default function MessageItem({
         {message.reasoning?.text && (
           <ReasoningBlock text={message.reasoning.text} seconds={message.reasoning.seconds} />
         )}
-        {editing ? editor : <AssistantBody content={displayContent} artifacts={artifacts} chatArtifacts={chatArtifacts} onOpenArtifact={onOpenArtifact} />}
+        {editing ? editor : <AssistantBody content={displayContent} artifacts={artifacts} chatArtifacts={chatArtifacts} onOpenArtifact={onOpenArtifact} clampContent={clampContent} />}
         {!editing && sources.length > 0 && <SourcesBar sources={sources} />}
         {!editing && usedTools && toolsEnabled && (
           <ToolEventsPanel events={toolEvents} open={showTools} onOpenChange={setShowTools} />
@@ -1484,15 +1493,15 @@ export default function MessageItem({
         {/* barra de ações — abaixo de toda mensagem da IA */}
         {!editing && (
           <>
-            <div className="mt-1.5 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+            <div className={`mt-1.5 flex items-center gap-0.5 transition-opacity duration-150 ${speaking ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
               <IconButton title="Editar" onClick={() => { setDraft(message.content); setEditing(true); }} disabled={busy}>
                 <Pencil size={15} />
               </IconButton>
               <IconButton title="Copiar" onClick={copy}>
                 {copied ? <Check size={15} className="text-green-400" /> : <Copy size={15} />}
               </IconButton>
-              <IconButton title="Ler em voz alta" onClick={() => onSpeak(message.content)}>
-                <Volume2 size={15} />
+              <IconButton title={speaking ? "Parar leitura" : "Ler em voz alta"} onClick={onSpeak} active={speaking}>
+                {speaking ? <Square size={14} fill="currentColor" /> : <Volume2 size={15} />}
               </IconButton>
               <IconButton title="Custo / tokens" onClick={() => setShowCost((v) => !v)}>
                 <Info size={15} className={showCost ? "text-accent-hover" : ""} />

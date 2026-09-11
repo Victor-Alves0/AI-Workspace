@@ -155,6 +155,13 @@ select:focus-visible {
   content-visibility: auto;
   contain-intrinsic-size: auto 160px;
 }
+/* A cauda da conversa precisa de altura exata: ela participa do auto-scroll e da
+ * troca entre o balão de streaming e a mensagem persistida. Só o histórico antigo
+ * usa content-visibility/intrinsic-size para economizar layout. */
+.msg-row-recent {
+  content-visibility: visible;
+  contain-intrinsic-size: none;
+}
 
 /* indicador de "pensando" (três pontos) */
 @keyframes typing-dot {

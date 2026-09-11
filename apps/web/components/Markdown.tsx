@@ -42,8 +42,8 @@ function CodeBlock({ children }: { children?: React.ReactNode }) {
   }
 
   return (
-    <div className="my-3 overflow-hidden rounded-xl border border-border">
-      <div className="flex items-center justify-between border-b border-border bg-surface px-3 py-1.5">
+    <div className="relative my-3 rounded-xl border border-border">
+      <div className="sticky top-0 z-10 flex items-center justify-between rounded-t-xl border-b border-border bg-surface px-3 py-1.5 shadow-sm">
         <span className="font-mono text-[11px] uppercase tracking-wider text-muted">
           {lang || "código"}
         </span>
@@ -55,7 +55,7 @@ function CodeBlock({ children }: { children?: React.ReactNode }) {
           {copied ? "Copiado" : "Copiar"}
         </button>
       </div>
-      <pre>{children}</pre>
+      <pre className="rounded-b-xl">{children}</pre>
     </div>
   );
 }

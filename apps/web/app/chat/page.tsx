@@ -195,7 +195,7 @@ export default function ChatPage() {
   // getDeps é lido pós-render, então as deps podem ser declaradas mais abaixo.
   const gen = useGeneration(() => ({
     artifactsEnabled, temporary, setArtifactOpen, setActive,
-    reloadMessages, reloadArtifacts, refreshChats, isActiveChat,
+    reloadMessages, reloadArtifacts, refreshChats, isActiveChat, prepareStreamLanding,
     onReasoningEffort: (e: string) => setReasoningEffort(e as ReasoningEffort),
   }));
   const {
@@ -381,6 +381,10 @@ export default function ChatPage() {
   const [voicePhase, setVoicePhase] = useState<"off" | "listening" | "thinking" | "speaking">("off");
   const [voiceLevel, setVoiceLevel] = useState(0);
   const voiceRef = useRef<{ active: boolean; utter: { stop: () => void; cancel: () => void } | null; session: VoiceSession | null }>({ active: false, utter: null, session: null });
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  // Id/run são transitórios: ficam em ref para trocar/parar a leitura sem fazer
+  // callbacks de todas as mensagens dependerem do estado que muda a cada clique.
+  const messageSpeechRef = useRef<{ id: string | null; run: number }>({ id: null, run: 0 });
   // Wake word ("hey nome"): escuta sempre-ativa opt-in.
   const [wakeOn, setWakeOn] = useState(false);
   const [wakeStatus, setWakeStatus] = useState<"off" | "starting" | "on" | "error">("off");
@@ -391,6 +395,9 @@ export default function ChatPage() {
   const stickFrameRef = useRef<number | null>(null);
   const lastStickyHeightRef = useRef(-1);
   const selectingTextRef = useRef(false);
+  // Durante a troca stream -> mensagem persistida, preserva o grude que existia
+  // antes do DOM trocar de identidade. Um scroll manual cancela esta intenção.
+  const forceBottomAfterLandingRef = useRef(false);
   // botão "ir até o fim": visível só quando o usuário rolou p/ cima
   const [atBottom, setAtBottom] = useState(true);
   // id da última mensagem cujo seletor de opções (kind:ask) foi dispensado
@@ -593,7 +600,8 @@ export default function ChatPage() {
   // custo) durante o streaming ou quando o poll recarregava as mensagens: a página
   // puxava o usuário de volta pro fundo a cada evento.
   const stickToBottom = useCallback(() => {
-    if (!pollRef.current.atBottom) return;
+    const forced = forceBottomAfterLandingRef.current;
+    if (!pollRef.current.atBottom && !forced) return;
     if (selectingTextRef.current) return;
     // usuário selecionando texto: rolar agora arrasta o conteúdo sob o cursor e
     // desfaz a seleção (impossível copiar enquanto a IA responde) — pausa o grude
@@ -602,7 +610,8 @@ export default function ChatPage() {
     if (stickFrameRef.current !== null) return;
     stickFrameRef.current = requestAnimationFrame(() => {
       stickFrameRef.current = null;
-      if (!pollRef.current.atBottom || selectingTextRef.current) return;
+      const stillForced = forceBottomAfterLandingRef.current;
+      if ((!pollRef.current.atBottom && !stillForced) || selectingTextRef.current) return;
       const selection = window.getSelection();
       if (selection && !selection.isCollapsed) return;
       const el = scrollRef.current;
@@ -610,10 +619,15 @@ export default function ChatPage() {
       const height = el.scrollHeight;
       // Evita uma escrita no scroll (e a sincronização de layout resultante) se
       // a altura não mudou desde a última pintura acompanhada.
-      if (height === lastStickyHeightRef.current) return;
+      if (!stillForced && height === lastStickyHeightRef.current) return;
       lastStickyHeightRef.current = height;
       el.scrollTop = height;
+      forceBottomAfterLandingRef.current = false;
     });
+  }, []);
+  const prepareStreamLanding = useCallback(() => {
+    forceBottomAfterLandingRef.current = pollRef.current.atBottom;
+    if (forceBottomAfterLandingRef.current) lastStickyHeightRef.current = -1;
   }, []);
   useEffect(() => {
     stickToBottom();
@@ -641,6 +655,12 @@ export default function ChatPage() {
   // responsabilidade do navegador. Não reintroduzir — era a origem do bug recorrente
   // "o scroll morre antes do fim" (qualquer atraso da medição escondia o fim).
   const hasConversation = messages.length > 0 || !!streaming || rtRunning || !!rtStreaming;
+  // As três mensagens mais recentes permanecem completas e com layout exato. O
+  // clamp/content-visibility serve para o histórico antigo, não para a conversa atual.
+  const recentFullMessageIds = useMemo(
+    () => new Set(messages.slice(-3).map((m) => m.id)),
+    [messages],
+  );
 
   // detecta tela pequena (< md = 768px) p/ virar a barra lateral em drawer
   useEffect(() => {
@@ -762,6 +782,28 @@ export default function ChatPage() {
     const legacyByName = sameName.length === 1 ? sameName[0] : undefined;
     return (byId ?? legacyByName ?? curCustom)?.tts_voice ?? undefined;
   }, [customModels, curCustom]);
+  const toggleMessageSpeech = useCallback((m: Message) => {
+    const current = messageSpeechRef.current;
+    if (current.id === m.id) {
+      messageSpeechRef.current = { id: null, run: current.run + 1 };
+      stopSpeaking();
+      setSpeakingMessageId(null);
+      return;
+    }
+    stopSpeaking();
+    const run = current.run + 1;
+    messageSpeechRef.current = { id: m.id, run };
+    setSpeakingMessageId(m.id);
+    void speak(m.content, voiceFor(m)).finally(() => {
+      if (messageSpeechRef.current.run !== run) return;
+      messageSpeechRef.current = { id: null, run };
+      setSpeakingMessageId(null);
+    });
+  }, [voiceFor]);
+  useEffect(() => () => {
+    messageSpeechRef.current.run += 1;
+    stopSpeaking();
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Mesa-redonda (multi-modelo): modelos conversam entre si; o usuário guia.
@@ -1340,10 +1382,13 @@ export default function ChatPage() {
         // sobrescreveria o chat para onde ele navegou (a resposta já ficou salva
         // no servidor e reaparece ao reabrir este chat).
         if (isActiveChat(ownerId)) {
-          setStreaming("");
-          setStreamingReasoning("");
+          // Mantém o balão vivo até os registros reais chegarem. Removê-lo antes
+          // fazia o scroll colapsar até a mensagem do usuário e ancorar ali.
+          prepareStreamLanding();
           // recarrega as mensagens reais (ids do servidor + registro de tokens/custo)
           await reloadMessages(chat.id);
+          setStreaming("");
+          setStreamingReasoning("");
           await reloadArtifacts(chat.id);
           // as mensagens enfileiradas já "aterrissaram" (persistidas + no histórico):
           // limpa os chips. Se havia FILA (não-steer), o back disparou um turno de
@@ -2261,7 +2306,11 @@ export default function ChatPage() {
                 <div
                   ref={scrollRef}
                   onScroll={onScrollArea}
-                  onPointerDown={(event) => { if (event.button === 0) selectingTextRef.current = true; }}
+                  onWheel={() => { forceBottomAfterLandingRef.current = false; }}
+                  onPointerDown={(event) => {
+                    forceBottomAfterLandingRef.current = false;
+                    if (event.button === 0) selectingTextRef.current = true;
+                  }}
                   onPointerUp={() => { selectingTextRef.current = false; }}
                   onPointerCancel={() => { selectingTextRef.current = false; }}
                   className="flex-1 space-y-5 overflow-y-auto px-4 pb-14 pt-6 [scroll-padding-bottom:5rem]"
@@ -2293,7 +2342,9 @@ export default function ChatPage() {
                         modelAvatar={isRt ? null : (showAv ? (curCustom?.avatar_url ?? null) : null)}
                         chatArtifacts={chatArtifacts}
                         onOpenArtifact={(ident) => setArtifactOpen(ident)}
-                        onSpeak={(c) => speak(c, voiceFor(m))}
+                        onSpeak={() => toggleMessageSpeech(m)}
+                        speaking={speakingMessageId === m.id}
+                        clampContent={!recentFullMessageIds.has(m.id)}
                         onEdit={editMessage}
                         onRegenerate={regenerateMessage}
                         onContinue={continueMessage}
@@ -2309,7 +2360,7 @@ export default function ChatPage() {
                       />
                     ) : null;
                     return (
-                      <div key={m.id} id={`msg-${m.id}`} className="msg-row">
+                      <div key={m.id} id={`msg-${m.id}`} className={recentFullMessageIds.has(m.id) ? "msg-row msg-row-recent" : "msg-row"}>
                         {m.is_summary ? (
                           <CompactionDivider onOpen={() => setShowCompactions(true)} />
                         ) : temporary ? (
@@ -2327,7 +2378,8 @@ export default function ChatPage() {
                               name={m.role === "assistant" ? modelLabel : undefined}
                               reasoning={m.reasoning}
                               toolEvents={m.tool_events ?? undefined}
-                              onSpeak={m.role === "assistant" ? () => speak(m.content, voiceFor(m)) : undefined}
+                              onSpeak={m.role === "assistant" ? () => toggleMessageSpeech(m) : undefined}
+                              speaking={speakingMessageId === m.id}
                               onDelete={() => deleteMessage(m.id)}
                             />
                           </>
@@ -2712,6 +2764,7 @@ function MessageBubble({
   role,
   content,
   onSpeak,
+  speaking = false,
   onDelete,
   time,
   streaming = false,
@@ -2728,6 +2781,7 @@ function MessageBubble({
   role: string;
   content: string;
   onSpeak?: () => void;
+  speaking?: boolean;
   onDelete?: () => void;
   time?: string;
   streaming?: boolean;
@@ -2784,13 +2838,19 @@ function MessageBubble({
           <ReasoningBlock text={reasoning.text} seconds={reasoning.seconds} live={reasoningLive} />
         )}
         {(content || !reasoning) && (
-          <Markdown content={content} fast={streaming} clamp={streaming} className={streaming ? "stream-caret" : ""} />
+          <Markdown content={content} fast={streaming} className={streaming ? "stream-caret" : ""} />
         )}
         {usedTools && <ToolEventsPanel events={toolEvents!} live={toolsLive} />}
         {footer}
         {onSpeak && (
-          <button onClick={() => onSpeak()} title="Ler em voz alta" className="mt-1 flex items-center gap-1 text-xs text-muted opacity-0 transition-opacity hover:text-ink group-hover:opacity-100">
-            <Volume2 size={13} /> Ler
+          <button
+            onClick={() => onSpeak()}
+            title={speaking ? "Parar leitura" : "Ler em voz alta"}
+            aria-pressed={speaking || undefined}
+            className={`mt-1 flex items-center gap-1 text-xs transition-opacity hover:text-ink ${speaking ? "text-accent-hover opacity-100" : "text-muted opacity-0 group-hover:opacity-100"}`}
+          >
+            {speaking ? <Square size={12} fill="currentColor" /> : <Volume2 size={13} />}
+            {speaking ? "Parar" : "Ler"}
           </button>
         )}
       </div>
