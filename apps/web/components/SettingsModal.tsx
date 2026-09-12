@@ -12,6 +12,7 @@ import {
   EyeOff,
   GripVertical,
   ChevronDown,
+  ChevronRight,
   Clapperboard,
   Crown,
   ChevronLeft,
@@ -168,11 +169,11 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Testar escuta", cat: "connections", view: "assistant-voice" },
   // a chave do OpenRouter mora em Provedores (junto com os demais provedores de LLM)
   { label: "Chave do OpenRouter", cat: "connections", view: "providers" },
-  { label: "Chave Tavily", cat: "connections", view: "apis" },
-  { label: "Chave Brave Search", cat: "connections", view: "apis" },
-  { label: "Chave Finnhub", cat: "connections", view: "apis" },
-  { label: "Chave Alpha Vantage", cat: "connections", view: "apis" },
-  { label: "Chave do provedor de voz", cat: "connections", view: "apis" },
+  { label: "Chave Tavily", cat: "connections", view: "apis/search" },
+  { label: "Chave Brave Search", cat: "connections", view: "apis/search" },
+  { label: "Chave Finnhub", cat: "connections", view: "apis/finance" },
+  { label: "Chave Alpha Vantage", cat: "connections", view: "apis/finance" },
+  { label: "Chave do provedor de voz", cat: "connections", view: "apis/voice" },
   { label: "Provedores", cat: "connections", view: "providers" },
   { label: "LiteLLM", cat: "connections", view: "providers" },
   { label: "Web", cat: "connections", view: "web" },
@@ -577,8 +578,13 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
               />
             )}
             {cat === "connections" && (
-              connView === "apis" ? (
-                <ApisPanel status={status} reloadSecrets={reloadSecrets} onBack={() => setConnView(null)} />
+              (connView === "apis" || connView?.startsWith("apis/")) ? (
+                <ApisPanel
+                  status={status}
+                  reloadSecrets={reloadSecrets}
+                  initialSection={connView.includes("/") ? connView.split("/")[1] as ApiSection : undefined}
+                  onBack={() => setConnView(null)}
+                />
               ) : connView === "ollama" ? (
                 <OllamaPanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
               ) : connView === "providers" ? (
@@ -2161,20 +2167,141 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
  * lá cada provedor tem chave, base URL e modelos no MESMO lugar. Este arquivo cuida
  * das chaves de serviços (voz, pesquisa, finanças). */
 
-function ApisPanel({ status, reloadSecrets, onBack }: { status: SecretStatus | null; reloadSecrets: () => void; onBack: () => void }) {
+type ApiSection = "voice" | "search" | "finance";
+
+const API_SECTION_COPY: Record<ApiSection, { title: string; description: string }> = {
+  voice: {
+    title: "Voz",
+    description: "Credencial usada para transcrição e síntese de voz.",
+  },
+  search: {
+    title: "Pesquisa na web",
+    description: "Mecanismos que alimentam a Pesquisa na Web e o Deep Search.",
+  },
+  finance: {
+    title: "Finanças",
+    description: "Fontes de mercado usadas pelas ferramentas de cotações.",
+  },
+};
+
+function ApiCategoryCard({
+  icon,
+  title,
+  description,
+  configured,
+  total,
+  onOpen,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  configured: number;
+  total: number;
+  onOpen: () => void;
+}) {
+  const ready = configured === total;
+  const statusText = configured === 0
+    ? "Nenhuma chave"
+    : total === 1
+      ? "Chave configurada"
+      : `${configured} de ${total} configuradas`;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="group relative flex min-h-44 flex-col rounded-2xl border border-border bg-surface p-4 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-accent/40 hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+    >
+      <span className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
+        {icon}
+      </span>
+      <ChevronRight size={17} className="absolute right-4 top-4 text-muted transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-ink" />
+      <span className="text-sm font-semibold text-ink">{title}</span>
+      <span className="mt-1 text-xs leading-4 text-muted">{description}</span>
+      <span className={`mt-auto flex items-center gap-1.5 pt-4 text-[11px] ${ready ? "text-green-400" : configured > 0 ? "text-accent-hover" : "text-muted"}`}>
+        <span className={`h-1.5 w-1.5 rounded-full ${ready ? "bg-green-400" : configured > 0 ? "bg-accent" : "bg-muted"}`} />
+        {statusText}
+      </span>
+    </button>
+  );
+}
+
+function ApisPanel({
+  status,
+  reloadSecrets,
+  onBack,
+  initialSection,
+}: {
+  status: SecretStatus | null;
+  reloadSecrets: () => void;
+  onBack: () => void;
+  initialSection?: ApiSection;
+}) {
+  const [section, setSection] = useState<ApiSection | null>(
+    initialSection && initialSection in API_SECTION_COPY ? initialSection : null,
+  );
+
+  if (section) {
+    const copy = API_SECTION_COPY[section];
+    return (
+      <DetailView title={copy.title} onBack={() => setSection(null)}>
+        <p className="mb-3 text-xs leading-5 text-muted">{copy.description}</p>
+        <div className="rounded-xl border border-border bg-surface px-4 py-2">
+          {section === "voice" && (
+            <SecretField label="Chave do provedor de voz" name="voice" configured={status?.voice ?? false} hint="TTS/STT — endpoint compatível com OpenAI (VOICE_BASE_URL). Use OpenAI ou um servidor local." onSaved={reloadSecrets} />
+          )}
+          {section === "search" && (
+            <>
+              <SecretField label="Chave Tavily" name="tavily" configured={status?.tavily ?? false} hint="tavily.com — ferramenta Pesquisa na Web / Deep Search." onSaved={reloadSecrets} />
+              <div className="border-t border-border" />
+              <SecretField label="Chave Brave Search" name="brave" configured={status?.brave ?? false} hint="brave.com/search/api" onSaved={reloadSecrets} />
+            </>
+          )}
+          {section === "finance" && (
+            <>
+              <SecretField label="Chave Finnhub" name="finnhub" configured={status?.finnhub ?? false} hint="finnhub.io — ferramenta Cotação (Ações)." onSaved={reloadSecrets} />
+              <div className="border-t border-border" />
+              <SecretField label="Chave Alpha Vantage" name="alphavantage" configured={status?.alphavantage ?? false} hint="alphavantage.co" onSaved={reloadSecrets} />
+            </>
+          )}
+        </div>
+      </DetailView>
+    );
+  }
+
   return (
     <DetailView title="APIs" onBack={onBack}>
       {/* As chaves de LLM (OpenRouter, LiteLLM, personalizados) NÃO ficam mais aqui:
           foram todas para Conexões → Provedores, junto com a URL e os modelos de cada
           um. Aqui ficam só as chaves de SERVIÇOS (voz, pesquisa, finanças). */}
-      <Heading>Voz</Heading>
-      <SecretField label="Chave do provedor de voz" name="voice" configured={status?.voice ?? false} hint="TTS/STT — endpoint compatível com OpenAI (VOICE_BASE_URL). Use OpenAI ou um servidor local." onSaved={reloadSecrets} />
-      <Heading>Pesquisa na web</Heading>
-      <SecretField label="Chave Tavily" name="tavily" configured={status?.tavily ?? false} hint="tavily.com — ferramenta Pesquisa na Web / Deep Search." onSaved={reloadSecrets} />
-      <SecretField label="Chave Brave Search" name="brave" configured={status?.brave ?? false} hint="brave.com/search/api" onSaved={reloadSecrets} />
-      <Heading>Finanças</Heading>
-      <SecretField label="Chave Finnhub" name="finnhub" configured={status?.finnhub ?? false} hint="finnhub.io — ferramenta Cotação (Ações)." onSaved={reloadSecrets} />
-      <SecretField label="Chave Alpha Vantage" name="alphavantage" configured={status?.alphavantage ?? false} hint="alphavantage.co" onSaved={reloadSecrets} />
+      <p className="mb-4 text-xs leading-5 text-muted">
+        Escolha uma categoria para configurar as credenciais dos serviços.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <ApiCategoryCard
+          icon={<AudioLines size={20} />}
+          title="Voz"
+          description="Transcrição e síntese"
+          configured={status?.voice ? 1 : 0}
+          total={1}
+          onOpen={() => setSection("voice")}
+        />
+        <ApiCategoryCard
+          icon={<Search size={20} />}
+          title="Pesquisa"
+          description="Tavily e Brave Search"
+          configured={(status?.tavily ? 1 : 0) + (status?.brave ? 1 : 0)}
+          total={2}
+          onOpen={() => setSection("search")}
+        />
+        <ApiCategoryCard
+          icon={<Activity size={20} />}
+          title="Finanças"
+          description="Finnhub e Alpha Vantage"
+          configured={(status?.finnhub ? 1 : 0) + (status?.alphavantage ? 1 : 0)}
+          total={2}
+          onOpen={() => setSection("finance")}
+        />
+      </div>
     </DetailView>
   );
 }
