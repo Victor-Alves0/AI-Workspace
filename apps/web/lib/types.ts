@@ -383,6 +383,16 @@ export interface ChartSpec {
   series: { name: string; data: number[] }[];
 }
 
+export type ActivityStep =
+  | { kind: "reasoning" | "commentary"; text: string }
+  | { kind: "tool"; event: ToolEvent };
+
+export interface MessageReasoning {
+  text: string;
+  seconds?: number;
+  steps?: ActivityStep[];
+}
+
 export interface Message {
   id: string;
   role: "system" | "user" | "assistant" | "tool";
@@ -392,7 +402,7 @@ export interface Message {
   tokens?: number | null;
   cost?: number | null;
   usage?: MessageUsage | null;
-  reasoning?: { text: string; seconds?: number } | null;
+  reasoning?: MessageReasoning | null;
   tool_events?: ToolEvent[] | null;
   /** memórias (mem0) injetadas nesta resposta */
   memories_used?: { id: string; text: string; scope?: string }[] | null;
@@ -745,7 +755,7 @@ export type ChatEvent =
   | { type: "tool_call"; name: string; arguments: Record<string, unknown> }
   | { type: "tool_result"; name: string; result: unknown }
   | { type: "usage"; usage: Record<string, unknown> }
-  | { type: "done"; content: string; usage?: MessageUsage | null; reasoning?: { text: string; seconds?: number } | null; tool_events?: ToolEvent[] | null }
+  | { type: "done"; content: string; usage?: MessageUsage | null; reasoning?: MessageReasoning | null; tool_events?: ToolEvent[] | null }
   | { type: "reasoning"; text: string }
   // provider recusou o nível de raciocínio pedido; o backend rebaixou (o seletor reflete)
   | { type: "reasoning_effort"; effort: string }

@@ -19,7 +19,7 @@ import CodespaceFileBrowser, { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME, extLa
 import type { CodespaceDragPayload, CodespaceSnippetPayload } from "@/components/CodespaceFileBrowser";
 import Roundtable, { nextColor, RT_COLORS } from "@/components/Roundtable";
 import Markdown from "@/components/Markdown";
-import { ReasoningBlock, ToolEventsPanel, fmtTime } from "@/components/MessageItem";
+import { ReasoningBlock, fmtTime } from "@/components/MessageItem";
 import { setFormatPrefs } from "@/lib/format";
 import AskOptions from "@/components/AskOptions";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -199,7 +199,7 @@ export default function ChatPage() {
     onReasoningEffort: (e: string) => setReasoningEffort(e as ReasoningEffort),
   }));
   const {
-    streaming, setStreaming, streamingReasoning, setStreamingReasoning,
+    streaming, setStreaming, streamingReasoning, setStreamingReasoning, streamingSteps,
     toolEvents, setToolEvents, generatingImage, setGeneratingImage,
     consultingKnowledge, setConsultingKnowledge, transcribingAudio, setTranscribingAudio,
     subagents, setSubagents, guardNote, setGuardNote, liveArtifact, setLiveArtifact,
@@ -1373,8 +1373,8 @@ export default function ChatPage() {
         } catch (e) {
           if (!(e instanceof DOMException && e.name === "AbortError")) throw e;
         }
-        if (state.acc && isActiveChat(ownerId)) {
-          setMessages((m) => [...m, { id: `a-${Date.now()}`, role: "assistant", content: state.acc, reasoning: state.reason ? { text: state.reason } : null, tool_events: state.tools.length ? state.tools : null, created_at: new Date().toISOString() }]);
+        if ((state.acc || state.steps.length) && isActiveChat(ownerId)) {
+          setMessages((m) => [...m, { id: `a-${Date.now()}`, role: "assistant", content: state.acc, reasoning: state.reason || state.steps.length ? { text: state.reason, steps: state.steps } : null, tool_events: state.tools.length ? state.tools : null, created_at: new Date().toISOString() }]);
         }
       } else {
         let chat = active;
@@ -2378,8 +2378,8 @@ export default function ChatPage() {
                       content={streaming}
                       streaming={!!streaming}
                       name={modelLabel}
-                      reasoning={streamingReasoning ? { text: streamingReasoning } : null}
-                      reasoningLive={!streaming}
+                      reasoning={streamingReasoning || streamingSteps.length ? { text: streamingReasoning, steps: streamingSteps } : null}
+                      reasoningLive={sending}
                       toolEvents={toolEvents.length ? toolEvents : undefined}
                       toolsLive={sending}
                       status={statusFor({ sending, phase: streamPhase, streaming, streamingReasoning, generatingImage, consultingKnowledge, transcribingAudio, toolEvents })}
@@ -2860,7 +2860,7 @@ function MessageBubble({
   name?: string;
   nameColor?: string | null;
   bare?: boolean;
-  reasoning?: { text: string; seconds?: number } | null;
+  reasoning?: Message["reasoning"];
   reasoningLive?: boolean;
   toolEvents?: ToolEvent[];
   /** geração em andamento: mostra o painel de tools já aberto + spinner na tool ativa */
@@ -2906,13 +2906,12 @@ function MessageBubble({
             <span>{status}</span>
           </p>
         )}
-        {reasoning?.text && (
-          <ReasoningBlock text={reasoning.text} seconds={reasoning.seconds} live={reasoningLive} />
+        {(reasoning?.text || reasoning?.steps?.length || usedTools) && (
+          <ReasoningBlock text={reasoning?.text ?? ""} seconds={reasoning?.seconds} steps={reasoning?.steps} tools={toolEvents} live={reasoningLive || toolsLive} />
         )}
         {(content || !reasoning) && (
           <Markdown content={content} fast={streaming} className={streaming ? "stream-caret" : ""} />
         )}
-        {usedTools && <ToolEventsPanel events={toolEvents!} live={toolsLive} />}
         {footer}
         {onSpeak && (
           <button

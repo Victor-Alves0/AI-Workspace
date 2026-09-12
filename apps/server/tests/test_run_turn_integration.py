@@ -112,7 +112,8 @@ async def test_simple_turn_no_tools(monkeypatch):
 async def test_tool_loop_dispatches_and_answers(monkeypatch):
     """iteração 1: modelo chama a tool; iteração 2: responde com base no resultado."""
     scripts = [
-        [_chunk(tool=("web.search.query", '{"query":"dolar"}'), finish="tool_calls")],
+        [_chunk(content="Vou pesquisar a cotação."),
+         _chunk(tool=("web.search.query", '{"query":"dolar"}'), finish="tool_calls")],
         [_chunk(content="O dólar está R$5", finish="stop",
                 usage={"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14})],
     ]
@@ -128,6 +129,9 @@ async def test_tool_loop_dispatches_and_answers(monkeypatch):
     assert result["result"]["results"][0]["title"] == "USD"
     done = [e for e in events if e["type"] == "done"][0]
     assert done["content"] == "O dólar está R$5"
+    assert done["reasoning"]["steps"][0] == {
+        "kind": "commentary", "text": "Vou pesquisar a cotação.",
+    }
     # tool_events persistidos (call + result)
     kinds = [(t["kind"], t["name"]) for t in done["tool_events"]]
     assert ("call", "web.search.query") in kinds

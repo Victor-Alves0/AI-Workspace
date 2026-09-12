@@ -22,6 +22,7 @@ import time
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 from .. import bg, tracing
+from .activity import ActivityTrace
 
 logger = logging.getLogger(__name__)
 
@@ -193,8 +194,10 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
             "tools_streamed": [],
             "error": None,
         }
+        activity = ActivityTrace()
         try:
             async for ev in source:
+                activity.add(ev)
                 t = ev.get("type")
                 elapsed_ms = round((time.monotonic() - started) * 1000, 3)
                 if t == "token" and first_token_ms is None:
@@ -240,6 +243,9 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
                     )
                 elif t == "error":
                     collected["error"] = ev.get("message")
+                if t in {"tool_call", "guard_reset"}:
+                    collected["streamed"] = ""
+                collected["reasoning"] = activity.reasoning(collected["reasoning"])
                 await gen._append(ev)
         except asyncio.CancelledError:
             # "Parar" do usuário ou shutdown: salva o parcial e re-propaga. Se foi

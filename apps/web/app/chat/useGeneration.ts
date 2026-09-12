@@ -1,9 +1,9 @@
 "use client";
 
-import { startTransition, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { startTransition, useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { api } from "@/lib/api";
 import { streamResume } from "@/lib/sse";
-import type { Chat, ToolEvent } from "@/lib/types";
+import type { ActivityStep, Chat, ToolEvent } from "@/lib/types";
 import { splitStreamArtifacts, type StreamArtifact } from "@/lib/artifacts";
 
 export interface GuardNote {
@@ -27,6 +27,7 @@ export interface StreamState {
   acc: string;
   reason: string;
   tools: ToolEvent[];
+  steps: ActivityStep[];
 }
 
 /** Dependências reativas que o subsistema de geração precisa do componente. */
@@ -65,7 +66,12 @@ export interface GenerationDeps {
  */
 export function useGeneration(getDeps: () => GenerationDeps) {
   const [streaming, setStreaming] = useState("");
-  const [streamingReasoning, setStreamingReasoning] = useState("");
+  const [streamingReasoning, setReasoningText] = useState("");
+  const [streamingSteps, setStreamingSteps] = useState<ActivityStep[]>([]);
+  const setStreamingReasoning = useCallback((text: string) => {
+    setReasoningText(text);
+    if (!text) setStreamingSteps([]);
+  }, []);
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
   const [generatingImage, setGeneratingImage] = useState(false);
   const [consultingKnowledge, setConsultingKnowledge] = useState(false);
@@ -88,7 +94,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
 
   function makeStreamHandler(getOwnerId?: () => string | null) {
     const deps = getDeps();
-    const state: StreamState = { acc: "", reason: "", tools: [] };
+    const state: StreamState = { acc: "", reason: "", tools: [], steps: [] };
     // dono deste stream ainda é o chat ativo? (checado ao vivo a cada evento).
     // Enquanto for, pinta o estado global; se o usuário trocou de chat, o handler
     // segue ACUMULANDO em `state` (p/ notify/persistência) mas NÃO toca a UI —
@@ -115,10 +121,10 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       const selection = window.getSelection();
       return !!selection && !selection.isCollapsed && selection.rangeCount > 0;
     };
-    // O backend descarta o texto provisório emitido antes de uma tool e começa uma
-    // nova resposta na iteração seguinte. Mantemos o provisório visível enquanto a
-    // tool roda, mas o substituímos assim que chega o primeiro token pós-tool.
-    let resetTextOnNextToken = false;
+    const archiveCommentary = () => {
+      if (state.acc.trim()) state.steps.push({ kind: "commentary", text: state.acc });
+      state.acc = "";
+    };
     // Auto-abre o painel UMA vez por artefato (identifier). Sem isto, cada flush
     // reabria o painel — se o usuário fechasse durante a geração, o próximo flush
     // (~70ms) reabria. Guardamos o id já aberto; só reabrimos p/ um artefato NOVO.
@@ -152,7 +158,8 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         } else {
           setStreaming(state.acc);
         }
-        setStreamingReasoning(state.reason);
+        setReasoningText(state.reason);
+        setStreamingSteps([...state.steps]);
       });
     };
     const maybeFlush = () => {
@@ -183,17 +190,17 @@ export function useGeneration(getDeps: () => GenerationDeps) {
     }
     const handler = (ev: any) => {
       if (ev.type === "token") {
-        if (resetTextOnNextToken) {
-          state.acc = "";
-          resetTextOnNextToken = false;
-        }
         if (state.acc === "" && paint()) setGeneratingImage(false); // 1º token = respondendo em texto
         if (paint()) setStreamPhase("streaming");
         state.acc += ev.text;
         maybeFlush();
       } else if (ev.type === "reasoning") {
+        if (state.acc) archiveCommentary();
         if (paint()) setStreamPhase("thinking");
         state.reason += ev.text;
+        const last = state.steps[state.steps.length - 1];
+        if (last?.kind === "reasoning") state.steps[state.steps.length - 1] = { ...last, text: last.text + ev.text };
+        else state.steps.push({ kind: "reasoning", text: ev.text });
         maybeFlush();
       } else if (ev.type === "reasoning_effort") {
         // provider recusou o nível pedido; o backend rebaixou → o seletor reflete
@@ -201,18 +208,20 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       } else if (ev.type === "tool_call") {
         // pinta imediatamente o último trecho de texto/raciocínio antes de trocar
         // para a fase de ferramenta (que pode levar vários segundos).
-        flush();
-        resetTextOnNextToken = true;
+        archiveCommentary();
         const t: ToolEvent = { kind: "call", name: ev.name, data: ev.arguments };
         state.tools.push(t);
+        state.steps.push({ kind: "tool", event: t });
+        flush();
         if (paint()) {
           setStreamPhase("tool");
           setToolEvents((x) => [...x, t]);
         }
       } else if (ev.type === "tool_result") {
-        flush();
         const t: ToolEvent = { kind: "result", name: ev.name, data: ev.result };
         state.tools.push(t);
+        state.steps.push({ kind: "tool", event: t });
+        flush();
         if (paint()) {
           // A ferramenta terminou, mas o próximo passo ainda é uma nova chamada ao
           // modelo com seu resultado no contexto.
@@ -239,9 +248,9 @@ export function useGeneration(getDeps: () => GenerationDeps) {
           setGuardNote({ name: ev.name, action: ev.action, fallback_model: ev.fallback_model });
         }
       } else if (ev.type === "guard_reset") {
-        // descarta a tentativa anterior — a resposta boa vem na próxima
+        archiveCommentary();
+        state.steps.push({ kind: "commentary", text: "Revisando a resposta após a verificação de saída." });
         state.acc = ""; state.reason = ""; state.tools = [];
-        resetTextOnNextToken = false;
         if (paint()) {
           setStreamPhase("preparing");
           setToolEvents([]);
@@ -275,6 +284,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         // fechar. Aplicamos o snapshot final assim que ele chega.
         if (typeof ev.content === "string") state.acc = ev.content;
         if (typeof ev.reasoning?.text === "string") state.reason = ev.reasoning.text;
+        if (Array.isArray(ev.reasoning?.steps)) state.steps = ev.reasoning.steps;
         // o `done` traz os tool_events DEFINITIVOS: os guardas (que não são streamados
         // como tool_call) e o custo em tokens de cada evento — só conhecido no fim do
         // turno. Substitui os montados durante o stream p/ o badge aparecer na hora,
@@ -367,6 +377,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
   return {
     streaming, setStreaming,
     streamingReasoning, setStreamingReasoning,
+    streamingSteps,
     toolEvents, setToolEvents,
     generatingImage, setGeneratingImage,
     consultingKnowledge, setConsultingKnowledge,

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Loader2, Mail, MessageSquarePlus, Pencil, Play, RotateCcw, Send, ShieldAlert, Square, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench } from "lucide-react";
-import type { BrainNoteEvent, ChartSpec, ChatArtifact, DeepResearch, Message, SkillProposal, StockQuote, ToolEvent } from "@/lib/types";
+import type { ActivityStep, BrainNoteEvent, ChartSpec, ChatArtifact, DeepResearch, Message, SkillProposal, StockQuote, ToolEvent } from "@/lib/types";
 import { api, ApiError, API_URL } from "@/lib/api";
 import { fmtHM, fmtDayShort } from "@/lib/format";
 import { copyText } from "@/lib/clipboard";
@@ -1019,15 +1019,23 @@ export function ReasoningBlock({
   text,
   seconds,
   live = false,
+  steps,
+  tools = [],
+  openRequested = false,
 }: {
   text: string;
   seconds?: number;
   live?: boolean;
+  steps?: ActivityStep[];
+  tools?: ToolEvent[];
+  openRequested?: boolean;
 }) {
-  // Colapsado por padrão MESMO ao vivo (estilo ChatGPT/Claude): o raciocínio bruto do
-  // modelo (chain-of-thought sem formatação) vira um "muro" que embola a tela durante a
-  // geração. Mostramos só "Pensando…" (pulsando); quem quiser ver os detalhes, expande.
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(live);
+  useEffect(() => { if (openRequested) setOpen(true); }, [openRequested]);
+  const timeline: ActivityStep[] = steps?.length ? steps : [
+    ...(text ? [{ kind: "reasoning" as const, text }] : []),
+    ...tools.map((event) => ({ kind: "tool" as const, event })),
+  ];
   const label = live
     ? "Pensando…"
     : seconds && seconds > 0
@@ -1037,15 +1045,30 @@ export function ReasoningBlock({
     <div className="mb-2">
       <button
         onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
         className={`flex items-center gap-1 text-sm transition-colors hover:text-ink-soft ${live ? "animate-pulse text-muted" : "text-muted"}`}
       >
         {label}
         <ChevronDown size={14} className={`transition-transform duration-150 ${open ? "" : "-rotate-90"}`} />
       </button>
       {open && (
-        <div className="mt-2 max-h-[28rem] overflow-y-auto whitespace-pre-wrap break-words border-l-2 border-border pl-3 text-sm leading-6 text-muted">
-          {text}
-        </div>
+        <ol className="ml-1.5 mt-3 space-y-4 border-l border-border pb-2 pl-5 text-sm leading-6 text-muted" aria-label="Etapas da resposta">
+          {timeline.map((step, index) => (
+            <li key={index} className="relative min-w-0 [overflow-wrap:anywhere]">
+              <span aria-hidden className={`absolute -left-[25px] top-2 h-2 w-2 rounded-full ${step.kind === "tool" ? "bg-emerald-400" : "bg-muted"}`} />
+              {step.kind === "tool" ? (
+                <ToolEventRow event={step.event} running={live && index === timeline.length - 1 && step.event.kind === "call"} />
+              ) : step.kind === "reasoning" ? (
+                <details className="group/reason">
+                  <summary className="cursor-pointer text-xs text-muted">Raciocínio</summary>
+                  <div className="mt-1 whitespace-pre-wrap">{step.text}</div>
+                </details>
+              ) : (
+                <Markdown content={step.text} fast={live} />
+              )}
+            </li>
+          ))}
+        </ol>
       )}
     </div>
   );
@@ -1481,14 +1504,11 @@ export default function MessageItem({
             </span>
           </p>
         )}
-        {message.reasoning?.text && (
-          <ReasoningBlock text={message.reasoning.text} seconds={message.reasoning.seconds} />
+        {(message.reasoning?.text || message.reasoning?.steps?.length || (usedTools && toolsEnabled)) && (
+          <ReasoningBlock text={message.reasoning?.text ?? ""} seconds={message.reasoning?.seconds} steps={message.reasoning?.steps} tools={toolsEnabled ? toolEvents : []} openRequested={showTools} />
         )}
         {editing ? editor : <AssistantBody content={displayContent} artifacts={artifacts} chatArtifacts={chatArtifacts} onOpenArtifact={onOpenArtifact} clampContent={clampContent} />}
         {!editing && sources.length > 0 && <SourcesBar sources={sources} />}
-        {!editing && usedTools && toolsEnabled && (
-          <ToolEventsPanel events={toolEvents} open={showTools} onOpenChange={setShowTools} />
-        )}
 
         {/* barra de ações — abaixo de toda mensagem da IA */}
         {!editing && (

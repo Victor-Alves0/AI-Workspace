@@ -45,6 +45,7 @@ from ..models import GeneratedImage, Message
 from ..providers import image_gen, openrouter
 from ..tools import sift_service, toolctx
 from . import curator
+from .activity import with_activity
 
 logger = logging.getLogger(__name__)
 
@@ -2659,6 +2660,7 @@ def _health(capability: str, event: str, severity: str, detail: dict, chat_id: s
         pass
 
 
+@with_activity
 async def run_turn(
     *,
     api_key: str,
@@ -3531,6 +3533,7 @@ def _merge_done_usage(acc: dict | None, u: dict | None) -> dict | None:
     return acc
 
 
+@with_activity
 async def run_turn_guarded(
     *, guards: list[dict] | None = None, **turn_kwargs: Any
 ) -> AsyncGenerator[dict[str, Any], None]:
