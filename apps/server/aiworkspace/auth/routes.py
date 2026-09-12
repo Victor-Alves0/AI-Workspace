@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import jwt
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +30,47 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # Lock transacional global no banco. O valor é somente um namespace estável deste
 # fluxo; advisory locks não precisam corresponder a uma linha/tabela.
 _REGISTRATION_LOCK_ID = 0x41495752  # "AIWR"
+
+
+def _chatgpt_return_url(origin: str, connected: bool, reason: str = "") -> str:
+    """Destino do callback. `origin` já foi reduzida a scheme+authority no begin."""
+    from urllib.parse import urlencode
+
+    safe_origin = origin.rstrip("/") if origin else get_settings().web_origin.rstrip("/")
+    query = {"chatgpt": "connected" if connected else "error"}
+    if reason and not connected:
+        query["reason"] = reason[:240]
+    return f"{safe_origin}/chat?{urlencode(query)}"
+
+
+@router.get("/callback")
+async def chatgpt_oauth_callback(
+    code: str = Query(default=""),
+    state: str = Query(default=""),
+    error: str = Query(default=""),
+    error_description: str = Query(default=""),
+    db: AsyncSession = Depends(get_db),
+):
+    """Callback fixo do cliente público do Codex (`localhost:1455`).
+
+    Não usa cookie: o state opaco identifica o fluxo e a origem autenticados no
+    começo do login. Depois da troca, devolve o navegador à UI original.
+    """
+    from ..integrations import chatgpt_service
+    from ..tools import sift_service
+
+    if error:
+        # Mesmo em cancelamento, tenta recuperar a origem pelo fluxo pendente.
+        out, _user_id, origin = await chatgpt_service.finish_auth_callback(db, "", state)
+        reason = error_description or error or out.get("error") or "autorização cancelada"
+        return RedirectResponse(_chatgpt_return_url(origin, False, reason))
+
+    out, user_id, origin = await chatgpt_service.finish_auth_callback(db, code, state)
+    if out.get("error"):
+        return RedirectResponse(_chatgpt_return_url(origin, False, out["error"]))
+    if user_id:
+        sift_service.invalidate(user_id)
+    return RedirectResponse(_chatgpt_return_url(origin, True))
 
 
 async def _lock_registration(db: AsyncSession) -> None:

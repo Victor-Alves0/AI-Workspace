@@ -106,6 +106,10 @@ services:
       # host bind + porta configuráveis (o painel do admin diz quais valores pôr
       # no .env). Ex.: SERVER_BIND=127.0.0.1 SERVER_PORT=8000
       - "${SERVER_BIND:-0.0.0.0}:${SERVER_PORT:-8000}:8000"
+      # Callback fixo do login ChatGPT/Codex. A OpenAI retorna para
+      # localhost:1455; esta publicação permite concluir o OAuth sem copiar URL
+      # quando o navegador roda na mesma máquina do AI Workspace.
+      - "${CHATGPT_OAUTH_BIND:-127.0.0.1}:${CHATGPT_OAUTH_PORT:-1455}:8000"
       # Codespace: previews "own-origin" — a IA sobe um app numa porta deste range,
       # publicada no host, pra apps completos (Metabase etc.) rodarem na RAIZ da própria
       # origem (login/redirect/SPA/websocket funcionam). DEVE bater com code_preview_port_*.

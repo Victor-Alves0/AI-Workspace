@@ -13,10 +13,14 @@ interface ChatgptStatus {
   models?: string[];
 }
 
-/** Conexões → Assinaturas: usar planos de IA pelo LOGIN da conta (sem chave de
- *  API). ChatGPT Plus/Pro → modelos codex/* nos seletores. O card do Claude é
- *  informativo: a Anthropic proibiu OAuth de assinatura em apps de terceiros
- *  (fev/2026) e a enforcement baniu contas — não implementamos de propósito. */
+interface DeviceAuthStart {
+  url: string;
+  user_code: string;
+  interval: number;
+}
+
+/** Conexões → Assinaturas: usar o plano ChatGPT pelo login da conta (sem chave
+ *  de API). ChatGPT Plus/Pro → modelos codex/* nos seletores. */
 export default function SubscriptionsPanel({ onBack }: { onBack: () => void }) {
   const [st, setSt] = useState<ChatgptStatus | null>(null);
 
@@ -50,25 +54,6 @@ export default function SubscriptionsPanel({ onBack }: { onBack: () => void }) {
       ) : (
         <div className="mt-4 space-y-4">
           <ChatgptBlock st={st} reload={load} />
-
-          {/* Claude — honesto: proibido, não "em breve" */}
-          <div className="space-y-1.5 rounded-xl border border-border bg-surface p-3 opacity-80">
-            <p className="text-xs font-semibold text-ink">Claude (Pro/Max)</p>
-            <p className="text-xs leading-4 text-muted">
-              Indisponível: a Anthropic proíbe usar o login da assinatura fora dos apps oficiais
-              (termos de fev/2026) e a fiscalização suspendeu contas. Para usar Claude aqui,
-              use a API (OpenRouter) — cobrada por uso.
-            </p>
-          </div>
-
-          {/* Gemini — tecnicamente possível, não implementado */}
-          <div className="space-y-1.5 rounded-xl border border-border bg-surface p-3 opacity-80">
-            <p className="text-xs font-semibold text-ink">Google Gemini</p>
-            <p className="text-xs leading-4 text-muted">
-              Em avaliação: o login do Gemini CLI exige callback local do OAuth do Google;
-              o encaixe no servidor ainda está sendo estudado.
-            </p>
-          </div>
         </div>
       )}
     </div>
@@ -77,19 +62,96 @@ export default function SubscriptionsPanel({ onBack }: { onBack: () => void }) {
 
 function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise<void> }) {
   const [authUrl, setAuthUrl] = useState<string | null>(null);
+  const [authKind, setAuthKind] = useState<"device" | "browser" | null>(null);
+  const [userCode, setUserCode] = useState("");
+  const [pollDelayMs, setPollDelayMs] = useState(5000);
   const [pasted, setPasted] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [modelsDraft, setModelsDraft] = useState<string | null>(null);
 
-  async function begin() {
+  // Device auth é consultado pelo servidor; no fallback de navegador, basta
+  // consultar o status porque o callback local é quem conclui o OAuth.
+  useEffect(() => {
+    if (!authUrl || !authKind || st.connected) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      let nextDelay = authKind === "device" ? pollDelayMs : 1800;
+      try {
+        if (authKind === "device") {
+          const out = await api.post<ChatgptStatus & { pending?: boolean; retry_after?: number }>(
+            "/integrations/subscriptions/chatgpt/device/poll",
+          );
+          if (out.connected) {
+            setAuthUrl(null);
+            setAuthKind(null);
+            setUserCode("");
+            await reload();
+            return;
+          }
+          nextDelay = Math.max(1000, (out.retry_after ?? 5) * 1000);
+        } else {
+          await reload();
+        }
+      } catch (e) {
+        if (authKind === "device") {
+          setErr(e instanceof ApiError ? e.message : "Falha ao consultar a autorização");
+          setAuthUrl(null);
+          setAuthKind(null);
+          setUserCode("");
+          return;
+        }
+      }
+      if (!cancelled) timer = setTimeout(poll, nextDelay);
+    };
+    timer = setTimeout(poll, authKind === "device" ? pollDelayMs : 1200);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [authUrl, authKind, pollDelayMs, st.connected, reload]);
+
+  useEffect(() => {
+    if (!st.connected) return;
+    setAuthUrl(null);
+    setAuthKind(null);
+    setUserCode("");
+    setPasted("");
+  }, [st.connected]);
+
+  async function beginDevice() {
+    setErr(null);
+    setBusy(true);
+    try {
+      const r = await api.post<DeviceAuthStart>("/integrations/subscriptions/chatgpt/device/begin");
+      setAuthUrl(r.url);
+      setAuthKind("device");
+      setUserCode(r.user_code);
+      setPollDelayMs(Math.max(1000, r.interval * 1000));
+      if (!(await openExternal(r.url))) {
+        setErr("Não consegui abrir o navegador daqui — use o botão “Abrir OpenAI”.");
+      }
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Falha ao iniciar o login");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function beginBrowser() {
     setErr(null);
     setBusy(true);
     try {
       const r = await api.post<{ url: string }>("/integrations/subscriptions/chatgpt/begin");
       setAuthUrl(r.url);
+      setAuthKind("browser");
+      setUserCode("");
+      if (!(await openExternal(r.url))) {
+        setErr("Não consegui abrir o navegador daqui — use “Copiar link”.");
+      }
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao iniciar o login");
+      setErr(e instanceof ApiError ? e.message : "Falha ao iniciar o login alternativo");
     } finally {
       setBusy(false);
     }
@@ -101,6 +163,7 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
     try {
       await api.post("/integrations/subscriptions/chatgpt/finish", { pasted });
       setAuthUrl(null);
+      setAuthKind(null);
       setPasted("");
       await reload();
     } catch (e) {
@@ -115,6 +178,8 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
     try {
       await api.del("/integrations/subscriptions/chatgpt");
       setAuthUrl(null);
+      setAuthKind(null);
+      setUserCode("");
       await reload();
     } catch (e) {
       setErr(e instanceof ApiError ? e.message : "Falha ao desconectar");
@@ -153,19 +218,59 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
             <span className="font-mono text-ink-soft"> codex/*</span> pela assinatura, sem chave de API.
             Fluxo não oficial: a OpenAI tolera hoje, mas pode mudar — uso por sua conta e risco.
           </p>
-          <button onClick={begin} disabled={busy}
+          <button onClick={beginDevice} disabled={busy}
             className="rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
             {busy ? "…" : "Conectar"}
+          </button>
+          <button onClick={beginBrowser} disabled={busy}
+            className="ml-2 rounded-full border border-border px-3 py-1.5 text-[11px] text-muted transition-colors hover:bg-hover hover:text-ink disabled:opacity-60">
+            Login alternativo
           </button>
         </>
       )}
 
-      {!st.connected && authUrl && (
+      {!st.connected && authUrl && authKind === "device" && (
+        <div className="space-y-2.5">
+          <p className="text-xs leading-4 text-muted">
+            Entre na OpenAI e informe este código de uso único. A conexão será
+            reconhecida automaticamente aqui, sem callback em localhost.
+          </p>
+          <div className="flex items-center gap-2">
+            <code className="rounded-lg border border-accent/40 bg-surface2 px-3 py-2 text-base font-semibold tracking-[0.18em] text-ink">
+              {userCode}
+            </code>
+            <button
+              onClick={async () => { setErr(await copyText(userCode) ? null : "Não consegui copiar o código."); }}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:bg-hover hover:text-ink">
+              <Copy size={13} /> Copiar código
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={async () => {
+                if (!(await openExternal(authUrl))) {
+                  setErr("Não consegui abrir o navegador daqui.");
+                }
+              }}
+              className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover">
+              <ExternalLink size={13} /> Abrir OpenAI
+            </button>
+            <button onClick={() => { setAuthUrl(null); setAuthKind(null); setUserCode(""); }}
+              className="rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:bg-hover hover:text-ink">
+              Cancelar
+            </button>
+          </div>
+          <p className="text-[11px] leading-4 text-muted">
+            O código expira em 15 minutos. Continue somente se você iniciou este login.
+          </p>
+        </div>
+      )}
+
+      {!st.connected && authUrl && authKind === "browser" && (
         <div className="space-y-2">
           <p className="text-xs leading-4 text-muted">
-            1. Abra o link e faça login. 2. Ao final o navegador tenta abrir
-            <span className="font-mono"> localhost:1455</span> e falha — é esperado.
-            3. Copie a URL inteira da barra de endereço e cole aqui.
+            Este modo usa o callback fixo do Codex em localhost. Se navegador e
+            servidor estiverem na mesma máquina, a conexão termina automaticamente.
           </p>
           {/* NÃO usar <a target="_blank">: no webview do app desktop isso não faz nada
               (sem handler de nova janela / plugin de shell) e o clique parece morto.
@@ -187,6 +292,10 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
               <Copy size={13} /> Copiar link
             </button>
           </div>
+          <p className="text-[11px] leading-4 text-muted">
+            Se o AI Workspace estiver em outra máquina e o retorno automático não abrir,
+            copie a URL inteira da barra de endereço e use o campo abaixo.
+          </p>
           <textarea rows={2} value={pasted} onChange={(e) => setPasted(e.target.value)}
             placeholder="http://localhost:1455/auth/callback?code=…&state=…"
             className="w-full resize-y rounded-lg border border-border bg-surface2 px-3 py-2 font-mono text-[11px] text-ink outline-none focus:border-accent" />
@@ -195,7 +304,7 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
               className="rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
               {busy ? "…" : "Concluir"}
             </button>
-            <button onClick={() => { setAuthUrl(null); setPasted(""); }}
+            <button onClick={() => { setAuthUrl(null); setAuthKind(null); setPasted(""); }}
               className="rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:bg-hover hover:text-ink">
               Cancelar
             </button>

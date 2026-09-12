@@ -29,7 +29,15 @@ segredo, callback livre) e **device flow** (sem segredo, sem callback).
 | Integração | Fluxo | Observação |
 |---|---|---|
 | **OpenRouter** | OAuth PKCE | Nem app registrado, nem secret, nem callback cadastrado. Vale para qualquer instalação. Ver `integrations/openrouter_oauth.py`. |
-| **Assinatura ChatGPT/Codex** | OAuth (client público) | Login pela conta, sem chave de API. |
+| **Assinatura ChatGPT/Codex** | Device code (principal) + OAuth PKCE (fallback) | Login pela conta, sem chave de API. O device flow funciona em qualquer origem/IP e o painel consulta o resultado automaticamente. |
+
+O painel usa o mesmo device flow do Codex CLI: abre
+`https://auth.openai.com/codex/device`, mostra um código de uso único e consulta a
+autorização no servidor. Não há callback para a origem da instalação, portanto
+`localhost`, IP de LAN, domínio e servidor remoto funcionam do mesmo modo. Se device
+auth estiver desabilitado na conta/workspace, o botão de login alternativo mantém o
+fluxo PKCE: o callback automático funciona na mesma máquina e a colagem da URL fica
+disponível para o caso remoto.
 
 ### Botão, dependendo de um `client_id` público no build
 

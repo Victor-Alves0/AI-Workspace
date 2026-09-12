@@ -14,8 +14,9 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -26,12 +27,47 @@ from . import crypto
 from .auth.deps import require_admin, require_approved
 from .config import get_settings
 from .db import get_db
-from .integrations import elevenlabs_service, github_service, google_service, notion_service, ollama_service, openrouter_oauth, providers_service, slack_service, spotify_service, tuya_service, vercel_service
+from .integrations import (
+    elevenlabs_service,
+    github_service,
+    google_service,
+    notion_service,
+    ollama_service,
+    openrouter_oauth,
+    providers_service,
+    slack_service,
+    spotify_service,
+    tuya_service,
+    vercel_service,
+)
 from .models import GithubAccount, GoogleAccount, NotionAccount, SlackAccount, User
 from .secrets_service import OPENROUTER_KEY, set_secret
 from .tools import sift_service
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
+
+
+def _safe_http_origin(value: str | None) -> str:
+    """Reduz uma URL/origin a `scheme://host[:port]` ou rejeita.
+
+    O valor normalmente vem do header Origin de um POST autenticado. Remover
+    path/query/fragment e recusar credenciais evita persistir um open redirect.
+    """
+    if not value:
+        return ""
+    try:
+        parsed = urlparse(value.strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return ""
+        if parsed.username is not None or parsed.password is not None:
+            return ""
+        port = parsed.port
+    except ValueError:
+        return ""
+    host = parsed.hostname
+    if ":" in host:  # IPv6 precisa dos colchetes na autoridade reconstruída
+        host = f"[{host}]"
+    return f"{parsed.scheme}://{host}{f':{port}' if port is not None else ''}"
 
 
 async def _accounts(db: AsyncSession, user_id: uuid.UUID) -> list[GoogleAccount]:
@@ -1187,10 +1223,8 @@ async def tuya_test(
 
 
 # --------------------------------------------------------------------------- #
-# Assinaturas — usar planos de IA (ChatGPT Plus/Pro) pelo LOGIN da conta, sem
-# chave de API. Só ChatGPT/Codex: a Anthropic PROIBIU OAuth de assinatura em
-# apps de terceiros (fev/2026, com contas banidas na enforcement) — o card do
-# Claude existe na UI apenas p/ explicar o porquê, sem botão de conectar.
+# Assinaturas — usar ChatGPT Plus/Pro pelo login da conta, sem chave de API.
+# Device code é o fluxo principal; o OAuth com callback local é o fallback.
 # --------------------------------------------------------------------------- #
 @router.get("/subscriptions/chatgpt")
 async def chatgpt_status(
@@ -1221,13 +1255,50 @@ async def chatgpt_models(
 
 @router.post("/subscriptions/chatgpt/begin")
 async def chatgpt_begin(
+    request: Request,
     user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
 ):
-    """Gera a URL de autorização (PKCE). O usuário loga, o navegador redireciona
-    p/ localhost:1455 (que não responde) e ele cola a URL da barra de volta."""
+    """Gera a URL PKCE e guarda a origem real da UI para o retorno automático."""
     from .integrations import chatgpt_service
-    url = await chatgpt_service.begin_auth(db, str(user.id))
+
+    # `Origin` é a origem efetiva da UI que fez o POST (localhost, IP da LAN ou
+    # domínio). Guardamos somente scheme+authority: o callback nunca aceita uma
+    # URL de retorno livre, evitando transformar o endpoint em open redirect.
+    return_origin = _safe_http_origin(request.headers.get("origin"))
+    if not return_origin:
+        return_origin = _safe_http_origin(request.headers.get("referer"))
+    if not return_origin:
+        return_origin = _safe_http_origin(get_settings().web_origin)
+    url = await chatgpt_service.begin_auth(db, str(user.id), return_origin or "")
     return {"url": url}
+
+
+@router.post("/subscriptions/chatgpt/device/begin")
+async def chatgpt_device_begin(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Inicia o device flow oficial, que não depende de localhost/callback."""
+    from .integrations import chatgpt_service
+
+    out = await chatgpt_service.begin_device_auth(db, str(user.id))
+    if out.get("error"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, out["error"])
+    return out
+
+
+@router.post("/subscriptions/chatgpt/device/poll")
+async def chatgpt_device_poll(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Consulta uma vez o device flow; o frontend respeita o intervalo retornado."""
+    from .integrations import chatgpt_service
+
+    out = await chatgpt_service.poll_device_auth(db, str(user.id))
+    if out.get("error"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, out["error"])
+    if out.get("connected"):
+        sift_service.invalidate(str(user.id))
+    return out
 
 
 class ChatgptFinishIn(BaseModel):

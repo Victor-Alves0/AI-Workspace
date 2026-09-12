@@ -7,6 +7,7 @@ from typing import ClassVar
 
 import pytest
 
+from aiworkspace.integration_routes import _safe_http_origin
 from aiworkspace.integrations import chatgpt_service as cs
 from aiworkspace.providers import chatgpt_codex as cx
 
@@ -31,6 +32,137 @@ def test_pkce_pair_is_s256_shaped():
     verifier, challenge = cs._pkce_pair()
     digest = hashlib.sha256(verifier.encode()).digest()
     assert challenge == base64.urlsafe_b64encode(digest).decode().rstrip("=")
+
+
+def test_callback_state_identifica_usuario_sem_cookie_e_recusa_adulteracao():
+    state = cs._encode_state("user-123")
+    assert "user-123" not in state
+    assert cs._decode_state_user(state) == "user-123"
+    changed = state[:20] + ("A" if state[20] != "A" else "B") + state[21:]
+    assert cs._decode_state_user(changed) == ""
+
+
+def test_return_origin_preserva_host_real_e_remove_path():
+    assert _safe_http_origin("http://192.168.1.200:3000/chat?x=1") == (
+        "http://192.168.1.200:3000"
+    )
+    assert _safe_http_origin("https://ai.example.com/settings") == "https://ai.example.com"
+    assert _safe_http_origin("http://user:pass@example.com") == ""
+    assert _safe_http_origin("javascript:alert(1)") == ""
+
+
+@pytest.mark.asyncio
+async def test_callback_recupera_origem_do_fluxo_salvo(monkeypatch):
+    state = cs._encode_state("user-123")
+
+    async def fake_get(_db, key):
+        assert key == "chatgpt_auth:user-123"
+        return {"return_origin": "http://192.168.1.200:3000"}
+
+    async def fake_finish(_db, user_id, parsed):
+        assert user_id == "user-123"
+        assert parsed == {"code": "oauth-code", "state": state}
+        return {"connected": True}
+
+    monkeypatch.setattr(cs, "get_setting", fake_get)
+    monkeypatch.setattr(cs, "_finish_auth", fake_finish)
+    out, user_id, origin = await cs.finish_auth_callback(None, "oauth-code", state)
+    assert out == {"connected": True}
+    assert user_id == "user-123"
+    assert origin == "http://192.168.1.200:3000"
+
+
+@pytest.mark.asyncio
+async def test_device_begin_guarda_fluxo_e_devolve_codigo(monkeypatch):
+    saved = {}
+
+    class Response:
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def json():
+            return {
+                "device_auth_id": "device-1",
+                "user_code": "ABCD-1234",
+                "interval": "5",
+            }
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **kwargs):
+            assert url == cs.DEVICE_CODE_URL
+            assert kwargs["json"] == {"client_id": cs.CLIENT_ID}
+            return Response()
+
+    async def fake_set(_db, key, value):
+        saved[key] = value
+
+    monkeypatch.setattr(cs.httpx, "AsyncClient", lambda **_kwargs: Client())
+    monkeypatch.setattr(cs, "set_setting", fake_set)
+    out = await cs.begin_device_auth(None, "user-1")
+
+    assert out == {
+        "url": cs.DEVICE_VERIFY_URL,
+        "user_code": "ABCD-1234",
+        "interval": 5,
+    }
+    assert saved["chatgpt_auth:user-1"]["device_auth_id"] == "device-1"
+
+
+@pytest.mark.asyncio
+async def test_device_poll_troca_codigo_sem_callback_local(monkeypatch):
+    class Response:
+        status_code = 200
+        text = ""
+
+        @staticmethod
+        def json():
+            return {
+                "authorization_code": "oauth-code",
+                "code_challenge": "unused-here",
+                "code_verifier": "verifier-from-openai",
+            }
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def post(self, url, **kwargs):
+            assert url == cs.DEVICE_TOKEN_URL
+            assert kwargs["json"]["device_auth_id"] == "device-1"
+            return Response()
+
+    async def fake_get(_db, key):
+        assert key == "chatgpt_auth:user-1"
+        return {
+            "type": "device",
+            "device_auth_id": "device-1",
+            "user_code": "ABCD-1234",
+            "created": 9_999_999_999,
+        }
+
+    async def fake_exchange(_db, user_id, code, verifier, redirect_uri):
+        assert (user_id, code, verifier) == (
+            "user-1",
+            "oauth-code",
+            "verifier-from-openai",
+        )
+        assert redirect_uri == cs.DEVICE_REDIRECT_URI
+        return {"connected": True}
+
+    monkeypatch.setattr(cs.httpx, "AsyncClient", lambda **_kwargs: Client())
+    monkeypatch.setattr(cs, "get_setting", fake_get)
+    monkeypatch.setattr(cs, "_exchange_code", fake_exchange)
+    assert await cs.poll_device_auth(None, "user-1") == {"connected": True}
 
 
 # --------------------------------------------------------------------------- #

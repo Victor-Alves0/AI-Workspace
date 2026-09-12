@@ -704,7 +704,7 @@ export default function ChatPage() {
     // opcional — tem que aparecer mesmo com as notificações desligadas.
     const SERVICOS: Record<string, string> = {
       openrouter: "OpenRouter", google: "Google", github: "GitHub",
-      notion: "Notion", slack: "Slack",
+      notion: "Notion", slack: "Slack", chatgpt: "ChatGPT",
     };
     for (const [param, nome] of Object.entries(SERVICOS)) {
       const v = qs.get(param);
