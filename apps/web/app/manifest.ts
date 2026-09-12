@@ -10,7 +10,8 @@ export default function manifest(): MetadataRoute.Manifest {
     start_url: "/",
     display: "standalone",
     orientation: "portrait",
-    background_color: "#0f0f12",
+    // A tela de abertura/overscroll do PWA deve casar exatamente com o chat.
+    background_color: "#141417",
     theme_color: "#141417",
     icons: [
       { src: "/icon.png", sizes: "500x500", type: "image/png", purpose: "any" },

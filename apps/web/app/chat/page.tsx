@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, Code2, Copy, FlaskConical, GitBranch, Image as ImageIcon, Link2, Loader2, Menu, MessageSquareDashed, Mic, Pause, Play, RotateCcw, RotateCw, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
+import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, ChevronDown, ChevronUp, Code2, Copy, FlaskConical, GitBranch, Image as ImageIcon, Link2, Loader2, Menu, MessageSquareDashed, Mic, Pause, Play, RotateCcw, RotateCw, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamRoundtable } from "@/lib/sse";
@@ -2394,31 +2394,41 @@ export default function ChatPage() {
                     enfeite: não entra no layout e não pode desalinhar a geometria. */}
                 <div className="relative z-10 shrink-0">
                   <div className="pointer-events-none absolute -top-12 inset-x-0 h-12 bg-gradient-to-t from-bg to-transparent" />
-                  <div className="bg-bg px-4 pb-3">
-                    <div
-                      className={`relative rounded-2xl transition-shadow ${csDropOver ? "ring-2 ring-accent/50" : ""}`}
-                      onDragOver={(e) => { const t = e.dataTransfer.types;
-                    if (t.includes(CODESPACE_DND_MIME) || t.includes(CODESPACE_SNIPPET_MIME)) { e.preventDefault(); setCsDropOver(true); } }}
-                      onDragLeave={() => setCsDropOver(false)}
-                      onDrop={handleComposerFileDrop}
-                    >
-                      {!atBottom && (
-                        <button
-                          onClick={scrollToBottom}
-                          title="Ir para a última mensagem"
-                          aria-label="Ir para a última mensagem"
-                          className="animate-pop absolute -top-11 left-1/2 z-20 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface text-ink-soft shadow-menu transition-colors hover:bg-hover hover:text-ink"
-                        >
-                          <ArrowDown size={18} />
-                        </button>
-                      )}
-                      {showAsk && askSpec && (
-                        <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
-                      )}
+                  <div className="chat-composer-shell bg-bg px-4 pb-3">
+                    <div className="chat-composer-grid">
                       {speakingMessageId && (
-                        <SpeechController progress={speechProgress} onClose={stopMessageSpeech} />
+                        <SpeechController variant="primary" progress={speechProgress} onClose={stopMessageSpeech} />
                       )}
-                      <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
+                      <div className="chat-composer-center relative min-w-0">
+                        {speakingMessageId && (
+                          <SpeechController variant="mobile" progress={speechProgress} onClose={stopMessageSpeech} />
+                        )}
+                        <div
+                          className={`relative z-10 rounded-2xl transition-shadow ${csDropOver ? "ring-2 ring-accent/50" : ""}`}
+                          onDragOver={(e) => { const t = e.dataTransfer.types;
+                        if (t.includes(CODESPACE_DND_MIME) || t.includes(CODESPACE_SNIPPET_MIME)) { e.preventDefault(); setCsDropOver(true); } }}
+                          onDragLeave={() => setCsDropOver(false)}
+                          onDrop={handleComposerFileDrop}
+                        >
+                          {!atBottom && (
+                            <button
+                              onClick={scrollToBottom}
+                              title="Ir para a última mensagem"
+                              aria-label="Ir para a última mensagem"
+                              className="animate-pop absolute -top-11 left-1/2 z-20 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface text-ink-soft shadow-menu transition-colors hover:bg-hover hover:text-ink"
+                            >
+                              <ArrowDown size={18} />
+                            </button>
+                          )}
+                          {showAsk && askSpec && (
+                            <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
+                          )}
+                          <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
+                        </div>
+                      </div>
+                      {speakingMessageId && (
+                        <SpeechController variant="transport" progress={speechProgress} onClose={stopMessageSpeech} />
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2678,7 +2688,16 @@ function formatSpeechTime(seconds: number): string {
   return `${Math.floor(rounded / 60)}:${String(rounded % 60).padStart(2, "0")}`;
 }
 
-function SpeechController({ progress, onClose }: { progress: SpeechProgress; onClose: () => void }) {
+function SpeechController({
+  variant,
+  progress,
+  onClose,
+}: {
+  variant: "primary" | "transport" | "mobile";
+  progress: SpeechProgress;
+  onClose: () => void;
+}) {
+  const [mobileOpen, setMobileOpen] = useState(false);
   const loading = progress.phase === "loading";
   const paused = progress.phase === "paused";
   const rates = [1, 1.25, 1.5, 2];
@@ -2687,24 +2706,20 @@ function SpeechController({ progress, onClose }: { progress: SpeechProgress; onC
   const elapsed = formatSpeechTime(progress.currentTime);
   const duration = progress.duration > 0 ? formatSpeechTime(progress.duration) : null;
 
-  return (
-    <div
-      role="region"
-      aria-label="Controles da leitura em voz alta"
-      className="animate-pop absolute bottom-[calc(100%+0.75rem)] right-0 z-30 flex max-w-[calc(100vw-2rem)] items-center gap-1 rounded-2xl border border-border bg-surface/95 p-1.5 text-ink shadow-menu backdrop-blur"
+  const playButton = (
+    <button
+      type="button"
+      onClick={toggleSpeakingPaused}
+      disabled={loading}
+      title={paused ? "Continuar leitura" : "Pausar leitura"}
+      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent text-white transition-colors hover:bg-accent-hover disabled:cursor-wait disabled:opacity-70"
     >
-      <button
-        type="button"
-        onClick={toggleSpeakingPaused}
-        disabled={loading}
-        title={paused ? "Continuar leitura" : "Pausar leitura"}
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-white transition-colors hover:bg-accent-hover disabled:cursor-wait disabled:opacity-70"
-      >
-        {loading ? <Loader2 size={16} className="animate-spin" /> : paused ? <Play size={16} fill="currentColor" /> : <Pause size={16} fill="currentColor" />}
-      </button>
-      <span aria-live="polite" className="min-w-[4.4rem] px-1 text-center font-mono text-[11px] tabular-nums text-ink-soft">
-        {elapsed}{duration ? ` / ${duration}` : ""}
-      </span>
+      {loading ? <Loader2 size={17} className="animate-spin" /> : paused ? <Play size={17} fill="currentColor" /> : <Pause size={17} fill="currentColor" />}
+    </button>
+  );
+
+  const transport = (
+    <>
       <button
         type="button"
         onClick={() => setSpeakingRate(nextRate)}
@@ -2733,7 +2748,6 @@ function SpeechController({ progress, onClose }: { progress: SpeechProgress; onC
         <RotateCw size={19} />
         <span className="absolute text-[8px] font-bold">15</span>
       </button>
-      <span className="mx-0.5 h-6 w-px bg-border" />
       <button
         type="button"
         onClick={onClose}
@@ -2742,6 +2756,58 @@ function SpeechController({ progress, onClose }: { progress: SpeechProgress; onC
       >
         <X size={18} />
       </button>
+    </>
+  );
+
+  if (variant === "primary") {
+    return (
+      <div className="speech-desktop-primary min-w-0 items-center justify-end pr-3">
+        <div role="region" aria-label="Leitura em voz alta" className="animate-pop flex min-w-0 max-w-[17rem] items-center gap-2 rounded-2xl border border-border bg-surface p-2 shadow-prompt">
+          {playButton}
+          <span className="min-w-0 pr-1">
+            <span className="block truncate text-xs font-medium text-ink">Lendo resposta</span>
+            <span aria-live="polite" className="block font-mono text-[11px] tabular-nums text-muted">
+              {elapsed}{duration ? ` / ${duration}` : ""}
+            </span>
+          </span>
+        </div>
+      </div>
+    );
+  }
+  if (variant === "transport") {
+    return (
+      <div className="speech-desktop-transport min-w-0 items-center justify-start pl-3">
+        <div role="region" aria-label="Navegação da leitura em voz alta" className="animate-pop flex items-center gap-0.5 rounded-2xl border border-border bg-surface p-1.5 shadow-prompt">
+          {transport}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`speech-mobile-drawer relative z-0 mx-8 transition-[height] duration-200 ${mobileOpen ? "h-[4.75rem]" : "h-5"}`}>
+      <div className="absolute inset-x-0 bottom-[-0.75rem] rounded-t-2xl border border-border bg-surface px-2 pb-4 pt-1 shadow-prompt">
+        <button
+          type="button"
+          onClick={() => setMobileOpen((open) => !open)}
+          aria-expanded={mobileOpen}
+          title={mobileOpen ? "Recolher controles de leitura" : "Mostrar controles de leitura"}
+          className="flex h-6 w-full items-center justify-center gap-1.5 text-[11px] font-medium text-muted transition-colors hover:text-ink"
+        >
+          <span className="h-1 w-8 rounded-full bg-border" />
+          <span>Leitura · {elapsed}</span>
+          {mobileOpen ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+        </button>
+        {mobileOpen && (
+          <div role="region" aria-label="Controles da leitura em voz alta" className="animate-pop flex items-center justify-center gap-1 pt-1 text-ink">
+            {playButton}
+            <span aria-live="polite" className="min-w-[3.1rem] px-1 text-center font-mono text-[10px] tabular-nums text-muted">
+              {elapsed}{duration ? <span className="block opacity-70">{duration}</span> : null}
+            </span>
+            {transport}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
