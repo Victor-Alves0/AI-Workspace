@@ -315,6 +315,16 @@ select:focus-visible {
   padding: 0;
 }
 
+/* `position: sticky` usa a borda interna do scroll container. No chat, o `pt-6`
+ * criava uma faixa de 24px acima do cabeçalho onde linhas do código continuavam
+ * visíveis. A variável compensa apenas esse padding; em outras telas o padrão é 0. */
+.md-code-sticky-header {
+  top: var(--code-sticky-top, 0px);
+}
+.chat-scroll {
+  --code-sticky-top: -1.5rem;
+}
+
 /* ------------------------------------------------------------------ */
 /* Syntax highlight (highlight.js) — tema próprio, casado com a paleta */
 /* ------------------------------------------------------------------ */

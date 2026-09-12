@@ -2324,7 +2324,7 @@ export default function ChatPage() {
                   }}
                   onPointerUp={() => { selectingTextRef.current = false; }}
                   onPointerCancel={() => { selectingTextRef.current = false; }}
-                  className="flex-1 space-y-5 overflow-y-auto px-4 pb-14 pt-6 [scroll-padding-bottom:5rem]"
+                  className="chat-scroll flex-1 space-y-5 overflow-y-auto px-4 pb-14 pt-6 [scroll-padding-bottom:5rem]"
                 >
                   {temporary && (
                     <div className="mx-auto w-fit rounded-full border border-border bg-surface px-4 py-1.5 text-center text-xs text-muted">

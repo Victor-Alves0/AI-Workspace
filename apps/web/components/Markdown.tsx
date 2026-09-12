@@ -43,7 +43,7 @@ function CodeBlock({ children }: { children?: React.ReactNode }) {
 
   return (
     <div className="relative my-3 rounded-xl border border-border">
-      <div className="sticky top-0 z-20 flex items-center justify-between rounded-t-xl border-b border-border bg-surface px-3 py-1.5 shadow-sm">
+      <div className="md-code-sticky-header sticky z-20 flex items-center justify-between rounded-t-xl border-b border-border bg-surface px-3 py-1.5 shadow-sm">
         <span className="font-mono text-[11px] uppercase tracking-wider text-muted">
           {lang || "código"}
         </span>

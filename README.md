@@ -167,6 +167,21 @@ Details in **[docs/architecture.md](docs/architecture.md)**.
 
 **Prerequisites:** [Docker](https://docs.docker.com/get-docker/) + Docker Compose.
 
+### One-command install (Linux/macOS)
+
+The installer clones the repository, generates strong local secrets, creates `.env` and starts
+the core stack. Existing `.env` files are preserved.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Victor-Alves0/AI-Workspace/main/install.sh | bash
+```
+
+To choose another destination, use
+`curl -fsSL https://raw.githubusercontent.com/Victor-Alves0/AI-Workspace/main/install.sh | AI_WORKSPACE_DIR=/path/to/ai-workspace bash`.
+Review the script before piping it to Bash if this is a production server.
+
+### Manual install
+
 ```bash
 git clone https://github.com/Victor-Alves0/AI-Workspace.git
 cd AI-Workspace
@@ -259,5 +274,3 @@ Local setup guide (without Docker), tests and code organization in
 > If the intent is to open the project, add a license
 > ([choose one here](https://choosealicense.com/)) — MIT/Apache-2.0 for permissive, AGPL-3.0
 > for strong copyleft (common in self-hosted apps).
-</content>
-</invoke>
