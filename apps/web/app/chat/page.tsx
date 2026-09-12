@@ -2,18 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, Code2, Copy, Ear, FlaskConical, GitBranch, Image as ImageIcon, Link2, Loader2, Menu, MessageSquareDashed, Mic, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
+import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, Code2, Copy, FlaskConical, GitBranch, Image as ImageIcon, Link2, Loader2, Menu, MessageSquareDashed, Mic, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamRoundtable } from "@/lib/sse";
 import { speak, startBrowserDictation, startRecording, stopSpeaking, transcribe } from "@/lib/voice";
 import { captureUtterance } from "@/lib/voiceSession";
-import { startWakeWord, transcribeWhisper, type WakeHandle } from "@/lib/wakeword";
+import { transcribeWhisper } from "@/lib/wakeword";
 import { onVoiceActivate } from "@/lib/desktop";
 import { browserNotify, playChime, requestNotifPermission } from "@/lib/notify";
 import { downloadJSON, downloadPDF, downloadTXT } from "@/lib/download";
 import { pickSuggestions, type Suggestion } from "@/lib/suggestions";
-import type { AskSpec, Attachment, Chat, ChatArtifact, CodespaceProject, Folder, KnowledgeRef, ListenConfig, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User, VoiceSession, WakeCreds } from "@/lib/types";
+import type { AskSpec, Attachment, Chat, ChatArtifact, CodespaceProject, Folder, KnowledgeRef, ListenConfig, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User, VoiceSession } from "@/lib/types";
 import ArtifactPanel from "@/components/ArtifactPanel";
 import CodespaceFileBrowser, { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME, extLang, stripLineNumbers } from "@/components/CodespaceFileBrowser";
 import type { CodespaceDragPayload, CodespaceSnippetPayload } from "@/components/CodespaceFileBrowser";
@@ -385,10 +385,6 @@ export default function ChatPage() {
   // Id/run são transitórios: ficam em ref para trocar/parar a leitura sem fazer
   // callbacks de todas as mensagens dependerem do estado que muda a cada clique.
   const messageSpeechRef = useRef<{ id: string | null; run: number }>({ id: null, run: 0 });
-  // Wake word ("hey nome"): escuta sempre-ativa opt-in.
-  const [wakeOn, setWakeOn] = useState(false);
-  const [wakeStatus, setWakeStatus] = useState<"off" | "starting" | "on" | "error">("off");
-  const wakeRef = useRef<{ handle: WakeHandle | null; on: boolean }>({ handle: null, on: false });
   const scrollRef = useRef<HTMLDivElement>(null);
   // O scroll é agendado em um frame, não a cada delta. A pausa durante a seleção
   // protege o intervalo que o usuário está arrastando para copiar.
@@ -1623,9 +1619,6 @@ export default function ChatPage() {
     stopSpeaking();
     setVoicePhase("off");
     setVoiceLevel(0);
-    // retoma a wake word se a escuta continua ligada (o modo voz "pausou" o mic dela)
-    const w = wakeRef.current;
-    if (w.on && w.handle) w.handle.resume().catch(() => {});
   }
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -1726,11 +1719,6 @@ export default function ChatPage() {
       return;
     }
     voiceRef.current = { active: true, utter: null, session };
-    // solta o mic da wake word enquanto o modo voz grava (idempotente: se veio de
-    // onWakeTriggered já está pausada; cobre também o start manual/atalho global).
-    if (wakeRef.current.on && wakeRef.current.handle) {
-      try { await wakeRef.current.handle.pause(); } catch { /* segue: o mic é multi-stream */ }
-    }
     setVoicePhase("listening");
     if (pollRef.current.active?.id !== session.chat_id) {
       try { await selectChat(session.chat_id); } catch { /* segue mesmo assim */ }
@@ -1767,90 +1755,6 @@ export default function ChatPage() {
     } catch { /* sessionStorage indisponível */ }
     return () => window.removeEventListener("aiw:open-settings", onOpen);
   }, [openSettings]);
-
-  // ---- Wake word ("hey nome"): escuta sempre-ativa opt-in ----
-  async function onWakeTriggered() {
-    if (voiceRef.current.active) return; // já dentro do modo voz
-    const h = wakeRef.current.handle;
-    if (h) { try { await h.pause(); } catch { /* solta o mic p/ o modo voz */ } }
-    void startVoiceModeRef.current();
-  }
-
-  async function startWake() {
-    const lc = (curCustom?.filter_config?.listen ?? {}) as ListenConfig;
-    if (!lc.wake_enabled) { alert("Ative a wake word nas Configurações do modelo → Voz."); return; }
-    const engine =
-      lc.wake_engine === "vosk" ? "vosk"
-      : lc.wake_engine === "whisper" ? "whisper"
-      : lc.wake_engine === "openwakeword" ? "openwakeword"
-      : "porcupine";
-    // Whisper não tem chave; os demais buscam creds (Porcupine=key, Vosk/OWW=URL) do servidor.
-    let wake: WakeCreds = {};
-    if (engine !== "whisper") {
-      try { wake = (await api.get<WakeCreds>("/voice/wake")) ?? {}; } catch { /* segue com vazio → valida abaixo */ }
-    }
-    // Porcupine "__custom__" usa o .ppn do usuário; senão a palavra embutida
-    const custom = lc.porcupine_keyword === "__custom__";
-    const kw = custom ? (wake.ppn_url || "") : (lc.porcupine_keyword || "Jarvis");
-    // valida cedo com mensagem que aponta o lugar certo
-    if (engine === "porcupine" && !wake.picovoice_key) {
-      alert("Configure a AccessKey da Picovoice em Configurações → Conexões → Assistente de voz."); return;
-    }
-    if (engine === "porcupine" && custom && !wake.ppn_url) {
-      alert("Palavra 'Personalizada' selecionada, mas nenhum .ppn cadastrado em Conexões → Assistente de voz."); return;
-    }
-    if (engine === "openwakeword" && !(wake.oww_model_url || "").trim()) {
-      alert("Cadastre a URL do seu modelo OpenWakeWord (.onnx) em Conexões → Assistente."); return;
-    }
-    // Vosk/Whisper casam a 'Palavra de ativação'; OpenWakeWord/Porcupine não precisam dela.
-    if ((engine === "vosk" || engine === "whisper") && !(lc.call_name || "").trim()) {
-      alert("Defina a 'Palavra de ativação' nas Configurações do modelo → Assistente."); return;
-    }
-    setWakeStatus("starting");
-    try {
-      const handle = await startWakeWord({
-        engine,
-        callName: lc.call_name,
-        accessKey: wake.picovoice_key,
-        porcupineKeyword: kw,
-        voskModelUrl: wake.vosk_model_url,
-        owwModelUrl: wake.oww_model_url,
-        owwMelspecUrl: wake.oww_melspec_url,
-        owwEmbeddingUrl: wake.oww_embedding_url,
-        owwThreshold: lc.oww_threshold,
-        onError: () => setWakeStatus("error"),
-      }, () => { void onWakeTriggered(); });
-      wakeRef.current = { handle, on: true };
-      setWakeOn(true);
-      setWakeStatus("on");
-    } catch (e) {
-      setWakeStatus("error");
-      alert(e instanceof Error ? e.message : "Falha ao iniciar a escuta (verifique as chaves em Conexões → Assistente de voz).");
-    }
-  }
-
-  async function stopWake() {
-    const h = wakeRef.current.handle;
-    wakeRef.current = { handle: null, on: false };
-    setWakeOn(false);
-    setWakeStatus("off");
-    if (h) { try { await h.stop(); } catch { /* noop */ } }
-  }
-
-  function toggleWake() { if (wakeRef.current.on) stopWake(); else startWake(); }
-
-  // some a escuta ao desmontar (não deixa o mic ligado)
-  useEffect(() => () => { void wakeRef.current.handle?.stop(); }, []);
-
-  const wakeAvailable = !!(curCustom?.filter_config?.listen as ListenConfig | undefined)?.wake_enabled;
-  const wakeName = ((curCustom?.filter_config?.listen as ListenConfig | undefined)?.call_name || "").trim();
-
-  // Trocar para um modelo SEM wake esconde o chip; sem isto o handle (e o mic)
-  // continuariam vivos sem UI para parar. Desliga a escuta nessa transição.
-  useEffect(() => {
-    if (!wakeAvailable && wakeRef.current.on) void stopWake();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wakeAvailable]);
 
   async function logout() {
     await api.post("/auth/logout");
@@ -2689,20 +2593,6 @@ export default function ChatPage() {
             </div>
           ))}
         </div>
-      )}
-
-      {/* Wake word — botão/indicador de escuta (só quando o modelo tem wake ligado) */}
-      {wakeAvailable && voicePhase === "off" && (
-        <button
-          onClick={toggleWake}
-          title={wakeOn ? "Escuta ativa — clique para parar" : "Ativar escuta (wake word)"}
-          className={`fixed bottom-[calc(1.25rem+env(safe-area-inset-bottom))] left-4 z-[105] flex items-center gap-2 rounded-full border py-2 pl-2.5 pr-3 text-xs font-medium shadow-menu backdrop-blur transition-colors ${
-            wakeOn ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border bg-surface/95 text-muted hover:text-ink"
-          }`}
-        >
-          <Ear size={15} className={wakeOn ? "animate-pulse" : ""} />
-          {wakeStatus === "starting" ? "iniciando…" : wakeOn ? (wakeName ? `escutando "${wakeName}"` : "escutando") : "escuta"}
-        </button>
       )}
 
       {/* Modo voz (assistente) — HUD flutuante */}
