@@ -327,45 +327,73 @@ select:focus-visible {
   --code-sticky-top: -1.5rem;
 }
 
-/* O composer usa as faixas vazias laterais como dock da leitura em voz alta.
- * A query considera a largura REAL da conversa (já descontadas sidebar/painéis),
- * em vez da largura da tela. Abaixo de 1180px os controles viram uma gaveta
- * atrás da caixa central, sem apertar o campo de texto. */
+/* O composer usa apenas a faixa direita como dock da leitura em voz alta.
+ * A faixa esquerda fica vazia para manter a caixa centralizada. Em larguras
+ * menores, o mesmo player vira uma gaveta atrás da caixa. */
 .chat-composer-shell {
   container: chat-composer / inline-size;
 }
 .chat-composer-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  align-items: end;
+  align-items: center;
 }
 .chat-composer-center {
   grid-column: 1;
 }
-.speech-desktop-primary,
-.speech-desktop-transport {
+.speech-desktop-player {
   display: none;
 }
-@container chat-composer (min-width: 1180px) {
+@container chat-composer (min-width: 1300px) {
   .chat-composer-grid {
     grid-template-columns: minmax(0, 1fr) minmax(0, 50rem) minmax(0, 1fr);
   }
   .chat-composer-center {
     grid-column: 2;
   }
-  .speech-desktop-primary {
-    display: flex;
-    grid-column: 1;
-    grid-row: 1;
-  }
-  .speech-desktop-transport {
+  .speech-desktop-player {
     display: flex;
     grid-column: 3;
     grid-row: 1;
+    transform: translateY(-6px);
   }
   .speech-mobile-drawer {
     display: none;
   }
+}
+
+.speech-progress {
+  --speech-progress: 0%;
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(
+    to right,
+    rgb(var(--c-accent)) 0 var(--speech-progress),
+    rgb(var(--c-border)) var(--speech-progress) 100%
+  );
+  cursor: pointer;
+}
+.speech-progress::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgb(var(--c-surface));
+  border-radius: 9999px;
+  background: rgb(var(--c-accent));
+  box-shadow: 0 0 0 1px rgb(var(--c-border));
+}
+.speech-progress::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border: 2px solid rgb(var(--c-surface));
+  border-radius: 9999px;
+  background: rgb(var(--c-accent));
+  box-shadow: 0 0 0 1px rgb(var(--c-border));
+}
+.speech-progress:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 /* ------------------------------------------------------------------ */

@@ -129,7 +129,15 @@ export function toggleSpeakingPaused(): void {
 export function seekSpeaking(seconds: number): void {
   const audio = _currentAudio;
   if (!audio || !Number.isFinite(audio.duration)) return;
-  audio.currentTime = Math.max(0, Math.min(audio.duration, audio.currentTime + seconds));
+  seekSpeakingTo(audio.currentTime + seconds);
+}
+
+// Move para uma posição absoluta do áudio já gerado. O player do chat usa esta
+// função na timeline; a voz nativa do navegador não oferece seek confiável.
+export function seekSpeakingTo(seconds: number): void {
+  const audio = _currentAudio;
+  if (!audio || !Number.isFinite(audio.duration)) return;
+  audio.currentTime = Math.max(0, Math.min(audio.duration, seconds));
   publishAudioProgress(audio);
 }
 
@@ -182,6 +190,8 @@ export async function speak(text: string, voice?: string): Promise<void> {
       body: JSON.stringify({ text, voice }),
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? "TTS falhou");
+    // Aguarda o arquivo inteiro antes de criar o player. Assim duração e seek
+    // estão disponíveis desde o primeiro play, sem reproduzir um stream parcial.
     const blob = await res.blob();
     if (generation !== _speechGeneration) return;
     const url = URL.createObjectURL(blob);

@@ -6,7 +6,7 @@ import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, ChevronDown, ChevronUp,
 import { api, ApiError } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamRoundtable } from "@/lib/sse";
-import { seekSpeaking, setSpeakingRate, speak, startBrowserDictation, startRecording, stopSpeaking, subscribeSpeechProgress, toggleSpeakingPaused, transcribe, type SpeechProgress } from "@/lib/voice";
+import { seekSpeaking, seekSpeakingTo, setSpeakingRate, speak, startBrowserDictation, startRecording, stopSpeaking, subscribeSpeechProgress, toggleSpeakingPaused, transcribe, type SpeechProgress } from "@/lib/voice";
 import { captureUtterance } from "@/lib/voiceSession";
 import { transcribeWhisper } from "@/lib/wakeword";
 import { onVoiceActivate } from "@/lib/desktop";
@@ -2396,9 +2396,6 @@ export default function ChatPage() {
                   <div className="pointer-events-none absolute -top-12 inset-x-0 h-12 bg-gradient-to-t from-bg to-transparent" />
                   <div className="chat-composer-shell bg-bg px-4 pb-3">
                     <div className="chat-composer-grid">
-                      {speakingMessageId && (
-                        <SpeechController variant="primary" progress={speechProgress} onClose={stopMessageSpeech} />
-                      )}
                       <div className="chat-composer-center relative min-w-0">
                         {speakingMessageId && (
                           <SpeechController variant="mobile" progress={speechProgress} onClose={stopMessageSpeech} />
@@ -2427,7 +2424,7 @@ export default function ChatPage() {
                         </div>
                       </div>
                       {speakingMessageId && (
-                        <SpeechController variant="transport" progress={speechProgress} onClose={stopMessageSpeech} />
+                        <SpeechController variant="desktop" progress={speechProgress} onClose={stopMessageSpeech} />
                       )}
                     </div>
                   </div>
@@ -2693,7 +2690,7 @@ function SpeechController({
   progress,
   onClose,
 }: {
-  variant: "primary" | "transport" | "mobile";
+  variant: "desktop" | "mobile";
   progress: SpeechProgress;
   onClose: () => void;
 }) {
@@ -2705,13 +2702,18 @@ function SpeechController({
   const nextRate = rates[(currentRate + 1 + rates.length) % rates.length];
   const elapsed = formatSpeechTime(progress.currentTime);
   const duration = progress.duration > 0 ? formatSpeechTime(progress.duration) : null;
+  const canSeek = progress.seekable && progress.duration > 0;
+  const timelineMax = canSeek ? progress.duration : 1;
+  const timelineValue = canSeek ? Math.min(progress.currentTime, progress.duration) : 0;
+  const timelinePercent = canSeek ? Math.min(100, (timelineValue / timelineMax) * 100) : 0;
 
   const playButton = (
     <button
       type="button"
       onClick={toggleSpeakingPaused}
       disabled={loading}
-      title={paused ? "Continuar leitura" : "Pausar leitura"}
+      title={loading ? "Preparando o áudio completo" : paused ? "Continuar leitura" : "Pausar leitura"}
+      aria-label={loading ? "Preparando o áudio completo" : paused ? "Continuar leitura" : "Pausar leitura"}
       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent text-white transition-colors hover:bg-accent-hover disabled:cursor-wait disabled:opacity-70"
     >
       {loading ? <Loader2 size={17} className="animate-spin" /> : paused ? <Play size={17} fill="currentColor" /> : <Pause size={17} fill="currentColor" />}
@@ -2759,33 +2761,48 @@ function SpeechController({
     </>
   );
 
-  if (variant === "primary") {
+  const timeline = (
+    <div className="flex min-w-0 items-center gap-2 px-1">
+      <input
+        type="range"
+        min={0}
+        max={timelineMax}
+        step={0.1}
+        value={timelineValue}
+        onChange={(event) => seekSpeakingTo(Number(event.target.value))}
+        disabled={!canSeek || loading}
+        aria-label="Posição da leitura"
+        title={canSeek ? "Arraste para mudar a posição" : "A timeline estará disponível quando o áudio terminar de carregar"}
+        className="speech-progress min-w-0 flex-1"
+        style={{ "--speech-progress": `${timelinePercent}%` } as React.CSSProperties}
+      />
+      <span aria-live="polite" className="shrink-0 font-mono text-[10px] tabular-nums text-muted">
+        {elapsed} / {duration ?? "--:--"}
+      </span>
+    </div>
+  );
+
+  const status = loading ? "Preparando áudio…" : paused ? "Leitura pausada" : "Lendo resposta";
+
+  if (variant === "desktop") {
     return (
-      <div className="speech-desktop-primary min-w-0 items-center justify-end pr-3">
-        <div role="region" aria-label="Leitura em voz alta" className="animate-pop flex min-w-0 max-w-[17rem] items-center gap-2 rounded-2xl border border-border bg-surface p-2 shadow-prompt">
-          {playButton}
-          <span className="min-w-0 pr-1">
-            <span className="block truncate text-xs font-medium text-ink">Lendo resposta</span>
-            <span aria-live="polite" className="block font-mono text-[11px] tabular-nums text-muted">
-              {elapsed}{duration ? ` / ${duration}` : ""}
+      <div className="speech-desktop-player min-w-0 items-center justify-start pl-3 pr-4">
+        <div role="region" aria-label="Leitura em voz alta" className="animate-pop min-w-0 w-full max-w-[22rem] rounded-2xl border border-border bg-surface p-2 shadow-prompt">
+          <div className="flex min-w-0 items-center gap-1">
+            {playButton}
+            <span className="min-w-0 flex-1 px-1">
+              <span className="block truncate text-xs font-medium text-ink">{status}</span>
             </span>
-          </span>
-        </div>
-      </div>
-    );
-  }
-  if (variant === "transport") {
-    return (
-      <div className="speech-desktop-transport min-w-0 items-center justify-start pl-3">
-        <div role="region" aria-label="Navegação da leitura em voz alta" className="animate-pop flex items-center gap-0.5 rounded-2xl border border-border bg-surface p-1.5 shadow-prompt">
-          {transport}
+            {transport}
+          </div>
+          <div className="pt-1.5">{timeline}</div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`speech-mobile-drawer relative z-0 mx-8 transition-[height] duration-200 ${mobileOpen ? "h-[4.75rem]" : "h-5"}`}>
+    <div className={`speech-mobile-drawer relative z-0 mx-8 transition-[height] duration-200 ${mobileOpen ? "h-[7rem]" : "h-5"}`}>
       <div className="absolute inset-x-0 bottom-[-0.75rem] rounded-t-2xl border border-border bg-surface px-2 pb-4 pt-1 shadow-prompt">
         <button
           type="button"
@@ -2799,12 +2816,13 @@ function SpeechController({
           {mobileOpen ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
         </button>
         {mobileOpen && (
-          <div role="region" aria-label="Controles da leitura em voz alta" className="animate-pop flex items-center justify-center gap-1 pt-1 text-ink">
-            {playButton}
-            <span aria-live="polite" className="min-w-[3.1rem] px-1 text-center font-mono text-[10px] tabular-nums text-muted">
-              {elapsed}{duration ? <span className="block opacity-70">{duration}</span> : null}
-            </span>
-            {transport}
+          <div role="region" aria-label="Controles da leitura em voz alta" className="animate-pop pt-1 text-ink">
+            <div className="flex min-w-0 items-center justify-center gap-1">
+              {playButton}
+              <span className="min-w-0 flex-1 px-1 text-xs font-medium text-ink">{status}</span>
+              {transport}
+            </div>
+            <div className="pt-2">{timeline}</div>
           </div>
         )}
       </div>
