@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -10,9 +12,6 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-import asyncio
-import logging
 
 from .auth.deps import require_approved
 from .automation import runner, scheduler
@@ -286,13 +285,25 @@ async def list_runs(
 # --------------------------------------------------------------------------- #
 # Notifications
 # --------------------------------------------------------------------------- #
+def _visible_notification():
+    """Exclui alarmes legados de saúde do feed voltado ao usuário.
+
+    Saúde tem painel administrativo próprio. O filtro também protege instalações que
+    ainda não aplicaram a migração de limpeza ou restauraram um backup antigo.
+    """
+    return ~Notification.title.startswith("Saúde:")
+
+
 @router.get("/notifications", response_model=list[NotificationOut])
 async def list_notifications(
     unread: bool = False,
     user: User = Depends(require_approved),
     db: AsyncSession = Depends(get_db),
 ):
-    q = select(Notification).where(Notification.user_id == user.id)
+    q = select(Notification).where(
+        Notification.user_id == user.id,
+        _visible_notification(),
+    )
     if unread:
         q = q.where(Notification.read.is_(False))
     q = q.order_by(Notification.created_at.desc()).limit(100)
@@ -307,7 +318,11 @@ async def unread_count(
     n = await db.scalar(
         select(func.count())
         .select_from(Notification)
-        .where(Notification.user_id == user.id, Notification.read.is_(False))
+        .where(
+            Notification.user_id == user.id,
+            Notification.read.is_(False),
+            _visible_notification(),
+        )
     )
     return {"count": int(n or 0)}
 
@@ -333,7 +348,9 @@ async def read_all(
 ):
     rows = await db.scalars(
         select(Notification).where(
-            Notification.user_id == user.id, Notification.read.is_(False)
+            Notification.user_id == user.id,
+            Notification.read.is_(False),
+            _visible_notification(),
         )
     )
     for n in rows:

@@ -6,8 +6,9 @@ async (orchestrator), e um evento de saúde jamais pode derrubar o caminho que e
 tentando observar. Eventos raros (degradações), então conectar por evento é barato.
 
 Severidades: info (nota) < warn (fallback leve) < degraded (capacidade caída/rebaixada)
-< error (falha). Em `degraded|error` dispara um ALARME (Notification pros admins),
-com cooldown em memória p/ não floodar.
+< error (falha). Em `degraded|error` registra um alerta no log com cooldown. O evento
+estruturado continua disponível em Administração → Saúde; ele NÃO vira uma notificação
+comum, cujo feed é reservado a automações e ações do usuário.
 """
 
 from __future__ import annotations
@@ -97,8 +98,12 @@ def record_bg(capability: str, event: str, *, severity: str = "info",
 
 
 def _maybe_alarm(capability: str, event: str, severity: str, detail: dict) -> None:
-    """Cria uma Notification pros admins quando uma capacidade degrada — com cooldown
-    por (capability,event). Silencioso e à prova de falha."""
+    """Emite um alerta de log quando uma capacidade degrada, com cooldown.
+
+    O registro persistente já vive em ``health_events`` e aparece no painel Saúde.
+    Duplicá-lo em ``notifications`` misturava telemetria administrativa com lembretes
+    do usuário e voltava a poluir o feed a cada reinício do servidor.
+    """
     key = f"{capability}:{event}"
     now = time.monotonic()
     # "nunca alarmou" é None, e NÃO 0.0. `time.monotonic()` conta desde o boot da
@@ -111,24 +116,9 @@ def _maybe_alarm(capability: str, event: str, severity: str, detail: dict) -> No
     if last is not None and now - last < _ALARM_COOLDOWN_S:
         return
     _last_alarm[key] = now
-    try:
-        reason = str(detail.get("reason") or detail.get("error") or "").strip()
-        title = f"Saúde: {capability} {severity}"
-        body = f"[{severity}] {capability} → {event}" + (f": {reason[:300]}" if reason else "")
-        conn = _conn()
-        with conn, conn.cursor() as cur:
-            cur.execute("SELECT id FROM users WHERE role = 'admin'")
-            admin_ids = [r[0] for r in cur.fetchall()]
-            for aid in admin_ids:
-                cur.execute(
-                    "INSERT INTO notifications (id, user_id, title, body, read, "
-                    "created_at, updated_at) VALUES (%s,%s,%s,%s,false, now(), now())",
-                    (str(uuid.uuid4()), aid, title[:255], body),
-                )
-        conn.close()
-        logger.warning("ALARME de saúde: %s", body)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("health._maybe_alarm falhou (%s): %s", key, exc)
+    reason = str(detail.get("reason") or detail.get("error") or "").strip()
+    body = f"[{severity}] {capability} → {event}" + (f": {reason[:300]}" if reason else "")
+    logger.warning("ALARME de saúde: %s", body)
 
 
 # --------------------------------------------------------------------------- #

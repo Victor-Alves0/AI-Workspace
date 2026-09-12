@@ -343,10 +343,12 @@ function CardGrid({
 function DetailView({ title, onBack, children }: { title: string; onBack: () => void; children: React.ReactNode }) {
   return (
     <div className="pt-1">
-      <button onClick={onBack} className="mb-3 flex items-center gap-1 text-sm text-muted transition-colors hover:text-ink">
-        <ChevronLeft size={16} /> Voltar
-      </button>
-      <Heading>{title}</Heading>
+      <div className="mb-3 flex items-center justify-between gap-4 border-b border-border pb-2">
+        <h3 className="text-sm font-semibold text-ink">{title}</h3>
+        <button onClick={onBack} className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted transition-colors hover:bg-hover hover:text-ink">
+          <ChevronLeft size={16} /> Voltar
+        </button>
+      </div>
       {children}
     </div>
   );

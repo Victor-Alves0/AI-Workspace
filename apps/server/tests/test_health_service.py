@@ -1,6 +1,6 @@
 """Auto-observabilidade (health_service): registro de eventos, agregação do snapshot
-e o alarme com cooldown. O `record()` é sync (psycopg2) e nunca levanta; o `snapshot()`
-é async. Fluxo de DB pula com graça se o Postgres não estiver acessível."""
+e o alerta de log com cooldown. O `record()` é sync (psycopg2) e nunca levanta; o
+`snapshot()` é async. Fluxo de DB pula com graça se o Postgres não estiver acessível."""
 from __future__ import annotations
 
 import asyncio
@@ -35,6 +35,8 @@ def test_primeiro_alarme_dispara_mesmo_com_o_processo_recem_subido(monkeypatch):
     vida caía em `now - 0.0 < 900` e ENGOLIA o primeiro alarme — silenciosamente, sem
     log. A observabilidade ficava cega justo na janela de boot."""
     inseridos: list = []
+    # O alerta não abre uma segunda conexão nem cria Notification: a saúde já foi
+    # persistida em health_events pelo record().
     monkeypatch.setattr(hs, "_conn", lambda: (_ for _ in ()).throw(AssertionError("chegou no DB")))
     monkeypatch.setattr(hs, "logger", _LoggerEspiao(inseridos))
     monkeypatch.setattr(hs.time, "monotonic", lambda: 42.0)  # processo com 42s de vida
@@ -42,11 +44,13 @@ def test_primeiro_alarme_dispara_mesmo_com_o_processo_recem_subido(monkeypatch):
 
     hs._maybe_alarm("memory", "no_op", "degraded", {"error": "x"})
     assert "memory:no_op" in hs._last_alarm, "o 1º alarme foi engolido pelo cooldown"
+    assert len(inseridos) == 1
 
     # e o SEGUNDO, aí sim, é silenciado pelo cooldown
     marca = hs._last_alarm["memory:no_op"]
     hs._maybe_alarm("memory", "no_op", "degraded", {"error": "x"})
     assert hs._last_alarm["memory:no_op"] == marca
+    assert len(inseridos) == 1
 
 
 class _LoggerEspiao:
@@ -128,6 +132,7 @@ def test_record_snapshot_e_alarme_com_cooldown():
     try:
         async def _flow():
             from sqlalchemy import func, select
+
             from aiworkspace.db import SessionLocal, engine
             from aiworkspace.models import HealthEvent, Notification
 
@@ -142,11 +147,11 @@ def test_record_snapshot_e_alarme_com_cooldown():
                         .where(HealthEvent.capability == "memory",
                                HealthEvent.event == "no_op"))
                     assert n_ev >= 2, n_ev
-                    # mas o ALARME disparou UMA vez só (cooldown) → 1 notificação p/ o admin
+                    # Saúde fica no painel próprio e não polui o feed de notificações.
                     n_notif = await db.scalar(
                         select(func.count()).select_from(Notification)
                         .where(Notification.user_id == uuid.UUID(admin)))
-                    assert n_notif == 1, f"esperava 1 alarme (throttle), veio {n_notif}"
+                    assert n_notif == 0, f"saúde vazou para notificações: {n_notif}"
                     # snapshot: memory aparece com 'worst' = degraded
                     snap = await hs.snapshot(db, hours=24)
                     mem = next((c for c in snap["capabilities"] if c["capability"] == "memory"), None)
