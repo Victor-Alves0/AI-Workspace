@@ -123,35 +123,49 @@ def _headers(api_key: str) -> dict[str, str]:
 # modelo o buscava a CADA abertura, pagando ~300ms de rede sempre. TTL de 10min:
 # um modelo novo aparece em minutos, e as aberturas seguintes são instantâneas.
 _CATALOG_TTL = 600.0
-_catalog_cache: tuple[float, list[dict[str, Any]]] | None = None
+_catalog_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _catalog_lock = asyncio.Lock()
 
 
-async def list_models(api_key: str, *, force: bool = False) -> list[dict[str, Any]]:
-    global _catalog_cache
+async def list_models(
+    api_key: str,
+    *,
+    force: bool = False,
+    output_modality: str | None = None,
+) -> list[dict[str, Any]]:
+    """Lista o catálogo geral ou uma modalidade especializada do OpenRouter.
+
+    STT/TTS não aparecem necessariamente no catálogo padrão; o OpenRouter os
+    expõe por ``output_modalities=transcription|speech``. Cada visão tem cache
+    próprio para uma consulta filtrada nunca contaminar o seletor de chat.
+    """
     now = time.monotonic()
-    if not force and _catalog_cache is not None and now - _catalog_cache[0] < _CATALOG_TTL:
-        return _catalog_cache[1]
+    cache_key = output_modality or "all"
+    cached = _catalog_cache.get(cache_key)
+    if not force and cached is not None and now - cached[0] < _CATALOG_TTL:
+        return cached[1]
     # lock evita "stampede": N aberturas simultâneas do seletor fariam N fetches;
     # o 1º busca, os outros reusam o resultado recém-cacheado.
     async with _catalog_lock:
-        if not force and _catalog_cache is not None and time.monotonic() - _catalog_cache[0] < _CATALOG_TTL:
-            return _catalog_cache[1]
+        cached = _catalog_cache.get(cache_key)
+        if not force and cached is not None and time.monotonic() - cached[0] < _CATALOG_TTL:
+            return cached[1]
         settings = get_settings()
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(
-                f"{settings.openrouter_base_url}/models", headers=_headers(api_key)
+                f"{settings.openrouter_base_url}/models",
+                headers=_headers(api_key),
+                params={"output_modalities": output_modality} if output_modality else None,
             )
             resp.raise_for_status()
             data = resp.json().get("data", [])
-        _catalog_cache = (time.monotonic(), data)
+        _catalog_cache[cache_key] = (time.monotonic(), data)
         return data
 
 
 def invalidate_catalog() -> None:
     """Descarta o catálogo cacheado (ex.: após trocar a chave do OpenRouter)."""
-    global _catalog_cache
-    _catalog_cache = None
+    _catalog_cache.clear()
 
 
 def _compat_model(model: str, base_url: str | None) -> str:

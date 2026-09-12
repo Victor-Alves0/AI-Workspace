@@ -1,14 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, BookOpen, Box, Brain, Camera, Check, ChevronDown, ChevronRight, Ear, FileText, Gauge, GitBranch, Info, Pin, Plus, Search, Settings, ShieldAlert, Sliders, Sparkles, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
-import { api, ApiError } from "@/lib/api";
+import { ArrowLeft, AudioLines, BookOpen, Box, Brain, Camera, Check, ChevronDown, ChevronRight, Ear, FileText, Gauge, GitBranch, Info, Loader2, Mic2, Pin, Play, Plus, Search, Settings, ShieldAlert, Sliders, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
+import { API_URL, api, ApiError } from "@/lib/api";
 import { fileToAvatarDataUrl } from "@/lib/image";
 import type { KnowledgeBase, MemoryBank, Model, ModelConfig, Skill, SystemTool, Tool } from "@/lib/types";
 import TransferModal, { type TransferItem } from "./TransferModal";
 import { toolCategoryIcon, toolCategoryTitle } from "./toolCategory";
 import ModelField from "./ModelField";
-import { Toggle } from "./ui";
+import { AnchoredMenu, finePointer, Toggle } from "./ui";
 import { WebSearchPanel, FinancePanel, TextExtractionPanel, DeepSearchPanel, GooglePanel, TuyaToolPanel, GithubToolPanel, MessagingToolPanel, RemoteTerminalToolPanel } from "./toolPanels";
 
 // ferramentas internas com painel de config (engrenagem em "Ferramentas Ativas")
@@ -106,73 +106,280 @@ function ManageBtn({ icon, label, onClick }: { icon: React.ReactNode; label: str
   );
 }
 
-/** Seletor de voz: mostra o provedor ativo (Voz Local ou global) e deixa escolher
- *  a voz — dropdown quando há vozes da conexão local, ou texto livre (alloy…). O
- *  campo de mistura (avançado) permite combinar vozes com pesos. */
-function VoicePicker({
-  voices, provider, value, onChange,
+type VoiceProvider = "auto" | "openrouter" | "api" | "local";
+type AudioChoice = { id: string; name: string; provider: string };
+type VoiceCatalog = {
+  providers: Record<Exclude<VoiceProvider, "auto">, { configured: boolean; label: string }>;
+  tts_models: AudioChoice[];
+  stt_models: AudioChoice[];
+  voices: AudioChoice[];
+};
+type ModelVoiceConfig = {
+  tts_provider?: VoiceProvider;
+  tts_model?: string;
+  stt_provider?: VoiceProvider;
+  stt_model?: string;
+};
+
+const API_TTS_MODELS: AudioChoice[] = [
+  { id: "gpt-4o-mini-tts", name: "GPT-4o mini TTS", provider: "API de voz" },
+  { id: "tts-1", name: "TTS-1", provider: "API de voz" },
+  { id: "tts-1-hd", name: "TTS-1 HD", provider: "API de voz" },
+];
+const API_STT_MODELS: AudioChoice[] = [
+  { id: "whisper-1", name: "Whisper", provider: "API de voz" },
+  { id: "gpt-4o-transcribe", name: "GPT-4o Transcribe", provider: "API de voz" },
+  { id: "gpt-4o-mini-transcribe", name: "GPT-4o mini Transcribe", provider: "API de voz" },
+];
+const OPENROUTER_STT_FALLBACK: AudioChoice = {
+  id: "openai/whisper-large-v3-turbo",
+  name: "OpenAI: Whisper Large V3 Turbo",
+  provider: "OpenRouter",
+};
+
+function SearchChoice({
+  label, value, options, placeholder, onChange,
 }: {
-  voices: string[];
-  provider: { configured: boolean; enabled: boolean; base_url?: string } | null;
+  label: string;
   value: string;
-  onChange: (v: string) => void;
+  options: AudioChoice[];
+  placeholder: string;
+  onChange: (value: string) => void;
 }) {
-  const hasLocal = !!(provider?.configured && provider?.enabled && voices.length);
-  const isMix = /[+()]/.test(value); // ex.: af_bella(2)+af_sky(1)
-  const [mixOpen, setMixOpen] = useState(isMix);
+  const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const shown = q ? voices.filter((v) => v.toLowerCase().includes(q.toLowerCase())) : voices;
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const normalized = q.trim().toLowerCase();
+  const shown = options.filter((item) => !normalized
+    || item.name.toLowerCase().includes(normalized)
+    || item.id.toLowerCase().includes(normalized)
+    || item.provider.toLowerCase().includes(normalized));
+  const selected = options.find((item) => item.id === value);
+  const canUseCustom = !!q.trim() && !options.some((item) => item.id.toLowerCase() === normalized);
 
   return (
-    <div className="space-y-2.5 rounded-xl border border-border bg-surface p-3">
-      {/* linha de status do provedor */}
-      <div className="flex items-center gap-2 text-xs">
-        <span className={`h-2 w-2 shrink-0 rounded-full ${hasLocal ? "bg-emerald-400" : provider?.configured ? "bg-amber-400" : "bg-muted"}`} />
-        <span className="text-ink-soft">
-          {hasLocal
-            ? `Voz Local conectada · ${voices.length} vozes`
-            : provider?.configured
-              ? "Voz Local configurada (desativada)"
-              : "Provedor global (OpenAI)"}
+    <div className="space-y-1.5">
+      <label className="text-xs font-medium text-muted">{label}</label>
+      <button
+        ref={anchorRef}
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center justify-between gap-2 rounded-xl border border-border bg-bg px-3 py-2.5 text-left text-sm outline-none transition-colors hover:border-accent/50 focus-visible:border-accent"
+      >
+        <span className="min-w-0">
+          <span title={selected?.name || value || placeholder} className={`block truncate ${value ? "text-ink" : "text-muted"}`}>
+            {selected?.name || value || placeholder}
+          </span>
+          {value && <span title={value} className="block truncate font-mono text-[10px] text-muted">{value}</span>}
         </span>
-        <span className="ml-auto text-muted">Provedor em Configurações → Voz</span>
-      </div>
-
-      {hasLocal && !mixOpen ? (
-        <>
-          {voices.length > 8 && (
-            <div className="relative">
-              <Search size={13} className="pointer-events-none absolute left-2.5 top-2 text-muted" />
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar voz…" className="w-full rounded-lg border border-border bg-surface2 py-1.5 pl-8 pr-3 text-xs text-ink outline-none focus:border-accent placeholder:text-muted" />
-            </div>
-          )}
-          <div className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto pr-1">
-            {shown.map((v) => (
+        <ChevronDown size={15} className="shrink-0 text-muted" />
+      </button>
+      {open && (
+        <AnchoredMenu anchorRef={anchorRef} onClose={() => setOpen(false)} align="left" className="w-[420px] max-w-[calc(100vw-1.5rem)] overflow-hidden !rounded-2xl !p-0">
+          <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
+            <Search size={15} className="shrink-0 text-muted" />
+            <input
+              autoFocus={finePointer()}
+              value={q}
+              onChange={(event) => setQ(event.target.value)}
+              placeholder="Buscar por nome, ID ou provedor"
+              className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
+            />
+          </div>
+          <div className="max-h-[min(19rem,55dvh)] overflow-y-auto p-1.5">
+            {shown.map((item) => (
               <button
-                key={v}
-                onClick={() => onChange(v)}
-                className={`rounded-full border px-3 py-1 text-xs transition-colors ${value === v ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border bg-surface2 text-muted hover:text-ink"}`}
+                key={`${item.provider}:${item.id}`}
+                type="button"
+                onClick={() => { onChange(item.id); setOpen(false); setQ(""); }}
+                className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-hover"
               >
-                {v}
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-surface2 text-accent-hover">
+                  <AudioLines size={14} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span title={item.name} className="block truncate text-sm text-ink">{item.name}</span>
+                  <span title={item.id} className="block truncate font-mono text-[10px] text-muted">{item.id}</span>
+                </span>
+                <span className="shrink-0 rounded-md bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">{item.provider}</span>
+                {value === item.id && <Check size={15} className="shrink-0 text-accent" />}
               </button>
             ))}
-            {shown.length === 0 && <p className="px-1 py-1 text-xs text-muted">Nenhuma voz corresponde à busca.</p>}
+            {canUseCustom && (
+              <button
+                type="button"
+                onClick={() => { onChange(q.trim()); setOpen(false); setQ(""); }}
+                className="mt-1 flex w-full items-center gap-2 rounded-xl border border-dashed border-border px-3 py-2 text-left text-xs text-ink-soft transition-colors hover:border-accent/50 hover:bg-hover"
+              >
+                <Plus size={14} className="text-accent-hover" /> Usar <span className="min-w-0 truncate font-mono text-ink">{q.trim()}</span> como ID personalizado
+              </button>
+            )}
+            {!shown.length && !canUseCustom && <p className="px-3 py-6 text-center text-sm text-muted">Nenhum modelo encontrado.</p>}
           </div>
-        </>
-      ) : (
-        <input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={hasLocal ? "ex.: af_bella(2)+af_sky(1)" : "ex.: alloy, echo, shimmer"}
-          className={inpCls}
-        />
+        </AnchoredMenu>
       )}
+    </div>
+  );
+}
 
-      {hasLocal && (
-        <button onClick={() => setMixOpen((v) => !v)} className="text-xs text-muted transition-colors hover:text-ink">
-          {mixOpen ? "← Escolher da lista" : "Misturar vozes (avançado)"}
-        </button>
-      )}
+function ProviderPicker({
+  kind, value, catalog, onChange,
+}: {
+  kind: "tts" | "stt";
+  value: VoiceProvider;
+  catalog: VoiceCatalog | null;
+  onChange: (provider: VoiceProvider) => void;
+}) {
+  const entries: { id: VoiceProvider; label: string }[] = [
+    { id: "auto", label: "Automático" },
+    { id: "openrouter", label: "OpenRouter" },
+    { id: "api", label: "API de voz" },
+    { id: "local", label: "Local" },
+  ];
+  return (
+    <div>
+      <p className="mb-1.5 text-xs font-medium text-muted">Origem do {kind === "tts" ? "áudio" : "transcrito"}</p>
+      <div className="grid grid-cols-2 gap-1 rounded-xl border border-border bg-bg p-1 sm:grid-cols-4">
+        {entries.map((entry) => {
+          const ready = entry.id === "auto" || catalog?.providers[entry.id]?.configured;
+          return (
+            <button
+              key={entry.id}
+              type="button"
+              onClick={() => onChange(entry.id)}
+              title={ready ? entry.label : `${entry.label} ainda não está configurado`}
+              className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors ${value === entry.id ? "bg-accent text-white" : "text-ink-soft hover:bg-hover"}`}
+            >
+              {entry.id !== "auto" && <span className={`h-1.5 w-1.5 rounded-full ${ready ? "bg-emerald-400" : "bg-muted"}`} />}
+              {entry.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Console de voz por-modelo: separa fala (TTS) e escuta (STT), mas mantém
+ *  provedor/modelo/voz no mesmo lugar e permite testar sem salvar primeiro. */
+function VoiceStudio({
+  catalog, config, voice, onConfigChange, onVoiceChange,
+}: {
+  catalog: VoiceCatalog | null;
+  config: ModelVoiceConfig;
+  voice: string;
+  onConfigChange: (patch: Partial<ModelVoiceConfig>) => void;
+  onVoiceChange: (voice: string) => void;
+}) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const objectUrlRef = useRef<string | null>(null);
+  const [preview, setPreview] = useState<"idle" | "loading" | "playing">("idle");
+  const [previewError, setPreviewError] = useState("");
+  const ttsProvider = config.tts_provider ?? "auto";
+  const sttProvider = config.stt_provider ?? "auto";
+
+  const unique = (items: AudioChoice[]) => Array.from(new Map(items.map((item) => [item.id, item])).values());
+  const ttsOptions = unique([
+    ...(ttsProvider === "openrouter" || ttsProvider === "auto" ? (catalog?.tts_models ?? []) : []),
+    ...(ttsProvider === "api" || ttsProvider === "auto" ? API_TTS_MODELS : []),
+    ...(ttsProvider === "local" || ttsProvider === "auto" ? [{ id: "kokoro", name: "Kokoro", provider: "Local" }] : []),
+  ]);
+  const sttOptions = unique([
+    ...(sttProvider === "openrouter" || sttProvider === "auto" ? [OPENROUTER_STT_FALLBACK, ...(catalog?.stt_models ?? [])] : []),
+    ...(sttProvider === "api" || sttProvider === "auto" ? API_STT_MODELS : []),
+    ...(sttProvider === "local" || sttProvider === "auto" ? [{ id: "whisper-large-v3-turbo", name: "Whisper Large V3 Turbo", provider: "Local" }] : []),
+  ]);
+  const voiceOptions = catalog?.voices ?? [];
+
+  const stopPreview = useCallback(() => {
+    audioRef.current?.pause();
+    audioRef.current = null;
+    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    objectUrlRef.current = null;
+    setPreview("idle");
+  }, []);
+  useEffect(() => () => stopPreview(), [stopPreview]);
+
+  async function testVoice() {
+    if (preview !== "idle") { stopPreview(); return; }
+    setPreview("loading");
+    setPreviewError("");
+    try {
+      const response = await fetch(`${API_URL}/voice/tts`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "Olá! Esta é uma prévia da voz deste modelo.",
+          voice: voice || "alloy",
+          provider: ttsProvider,
+          model: config.tts_model || undefined,
+        }),
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error(detail.detail || "Não foi possível gerar a prévia");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      objectUrlRef.current = url;
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onended = stopPreview;
+      audio.onerror = () => { setPreviewError("O áudio retornado não pôde ser reproduzido."); stopPreview(); };
+      await audio.play();
+      setPreview("playing");
+    } catch (error) {
+      stopPreview();
+      setPreviewError(error instanceof Error ? error.message : "Falha ao testar a voz");
+    }
+  }
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border bg-surface">
+      <div className="grid divide-y divide-border lg:grid-cols-2 lg:divide-x lg:divide-y-0">
+        <div className="space-y-3 p-4">
+          <div className="flex items-start gap-2.5">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent-hover"><Volume2 size={16} /></span>
+            <span>
+              <span className="block text-sm font-semibold text-ink">Fala · TTS</span>
+              <span className="block text-[11px] text-muted">Transforma a resposta do modelo em áudio.</span>
+            </span>
+          </div>
+          <ProviderPicker kind="tts" value={ttsProvider} catalog={catalog} onChange={(value) => onConfigChange({ tts_provider: value, tts_model: "" })} />
+          <SearchChoice label="Modelo de voz" value={config.tts_model ?? ""} options={ttsOptions} placeholder="Usar modelo padrão do provedor" onChange={(value) => onConfigChange({ tts_model: value })} />
+          <SearchChoice label="Voz" value={voice} options={voiceOptions} placeholder="Escolher uma voz" onChange={onVoiceChange} />
+          <button
+            type="button"
+            onClick={testVoice}
+            disabled={preview === "loading"}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent/30 bg-accent/10 px-3 py-2 text-sm font-medium text-accent-hover transition-colors hover:bg-accent/15 disabled:cursor-wait disabled:opacity-70"
+          >
+            {preview === "loading" ? <Loader2 size={15} className="animate-spin" /> : preview === "playing" ? <Square size={14} fill="currentColor" /> : <Play size={15} fill="currentColor" />}
+            {preview === "loading" ? "Gerando prévia…" : preview === "playing" ? "Parar teste" : "Testar voz"}
+          </button>
+          {previewError && <p role="alert" className="text-xs text-red-400">{previewError}</p>}
+        </div>
+
+        <div className="space-y-3 p-4">
+          <div className="flex items-start gap-2.5">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-surface2 text-ink-soft"><Mic2 size={16} /></span>
+            <span>
+              <span className="block text-sm font-semibold text-ink">Escuta · STT</span>
+              <span className="block text-[11px] text-muted">Transcreve o microfone antes de enviar a mensagem.</span>
+            </span>
+          </div>
+          <ProviderPicker kind="stt" value={sttProvider} catalog={catalog} onChange={(value) => onConfigChange({ stt_provider: value, stt_model: "" })} />
+          <SearchChoice label="Modelo de transcrição" value={config.stt_model ?? ""} options={sttOptions} placeholder="Usar modelo padrão do provedor" onChange={(value) => onConfigChange({ stt_model: value })} />
+          <div className="rounded-xl border border-border bg-bg px-3 py-2.5 text-xs leading-5 text-muted">
+            Com OpenRouter, o áudio vai ao endpoint de transcrição usando a mesma chave do chat. O modelo escolhido aqui vale para o microfone e para o modo voz deste modelo.
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-bg/40 px-4 py-2.5 text-[11px] text-muted">
+        <span>As configurações são salvas somente neste modelo.</span>
+        <span>Credenciais: Configurações → APIs / Provedores</span>
+      </div>
     </div>
   );
 }
@@ -600,14 +807,17 @@ export default function ModelEditor({
   );
   const teamLabel = (id: string) => teamCandidates.find((m) => m.id === id)?.name ?? id;
   const [ttsVoice, setTtsVoice] = useState(model?.tts_voice ?? "");
-  // vozes + status da conexão de Voz Local (Kokoro/clonagem) p/ o seletor de voz
-  const [voices, setVoices] = useState<string[]>([]);
-  const [voiceInfo, setVoiceInfo] = useState<{ configured: boolean; enabled: boolean; base_url?: string } | null>(null);
+  // Catálogos especializados de TTS/STT. Diferente do catálogo de chat, o
+  // OpenRouter só devolve estes modelos quando filtramos pela modalidade.
+  const [voiceCatalog, setVoiceCatalog] = useState<VoiceCatalog | null>(null);
   useEffect(() => {
-    api.get<{ configured: boolean; enabled: boolean; base_url?: string; voices?: string[] }>("/voice/config")
-      .then((r) => { setVoiceInfo({ configured: r.configured, enabled: r.enabled, base_url: r.base_url }); setVoices(r.voices ?? []); })
+    api.get<VoiceCatalog>("/voice/catalog")
+      .then(setVoiceCatalog)
       .catch(() => {});
   }, []);
+  const voiceCfg: ModelVoiceConfig = filterConfig.voice ?? {};
+  const setVoiceCfg = (patch: Partial<ModelVoiceConfig>) =>
+    setFilterConfig((fc) => ({ ...fc, voice: { ...(fc.voice ?? {}), ...patch } }));
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -848,6 +1058,19 @@ export default function ModelEditor({
     for (const f of filters) if (filterConfig[f]) cleanFilterConfig[f] = filterConfig[f];
     // preserva a config POR-MODELO das ferramentas internas (web/finance/deep/extração)
     if (filterConfig.tools) cleanFilterConfig.tools = filterConfig.tools;
+    // roteamento TTS/STT por-modelo. Mantém valores vazios como herança do
+    // provedor, mas persiste a escolha explícita de origem.
+    if (filterConfig.voice) {
+      const vc = filterConfig.voice;
+      const provider = (value: unknown): VoiceProvider =>
+        value === "openrouter" || value === "api" || value === "local" ? value : "auto";
+      cleanFilterConfig.voice = {
+        tts_provider: provider(vc.tts_provider),
+        tts_model: String(vc.tts_model ?? "").trim().slice(0, 255),
+        stt_provider: provider(vc.stt_provider),
+        stt_model: String(vc.stt_model ?? "").trim().slice(0, 255),
+      };
+    }
     // config dos subagentes (time/modo/limites) — só quando a permissão está ligada
     if (subOn) {
       const sc = filterConfig.subagents ?? {};
@@ -1102,9 +1325,15 @@ export default function ModelEditor({
           <Section
             title="Voz"
             icon={<Volume2 size={15} />}
-            hint="Voz usada quando este modelo fala (TTS). O provedor vem da sua conexão de Voz Local (Kokoro/clonagem) ou, na ausência dela, do provedor global. Configure a conexão em Configurações → Voz."
+            hint="Configuração por-modelo para falar respostas (TTS) e transcrever o microfone (STT). Pode usar OpenRouter, uma API OpenAI-compatível ou o servidor local."
           >
-            <VoicePicker voices={voices} provider={voiceInfo} value={ttsVoice} onChange={setTtsVoice} />
+            <VoiceStudio
+              catalog={voiceCatalog}
+              config={voiceCfg}
+              voice={ttsVoice}
+              onConfigChange={setVoiceCfg}
+              onVoiceChange={setTtsVoice}
+            />
 
           </Section>
 

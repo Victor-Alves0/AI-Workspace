@@ -9,11 +9,13 @@ provedor global (Kokoro não faz STT).
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import json
 import uuid
 
 import httpx
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
@@ -25,7 +27,8 @@ from .config import get_settings
 from .db import get_db
 from .integrations import elevenlabs_service, voice_service
 from .models import Chat, Folder, ModelConfig, User
-from .secrets_service import VOICE_KEY, WAKE_CONFIG_KEY, get_secret, set_secret
+from .providers import openrouter
+from .secrets_service import OPENROUTER_KEY, VOICE_KEY, WAKE_CONFIG_KEY, get_secret, set_secret
 
 router = APIRouter(prefix="/voice", tags=["voice"])
 
@@ -37,6 +40,10 @@ _MAX_TTS_CHARS = 4096
 class TTSIn(BaseModel):
     text: str = Field(min_length=1, max_length=_MAX_TTS_CHARS)
     voice: str | None = Field(default=None, max_length=120)  # aceita mistura ex.: "af_bella(2)+af_sky(1)"
+    model_config_id: uuid.UUID | None = None
+    # Overrides são usados pelo botão Testar antes de salvar o modelo.
+    provider: str | None = Field(default=None, max_length=32)
+    model: str | None = Field(default=None, max_length=255)
 
 
 class VoiceConfigIn(BaseModel):
@@ -56,13 +63,46 @@ async def _global_key(db: AsyncSession, user: User) -> str:
     return key
 
 
-async def _resolve_tts(db: AsyncSession, user: User) -> tuple[str, str, str]:
-    """(base_url, api_key, tts_model) do TTS: conexão local do usuário → provedor global."""
-    prov = await voice_service.get_provider(db, user.id)
-    if prov:
-        return prov["base_url"], prov["api_key"], prov["tts_model"]
+async def _model_voice_config(
+    db: AsyncSession, user: User, model_config_id: uuid.UUID | None
+) -> dict:
+    if model_config_id is None:
+        return {}
+    mc = await db.scalar(
+        select(ModelConfig).where(ModelConfig.id == model_config_id, ModelConfig.user_id == user.id)
+    )
+    if mc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Modelo não encontrado")
+    raw = (mc.filter_config or {}).get("voice") or {}
+    return raw if isinstance(raw, dict) else {}
+
+
+async def _resolve_tts(
+    db: AsyncSession,
+    user: User,
+    *,
+    provider: str = "auto",
+    model: str | None = None,
+) -> tuple[str, str, str]:
+    """Resolve (base_url, api_key, modelo) para a rota escolhida no modelo."""
     s = get_settings()
-    return s.voice_base_url, await _global_key(db, user), s.tts_model
+    if provider == "openrouter":
+        key = await get_secret(db, user.id, OPENROUTER_KEY)
+        if not key:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Configure sua chave do OpenRouter primeiro")
+        return s.openrouter_base_url, key, model or "openai/gpt-4o-mini-tts-2025-12-15"
+    if provider == "api":
+        return s.voice_base_url, await _global_key(db, user), model or s.tts_model
+    prov = await voice_service.get_provider(db, user.id)
+    if provider == "local":
+        if not prov:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Configure e ative o servidor de voz local primeiro")
+        return prov["base_url"], prov["api_key"], model or prov["tts_model"]
+    if provider != "auto":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Provedor de voz inválido")
+    if prov:
+        return prov["base_url"], prov["api_key"], model or prov["tts_model"]
+    return s.voice_base_url, await _global_key(db, user), model or s.tts_model
 
 
 @router.post("/tts")
@@ -86,7 +126,12 @@ async def tts(
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Falha no TTS ElevenLabs: {exc}") from None
         return Response(content=data, media_type=mime)
 
-    base_url, key, model = await _resolve_tts(db, user)
+    voice_cfg = await _model_voice_config(db, user, body.model_config_id)
+    provider = body.provider or str(voice_cfg.get("tts_provider") or "auto")
+    requested_model = body.model or str(voice_cfg.get("tts_model") or "") or None
+    base_url, key, model = await _resolve_tts(
+        db, user, provider=provider, model=requested_model
+    )
     voice = body.voice or get_settings().tts_voice
     try:
         async with httpx.AsyncClient(timeout=60) as client:
@@ -109,7 +154,7 @@ async def tts(
         ) from None
     if resp.status_code != 200:
         raise HTTPException(resp.status_code, f"Falha no TTS: {resp.text[:200]}")
-    return Response(content=resp.content, media_type="audio/mpeg")
+    return Response(content=resp.content, media_type=resp.headers.get("content-type", "audio/mpeg"))
 
 
 async def _try_transcribe(base_url: str, key: str, model: str, filename: str, audio: bytes, mime: str):
@@ -132,9 +177,52 @@ async def _try_transcribe(base_url: str, key: str, model: str, filename: str, au
     return resp.json()
 
 
+def _audio_format(filename: str, mime: str) -> str:
+    known = {
+        "audio/wav": "wav", "audio/x-wav": "wav", "audio/mpeg": "mp3",
+        "audio/mp4": "m4a", "audio/x-m4a": "m4a", "audio/ogg": "ogg",
+        "audio/webm": "webm", "audio/flac": "flac", "audio/aac": "aac",
+    }
+    if mime.split(";", 1)[0].lower() in known:
+        return known[mime.split(";", 1)[0].lower()]
+    suffix = filename.rsplit(".", 1)[-1].lower() if "." in filename else "webm"
+    return suffix if suffix in {"wav", "mp3", "m4a", "ogg", "webm", "flac", "aac"} else "webm"
+
+
+async def _transcribe_openrouter(
+    key: str, model: str, filename: str, audio: bytes, mime: str
+) -> dict:
+    """OpenRouter STT usa JSON/base64 no endpoint dedicado de transcrição."""
+    s = get_settings()
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{s.openrouter_base_url}/audio/transcriptions",
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": s.openrouter_app_url,
+                    "X-Title": s.openrouter_app_name,
+                },
+                json={
+                    "model": model,
+                    "input_audio": {
+                        "data": base64.b64encode(audio).decode("ascii"),
+                        "format": _audio_format(filename, mime),
+                    },
+                },
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"OpenRouter STT inacessível: {exc}") from None
+    if resp.status_code != 200:
+        raise HTTPException(resp.status_code, f"Falha no STT OpenRouter: {resp.text[:200]}")
+    return resp.json()
+
+
 @router.post("/stt")
 async def stt(
     file: UploadFile = File(...),
+    model_config_id: uuid.UUID | None = Form(default=None),
     user: User = Depends(require_approved),
     db: AsyncSession = Depends(get_db),
 ):
@@ -148,13 +236,33 @@ async def stt(
         )
     fname = file.filename or "audio.webm"
     mime = file.content_type or "audio/webm"
+    voice_cfg = await _model_voice_config(db, user, model_config_id)
+    provider = str(voice_cfg.get("stt_provider") or "auto")
+    requested_model = str(voice_cfg.get("stt_model") or "") or None
+
+    if provider == "openrouter":
+        key = await get_secret(db, user.id, OPENROUTER_KEY)
+        if not key:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Configure sua chave do OpenRouter primeiro")
+        return await _transcribe_openrouter(
+            key, requested_model or "openai/whisper-large-v3-turbo", fname, audio, mime
+        )
+
     # 1º a conexão de voz LOCAL do usuário (stacks como speaches/faster-whisper
     # expõem /audio/transcriptions; Kokoro devolve 404 e caímos adiante)…
     prov = await voice_service.get_provider(db, user.id)
-    if prov:
-        out = await _try_transcribe(prov["base_url"], prov["api_key"], s.stt_model, fname, audio, mime)
+    if provider == "local" and not prov:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Configure e ative o servidor de voz local primeiro")
+    if provider in {"auto", "local"} and prov:
+        out = await _try_transcribe(
+            prov["base_url"], prov["api_key"], requested_model or s.stt_model, fname, audio, mime
+        )
         if out is not None:
             return out
+        if provider == "local":
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "O servidor de voz local não oferece transcrição")
+    if provider not in {"auto", "api", "local"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Provedor de transcrição inválido")
     # …depois o provedor global (exige a chave)
     key = await get_secret(db, user.id, VOICE_KEY)
     if not key:
@@ -163,10 +271,61 @@ async def stt(
             "Nenhum servidor de transcrição disponível: a conexão de Voz Local não faz "
             "STT e não há chave do provedor de voz configurada.",
         )
-    out = await _try_transcribe(s.voice_base_url, key, s.stt_model, fname, audio, mime)
+    out = await _try_transcribe(
+        s.voice_base_url, key, requested_model or s.stt_model, fname, audio, mime
+    )
     if out is None:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Provedor de voz global inacessível")
     return out
+
+
+_OPENAI_VOICES = [
+    "alloy", "ash", "ballad", "coral", "echo", "fable", "onyx",
+    "nova", "sage", "shimmer", "verse", "marin", "cedar",
+]
+
+
+@router.get("/catalog")
+async def voice_catalog(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Catálogo especializado para os seletores por-modelo de TTS e STT."""
+    key = await get_secret(db, user.id, OPENROUTER_KEY)
+    tts_models: list[dict] = []
+    stt_models: list[dict] = []
+    if key:
+        try:
+            speech, transcription = await asyncio.gather(
+                openrouter.list_models(key, output_modality="speech"),
+                openrouter.list_models(key, output_modality="transcription"),
+            )
+            tts_models = [
+                {"id": m.get("id"), "name": m.get("name") or m.get("id"), "provider": "OpenRouter"}
+                for m in speech if m.get("id")
+            ]
+            stt_models = [
+                {"id": m.get("id"), "name": m.get("name") or m.get("id"), "provider": "OpenRouter"}
+                for m in transcription if m.get("id")
+            ]
+        except httpx.HTTPError:
+            pass
+    local_cfg = await voice_service.public_config(db, user.id)
+    local_voices = await voice_service.list_user_voices(db, user.id) if local_cfg["configured"] and local_cfg["enabled"] else []
+    eleven_voices = await _elevenlabs_voice_names(db, user)
+    return {
+        "providers": {
+            "openrouter": {"configured": bool(key), "label": "OpenRouter API"},
+            "api": {"configured": bool(await get_secret(db, user.id, VOICE_KEY)), "label": "API de voz"},
+            "local": {"configured": bool(local_cfg["configured"] and local_cfg["enabled"]), "label": "Servidor local"},
+        },
+        "tts_models": tts_models,
+        "stt_models": stt_models,
+        "voices": [
+            *[{"id": v, "name": v.title(), "provider": "OpenAI/API"} for v in _OPENAI_VOICES],
+            *[{"id": v, "name": v, "provider": "Local"} for v in local_voices],
+            *[{"id": v, "name": v.removeprefix(elevenlabs_service.EL_VOICE_PREFIX), "provider": "ElevenLabs"} for v in eleven_voices],
+        ],
+    }
 
 
 # --------------------------------------------------------------------------- #

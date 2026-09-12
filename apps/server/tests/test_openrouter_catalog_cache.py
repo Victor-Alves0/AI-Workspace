@@ -7,6 +7,8 @@ fetches reais.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pytest
 
 from aiworkspace.providers import openrouter
@@ -25,6 +27,7 @@ class _FakeResp:
 
 class _FakeClient:
     calls = 0
+    params: ClassVar[list] = []
 
     def __init__(self, *a, **k):
         pass
@@ -37,6 +40,7 @@ class _FakeClient:
 
     async def get(self, *a, **k):
         _FakeClient.calls += 1
+        _FakeClient.params.append(k.get("params"))
         return _FakeResp([{"id": "m1"}, {"id": "m2"}])
 
 
@@ -44,6 +48,7 @@ class _FakeClient:
 def _reset(monkeypatch):
     openrouter.invalidate_catalog()
     _FakeClient.calls = 0
+    _FakeClient.params = []
     monkeypatch.setattr(openrouter.httpx, "AsyncClient", _FakeClient)
     yield
     openrouter.invalidate_catalog()
@@ -80,3 +85,17 @@ async def test_expiry_refetches(monkeypatch):
     monkeypatch.setattr(openrouter, "_CATALOG_TTL", -1)  # tudo já expirou
     await openrouter.list_models("key")
     assert _FakeClient.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_audio_modalities_have_isolated_catalogs():
+    await openrouter.list_models("key")
+    await openrouter.list_models("key", output_modality="speech")
+    await openrouter.list_models("key", output_modality="transcription")
+    await openrouter.list_models("key", output_modality="speech")
+    assert _FakeClient.calls == 3
+    assert _FakeClient.params == [
+        None,
+        {"output_modalities": "speech"},
+        {"output_modalities": "transcription"},
+    ]

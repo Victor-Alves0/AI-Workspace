@@ -781,7 +781,7 @@ export default function ChatPage() {
   // "Ler em voz alta": usa a voz do modelo que PRODUZIU a mensagem (casa o nome do
   // modelo da resposta com um modelo custom), caindo no modelo atual do chat. Sem
   // isto o botão usava só o modelo selecionado, ignorando a voz configurada.
-  const voiceFor = useCallback((m: Message): string | undefined => {
+  const voiceSettingsFor = useCallback((m: Message): { voice?: string; modelConfigId?: string } => {
     const configId = m.usage?.model_config_id;
     const byId = configId ? customModels.find((c) => c.id === configId) : undefined;
     const name = m.usage?.model_name;
@@ -790,7 +790,8 @@ export default function ChatPage() {
     // outro preset por acidente.
     const sameName = name ? customModels.filter((c) => c.name === name) : [];
     const legacyByName = sameName.length === 1 ? sameName[0] : undefined;
-    return (byId ?? legacyByName ?? curCustom)?.tts_voice ?? undefined;
+    const selected = byId ?? legacyByName ?? curCustom;
+    return { voice: selected?.tts_voice ?? undefined, modelConfigId: selected?.id };
   }, [customModels, curCustom]);
   const stopMessageSpeech = useCallback(() => {
     const current = messageSpeechRef.current;
@@ -808,12 +809,13 @@ export default function ChatPage() {
     const run = current.run + 1;
     messageSpeechRef.current = { id: m.id, run };
     setSpeakingMessageId(m.id);
-    void speak(m.content, voiceFor(m)).finally(() => {
+    const voiceSettings = voiceSettingsFor(m);
+    void speak(m.content, voiceSettings.voice, voiceSettings.modelConfigId).finally(() => {
       if (messageSpeechRef.current.run !== run) return;
       messageSpeechRef.current = { id: null, run };
       setSpeakingMessageId(null);
     });
-  }, [voiceFor, stopMessageSpeech]);
+  }, [voiceSettingsFor, stopMessageSpeech]);
   useEffect(() => subscribeSpeechProgress(setSpeechProgress), []);
   useEffect(() => () => {
     messageSpeechRef.current.run += 1;
@@ -1582,7 +1584,7 @@ export default function ChatPage() {
         try {
           const blob = await rec.stop();
           try {
-            const t = await transcribe(blob);
+            const t = await transcribe(blob, curCustom?.id ?? active?.model_config_id);
             void browser?.stop();
             setInput((v) => (v ? v + " " : "") + t);
           } catch (e) {
@@ -1695,7 +1697,7 @@ export default function ChatPage() {
 
       setVoicePhase("thinking");
       let text = "";
-      try { text = (await (sttLocal ? transcribeWhisper(blob) : transcribe(blob))).trim(); } catch { text = ""; }
+      try { text = (await (sttLocal ? transcribeWhisper(blob) : transcribe(blob, curCustom?.id ?? session.model_config_id))).trim(); } catch { text = ""; }
       if (!voiceRef.current.active) break;
       if (!text) { if (loops) continue; else break; }
       firstTurn = false;
@@ -1705,7 +1707,7 @@ export default function ChatPage() {
 
       if (session.auto_speak && reply) {
         setVoicePhase("speaking");
-        try { await speak(reply, voice); } catch { /* fallback interno */ }
+        try { await speak(reply, voice, curCustom?.id ?? session.model_config_id); } catch { /* fallback interno */ }
       }
       if (!voiceRef.current.active || !loops) break;
     }

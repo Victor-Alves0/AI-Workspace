@@ -33,9 +33,10 @@ export function subscribeSpeechProgress(
 }
 
 // Envia áudio gravado para STT e retorna o texto transcrito.
-export async function transcribe(blob: Blob): Promise<string> {
+export async function transcribe(blob: Blob, modelConfigId?: string | null): Promise<string> {
   const fd = new FormData();
   fd.append("file", blob, "audio.webm");
+  if (modelConfigId) fd.append("model_config_id", modelConfigId);
   const res = await fetch(`${API_URL}/voice/stt`, {
     method: "POST",
     credentials: "include",
@@ -176,7 +177,11 @@ export function stopSpeaking(): void {
 // Converte texto em fala (TTS) e toca o áudio. Servidor primeiro (voz local/
 // OpenAI); qualquer falha cai na voz do navegador. Resolve quando a fala TERMINA
 // (não só quando começa) — o modo voz espera isso antes de voltar a ouvir.
-export async function speak(text: string, voice?: string): Promise<void> {
+export async function speak(
+  text: string,
+  voice?: string,
+  modelConfigId?: string | null,
+): Promise<void> {
   // Cancela uma leitura anterior e guarda a geração desta chamada. Se o usuário
   // apertar Parar enquanto o TTS ainda está baixando, os bytes não começam a tocar.
   stopSpeaking();
@@ -187,7 +192,7 @@ export async function speak(text: string, voice?: string): Promise<void> {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, voice }),
+      body: JSON.stringify({ text, voice, model_config_id: modelConfigId || undefined }),
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? "TTS falhou");
     // Aguarda o arquivo inteiro antes de criar o player. Assim duração e seek
