@@ -256,33 +256,99 @@ def _request(conn: dict, method: str, path_with_query: str,
 # --------------------------------------------------------------------------- #
 def _discover_devices(conn: dict) -> tuple[list[dict], set[str]]:
     """Todos os dispositivos das contas vinculadas ao projeto. Devolve
-    ([{id,name,category,online}], {uids})."""
+    ([{id,name,category,online}], {uids}).
+
+    Tenta primeiro a API de usuários associados (Smart Life) e, quando ela
+    volta vazia/indisponível, a API atual de dispositivos do projeto. A Tuya
+    mantém contratos diferentes entre pacotes e data centers."""
     out: list[dict] = []
     uids: set[str] = set()
+    seen: set[str] = set()
+    errors: list[str] = []
+
+    def add(raw: Any) -> None:
+        if not isinstance(raw, dict):
+            return
+        did = str(raw.get("id") or "").strip()
+        if not did or did in seen:
+            return
+        seen.add(did)
+        out.append({
+            "id": did,
+            "name": raw.get("customName") or raw.get("name") or did,
+            "category": raw.get("category") or "",
+            "online": bool(raw.get("online", raw.get("isOnline", False))),
+        })
+        if raw.get("uid"):
+            uids.add(str(raw["uid"]))
+
+    def result_or_error(response: dict, endpoint: str) -> Any:
+        if response.get("success") is False:
+            detail = response.get("msg") or response.get("code") or "erro desconhecido"
+            raise RuntimeError(f"{endpoint}: {detail}")
+        return response.get("result")
+
+    # O endpoint documentado usa `has_more` (não `has_next`) e exemplos com
+    # páginas de 20. Alguns data centers recusam silenciosamente size=100.
     last = ""
-    for _ in range(20):  # teto de páginas
-        path = "/v1.0/iot-01/associated-users/devices?size=100"
-        if last:
-            path += f"&last_row_key={last}"
-        r = _request(conn, "GET", path)
-        res = r.get("result") or {}
-        for d in res.get("devices", []) or []:
-            did = d.get("id")
-            if not did:
-                continue
-            out.append({
-                "id": did,
-                "name": d.get("name") or did,
-                "category": d.get("category", ""),
-                "online": bool(d.get("online")),
-            })
-            if d.get("uid"):
-                uids.add(str(d["uid"]))
-        if not res.get("has_next"):
-            break
-        last = res.get("last_row_key") or ""
-        if not last:
-            break
+    try:
+        for _ in range(20):  # teto de páginas
+            path = "/v1.0/iot-01/associated-users/devices?size=20"
+            if last:
+                path += f"&last_row_key={last}"
+            res = result_or_error(_request(conn, "GET", path), "usuários associados")
+            batch = (
+                (res.get("devices") or res.get("list") or [])
+                if isinstance(res, dict)
+                else (res if isinstance(res, list) else [])
+            )
+            if not isinstance(batch, list):
+                batch = []
+            for device in batch:
+                add(device)
+            if not isinstance(res, dict) or not (
+                res.get("has_more") or res.get("has_next")
+            ):
+                break
+            next_key = str(res.get("last_row_key") or "")
+            if not next_key or next_key == last:
+                break
+            last = next_key
+    except RuntimeError as exc:
+        errors.append(str(exc))
+
+    if out:
+        return out, uids
+
+    # API atual (2026) do IoT Core: lista dispositivos diretamente em `result`,
+    # usa camelCase e limita page_size a 20. Serve também quando o pacote antigo
+    # de "associated users" não está habilitado no projeto.
+    last_id = ""
+    try:
+        for _ in range(20):
+            path = "/v2.0/cloud/thing/device?page_size=20"
+            if last_id:
+                path += f"&last_id={last_id}"
+            res = result_or_error(_request(conn, "GET", path), "dispositivos do projeto")
+            if isinstance(res, dict):
+                batch = res.get("devices") or res.get("list") or []
+            else:
+                batch = res if isinstance(res, list) else []
+            if not isinstance(batch, list):
+                batch = []
+            for device in batch:
+                add(device)
+            if len(batch) < 20:
+                break
+            next_id = str((batch[-1] if isinstance(batch[-1], dict) else {}).get("id") or "")
+            if not next_id or next_id == last_id:
+                break
+            last_id = next_id
+    except RuntimeError as exc:
+        errors.append(str(exc))
+
+    if not out and errors:
+        raise RuntimeError("; ".join(errors))
     return out, uids
 
 
@@ -553,7 +619,7 @@ def configure_ac(conn: dict, temperature: int = 23, mode: str = "frio",
         return {"error": f"'{d['name']}' não expõe controle de temperatura — use ligar/desligar."}
     code, vals = tf
     factor = _temp_factor(vals)
-    val = int(round(float(temperature) * factor))
+    val = round(float(temperature) * factor)
     mn, mx = vals.get("min"), vals.get("max")
     if isinstance(mn, (int, float)) and isinstance(mx, (int, float)) and not (mn <= val <= mx):
         return {"error": f"temperatura {temperature}°C fora do limite ({mn / factor:.0f}-{mx / factor:.0f}°C)"}

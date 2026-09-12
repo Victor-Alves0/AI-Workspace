@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, Code2, Copy, FlaskConical, GitBranch, Image as ImageIcon, Link2, Loader2, Menu, MessageSquareDashed, Mic, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
+import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, Code2, Copy, FlaskConical, GitBranch, Image as ImageIcon, Link2, Loader2, Menu, MessageSquareDashed, Mic, Pause, Play, RotateCcw, RotateCw, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamRoundtable } from "@/lib/sse";
-import { speak, startBrowserDictation, startRecording, stopSpeaking, transcribe } from "@/lib/voice";
+import { seekSpeaking, setSpeakingRate, speak, startBrowserDictation, startRecording, stopSpeaking, subscribeSpeechProgress, toggleSpeakingPaused, transcribe, type SpeechProgress } from "@/lib/voice";
 import { captureUtterance } from "@/lib/voiceSession";
 import { transcribeWhisper } from "@/lib/wakeword";
 import { onVoiceActivate } from "@/lib/desktop";
@@ -382,6 +382,9 @@ export default function ChatPage() {
   const [voiceLevel, setVoiceLevel] = useState(0);
   const voiceRef = useRef<{ active: boolean; utter: { stop: () => void; cancel: () => void } | null; session: VoiceSession | null }>({ active: false, utter: null, session: null });
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const [speechProgress, setSpeechProgress] = useState<SpeechProgress>({
+    phase: "idle", currentTime: 0, duration: 0, rate: 1, seekable: false,
+  });
   // Id/run são transitórios: ficam em ref para trocar/parar a leitura sem fazer
   // callbacks de todas as mensagens dependerem do estado que muda a cada clique.
   const messageSpeechRef = useRef<{ id: string | null; run: number }>({ id: null, run: 0 });
@@ -789,12 +792,16 @@ export default function ChatPage() {
     const legacyByName = sameName.length === 1 ? sameName[0] : undefined;
     return (byId ?? legacyByName ?? curCustom)?.tts_voice ?? undefined;
   }, [customModels, curCustom]);
+  const stopMessageSpeech = useCallback(() => {
+    const current = messageSpeechRef.current;
+    messageSpeechRef.current = { id: null, run: current.run + 1 };
+    stopSpeaking();
+    setSpeakingMessageId(null);
+  }, []);
   const toggleMessageSpeech = useCallback((m: Message) => {
     const current = messageSpeechRef.current;
     if (current.id === m.id) {
-      messageSpeechRef.current = { id: null, run: current.run + 1 };
-      stopSpeaking();
-      setSpeakingMessageId(null);
+      stopMessageSpeech();
       return;
     }
     stopSpeaking();
@@ -806,7 +813,8 @@ export default function ChatPage() {
       messageSpeechRef.current = { id: null, run };
       setSpeakingMessageId(null);
     });
-  }, [voiceFor]);
+  }, [voiceFor, stopMessageSpeech]);
+  useEffect(() => subscribeSpeechProgress(setSpeechProgress), []);
   useEffect(() => () => {
     messageSpeechRef.current.run += 1;
     stopSpeaking();
@@ -2407,6 +2415,9 @@ export default function ChatPage() {
                       {showAsk && askSpec && (
                         <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                       )}
+                      {speakingMessageId && (
+                        <SpeechController progress={speechProgress} onClose={stopMessageSpeech} />
+                      )}
                       <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
                     </div>
                   </div>
@@ -2659,6 +2670,80 @@ function statusFor(f: {
   if (f.phase === "tool") return "Executando ferramenta…";
   if (f.phase === "streaming") return "Respondendo…";
   return "Trabalhando…"; // fallback para retomada de stream sem evento classificável
+}
+
+function formatSpeechTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const rounded = Math.floor(seconds);
+  return `${Math.floor(rounded / 60)}:${String(rounded % 60).padStart(2, "0")}`;
+}
+
+function SpeechController({ progress, onClose }: { progress: SpeechProgress; onClose: () => void }) {
+  const loading = progress.phase === "loading";
+  const paused = progress.phase === "paused";
+  const rates = [1, 1.25, 1.5, 2];
+  const currentRate = rates.findIndex((rate) => rate === progress.rate);
+  const nextRate = rates[(currentRate + 1 + rates.length) % rates.length];
+  const elapsed = formatSpeechTime(progress.currentTime);
+  const duration = progress.duration > 0 ? formatSpeechTime(progress.duration) : null;
+
+  return (
+    <div
+      role="region"
+      aria-label="Controles da leitura em voz alta"
+      className="animate-pop absolute bottom-[calc(100%+0.75rem)] right-0 z-30 flex max-w-[calc(100vw-2rem)] items-center gap-1 rounded-2xl border border-border bg-surface/95 p-1.5 text-ink shadow-menu backdrop-blur"
+    >
+      <button
+        type="button"
+        onClick={toggleSpeakingPaused}
+        disabled={loading}
+        title={paused ? "Continuar leitura" : "Pausar leitura"}
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-white transition-colors hover:bg-accent-hover disabled:cursor-wait disabled:opacity-70"
+      >
+        {loading ? <Loader2 size={16} className="animate-spin" /> : paused ? <Play size={16} fill="currentColor" /> : <Pause size={16} fill="currentColor" />}
+      </button>
+      <span aria-live="polite" className="min-w-[4.4rem] px-1 text-center font-mono text-[11px] tabular-nums text-ink-soft">
+        {elapsed}{duration ? ` / ${duration}` : ""}
+      </span>
+      <button
+        type="button"
+        onClick={() => setSpeakingRate(nextRate)}
+        title="Alterar velocidade"
+        className="h-9 min-w-10 rounded-xl px-2 text-xs font-semibold text-ink-soft transition-colors hover:bg-hover hover:text-ink"
+      >
+        {progress.rate}×
+      </button>
+      <button
+        type="button"
+        onClick={() => seekSpeaking(-15)}
+        disabled={!progress.seekable}
+        title={progress.seekable ? "Voltar 15 segundos" : "Indisponível na voz do navegador"}
+        className="relative flex h-9 w-9 items-center justify-center rounded-xl text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-35"
+      >
+        <RotateCcw size={19} />
+        <span className="absolute text-[8px] font-bold">15</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => seekSpeaking(15)}
+        disabled={!progress.seekable}
+        title={progress.seekable ? "Avançar 15 segundos" : "Indisponível na voz do navegador"}
+        className="relative flex h-9 w-9 items-center justify-center rounded-xl text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-35"
+      >
+        <RotateCw size={19} />
+        <span className="absolute text-[8px] font-bold">15</span>
+      </button>
+      <span className="mx-0.5 h-6 w-px bg-border" />
+      <button
+        type="button"
+        onClick={onClose}
+        title="Parar e fechar"
+        className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition-colors hover:bg-red-500/15 hover:text-red-400"
+      >
+        <X size={18} />
+      </button>
+    </div>
+  );
 }
 
 function MessageBubble({

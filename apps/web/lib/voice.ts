@@ -1,5 +1,37 @@
 import { API_URL } from "./api";
 
+export interface SpeechProgress {
+  phase: "idle" | "loading" | "playing" | "paused";
+  currentTime: number;
+  duration: number;
+  rate: number;
+  seekable: boolean;
+}
+
+const IDLE_SPEECH: SpeechProgress = {
+  phase: "idle",
+  currentTime: 0,
+  duration: 0,
+  rate: 1,
+  seekable: false,
+};
+
+let _speechProgress: SpeechProgress = IDLE_SPEECH;
+const _speechListeners = new Set<(state: SpeechProgress) => void>();
+
+function publishSpeech(patch: Partial<SpeechProgress>): void {
+  _speechProgress = { ..._speechProgress, ...patch };
+  for (const listener of _speechListeners) listener(_speechProgress);
+}
+
+export function subscribeSpeechProgress(
+  listener: (state: SpeechProgress) => void,
+): () => void {
+  _speechListeners.add(listener);
+  listener(_speechProgress);
+  return () => _speechListeners.delete(listener);
+}
+
 // Envia áudio gravado para STT e retorna o texto transcrito.
 export async function transcribe(blob: Blob): Promise<string> {
   const fd = new FormData();
@@ -25,12 +57,28 @@ function browserSpeak(text: string): Promise<void> {
   const pt = window.speechSynthesis.getVoices().find((v) => v.lang?.toLowerCase().startsWith("pt"));
   if (pt) u.voice = pt;
   u.lang = pt?.lang ?? "pt-BR";
+  u.rate = _speechProgress.rate;
+  const estimatedDuration = Math.max(1, text.length / (14 * u.rate));
   return new Promise<void>((resolve) => {
     const done = () => {
-      if (_currentBrowserResolve === done) _currentBrowserResolve = null;
+      if (_currentBrowserResolve === done) {
+        _currentBrowserResolve = null;
+        _currentBrowserUtterance = null;
+        publishSpeech({ ...IDLE_SPEECH });
+      }
       resolve();
     };
     _currentBrowserResolve = done;
+    _currentBrowserUtterance = u;
+    u.onstart = () => publishSpeech({
+      phase: "playing", currentTime: 0, duration: estimatedDuration, seekable: false,
+    });
+    u.onpause = () => publishSpeech({ phase: "paused" });
+    u.onresume = () => publishSpeech({ phase: "playing" });
+    u.onboundary = (event) => publishSpeech({
+      currentTime: Math.max(0, event.elapsedTime),
+      duration: estimatedDuration,
+    });
     u.onend = done;
     u.onerror = done;
     window.speechSynthesis.speak(u);
@@ -39,8 +87,62 @@ function browserSpeak(text: string): Promise<void> {
 
 // Áudio em reprodução no momento (para o barge-in do modo voz poder cortá-lo).
 let _currentAudio: HTMLAudioElement | null = null;
+let _currentAudioFinish: (() => void) | null = null;
+let _currentBrowserUtterance: SpeechSynthesisUtterance | null = null;
 let _currentBrowserResolve: (() => void) | null = null;
 let _speechGeneration = 0;
+let _progressTimer: ReturnType<typeof setInterval> | null = null;
+
+function clearProgressTimer(): void {
+  if (_progressTimer) clearInterval(_progressTimer);
+  _progressTimer = null;
+}
+
+function publishAudioProgress(audio: HTMLAudioElement): void {
+  if (_currentAudio !== audio) return;
+  publishSpeech({
+    phase: audio.paused ? "paused" : "playing",
+    currentTime: Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
+    duration: Number.isFinite(audio.duration) ? audio.duration : 0,
+    rate: audio.playbackRate,
+    seekable: Number.isFinite(audio.duration) && audio.duration > 0,
+  });
+}
+
+export function toggleSpeakingPaused(): void {
+  if (_currentAudio) {
+    if (_currentAudio.paused) void _currentAudio.play();
+    else _currentAudio.pause();
+    publishAudioProgress(_currentAudio);
+    return;
+  }
+  if (!_currentBrowserUtterance || typeof window === "undefined") return;
+  if (window.speechSynthesis.paused) {
+    window.speechSynthesis.resume();
+    publishSpeech({ phase: "playing" });
+  } else {
+    window.speechSynthesis.pause();
+    publishSpeech({ phase: "paused" });
+  }
+}
+
+export function seekSpeaking(seconds: number): void {
+  const audio = _currentAudio;
+  if (!audio || !Number.isFinite(audio.duration)) return;
+  audio.currentTime = Math.max(0, Math.min(audio.duration, audio.currentTime + seconds));
+  publishAudioProgress(audio);
+}
+
+export function setSpeakingRate(rate: number): void {
+  const next = Math.max(0.5, Math.min(2, rate));
+  if (_currentAudio) {
+    _currentAudio.playbackRate = next;
+    publishAudioProgress(_currentAudio);
+  } else {
+    if (_currentBrowserUtterance) _currentBrowserUtterance.rate = next;
+    publishSpeech({ rate: next });
+  }
+}
 
 // Interrompe qualquer fala em curso (servidor ou navegador). Usado quando o usuário
 // volta a falar (barge-in) ou encerra o modo voz.
@@ -51,11 +153,16 @@ export function stopSpeaking(): void {
   }
   const finishBrowserSpeech = _currentBrowserResolve;
   _currentBrowserResolve = null;
+  _currentBrowserUtterance = null;
   finishBrowserSpeech?.();
   if (_currentAudio) {
     try { _currentAudio.pause(); } catch { /* noop */ }
-    _currentAudio = null;
+    const finishAudio = _currentAudioFinish;
+    _currentAudioFinish = null;
+    finishAudio?.();
   }
+  clearProgressTimer();
+  publishSpeech({ ...IDLE_SPEECH });
 }
 
 // Converte texto em fala (TTS) e toca o áudio. Servidor primeiro (voz local/
@@ -66,6 +173,7 @@ export async function speak(text: string, voice?: string): Promise<void> {
   // apertar Parar enquanto o TTS ainda está baixando, os bytes não começam a tocar.
   stopSpeaking();
   const generation = _speechGeneration;
+  publishSpeech({ ...IDLE_SPEECH, phase: "loading" });
   try {
     const res = await fetch(`${API_URL}/voice/tts`, {
       method: "POST",
@@ -79,15 +187,27 @@ export async function speak(text: string, voice?: string): Promise<void> {
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
     _currentAudio = audio;
-    await new Promise<void>((resolve) => {
-      audio.onended = () => { URL.revokeObjectURL(url); if (_currentAudio === audio) _currentAudio = null; resolve(); };
-      audio.onerror = () => { URL.revokeObjectURL(url); if (_currentAudio === audio) _currentAudio = null; resolve(); };
-      audio.onpause = () => { URL.revokeObjectURL(url); resolve(); };  // barge-in
-      audio.play().catch(() => {
+    await new Promise<void>((resolve, reject) => {
+      let finished = false;
+      const finish = (error?: unknown) => {
+        if (finished) return;
+        finished = true;
+        clearProgressTimer();
         URL.revokeObjectURL(url);
         if (_currentAudio === audio) _currentAudio = null;
-        resolve();
-      });
+        if (_currentAudioFinish === finish) _currentAudioFinish = null;
+        publishSpeech({ ...IDLE_SPEECH });
+        if (error) reject(error); else resolve();
+      };
+      _currentAudioFinish = finish;
+      audio.onloadedmetadata = () => publishAudioProgress(audio);
+      audio.ontimeupdate = () => publishAudioProgress(audio);
+      audio.onplay = () => publishAudioProgress(audio);
+      audio.onpause = () => publishAudioProgress(audio);
+      audio.onended = () => finish();
+      audio.onerror = () => finish(new Error("Falha ao reproduzir o áudio"));
+      _progressTimer = setInterval(() => publishAudioProgress(audio), 250);
+      audio.play().catch(finish);
     });
   } catch {
     if (generation !== _speechGeneration) return;

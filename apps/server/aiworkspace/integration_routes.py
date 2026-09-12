@@ -1195,12 +1195,24 @@ async def tuya_sync(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tuya não configurado.")
     try:
         found = await run_in_threadpool(tuya_service.sync, conn)
+    except RuntimeError as exc:
+        # Erros esperados da API Tuya (permissão, data center, credenciais) são
+        # seguros e úteis para o usuário corrigir a configuração. Antes eles
+        # eram substituídos pelo genérico "nenhum dispositivo".
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Falha ao consultar a Tuya: {exc}",
+        ) from None
     except Exception:  # noqa: BLE001
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Falha ao consultar a Tuya — verifique as credenciais.")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            "Falha ao consultar a Tuya — verifique as credenciais.",
+        ) from None
     if not found.get("devices"):
         raise HTTPException(
             status.HTTP_404_NOT_FOUND,
-            "Nenhum dispositivo encontrado. Vincule sua conta Smart Life ao projeto Cloud na Tuya.",
+            "Nenhum dispositivo encontrado. Confirme a conta Smart Life vinculada, "
+            "o data center selecionado e a autorização do serviço IoT Core na Tuya.",
         )
     await tuya_service.set_config(
         db, str(user.id), devices=found["devices"], scenes=found["scenes"]
