@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 
 import pytest
 
@@ -41,7 +42,7 @@ def test_exec_missing_dir_errors(tmp_path):
 
 
 def test_exec_timeout_kills(tmp_path):
-    r = exec_service.run_command(tmp_path, "sleep 5", timeout=1)
+    r = exec_service.run_command(tmp_path, f'"{sys.executable}" -c "import time; time.sleep(5)"', timeout=1)
     assert r["timed_out"] is True
     assert r["exit_code"] is None
 

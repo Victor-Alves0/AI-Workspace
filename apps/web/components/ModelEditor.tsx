@@ -144,7 +144,7 @@ function SearchChoice({
   value: string;
   options: AudioChoice[];
   placeholder: string;
-  onChange: (value: string) => void;
+  onChange: (value: string, choice?: AudioChoice) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -187,11 +187,14 @@ function SearchChoice({
             />
           </div>
           <div className="max-h-[min(19rem,55dvh)] overflow-y-auto p-1.5">
+            <button type="button" onClick={() => { onChange(""); setOpen(false); setQ(""); }} className="w-full rounded-xl px-3 py-2 text-left text-xs text-muted hover:bg-hover">
+              Usar padrão
+            </button>
             {shown.map((item) => (
               <button
                 key={`${item.provider}:${item.id}`}
                 type="button"
-                onClick={() => { onChange(item.id); setOpen(false); setQ(""); }}
+                onClick={() => { onChange(item.id, item); setOpen(false); setQ(""); }}
                 className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-hover"
               >
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-surface2 text-accent-hover">
@@ -273,6 +276,7 @@ function VoiceStudio({
 }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
+  const previewRequestRef = useRef<AbortController | null>(null);
   const [preview, setPreview] = useState<"idle" | "loading" | "playing">("idle");
   const [previewError, setPreviewError] = useState("");
   const ttsProvider = config.tts_provider ?? "auto";
@@ -290,23 +294,36 @@ function VoiceStudio({
     ...(sttProvider === "local" || sttProvider === "auto" ? [{ id: "whisper-large-v3-turbo", name: "Whisper Large V3 Turbo", provider: "Local" }] : []),
   ]);
   const voiceOptions = catalog?.voices ?? [];
+  const choiceProvider = (choice?: AudioChoice): VoiceProvider =>
+    choice?.provider === "OpenRouter" ? "openrouter"
+      : choice?.provider === "Local" ? "local"
+        : choice?.provider === "API de voz" ? "api" : "auto";
 
   const stopPreview = useCallback(() => {
-    audioRef.current?.pause();
+    previewRequestRef.current?.abort();
+    previewRequestRef.current = null;
+    if (audioRef.current) {
+      audioRef.current.onended = null;
+      audioRef.current.onerror = null;
+      audioRef.current.pause();
+    }
     audioRef.current = null;
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     objectUrlRef.current = null;
     setPreview("idle");
   }, []);
-  useEffect(() => () => stopPreview(), [stopPreview]);
+  useEffect(() => () => stopPreview(), [stopPreview, voice, ttsProvider, config.tts_model]);
 
   async function testVoice() {
     if (preview !== "idle") { stopPreview(); return; }
+    const request = new AbortController();
+    previewRequestRef.current = request;
     setPreview("loading");
     setPreviewError("");
     try {
       const response = await fetch(`${API_URL}/voice/tts`, {
         method: "POST",
+        signal: request.signal,
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -321,6 +338,7 @@ function VoiceStudio({
         throw new Error(detail.detail || "Não foi possível gerar a prévia");
       }
       const blob = await response.blob();
+      if (previewRequestRef.current !== request || request.signal.aborted) return;
       const url = URL.createObjectURL(blob);
       objectUrlRef.current = url;
       const audio = new Audio(url);
@@ -328,8 +346,10 @@ function VoiceStudio({
       audio.onended = stopPreview;
       audio.onerror = () => { setPreviewError("O áudio retornado não pôde ser reproduzido."); stopPreview(); };
       await audio.play();
+      if (previewRequestRef.current !== request) return;
       setPreview("playing");
     } catch (error) {
+      if (previewRequestRef.current !== request || request.signal.aborted) return;
       stopPreview();
       setPreviewError(error instanceof Error ? error.message : "Falha ao testar a voz");
     }
@@ -347,16 +367,15 @@ function VoiceStudio({
             </span>
           </div>
           <ProviderPicker kind="tts" value={ttsProvider} catalog={catalog} onChange={(value) => onConfigChange({ tts_provider: value, tts_model: "" })} />
-          <SearchChoice label="Modelo de voz" value={config.tts_model ?? ""} options={ttsOptions} placeholder="Usar modelo padrão do provedor" onChange={(value) => onConfigChange({ tts_model: value })} />
+          <SearchChoice label="Modelo de voz" value={config.tts_model ?? ""} options={ttsOptions} placeholder="Usar modelo padrão do provedor" onChange={(value, choice) => onConfigChange({ tts_model: value, tts_provider: ttsProvider === "auto" ? choiceProvider(choice) : ttsProvider })} />
           <SearchChoice label="Voz" value={voice} options={voiceOptions} placeholder="Escolher uma voz" onChange={onVoiceChange} />
           <button
             type="button"
             onClick={testVoice}
-            disabled={preview === "loading"}
             className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent/30 bg-accent/10 px-3 py-2 text-sm font-medium text-accent-hover transition-colors hover:bg-accent/15 disabled:cursor-wait disabled:opacity-70"
           >
             {preview === "loading" ? <Loader2 size={15} className="animate-spin" /> : preview === "playing" ? <Square size={14} fill="currentColor" /> : <Play size={15} fill="currentColor" />}
-            {preview === "loading" ? "Gerando prévia…" : preview === "playing" ? "Parar teste" : "Testar voz"}
+            {preview === "loading" ? "Cancelar geração da prévia" : preview === "playing" ? "Parar teste" : "Testar voz"}
           </button>
           {previewError && <p role="alert" className="text-xs text-red-400">{previewError}</p>}
         </div>
@@ -370,7 +389,7 @@ function VoiceStudio({
             </span>
           </div>
           <ProviderPicker kind="stt" value={sttProvider} catalog={catalog} onChange={(value) => onConfigChange({ stt_provider: value, stt_model: "" })} />
-          <SearchChoice label="Modelo de transcrição" value={config.stt_model ?? ""} options={sttOptions} placeholder="Usar modelo padrão do provedor" onChange={(value) => onConfigChange({ stt_model: value })} />
+          <SearchChoice label="Modelo de transcrição" value={config.stt_model ?? ""} options={sttOptions} placeholder="Usar modelo padrão do provedor" onChange={(value, choice) => onConfigChange({ stt_model: value, stt_provider: sttProvider === "auto" ? choiceProvider(choice) : sttProvider })} />
           <div className="rounded-xl border border-border bg-bg px-3 py-2.5 text-xs leading-5 text-muted">
             Com OpenRouter, o áudio vai ao endpoint de transcrição usando a mesma chave do chat. O modelo escolhido aqui vale para o microfone e para o modo voz deste modelo.
           </div>

@@ -6,6 +6,8 @@
 // usuário teria que clicar "parar" a cada frase. Também respeita um teto duro de
 // duração e um timeout caso nenhuma fala seja detectada.
 
+import { recordingBlob } from "./audioFormat";
+
 export interface UtteranceOptions {
   /** silêncio contínuo (ms) após fala que encerra a captura */
   silenceMs?: number;
@@ -38,7 +40,7 @@ export async function captureUtterance(opts: UtteranceOptions = {}): Promise<Utt
 
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const rec = new MediaRecorder(stream);
-  const chunks: BlobPart[] = [];
+  const chunks: Blob[] = [];
   rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
 
   const AudioCtx = (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext);
@@ -70,7 +72,7 @@ export async function captureUtterance(opts: UtteranceOptions = {}): Promise<Utt
     finished = true;
     const emit = (blob: Blob | null) => { cleanup(); resolveDone(blob); };
     if (keep && speechStarted && rec.state !== "inactive") {
-      rec.onstop = () => emit(new Blob(chunks, { type: "audio/webm" }));
+      rec.onstop = () => emit(recordingBlob(chunks, rec.mimeType));
       try { rec.stop(); } catch { emit(null); }
     } else {
       try { if (rec.state !== "inactive") rec.stop(); } catch { /* noop */ }

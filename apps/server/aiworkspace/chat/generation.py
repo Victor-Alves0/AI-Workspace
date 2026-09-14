@@ -245,7 +245,6 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
                     collected["error"] = ev.get("message")
                 if t in {"tool_call", "guard_reset"}:
                     collected["streamed"] = ""
-                collected["reasoning"] = activity.reasoning(collected["reasoning"])
                 await gen._append(ev)
         except asyncio.CancelledError:
             # "Parar" do usuário ou shutdown: salva o parcial e re-propaga. Se foi
@@ -253,6 +252,7 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
             if gen.interrupted_reason and not collected["error"]:
                 collected["error"] = gen.interrupted_reason
             await gen._append({"type": "stopped"})
+            collected["reasoning"] = activity.reasoning(collected["reasoning"])
             await _finalize(gen, on_finish, collected)
             _annotate_generation_trace(
                 started, first_token_ms, first_reasoning_ms, tool_calls, tool_results,
@@ -268,6 +268,8 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
             # uma resposta vazia ou fazia a resposta desaparecer por completo.
             collected["error"] = str(exc)
             await gen._append({"type": "error", "message": collected["error"]})
+        # Snapshot once at persistence, not a copy of every step on every token.
+        collected["reasoning"] = activity.reasoning(collected["reasoning"])
         await _finalize(gen, on_finish, collected)
         _annotate_generation_trace(
             started, first_token_ms, first_reasoning_ms, tool_calls, tool_results,

@@ -8,8 +8,26 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from aiworkspace.codespace import exec_jobs
 from aiworkspace.tools.sift_service import _is_long_runner, _looks_like_server
+
+
+@pytest.fixture(autouse=True)
+async def isolated_jobs(monkeypatch):
+    # These tests exercise processes/wakes, not PostgreSQL persistence (covered
+    # separately in test_exec_jobs_durable). Never contact a developer's database.
+    import asyncio
+
+    monkeypatch.setattr(exec_jobs, "_jobs", {})
+    monkeypatch.setattr(exec_jobs, "_reaper_task", None)
+    monkeypatch.setattr(exec_jobs, "_db_insert", lambda *_a, **_kw: None)
+    monkeypatch.setattr(exec_jobs, "_db_update", lambda *_a, **_kw: None)
+    yield
+    if exec_jobs._reaper_task:
+        exec_jobs._reaper_task.cancel()
+        await asyncio.gather(exec_jobs._reaper_task, return_exceptions=True)
 
 
 # ------------------------------- detecção --------------------------------------

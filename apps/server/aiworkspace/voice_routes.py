@@ -74,7 +74,7 @@ async def _model_voice_config(
     if mc is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Modelo não encontrado")
     raw = (mc.filter_config or {}).get("voice") or {}
-    return raw if isinstance(raw, dict) else {}
+    return {**(raw if isinstance(raw, dict) else {}), "tts_voice": mc.tts_voice}
 
 
 async def _resolve_tts(
@@ -109,9 +109,11 @@ async def _resolve_tts(
 async def tts(
     body: TTSIn, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
 ):
+    voice_cfg = await _model_voice_config(db, user, body.model_config_id)
+    voice = body.voice or voice_cfg.get("tts_voice") or get_settings().tts_voice
     # Voz ElevenLabs (voz por-modelo prefixada "el:"): sintetiza pela API nativa da
     # ElevenLabs (não é OpenAI-compat), antes do caminho Voz Local/global.
-    if (body.voice or "").startswith(elevenlabs_service.EL_VOICE_PREFIX):
+    if voice.startswith(elevenlabs_service.EL_VOICE_PREFIX):
         conn = await elevenlabs_service.get_provider(db, str(user.id))
         if conn is None:
             raise HTTPException(
@@ -120,19 +122,17 @@ async def tts(
             )
         try:
             data, mime = await run_in_threadpool(
-                elevenlabs_service.tts, conn["api_key"], body.text, body.voice, conn["model"]
+                elevenlabs_service.tts, conn["api_key"], body.text, voice, conn["model"]
             )
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Falha no TTS ElevenLabs: {exc}") from None
         return Response(content=data, media_type=mime)
 
-    voice_cfg = await _model_voice_config(db, user, body.model_config_id)
     provider = body.provider or str(voice_cfg.get("tts_provider") or "auto")
     requested_model = body.model or str(voice_cfg.get("tts_model") or "") or None
     base_url, key, model = await _resolve_tts(
         db, user, provider=provider, model=requested_model
     )
-    voice = body.voice or get_settings().tts_voice
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
@@ -294,21 +294,23 @@ async def voice_catalog(
     tts_models: list[dict] = []
     stt_models: list[dict] = []
     if key:
-        try:
-            speech, transcription = await asyncio.gather(
-                openrouter.list_models(key, output_modality="speech"),
-                openrouter.list_models(key, output_modality="transcription"),
-            )
-            tts_models = [
-                {"id": m.get("id"), "name": m.get("name") or m.get("id"), "provider": "OpenRouter"}
-                for m in speech if m.get("id")
-            ]
-            stt_models = [
-                {"id": m.get("id"), "name": m.get("name") or m.get("id"), "provider": "OpenRouter"}
-                for m in transcription if m.get("id")
-            ]
-        except httpx.HTTPError:
-            pass
+        async def load_catalog(modality):
+            try:
+                return await openrouter.list_models(key, output_modality=modality)
+            except httpx.HTTPError:
+                return []
+
+        speech, transcription = await asyncio.gather(
+            load_catalog("speech"), load_catalog("transcription"),
+        )
+        tts_models = [
+            {"id": m.get("id"), "name": m.get("name") or m.get("id"), "provider": "OpenRouter"}
+            for m in speech if m.get("id")
+        ]
+        stt_models = [
+            {"id": m.get("id"), "name": m.get("name") or m.get("id"), "provider": "OpenRouter"}
+            for m in transcription if m.get("id")
+        ]
     local_cfg = await voice_service.public_config(db, user.id)
     local_voices = await voice_service.list_user_voices(db, user.id) if local_cfg["configured"] and local_cfg["enabled"] else []
     eleven_voices = await _elevenlabs_voice_names(db, user)

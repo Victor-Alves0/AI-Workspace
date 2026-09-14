@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
@@ -20,8 +20,8 @@ router = APIRouter(prefix="/models", tags=["models"])
 
 
 class ModelIn(BaseModel):
-    base_model: str
-    name: str
+    base_model: str = Field(min_length=1, max_length=255)
+    name: str = Field(min_length=1, max_length=255)
     slug: str | None = Field(default=None, max_length=64)
     description: str | None = None
     avatar_url: str | None = None
@@ -36,13 +36,13 @@ class ModelIn(BaseModel):
     sift_config: dict[str, Any] = Field(default_factory=dict)
     skill_ids: list[str] = Field(default_factory=list)
     prompt_suggestions: list[str] = Field(default_factory=list)
-    tts_voice: str | None = None
+    tts_voice: str | None = Field(default=None, max_length=64)
     enabled: bool = True
 
 
 class ModelUpdate(BaseModel):
-    base_model: str | None = None
-    name: str | None = None
+    base_model: str | None = Field(default=None, min_length=1, max_length=255)
+    name: str | None = Field(default=None, min_length=1, max_length=255)
     slug: str | None = Field(default=None, max_length=64)
     description: str | None = None
     avatar_url: str | None = None
@@ -56,8 +56,20 @@ class ModelUpdate(BaseModel):
     sift_config: dict[str, Any] | None = None
     skill_ids: list[str] | None = None
     prompt_suggestions: list[str] | None = None
-    tts_voice: str | None = None
+    tts_voice: str | None = Field(default=None, max_length=64)
     enabled: bool | None = None
+
+    @field_validator(
+        "base_model", "name", "params", "capabilities", "filter_config",
+        "tools_enabled", "tool_ids", "code_mode", "sift_config", "skill_ids",
+        "prompt_suggestions", "enabled",
+    )
+    @classmethod
+    def reject_null_required_fields(cls, value):
+        # Omitted fields are untouched; explicit null would violate NOT NULL in DB.
+        if value is None:
+            raise ValueError("Este campo não pode ser nulo")
+        return value
 
 
 class ModelOut(BaseModel):

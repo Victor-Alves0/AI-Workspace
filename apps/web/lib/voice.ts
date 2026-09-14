@@ -1,4 +1,5 @@
 import { API_URL } from "./api";
+import { recordingBlob, recordingFilename } from "./audioFormat";
 
 export interface SpeechProgress {
   phase: "idle" | "loading" | "playing" | "paused";
@@ -35,7 +36,7 @@ export function subscribeSpeechProgress(
 // Envia áudio gravado para STT e retorna o texto transcrito.
 export async function transcribe(blob: Blob, modelConfigId?: string | null): Promise<string> {
   const fd = new FormData();
-  fd.append("file", blob, "audio.webm");
+  fd.append("file", blob, recordingFilename(blob));
   if (modelConfigId) fd.append("model_config_id", modelConfigId);
   const res = await fetch(`${API_URL}/voice/stt`, {
     method: "POST",
@@ -192,7 +193,7 @@ export async function speak(
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, voice, model_config_id: modelConfigId || undefined }),
+      body: JSON.stringify({ text, voice: modelConfigId ? undefined : voice, model_config_id: modelConfigId || undefined }),
     });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? "TTS falhou");
     // Aguarda o arquivo inteiro antes de criar o player. Assim duração e seek
@@ -276,18 +277,25 @@ export function startBrowserDictation(): { stop: () => Promise<string> } | null 
 // Gravação simples via MediaRecorder. Retorna um controlador com stop().
 export async function startRecording(): Promise<{ stop: () => Promise<Blob> }> {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const rec = new MediaRecorder(stream);
-  const chunks: BlobPart[] = [];
-  rec.ondataavailable = (e) => chunks.push(e.data);
-  rec.start();
-  return {
-    stop: () =>
-      new Promise<Blob>((resolve) => {
-        rec.onstop = () => {
-          stream.getTracks().forEach((t) => t.stop());
-          resolve(new Blob(chunks, { type: "audio/webm" }));
-        };
-        rec.stop();
-      }),
-  };
+  const cleanup = () => stream.getTracks().forEach((track) => track.stop());
+  try {
+    const rec = new MediaRecorder(stream);
+    const chunks: Blob[] = [];
+    let resolve!: (blob: Blob) => void;
+    let reject!: (error: Error) => void;
+    const done = new Promise<Blob>((res, rej) => { resolve = res; reject = rej; });
+    // A recording error can arrive before the user presses Stop.
+    void done.catch(() => {});
+    rec.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+    rec.onstop = () => { cleanup(); resolve(recordingBlob(chunks, rec.mimeType)); };
+    rec.onerror = () => { cleanup(); reject(new Error("Falha ao gravar o microfone")); };
+    rec.start();
+    return { stop: () => {
+      if (rec.state !== "inactive") rec.stop();
+      return done;
+    } };
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
 }

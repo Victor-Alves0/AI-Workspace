@@ -211,8 +211,6 @@ async def lifespan(app: FastAPI):
 async def _worktree_reaper() -> None:
     """Descarta periodicamente os worktrees isolados ociosos além do TTL (limpeza do
     disco + ciclo de vida das tarefas do Codespace). Best-effort; nunca derruba o app."""
-    import asyncio
-
     from .codespace import worktree_service
 
     while True:

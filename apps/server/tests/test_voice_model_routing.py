@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import uuid
 from types import SimpleNamespace
 from typing import ClassVar
 
+import httpx
 import pytest
 
 from aiworkspace import voice_routes
@@ -15,6 +17,8 @@ from aiworkspace.secrets_service import OPENROUTER_KEY
 class _Response:
     status_code = 200
     text = ""
+    content = b"audio"
+    headers: ClassVar[dict] = {"content-type": "audio/mpeg"}
 
     def json(self):
         return {"text": "olá"}
@@ -55,6 +59,7 @@ def test_audio_format_normalizes_browser_recordings():
     assert voice_routes._audio_format("audio.webm", "audio/webm;codecs=opus") == "webm"
     assert voice_routes._audio_format("memo.m4a", "application/octet-stream") == "m4a"
     assert voice_routes._audio_format("sem-extensao", "application/octet-stream") == "webm"
+    assert voice_routes._audio_format("audio.m4a", "audio/mp4;codecs=mp4a.40.2") == "m4a"
 
 
 @pytest.mark.asyncio
@@ -93,3 +98,47 @@ async def test_openrouter_tts_reuses_user_openrouter_key(monkeypatch):
     assert (base, key, model) == (
         "https://openrouter.test/api/v1", "sk-openrouter", "openai/tts-model"
     )
+
+
+@pytest.mark.asyncio
+async def test_tts_uses_latest_saved_voice_when_only_model_id_is_sent(monkeypatch):
+    async def resolve(*_args, **_kwargs):
+        return "https://voice.test", "key", "speech-model"
+
+    class Database:
+        async def scalar(self, _statement):
+            return SimpleNamespace(filter_config={"voice": {"tts_provider": "api"}}, tts_voice="coral")
+
+    monkeypatch.setattr(voice_routes, "_resolve_tts", resolve)
+    monkeypatch.setattr(voice_routes.httpx, "AsyncClient", _Client)
+    result = await voice_routes.tts(
+        voice_routes.TTSIn(text="Olá", model_config_id=uuid.uuid4()),
+        user=SimpleNamespace(id=uuid.uuid4()), db=Database(),
+    )
+    assert result.body == b"audio"
+    assert _Client.last_json["voice"] == "coral"
+
+
+@pytest.mark.asyncio
+async def test_audio_catalog_keeps_stt_when_tts_catalog_is_unavailable(monkeypatch):
+    async def secret(*_args):
+        return "key"
+
+    async def catalog(_key, *, output_modality):
+        if output_modality == "speech":
+            raise httpx.ConnectError("speech catalog unavailable")
+        return [{"id": "speech-to-text", "name": "Transcription"}]
+
+    async def local(*_args):
+        return {"configured": False, "enabled": False}
+
+    async def eleven(*_args):
+        return []
+
+    monkeypatch.setattr(voice_routes, "get_secret", secret)
+    monkeypatch.setattr(voice_routes.openrouter, "list_models", catalog)
+    monkeypatch.setattr(voice_routes.voice_service, "public_config", local)
+    monkeypatch.setattr(voice_routes, "_elevenlabs_voice_names", eleven)
+    result = await voice_routes.voice_catalog(user=SimpleNamespace(id="user"), db=object())
+    assert result["tts_models"] == []
+    assert result["stt_models"][0]["id"] == "speech-to-text"
