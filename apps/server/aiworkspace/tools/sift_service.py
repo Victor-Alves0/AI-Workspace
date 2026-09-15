@@ -255,6 +255,12 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
      "model_desc": "Search the web for current or factual info."},
     {"path": "web.page.read", "name": "Ler Página", "description": "Abre uma URL e devolve o texto legível da página (lê o conteúdo do site, não só o trecho da busca).",
      "model_desc": "Fetch a URL and return the page's readable text."},
+    {"path": "github.public.search", "name": "Pesquisar no GitHub", "description": "Pesquisa repositórios, issues e perfis públicos do GitHub, sem precisar conectar uma conta.",
+     "model_desc": "Search public GitHub repositories, issues and users without an account. For source-code search or private repositories, use the connected GitHub tool."},
+    {"path": "security.exploitdb.search", "name": "Pesquisar Exploit-DB", "description": "Pesquisa o catálogo público do Exploit-DB por produto, versão ou CVE e devolve metadados e links de referência.",
+     "model_desc": "Search the public Exploit-DB catalog by product, version or CVE. Returns metadata and reference links only; it never downloads or executes exploit code."},
+    {"path": "security.cve.search", "name": "Consultar CVEs (NVD)", "description": "Consulta CVEs existentes no NVD por ID ou palavras-chave, com descrição, CVSS e referências.",
+     "model_desc": "Look up existing CVEs in NVD by CVE ID or keywords, including description, CVSS and references."},
     # Navegador headless (Chromium) — requer o serviço opt-in `browser` (browserless).
     # A IA controla uma aba VIVA por conversa: navega com JS, lê, clica, digita, rola e
     # tira screenshot. Para sites com JS/SPA, login e formulários que o "Ler Página" não dá.
@@ -1182,6 +1188,66 @@ def _register_builtins(
                 return asyncio.run(_fetch_page(u, cap, (find or "").strip()))
             except Exception as exc:  # noqa: BLE001
                 return {"error": str(exc)}
+
+    if want("github.public.search"):
+        @sift.tool(
+            "github.public.search",
+            description=(
+                "Search PUBLIC GitHub repositories, issues or users without needing a connected "
+                "account. `kind`: repositories (default), issues, users. This public API does "
+                "not offer code search; use github.repo.manage with a connected account for "
+                "code search or private repositories."
+            ),
+            params={
+                "query": "string:o::search terms (at least 2 characters)",
+                "kind": "string:o:repositories::repositories | issues | users",
+                "limit": "number:o:10:max results (1-20)",
+            },
+            returns=["source", "kind", "total_count", "incomplete_results", "results", "error"],
+            examples=["find public repositories for FastAPI", "find open GitHub issues about CVE-2024-3094"],
+        )
+        def _github_public_search(query: str = "", kind: str = "repositories", limit: Any = 10) -> dict[str, Any]:
+            from .security_search import github_public_search
+            return github_public_search(query, kind, limit)
+
+    if want("security.exploitdb.search"):
+        @sift.tool(
+            "security.exploitdb.search",
+            description=(
+                "Search Exploit-DB's public catalog by product, version, technology or CVE. "
+                "Returns metadata and links only — never downloads, displays or executes exploit code. "
+                "Use it to check whether a public PoC/exploit entry exists, then report scope and "
+                "affected versions carefully."
+            ),
+            params={
+                "query": "string:o::product, version, technology or CVE ID (at least 2 characters)",
+                "limit": "number:o:10:max results (1-20)",
+            },
+            returns=["source", "note", "total_matches", "results", "error"],
+            examples=["search Exploit-DB for CVE-2024-3094", "does Exploit-DB have entries for Apache 2.4.49?"],
+        )
+        def _exploitdb_search(query: str = "", limit: Any = 10) -> dict[str, Any]:
+            from .security_search import exploitdb_search
+            return exploitdb_search(query, limit)
+
+    if want("security.cve.search"):
+        @sift.tool(
+            "security.cve.search",
+            description=(
+                "Look up vulnerabilities in the official NVD CVE API. Search by an exact CVE ID "
+                "or keywords; returns description, published date, CVSS and reference URLs. "
+                "Use this to establish whether a CVE exists before making a security claim."
+            ),
+            params={
+                "query": "string:o::CVE ID (e.g. CVE-2024-3094) or keyword search",
+                "limit": "number:o:10:max results (1-20)",
+            },
+            returns=["source", "total_results", "results", "error"],
+            examples=["look up CVE-2024-3094", "find CVEs for xz utils"],
+        )
+        def _cve_search(query: str = "", limit: Any = 10) -> dict[str, Any]:
+            from .security_search import nvd_cve_search
+            return nvd_cve_search(query, limit)
 
     if want("web.browser.use"):
         @sift.tool(
