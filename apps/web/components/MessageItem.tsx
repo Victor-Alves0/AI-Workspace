@@ -1059,10 +1059,7 @@ export function ReasoningBlock({
               {step.kind === "tool" ? (
                 <ToolEventRow event={step.event} running={live && index === timeline.length - 1 && step.event.kind === "call"} />
               ) : step.kind === "reasoning" ? (
-                <details className="group/reason">
-                  <summary className="cursor-pointer text-xs text-muted">Raciocínio</summary>
-                  <div className="mt-1 whitespace-pre-wrap">{step.text}</div>
-                </details>
+                <div className="whitespace-pre-wrap">{step.text}</div>
               ) : (
                 <Markdown content={step.text} fast={live} />
               )}
@@ -1296,7 +1293,7 @@ export default function MessageItem({
   clampContent = true,
 }: {
   message: Message;
-  onSpeak: () => void;
+  onSpeak?: () => void;
   speaking?: boolean;
   onEdit: (id: string, content: string) => Promise<void>;
   onRegenerate: (id: string) => void;
@@ -1520,9 +1517,11 @@ export default function MessageItem({
               <IconButton title="Copiar" onClick={copy}>
                 {copied ? <Check size={15} className="text-green-400" /> : <Copy size={15} />}
               </IconButton>
-              <IconButton title={speaking ? "Parar leitura" : "Ler em voz alta"} onClick={onSpeak} active={speaking}>
-                {speaking ? <Square size={14} fill="currentColor" /> : <Volume2 size={15} />}
-              </IconButton>
+              {onSpeak && (
+                <IconButton title={speaking ? "Parar leitura" : "Ler em voz alta"} onClick={onSpeak} active={speaking}>
+                  {speaking ? <Square size={14} fill="currentColor" /> : <Volume2 size={15} />}
+                </IconButton>
+              )}
               <IconButton title="Custo / tokens" onClick={() => setShowCost((v) => !v)}>
                 <Info size={15} className={showCost ? "text-accent-hover" : ""} />
               </IconButton>

@@ -9,6 +9,7 @@ from typing import ClassVar
 
 import httpx
 import pytest
+from fastapi import HTTPException
 
 from aiworkspace import voice_routes
 from aiworkspace.secrets_service import OPENROUTER_KEY
@@ -117,6 +118,51 @@ async def test_tts_uses_latest_saved_voice_when_only_model_id_is_sent(monkeypatc
     )
     assert result.body == b"audio"
     assert _Client.last_json["voice"] == "coral"
+
+
+@pytest.mark.asyncio
+async def test_tts_respects_model_voice_disabled_toggle():
+    class Database:
+        async def scalar(self, _statement):
+            return SimpleNamespace(
+                filter_config={"voice": {"tts_enabled": False}},
+                tts_voice="coral",
+            )
+
+    with pytest.raises(HTTPException) as exc:
+        await voice_routes.tts(
+            voice_routes.TTSIn(text="Olá", model_config_id=uuid.uuid4()),
+            user=SimpleNamespace(id=uuid.uuid4()),
+            db=Database(),
+        )
+
+    assert exc.value.status_code == 400
+    assert "desativada" in str(exc.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_stt_respects_model_voice_disabled_toggle_before_reading_audio():
+    class Database:
+        async def scalar(self, _statement):
+            return SimpleNamespace(
+                filter_config={"voice": {"stt_enabled": False}},
+                tts_voice=None,
+            )
+
+    class UnreadFile:
+        async def read(self, _limit):
+            raise AssertionError("disabled STT must not consume the upload")
+
+    with pytest.raises(HTTPException) as exc:
+        await voice_routes.stt(
+            file=UnreadFile(),
+            model_config_id=uuid.uuid4(),
+            user=SimpleNamespace(id=uuid.uuid4()),
+            db=Database(),
+        )
+
+    assert exc.value.status_code == 400
+    assert "desativada" in str(exc.value.detail)
 
 
 @pytest.mark.asyncio

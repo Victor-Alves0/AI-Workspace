@@ -42,6 +42,25 @@ import { useGeneration } from "./useGeneration";
 
 type RoundtableStream = { speaker: Speaker; content: string; reasoning: string };
 
+// Override reservado do composer, persistido no Chat sem alterar o preset do
+// modelo. O backend consome e remove esta chave antes de chamar o provider.
+const CHAT_REASONING_EFFORT_PARAM = "_chat_reasoning_effort";
+const REASONING_EFFORTS = new Set<ReasoningEffort>(["off", "minimal", "low", "medium", "high", "xhigh"]);
+
+function reasoningFromParams(params: Record<string, unknown> | null | undefined): ReasoningEffort | null {
+  const effort = (params?.reasoning as { effort?: unknown } | undefined)?.effort;
+  return typeof effort === "string" && REASONING_EFFORTS.has(effort as ReasoningEffort)
+    ? effort as ReasoningEffort
+    : null;
+}
+
+function chatReasoningOverride(params: Record<string, unknown> | null | undefined): ReasoningEffort | null {
+  const effort = params?.[CHAT_REASONING_EFFORT_PARAM];
+  return typeof effort === "string" && REASONING_EFFORTS.has(effort as ReasoningEffort)
+    ? effort as ReasoningEffort
+    : null;
+}
+
 // varre os resultados de ferramenta em busca de um artefato "kind:ask" (o seletor
 // de opções). Recursivo (execute_tool no topo ou run_code aninhado em `output`).
 function findAskInNode(node: unknown, depth = 0): AskSpec | null {
@@ -236,6 +255,9 @@ export default function ChatPage() {
   // rascunho de controles (system prompt / params) usado quando ainda não há chat ativo
   const [draftSystemPrompt, setDraftSystemPrompt] = useState("");
   const [draftParams, setDraftParams] = useState<Record<string, unknown>>({});
+  // Impede que um envio imediatamente após trocar o nível ultrapasse o PATCH
+  // que persiste a preferência no chat.
+  const reasoningSaveRef = useRef<Promise<unknown> | null>(null);
 
   const [temporary, setTemporary] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
@@ -781,7 +803,7 @@ export default function ChatPage() {
   // "Ler em voz alta": usa a voz do modelo que PRODUZIU a mensagem (casa o nome do
   // modelo da resposta com um modelo custom), caindo no modelo atual do chat. Sem
   // isto o botão usava só o modelo selecionado, ignorando a voz configurada.
-  const voiceSettingsFor = useCallback((m: Message): { voice?: string; modelConfigId?: string } => {
+  const voiceSettingsFor = useCallback((m: Message): { voice?: string; modelConfigId?: string; enabled: boolean } => {
     const configId = m.usage?.model_config_id;
     const byId = configId ? customModels.find((c) => c.id === configId) : undefined;
     const name = m.usage?.model_name;
@@ -791,7 +813,12 @@ export default function ChatPage() {
     const sameName = name ? customModels.filter((c) => c.name === name) : [];
     const legacyByName = sameName.length === 1 ? sameName[0] : undefined;
     const selected = byId ?? legacyByName ?? curCustom;
-    return { voice: selected?.tts_voice ?? undefined, modelConfigId: selected?.id };
+    const voiceConfig = selected?.filter_config?.voice as { tts_enabled?: boolean } | undefined;
+    return {
+      voice: selected?.tts_voice ?? undefined,
+      modelConfigId: selected?.id,
+      enabled: voiceConfig?.tts_enabled !== false,
+    };
   }, [customModels, curCustom]);
   const stopMessageSpeech = useCallback(() => {
     const current = messageSpeechRef.current;
@@ -810,6 +837,11 @@ export default function ChatPage() {
     messageSpeechRef.current = { id: m.id, run };
     setSpeakingMessageId(m.id);
     const voiceSettings = voiceSettingsFor(m);
+    if (!voiceSettings.enabled) {
+      messageSpeechRef.current = { id: null, run };
+      setSpeakingMessageId(null);
+      return;
+    }
     void speak(m.content, voiceSettings.voice, voiceSettings.modelConfigId).finally(() => {
       if (messageSpeechRef.current.run !== run) return;
       messageSpeechRef.current = { id: null, run };
@@ -1181,6 +1213,11 @@ export default function ChatPage() {
     modelChosenRef.current = true;
     setCurModel(mc.base_model);
     setCurCustomId(mc.id);
+    setDraftParams((current) => {
+      const next = { ...current };
+      delete next[CHAT_REASONING_EFFORT_PARAM];
+      return next;
+    });
     goHome();
   }
 
@@ -1203,12 +1240,22 @@ export default function ChatPage() {
     modelChosenRef.current = true;
     setCurModel(id);
     setCurCustomId(null);
+    setDraftParams((current) => {
+      const next = { ...current };
+      delete next[CHAT_REASONING_EFFORT_PARAM];
+      return next;
+    });
     if (active) await patchActive({ model: id, model_config_id: null });
   }
   async function selectCustom(mc: ModelConfig) {
     modelChosenRef.current = true;
     setCurModel(mc.base_model);
     setCurCustomId(mc.id);
+    setDraftParams((current) => {
+      const next = { ...current };
+      delete next[CHAT_REASONING_EFFORT_PARAM];
+      return next;
+    });
     // Mantém um snapshot para o fallback caso o preset seja apagado, mas o
     // backend sempre usa o ModelConfig ATUAL enquanto model_config_id existir.
     if (active) await patchActive({ model: mc.base_model, system_prompt: mc.system_prompt, params: mc.params, model_config_id: mc.id });
@@ -1359,6 +1406,9 @@ export default function ChatPage() {
     const initialParams = { ...(curCustom?.params ?? {}), ...draftParams };
 
     try {
+      // O nível de reasoning faz parte deste turno. Aguarda uma gravação que já
+      // estava em voo para o backend não ler o valor anterior por corrida de rede.
+      if (reasoningSaveRef.current) await reasoningSaveRef.current;
       if (temporary) {
         // temporário roda preso à request: "Parar" = abortar a conexão local
         const ctrl = new AbortController();
@@ -1602,6 +1652,13 @@ export default function ChatPage() {
         }
       }
     } else {
+      const selectedModel = curCustom
+        ?? customModels.find((model) => model.id === active?.model_config_id);
+      const voiceConfig = selectedModel?.filter_config?.voice as { stt_enabled?: boolean } | undefined;
+      if (voiceConfig?.stt_enabled === false) {
+        alert("A escuta (STT) está desativada nas configurações deste modelo.");
+        return;
+      }
       try {
         recorderRef.current = await startRecording();
         // melhor esforço, junto com a gravação — vira o fallback se o servidor falhar
@@ -1654,7 +1711,10 @@ export default function ChatPage() {
   }
 
   async function voiceLoop(session: VoiceSession) {
-    const voice = curCustom?.tts_voice ?? undefined;
+    const selectedModel = curCustom ?? customModels.find((model) => model.id === session.model_config_id);
+    const voice = selectedModel?.tts_voice ?? undefined;
+    const voiceConfig = selectedModel?.filter_config?.voice as { tts_enabled?: boolean } | undefined;
+    const ttsEnabled = voiceConfig?.tts_enabled !== false;
     // Conversa contínua (Fase 3): reabre a escuta após cada resposta com uma
     // JANELA DE GRAÇA — o usuário fala de novo sem repetir a wake word. Se ficar
     // em silêncio na janela, a conversa ENCERRA sozinha (volta ao standby da wake
@@ -1705,7 +1765,7 @@ export default function ChatPage() {
       const reply = await voiceSendAndWait(text);
       if (!voiceRef.current.active) break;
 
-      if (session.auto_speak && reply) {
+      if (session.auto_speak && ttsEnabled && reply) {
         setVoicePhase("speaking");
         try { await speak(reply, voice, curCustom?.id ?? session.model_config_id); } catch { /* fallback interno */ }
       }
@@ -1719,6 +1779,12 @@ export default function ChatPage() {
     const mcId = curCustom?.id ?? active?.model_config_id ?? null;
     if (!mcId) {
       alert('O modo voz precisa de um modelo com "Assistente de voz" ligado (Configurações do modelo → Voz).');
+      return;
+    }
+    const selectedModel = curCustom ?? customModels.find((model) => model.id === mcId);
+    const voiceConfig = selectedModel?.filter_config?.voice as { stt_enabled?: boolean } | undefined;
+    if (voiceConfig?.stt_enabled === false) {
+      alert("A escuta (STT) está desativada nas configurações deste modelo.");
       return;
     }
     let session: VoiceSession;
@@ -1779,24 +1845,57 @@ export default function ChatPage() {
     });
   }
 
-  // nível de raciocínio (thinking) — lido/gravado nos params do modelo
-  // Em chats vinculados, o ModelConfig é a fonte de verdade. Assim, voltar de
-  // "Modelos" já mostra os parâmetros editados sem precisar recriar o chat.
+  // Parâmetros gerais continuam vindo do ModelConfig atual (sem snapshots
+  // obsoletos). Só o nível escolhido no composer pode ser sobrescrito por chat.
   const activeParams = active
     ? (active.model_config_id && curCustom ? curCustom.params ?? {} : active.params)
     : draftParams;
+  const ownChatParams = active ? active.params : draftParams;
   const reasoningEffort: ReasoningEffort =
-    ((activeParams?.reasoning as { effort?: ReasoningEffort } | undefined)?.effort) ?? "off";
+    (curCustom ? chatReasoningOverride(ownChatParams) : null)
+    ?? reasoningFromParams(curCustom?.params)
+    ?? reasoningFromParams(activeParams)
+    ?? "off";
   function setReasoningEffort(level: ReasoningEffort) {
+    if (curCustom) {
+      const next = { ...(ownChatParams ?? {}), [CHAT_REASONING_EFFORT_PARAM]: level };
+      if (!active) {
+        setDraftParams(next);
+        return;
+      }
+
+      const chatId = active.id;
+      // Otimista: o botão não pisca de volta para "Desativado" enquanto salva.
+      setActive((current) => current?.id === chatId ? { ...current, params: next } : current);
+      // Serializa cliques rápidos (Médio → Alto): duas requests concorrentes
+      // poderiam chegar ao banco fora de ordem e salvar a escolha anterior.
+      const before = reasoningSaveRef.current?.catch(() => undefined) ?? Promise.resolve();
+      const request = before.then(() => api.patch<Chat>(`/chats/${chatId}`, { params: next }))
+        .then((updated) => {
+          setActive((current) => (
+            current?.id === chatId
+            && current.params?.[CHAT_REASONING_EFFORT_PARAM] === level
+              ? { ...current, params: updated.params }
+              : current
+          ));
+        });
+      reasoningSaveRef.current = request;
+      void request.catch(() => {}).finally(() => {
+        if (reasoningSaveRef.current === request) reasoningSaveRef.current = null;
+      });
+      return;
+    }
     const base = { ...(activeParams ?? {}) };
+    delete base[CHAT_REASONING_EFFORT_PARAM];
     if (level === "off") delete base.reasoning;
     else base.reasoning = { effort: level };
-    if (active?.model_config_id && curCustom) {
-      api.patch<ModelConfig>(`/models/${curCustom.id}`, { params: base })
-        .then((updated) => setCustomModels((models) => models.map((m) => m.id === updated.id ? updated : m)))
-        .catch(() => {});
-    } else if (active) {
-      patchActive({ params: base });
+    if (active) {
+      const before = reasoningSaveRef.current?.catch(() => undefined) ?? Promise.resolve();
+      const request = before.then(() => patchActive({ params: base }));
+      reasoningSaveRef.current = request;
+      void request.catch(() => {}).finally(() => {
+        if (reasoningSaveRef.current === request) reasoningSaveRef.current = null;
+      });
     } else {
       setDraftParams(base);
     }
@@ -2267,7 +2366,7 @@ export default function ChatPage() {
                         modelAvatar={isRt ? null : (showAv ? (curCustom?.avatar_url ?? null) : null)}
                         chatArtifacts={chatArtifacts}
                         onOpenArtifact={(ident) => setArtifactOpen(ident)}
-                        onSpeak={() => toggleMessageSpeech(m)}
+                        onSpeak={m.role === "assistant" && voiceSettingsFor(m).enabled ? () => toggleMessageSpeech(m) : undefined}
                         speaking={speakingMessageId === m.id}
                         clampContent={!recentFullMessageIds.has(m.id)}
                         onEdit={editMessage}
@@ -2303,7 +2402,7 @@ export default function ChatPage() {
                               name={m.role === "assistant" ? modelLabel : undefined}
                               reasoning={m.reasoning}
                               toolEvents={m.tool_events ?? undefined}
-                              onSpeak={m.role === "assistant" ? () => toggleMessageSpeech(m) : undefined}
+                              onSpeak={m.role === "assistant" && voiceSettingsFor(m).enabled ? () => toggleMessageSpeech(m) : undefined}
                               speaking={speakingMessageId === m.id}
                               onDelete={() => deleteMessage(m.id)}
                             />

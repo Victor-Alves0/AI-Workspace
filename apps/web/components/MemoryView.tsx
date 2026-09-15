@@ -1,15 +1,100 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Ban, Box, Boxes, Check, CheckSquare, Clock, FolderOpen, Globe, Loader2, MessagesSquare, Pencil, Plus,
+  Ban, Box, Boxes, Check, CheckSquare, ChevronDown, Clock, FolderOpen, Globe, Loader2, MessagesSquare, Pencil, Plus,
   RotateCcw, Search, Square, Trash2, X,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { MemoryBank, MemoryConfig, MemoryItem, MemoryScopes } from "@/lib/types";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { AnchoredMenu, dismissKeyboard, finePointer } from "@/components/ui";
 
 type Tab = "global" | "model" | "chat" | "project" | "bank";
+
+function ChatMemoryPicker({
+  chats,
+  value,
+  onChange,
+}: {
+  chats: MemoryScopes["chats"];
+  value: string;
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const selected = chats.find((chat) => chat.id === value);
+  const normalized = query.trim().toLowerCase();
+  const shown = normalized
+    ? chats.filter((chat) => chat.title.toLowerCase().includes(normalized))
+    : chats;
+
+  return (
+    <div>
+      <button
+        ref={anchorRef}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="flex max-w-[280px] items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-ink outline-none transition-colors hover:border-accent/50 focus-visible:border-accent"
+      >
+        <span title={selected?.title ?? "Selecionar chat"} className="min-w-0 flex-1 truncate text-left">
+          {selected ? `${selected.title} (${selected.count})` : "Nenhum chat com memória"}
+        </span>
+        <ChevronDown size={14} className="shrink-0 text-muted" />
+      </button>
+      {open && (
+        <AnchoredMenu
+          anchorRef={anchorRef}
+          onClose={() => { setOpen(false); setQuery(""); }}
+          align="left"
+          className="w-[360px] max-w-[calc(100vw-1.5rem)] overflow-hidden !rounded-2xl !p-0"
+        >
+          <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
+            <Search size={15} className="shrink-0 text-muted" />
+            <input
+              autoFocus={finePointer()}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Buscar chat"
+              aria-label="Buscar chat com memória"
+              className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
+            />
+          </div>
+          <div
+            role="listbox"
+            aria-label="Chats com memória"
+            onTouchMove={dismissKeyboard}
+            className="max-h-[min(19rem,55dvh)] overflow-y-auto overscroll-contain p-1.5"
+          >
+            {shown.map((chat) => (
+              <button
+                key={chat.id}
+                type="button"
+                role="option"
+                aria-selected={chat.id === value}
+                onClick={() => { onChange(chat.id); setOpen(false); setQuery(""); }}
+                className="flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-hover"
+              >
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-surface2 text-accent-hover">
+                  <MessagesSquare size={14} />
+                </span>
+                <span title={chat.title} className="min-w-0 flex-1 truncate text-sm text-ink">{chat.title}</span>
+                <span className="shrink-0 rounded-md bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">{chat.count}</span>
+                {chat.id === value && <Check size={15} className="shrink-0 text-accent" />}
+              </button>
+            ))}
+            {shown.length === 0 && (
+              <p className="px-3 py-6 text-center text-sm text-muted">Nenhum chat encontrado.</p>
+            )}
+          </div>
+        </AnchoredMenu>
+      )}
+    </div>
+  );
+}
 
 /** Controlador de Memória (mem0): configurações + visão por escopo (Global / Por
  *  modelo / Por chat) com editar, adicionar e excluir. Fica em Espaço → Memória. */
@@ -52,7 +137,10 @@ export default function MemoryView() {
   // seleciona automaticamente o 1º modelo/chat/banco da aba, se nenhum escolhido
   useEffect(() => {
     if (tab === "model" && !selModel && scopes?.models.length) setSelModel(scopes.models[0].id);
-    if (tab === "chat" && !selChat && scopes?.chats.length) setSelChat(scopes.chats[0].id);
+    if (tab === "chat" && scopes) {
+      if (scopes.chats.length && !scopes.chats.some((chat) => chat.id === selChat)) setSelChat(scopes.chats[0].id);
+      if (!scopes.chats.length && selChat) setSelChat("");
+    }
     if (tab === "project" && !selProject && scopes?.projects.length) setSelProject(scopes.projects[0].id);
     if (tab === "bank" && !selBank && banks.length) setSelBank(banks[0].id);
   }, [tab, scopes, banks, selModel, selChat, selProject, selBank]);
@@ -177,15 +265,22 @@ export default function MemoryView() {
     await apply(action, ids);
   }
 
-  const enabled = settings?.enabled !== false;
+  const enabled = settings?.enabled === true;
 
   return (
     <div className="space-y-5">
-      {!enabled && (
-        <p className="rounded-2xl border border-border bg-surface p-4 text-xs text-muted">
-          A memória está <span className="text-ink-soft">desativada</span>. Ative e ajuste os padrões em{" "}
-          <span className="text-ink-soft">Configurações → Controle de Dados → Memória</span> (engrenagem).
-        </p>
+      {settings && (
+        <div className="flex justify-end">
+          <span
+            title={enabled
+              ? "A memória está ativada."
+              : "A memória está desativada. Ative e ajuste os padrões em Configurações → Controle de Dados → Memória (engrenagem)."}
+            className="inline-flex cursor-help items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-ink-soft"
+          >
+            <span aria-hidden className={`h-2 w-2 rounded-full ${enabled ? "bg-emerald-400" : "bg-red-400"}`} />
+            <span>{enabled ? "Ativado" : "Desativado"}</span>
+          </span>
+        </div>
       )}
 
       {/* Fila de revisão (pendentes) */}
@@ -239,15 +334,7 @@ export default function MemoryView() {
           </select>
         )}
         {tab === "chat" && (
-          <select
-            value={selChat}
-            onChange={(e) => setSelChat(e.target.value)}
-            className="max-w-[240px] rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
-          >
-            {scopes?.chats.length ? scopes.chats.map((c) => (
-              <option key={c.id} value={c.id}>{c.title} ({c.count})</option>
-            )) : <option value="">Nenhum chat com memória</option>}
-          </select>
+          <ChatMemoryPicker chats={scopes?.chats ?? []} value={selChat} onChange={setSelChat} />
         )}
         {tab === "project" && (
           <select

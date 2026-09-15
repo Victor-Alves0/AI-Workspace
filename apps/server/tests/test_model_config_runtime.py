@@ -6,7 +6,11 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from aiworkspace.chat.turn_setup import _effective_chat_model
+from aiworkspace.chat.turn_setup import (
+    CHAT_REASONING_EFFORT_PARAM,
+    _effective_chat_model,
+    _params_with_chat_reasoning,
+)
 from aiworkspace.models_routes import ModelIn, ModelUpdate, _clean_slug, _ensure_slug_available
 
 
@@ -58,6 +62,37 @@ def test_unlinked_chat_keeps_its_own_configuration():
     assert _effective_chat_model(chat, None) == (
         "provider/model-do-chat", "prompt do chat", {"top_p": 0.8}
     )
+
+
+def test_linked_chat_applies_only_its_explicit_reasoning_override():
+    chat = SimpleNamespace(
+        model="provider/old",
+        system_prompt="old",
+        params={
+            "temperature": 0.1,
+            "reasoning": {"effort": "low"},
+            CHAT_REASONING_EFFORT_PARAM: "high",
+        },
+    )
+    current = SimpleNamespace(
+        base_model="provider/current",
+        system_prompt="current",
+        params={"temperature": 0.9, "reasoning": {"effort": "medium"}},
+    )
+
+    _, _, params = _effective_chat_model(chat, current)
+
+    assert params == {"temperature": 0.9, "reasoning": {"effort": "high"}}
+    assert CHAT_REASONING_EFFORT_PARAM not in params
+
+
+def test_chat_reasoning_off_removes_model_default_and_reserved_param():
+    params = _params_with_chat_reasoning(
+        {"temperature": 0.7, "reasoning": {"effort": "high"}},
+        {CHAT_REASONING_EFFORT_PARAM: "off"},
+    )
+
+    assert params == {"temperature": 0.7}
 
 
 def test_slug_is_trimmed_and_empty_slug_is_not_an_identifier():

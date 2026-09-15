@@ -41,6 +41,7 @@ from .turn_setup import (
     _mem_agent_id,
     _memory_opts,
     _ordered_messages,
+    _params_with_chat_reasoning,
     _prepare_attachments,
     _prepare_turn,
     _brain_setup,
@@ -96,11 +97,11 @@ async def ephemeral(
     if model_config is not None and model_config.base_model:
         model = model_config.base_model
         system_prompt = model_config.system_prompt
-        params = dict(model_config.params or {})
+        params = _params_with_chat_reasoning(model_config.params, body.get("params"))
     else:
         model = requested_model
         system_prompt = body.get("system_prompt")
-        params = dict(body.get("params") or {})
+        params = _params_with_chat_reasoning(body.get("params"), body.get("params"))
     api_key, base_url = await _resolve_provider(db, user, model)
     guards = await _resolve_guards(db, user, model_config)  # guardas valem no temporário também
     sift = await get_sift_for_user(db, user.id, model_config)

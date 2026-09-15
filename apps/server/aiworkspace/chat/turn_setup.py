@@ -42,6 +42,33 @@ logger = logging.getLogger(__name__)
 # chave do turno já existe) — mesmo exemplo que a UI do ModelEditor sugere
 _AUDIO_FALLBACK_MODEL = "google/gemini-2.5-flash"
 
+# Preferência escolhida no composer para ESTE chat. Ela fica nos params do Chat
+# (e não no ModelConfig) para que mudar Médio/Alto numa conversa não altere todas
+# as outras que usam o mesmo preset. O nome reservado nunca é enviado ao provider.
+CHAT_REASONING_EFFORT_PARAM = "_chat_reasoning_effort"
+_REASONING_EFFORTS = frozenset({"off", "minimal", "low", "medium", "high", "xhigh"})
+
+
+def _params_with_chat_reasoning(
+    base_params: dict | None, chat_params: dict | None
+) -> dict:
+    """Aplica somente a preferência de reasoning específica da conversa.
+
+    Os demais ``chat_params`` podem ser um snapshot antigo de ModelConfig e não
+    devem sobrepor o preset atual. A chave reservada é removida em todos os casos
+    para nunca vazar como parâmetro desconhecido à API do modelo.
+    """
+    params = dict(base_params) if isinstance(base_params, dict) else {}
+    params.pop(CHAT_REASONING_EFFORT_PARAM, None)
+    overrides = chat_params if isinstance(chat_params, dict) else {}
+    raw_effort = overrides.get(CHAT_REASONING_EFFORT_PARAM)
+    effort = raw_effort if isinstance(raw_effort, str) and raw_effort in _REASONING_EFFORTS else None
+    if effort == "off":
+        params.pop("reasoning", None)
+    elif effort is not None:
+        params["reasoning"] = {"effort": effort}
+    return params
+
 
 def _tz_from_header(x_timezone: str | None = Header(default=None)) -> str:
     """Fuso IANA do navegador (header `X-Timezone`, ex.: America/Sao_Paulo),
@@ -128,9 +155,9 @@ def _effective_chat_model(
         return (
             model_config.base_model,
             model_config.system_prompt,
-            dict(model_config.params or {}),
+            _params_with_chat_reasoning(model_config.params, chat.params),
         )
-    return chat.model, chat.system_prompt, dict(chat.params or {})
+    return chat.model, chat.system_prompt, _params_with_chat_reasoning(chat.params, chat.params)
 
 
 def _usage_record(usage: dict | None, model: str, model_config: ModelConfig | None) -> dict:

@@ -42,7 +42,7 @@ const CARD_META: { key: Section; name: string; desc: string; icon: ReactNode; li
   { key: "Cerebros", name: "Cérebros", desc: "Notas interligadas da IA", icon: <Waypoints size={22} />, live: true },
   { key: "Apps", name: "Apps", desc: "Mini-aplicações e automações", icon: <LayoutGrid size={22} />, live: false },
   { key: "Codespace", name: "Codespace", desc: "Programe com IA", icon: <Code2 size={22} />, live: true },
-  { key: "Investigacoes", name: "Investigações", desc: "Grafos de recon e engenharia reversa", icon: <Radar size={22} />, live: true },
+  { key: "Investigacoes", name: "Grafaria", desc: "Dados estruturados em grafo", icon: <Radar size={22} />, live: true },
   { key: "Automacoes", name: "Automações", desc: "Tarefas agendadas e monitores", icon: <CalendarClock size={22} />, live: true },
   { key: "Playground", name: "Playground", desc: "Benchmarks, comparações e debug", icon: <FlaskConical size={22} />, live: true },
   { key: "Memoria", name: "Memória", desc: "O que a IA lembra de você", icon: <Brain size={22} />, live: true },
@@ -929,7 +929,7 @@ export default function WorkspaceView({
         <CodespacePanel onBack={backHome} onOpenChat={(chatId, prefill) => { onOpenChat?.(chatId, prefill); onClose(); }} />
       )}
       {section === "Investigacoes" && (
-        <SectionShell title="Investigações" onBack={backHome}>
+        <SectionShell title="Grafaria" onBack={backHome}>
           <InvestigationPanel />
         </SectionShell>
       )}

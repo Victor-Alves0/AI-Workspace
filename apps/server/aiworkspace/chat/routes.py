@@ -26,6 +26,7 @@ from .. import crypto
 from ..auth.deps import require_approved
 from ..auth.security import hash_password
 from ..db import get_db
+from ..memory import mem0_service
 from ..models import Artifact, Chat, CodespaceProject, Message, User
 from ..schemas.chat import (
     ChatCreate,
@@ -36,7 +37,6 @@ from ..schemas.chat import (
 )
 from ..secrets_service import OPENROUTER_KEY, get_secret
 from . import compaction_routes, messages_routes, roundtable_routes
-from .turn_setup import _get_owned_chat
 
 # Compat: símbolos históricos re-exportados — importadores externos (automation,
 # integrations, playground, knowledge_routes) usavam `chat.routes._*`. Código
@@ -45,6 +45,7 @@ from .turn_setup import (  # noqa: F401
     _audio_router_config,
     _code_mode,
     _get_model_config,
+    _get_owned_chat,
     _load_skills,
     _mem_agent_id,
     _prepare_turn,
@@ -59,6 +60,41 @@ from .turn_setup import (  # noqa: F401
 
 router = APIRouter(prefix="/chats", tags=["chats"])
 logger = logging.getLogger(__name__)
+
+
+async def _delete_chat_memory_scopes(
+    db: AsyncSession,
+    user: User,
+    chat_ids: list[str] | None = None,
+) -> None:
+    """Remove do mem0 os escopos pertencentes aos chats apagados.
+
+    Memórias vivem no vector store e não participam do ``ON DELETE CASCADE`` do
+    Postgres da aplicação. ``chat_ids=None`` limpa todos os escopos de chat do
+    usuário (usado em "Excluir todos").
+    """
+    try:
+        key = (await get_secret(db, user.id, OPENROUTER_KEY)) or "x"
+    except Exception:  # noqa: BLE001 - o chat já foi apagado; limpeza é best-effort
+        logger.exception("Não foi possível resolver a memória ao apagar chat")
+        return
+
+    def cleanup() -> None:
+        ids = chat_ids
+        if ids is None:
+            ids = list(mem0_service.scope_summary(key, str(user.id)).get("chats", {}).keys())
+        for memory_chat_id in ids:
+            mem0_service.delete_scope(
+                key,
+                str(user.id),
+                scope="chat",
+                chat_id=memory_chat_id,
+            )
+
+    try:
+        await run_in_threadpool(cleanup)
+    except Exception:  # noqa: BLE001 - nunca transforma exclusão concluída em erro 500
+        logger.exception("Não foi possível apagar memórias dos chats")
 
 
 @router.get("", response_model=list[ChatOut])
@@ -262,6 +298,7 @@ async def delete_chat(
     chat = await _get_owned_chat(db, chat_id, user)
     await db.delete(chat)
     await db.commit()
+    await _delete_chat_memory_scopes(db, user, [str(chat_id)])
     return {"ok": True}
 
 
@@ -493,6 +530,7 @@ async def delete_all_chats(
 ):
     await db.execute(delete(Chat).where(Chat.user_id == user.id))
     await db.commit()
+    await _delete_chat_memory_scopes(db, user)
     return {"ok": True}
 
 

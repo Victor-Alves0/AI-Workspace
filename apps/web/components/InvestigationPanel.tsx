@@ -10,8 +10,8 @@ const KIND_LABEL: Record<string, string> = {
   recon: "Recon", re: "Eng. reversa", behavior: "Comportamento", generic: "Geral",
 };
 
-/** Painel do Espaço → Investigações: lista os grafos que a IA montou investigando
- *  (recon/RE/comportamento) e mostra o selecionado no canvas. A ESCRITA é sempre da
+/** Painel do Espaço → Grafaria: lista os grafos estruturados que a IA montou e
+ *  mostra o selecionado no canvas. A ESCRITA é sempre da
  *  IA (tool investigation.graph.manage); aqui só olhamos/apagamos. */
 export default function InvestigationPanel() {
   const [graphs, setGraphs] = useState<InvestigationGraphMeta[] | null>(null);
@@ -32,7 +32,7 @@ export default function InvestigationPanel() {
   }, [graphs, selected]);
 
   async function remove(id: string) {
-    if (!confirm("Apagar este grafo de investigação? Não dá para desfazer.")) return;
+    if (!confirm("Apagar este grafo? Não dá para desfazer.")) return;
     await api.del(`/investigation/graphs/${id}`).catch(() => {});
     if (selected === id) setSelected(null);
     load();
@@ -46,10 +46,10 @@ export default function InvestigationPanel() {
       <div className="grid h-56 place-items-center px-8 text-center">
         <div className="max-w-md">
           <Radar size={30} className="mx-auto mb-3 text-muted" />
-          <p className="text-sm text-ink">Nenhuma investigação ainda.</p>
+          <p className="text-sm text-ink">Nenhum grafo ainda.</p>
           <p className="mt-1 text-xs text-muted">
-            Num chat, peça à IA para investigar um alvo, um binário ou o comportamento de um
-            sistema — ela sonda com as ferramentas e vai montando o grafo aqui, consultável e visual.
+            Num chat, peça à IA para estruturar informações como grafo. Os dados ficam
+            organizados aqui em nós e relações, de forma consultável e visual.
           </p>
         </div>
       </div>
@@ -72,7 +72,7 @@ export default function InvestigationPanel() {
               >
                 <Radar size={16} className={`mt-0.5 shrink-0 ${active ? "text-accent" : "text-muted"}`} />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-ink">{g.name || "investigação"}</p>
+                  <p className="truncate text-sm text-ink">{g.name || "Grafo sem nome"}</p>
                   {g.target && <p className="truncate font-mono text-[11px] text-muted">{g.target}</p>}
                   <p className="mt-0.5 text-[10px] text-muted">
                     {KIND_LABEL[g.kind] ?? g.kind} · {g.nodes} nós · {g.edges} arestas
@@ -97,7 +97,7 @@ export default function InvestigationPanel() {
       <div className="min-w-0">
         {selected
           ? <InvestigationGraphView key={selected} graphId={selected} />
-          : <p className="grid h-40 place-items-center text-sm text-muted">Selecione uma investigação.</p>}
+          : <p className="grid h-40 place-items-center text-sm text-muted">Selecione um grafo.</p>}
       </div>
     </div>
   );

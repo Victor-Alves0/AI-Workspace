@@ -103,20 +103,25 @@ async def _model_names(db: AsyncSession, user: User, ids: list[str]) -> dict[str
     return out
 
 
-async def _chat_titles(db: AsyncSession, user: User, ids: list[str]) -> dict[str, str]:
+async def _existing_chat_titles(db: AsyncSession, user: User, ids: list[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     uuids: list[uuid.UUID] = []
     for i in ids:
         try:
             uuids.append(uuid.UUID(i))
         except ValueError:
-            out[i] = i
+            continue
     if uuids:
         rows = await db.scalars(
             select(Chat).where(Chat.user_id == user.id, Chat.id.in_(uuids))
         )
         for c in rows:
             out[str(c.id)] = c.title
+    return out
+
+
+async def _chat_titles(db: AsyncSession, user: User, ids: list[str]) -> dict[str, str]:
+    out = await _existing_chat_titles(db, user, ids)
     for i in ids:
         out.setdefault(i, "Chat removido")
     return out
@@ -242,14 +247,33 @@ async def scopes(user: User = Depends(require_approved), db: AsyncSession = Depe
     key = await _key(db, user)
     summary = await run_in_threadpool(mem0_service.scope_summary, key, str(user.id))
     mnames = await _model_names(db, user, list(summary["models"].keys()))
-    ctitles = await _chat_titles(db, user, list(summary["chats"].keys()))
+    memory_chat_ids = list(summary["chats"].keys())
+    ctitles = await _existing_chat_titles(db, user, memory_chat_ids)
+    # Repara instalações que já tinham órfãos antes do cascade explícito: além de
+    # não exibir "Chat removido", apaga de fato esses vetores do mem0.
+    orphan_chat_ids = [chat_id for chat_id in memory_chat_ids if chat_id not in ctitles]
+    if orphan_chat_ids:
+        def cleanup_orphans() -> None:
+            for chat_id in orphan_chat_ids:
+                mem0_service.delete_scope(
+                    key, str(user.id), scope="chat", chat_id=chat_id
+                )
+
+        await run_in_threadpool(cleanup_orphans)
+        summary = await run_in_threadpool(mem0_service.scope_summary, key, str(user.id))
+        memory_chat_ids = list(summary["chats"].keys())
+        ctitles = await _existing_chat_titles(db, user, memory_chat_ids)
     bnames = await _bank_names(db, user, list(summary.get("banks", {}).keys()))
     fnames = await _folder_names(db, user, list(summary.get("projects", {}).keys()))
     return {
         "global": summary["global"],
         "total": summary["total"],
         "models": [{"id": k, "name": mnames.get(k, k), "count": v} for k, v in summary["models"].items()],
-        "chats": [{"id": k, "title": ctitles.get(k, k), "count": v} for k, v in summary["chats"].items()],
+        "chats": [
+            {"id": k, "title": ctitles[k], "count": v}
+            for k, v in summary["chats"].items()
+            if k in ctitles
+        ],
         "banks": [{"id": k, "name": bnames.get(k, k), "count": v} for k, v in summary.get("banks", {}).items()],
         "projects": [{"id": k, "name": fnames.get(k, k), "count": v} for k, v in summary.get("projects", {}).items()],
     }

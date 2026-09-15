@@ -110,6 +110,11 @@ async def tts(
     body: TTSIn, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
 ):
     voice_cfg = await _model_voice_config(db, user, body.model_config_id)
+    if voice_cfg.get("tts_enabled") is False:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "A fala (TTS) está desativada nas configurações deste modelo.",
+        )
     voice = body.voice or voice_cfg.get("tts_voice") or get_settings().tts_voice
     # Voz ElevenLabs (voz por-modelo prefixada "el:"): sintetiza pela API nativa da
     # ElevenLabs (não é OpenAI-compat), antes do caminho Voz Local/global.
@@ -227,6 +232,12 @@ async def stt(
     db: AsyncSession = Depends(get_db),
 ):
     s = get_settings()
+    voice_cfg = await _model_voice_config(db, user, model_config_id)
+    if voice_cfg.get("stt_enabled") is False:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "A escuta (STT) está desativada nas configurações deste modelo.",
+        )
     # lê no máximo o limite + 1 byte para detectar estouro sem carregar tudo
     audio = await file.read(_MAX_AUDIO_BYTES + 1)
     if len(audio) > _MAX_AUDIO_BYTES:
@@ -236,7 +247,6 @@ async def stt(
         )
     fname = file.filename or "audio.webm"
     mime = file.content_type or "audio/webm"
-    voice_cfg = await _model_voice_config(db, user, model_config_id)
     provider = str(voice_cfg.get("stt_provider") or "auto")
     requested_model = str(voice_cfg.get("stt_model") or "") or None
 

@@ -115,8 +115,10 @@ type VoiceCatalog = {
   voices: AudioChoice[];
 };
 type ModelVoiceConfig = {
+  tts_enabled?: boolean;
   tts_provider?: VoiceProvider;
   tts_model?: string;
+  stt_enabled?: boolean;
   stt_provider?: VoiceProvider;
   stt_model?: string;
 };
@@ -266,8 +268,9 @@ function ProviderPicker({
 /** Console de voz por-modelo: separa fala (TTS) e escuta (STT), mas mantém
  *  provedor/modelo/voz no mesmo lugar e permite testar sem salvar primeiro. */
 function VoiceStudio({
-  catalog, config, voice, onConfigChange, onVoiceChange,
+  mode, catalog, config, voice, onConfigChange, onVoiceChange,
 }: {
+  mode: "tts" | "stt";
   catalog: VoiceCatalog | null;
   config: ModelVoiceConfig;
   voice: string;
@@ -357,7 +360,7 @@ function VoiceStudio({
 
   return (
     <div className="overflow-hidden rounded-2xl border border-border bg-surface">
-      <div className="grid divide-y divide-border lg:grid-cols-2 lg:divide-x lg:divide-y-0">
+      {mode === "tts" ? (
         <div className="space-y-3 p-4">
           <div className="flex items-start gap-2.5">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent-hover"><Volume2 size={16} /></span>
@@ -379,7 +382,7 @@ function VoiceStudio({
           </button>
           {previewError && <p role="alert" className="text-xs text-red-400">{previewError}</p>}
         </div>
-
+      ) : (
         <div className="space-y-3 p-4">
           <div className="flex items-start gap-2.5">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-surface2 text-ink-soft"><Mic2 size={16} /></span>
@@ -394,7 +397,7 @@ function VoiceStudio({
             Com OpenRouter, o áudio vai ao endpoint de transcrição usando a mesma chave do chat. O modelo escolhido aqui vale para o microfone e para o modo voz deste modelo.
           </div>
         </div>
-      </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-bg/40 px-4 py-2.5 text-[11px] text-muted">
         <span>As configurações são salvas somente neste modelo.</span>
         <span>Credenciais: Configurações → APIs / Provedores</span>
@@ -837,6 +840,7 @@ export default function ModelEditor({
   const voiceCfg: ModelVoiceConfig = filterConfig.voice ?? {};
   const setVoiceCfg = (patch: Partial<ModelVoiceConfig>) =>
     setFilterConfig((fc) => ({ ...fc, voice: { ...(fc.voice ?? {}), ...patch } }));
+  const [openVoiceConfig, setOpenVoiceConfig] = useState<"tts" | "stt" | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -1084,8 +1088,10 @@ export default function ModelEditor({
       const provider = (value: unknown): VoiceProvider =>
         value === "openrouter" || value === "api" || value === "local" ? value : "auto";
       cleanFilterConfig.voice = {
+        tts_enabled: vc.tts_enabled !== false,
         tts_provider: provider(vc.tts_provider),
         tts_model: String(vc.tts_model ?? "").trim().slice(0, 255),
+        stt_enabled: vc.stt_enabled !== false,
         stt_provider: provider(vc.stt_provider),
         stt_model: String(vc.stt_model ?? "").trim().slice(0, 255),
       };
@@ -1340,21 +1346,88 @@ export default function ModelEditor({
             </div>
           </Section>
 
-          {/* Voz — provedor (Voz Local ou global) + voz usada no TTS */}
-          <Section
-            title="Voz"
-            icon={<Volume2 size={15} />}
-            hint="Configuração por-modelo para falar respostas (TTS) e transcrever o microfone (STT). Pode usar OpenRouter, uma API OpenAI-compatível ou o servidor local."
-          >
-            <VoiceStudio
-              catalog={voiceCatalog}
-              config={voiceCfg}
-              voice={ttsVoice}
-              onConfigChange={setVoiceCfg}
-              onVoiceChange={setTtsVoice}
-            />
+          {/* Voz — cards independentes, no mesmo padrão de Ferramentas. */}
+          <div className="mt-8 space-y-3 border-t border-border pt-7">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
+              <span className="text-muted"><Volume2 size={15} /></span>
+              Voz
+              <InfoHint text="Ative separadamente a fala (TTS) e a escuta (STT). A engrenagem abre o provedor, modelo, voz e teste de cada recurso." />
+            </h2>
 
-          </Section>
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-ink">Fala · TTS</span>
+                <span className="block text-xs text-muted">Transforma respostas do modelo em áudio.</span>
+              </span>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {voiceCfg.tts_enabled !== false && (
+                  <button
+                    type="button"
+                    onClick={() => setOpenVoiceConfig((current) => current === "tts" ? null : "tts")}
+                    title="Configurar fala"
+                    aria-expanded={openVoiceConfig === "tts"}
+                    className={`rounded-lg p-1.5 transition-colors ${openVoiceConfig === "tts" ? "bg-hover text-ink" : "text-muted hover:bg-hover hover:text-ink"}`}
+                  >
+                    <Settings size={16} />
+                  </button>
+                )}
+                <Toggle
+                  on={voiceCfg.tts_enabled !== false}
+                  onChange={(enabled) => {
+                    setVoiceCfg({ tts_enabled: enabled });
+                    if (!enabled && openVoiceConfig === "tts") setOpenVoiceConfig(null);
+                  }}
+                />
+              </div>
+            </div>
+            {voiceCfg.tts_enabled !== false && openVoiceConfig === "tts" && (
+              <VoiceStudio
+                mode="tts"
+                catalog={voiceCatalog}
+                config={voiceCfg}
+                voice={ttsVoice}
+                onConfigChange={setVoiceCfg}
+                onVoiceChange={setTtsVoice}
+              />
+            )}
+
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-ink">Escuta · STT</span>
+                <span className="block text-xs text-muted">Transcreve o microfone antes de enviar a mensagem.</span>
+              </span>
+              <div className="flex shrink-0 items-center gap-1.5">
+                {voiceCfg.stt_enabled !== false && (
+                  <button
+                    type="button"
+                    onClick={() => setOpenVoiceConfig((current) => current === "stt" ? null : "stt")}
+                    title="Configurar escuta"
+                    aria-expanded={openVoiceConfig === "stt"}
+                    className={`rounded-lg p-1.5 transition-colors ${openVoiceConfig === "stt" ? "bg-hover text-ink" : "text-muted hover:bg-hover hover:text-ink"}`}
+                  >
+                    <Settings size={16} />
+                  </button>
+                )}
+                <Toggle
+                  on={voiceCfg.stt_enabled !== false}
+                  onChange={(enabled) => {
+                    setVoiceCfg({ stt_enabled: enabled });
+                    if (!enabled && openVoiceConfig === "stt") setOpenVoiceConfig(null);
+                  }}
+                />
+              </div>
+            </div>
+            {voiceCfg.stt_enabled !== false && openVoiceConfig === "stt" && (
+              <VoiceStudio
+                mode="stt"
+                catalog={voiceCatalog}
+                config={voiceCfg}
+                voice={ttsVoice}
+                onConfigChange={setVoiceCfg}
+                onVoiceChange={setTtsVoice}
+              />
+            )}
+          </div>
 
           {/* Assistente — chamar o modelo por voz (categoria própria, no estilo de Ferramentas) */}
           <div className="mt-8 space-y-3 border-t border-border pt-7">
@@ -1757,7 +1830,7 @@ export default function ModelEditor({
               onManage={() => setCapsModal(true)}
               searchPlaceholder="Buscar capacidades…"
               empty="Nenhuma capacidade marcada."
-              hint="'Nativo' = habilidade do próprio modelo (Visão, Upload de Arquivos, Geração de Imagens, Contexto do Chat). As demais são recursos que o app injeta quando ativados: Aprender Skills (/learn), Data e Hora em Tempo Real (injeta o 'agora' a cada turno — desligue p/ poupar tokens) e Artefatos (instruções de documento/código versionável; só injeta quando ativada ou quando o chat já tem artefatos)."
+              hint="Tudo o que o modelo é capaz de fazer. “Nativo” indica capacidades nativas do modelo, como visão; as demais capacidades são injetadas pelo app."
             />
           </div>
 

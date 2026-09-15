@@ -138,17 +138,39 @@ const STREAMING_TAIL_LIMIT = 2400;
  * Estabiliza markdown PARCIAL durante o streaming: enquanto os tokens chegam, uma
  * crase/cerca de código aberta faz TODO o texto seguinte "virar código" até a de
  * fechamento chegar — e volta no próximo flush. Esse flip-flop é o "piscar" que o
- * usuário via. Fechamos/removemos os delimitadores abertos só p/ renderizar (o texto
- * real não muda): cerca ``` ímpar → fecha; crase inline solta na última linha → remove.
+ * usuário via. Removemos apenas o delimitador de bloco ainda aberto da cópia usada
+ * na renderização. O texto recebido continua intacto e, quando chegar o fechamento,
+ * o bloco completo passa a ser renderizado normalmente.
  */
-function stabilizeStream(md: string): string {
-  const fences = (md.match(/^ {0,3}```/gm) || []).length;
-  if (fences % 2 === 1) return `${md}\n\`\`\``; // fecha o bloco de código aberto
+type OpenFence = { start: number; end: number; marker: "`" | "~"; length: number };
+
+function findOpenFence(md: string): OpenFence | null {
+  const line = /^ {0,3}(`{3,}|~{3,})[^\n]*(?:\n|$)/gm;
+  let open: OpenFence | null = null;
+  for (const match of md.matchAll(line)) {
+    const fence = match[1];
+    const marker = fence[0] as "`" | "~";
+    if (!open) {
+      open = { start: match.index, end: match.index + match[0].length, marker, length: fence.length };
+    } else if (marker === open.marker && fence.length >= open.length) {
+      open = null;
+    }
+  }
+  return open;
+}
+
+export function stabilizeStream(md: string): string {
+  const openFence = findOpenFence(md);
+  if (openFence) {
+    // Não inventa um fechamento: isso fazia todo o texto subsequente virar um
+    // grande bloco monoespaçado. Apenas omite a linha da cerca nesta pintura.
+    return md.slice(0, openFence.start) + md.slice(openFence.end);
+  }
   const nl = md.lastIndexOf("\n");
   const lastLine = md.slice(nl + 1);
   // NÃO mexer numa linha de cerca (``` de fechamento tem 3 crases, nº ímpar) — só
   // numa crase INLINE órfã (ex.: "... o `patternScan" ainda sem a de fechamento).
-  if (!/^ {0,3}```/.test(lastLine) && ((lastLine.match(/`/g) || []).length) % 2 === 1) {
+  if (!/^ {0,3}(`{3,}|~{3,})/.test(lastLine) && ((lastLine.match(/`/g) || []).length) % 2 === 1) {
     return md.slice(0, md.lastIndexOf("`"));
   }
   return md;
@@ -165,7 +187,7 @@ function splitStreamingMarkdown(md: string): { stable: string; tail: string } {
   const stable = md.slice(0, boundary + 2);
   // Uma cerca aberta precisa permanecer na mesma árvore que seu fechamento. Em
   // respostas com um único bloco enorme, o clamp ainda limita o trabalho a 8k.
-  if ((stable.match(/^ {0,3}```/gm) || []).length % 2 !== 0) return { stable: "", tail: md };
+  if (findOpenFence(stable)) return { stable: "", tail: md };
   return { stable, tail: md.slice(boundary + 2) };
 }
 
