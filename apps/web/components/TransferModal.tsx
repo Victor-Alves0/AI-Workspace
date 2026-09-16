@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Pin,
   Search,
+  Settings,
   Wrench,
   X,
 } from "lucide-react";
@@ -41,6 +42,8 @@ function TransferPane({
   onTogglePin,
   pinnedKeys,
   pinHint,
+  hasConfig,
+  onConfig,
   hasQuery,
 }: {
   heading: string;
@@ -52,8 +55,21 @@ function TransferPane({
   onTogglePin?: (key: string) => void;
   pinnedKeys?: string[];
   pinHint?: string;
+  hasConfig?: (key: string) => boolean;
+  onConfig?: (key: string) => void;
   hasQuery: boolean;
 }) {
+  const groups = useMemo(() => {
+    const out = new Map<string, TransferItem[]>();
+    for (const item of list) {
+      const key = item.group?.trim() || "";
+      const bucket = out.get(key);
+      if (bucket) bucket.push(item);
+      else out.set(key, [item]);
+    }
+    return [...out.entries()];
+  }, [list]);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border bg-bg">
       <div className="flex items-center justify-between border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted">
@@ -63,49 +79,68 @@ function TransferPane({
         </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
-        {list.map((it) => {
-          const marked = marks.has(it.key);
-          const showPin = side === "right" && !!onTogglePin;
-          const pinned = showPin && (pinnedKeys ?? []).includes(it.key);
-          return (
-            <div
-              key={it.key}
-              className={`flex items-center gap-1 rounded-lg transition-colors ${
-                marked ? "bg-accent/15 ring-1 ring-accent/40" : "hover:bg-hover"
-              }`}
-            >
-              <button
-                onClick={() => onToggleMark(side, it.key)}
-                onDoubleClick={() => onMove(side, it.key)}
-                className="flex min-w-0 flex-1 flex-col px-2.5 py-1.5 text-left"
-              >
-                <span className="flex items-center gap-1.5">
-                  {it.system && (
-                    <span title={it.iconTitle ?? "AI Workspace"} className="shrink-0 text-muted">
-                      {it.icon ?? <Wrench size={12} />}
-                    </span>
-                  )}
-                  {pinned && <Pin size={11} className="shrink-0 fill-accent-hover text-accent-hover" />}
-                  <span className="truncate text-sm text-ink">{it.label}</span>
-                </span>
-                {it.sublabel && <span className="truncate font-mono text-[11px] text-muted">{it.sublabel}</span>}
-              </button>
-              {showPin && (
-                <button
-                  onClick={() => onTogglePin!(it.key)}
-                  title={pinned
-                    ? "Fixada: sempre visível ao modelo, sem round-trip de busca. Clique p/ desafixar."
-                    : (pinHint || "Fixar: vira ferramenta de 1ª classe (o modelo chama direto, sem busca).")}
-                  className={`mr-1 shrink-0 rounded-md p-1 transition-colors ${
-                    pinned ? "text-accent-hover" : "text-muted hover:text-ink"
+        {groups.map(([group, items]) => (
+          <div key={group || "ungrouped"} className="mb-2 last:mb-0">
+            {group && (
+              <p className="px-1.5 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">
+                {group}
+              </p>
+            )}
+            {items.map((it) => {
+              const marked = marks.has(it.key);
+              const showPin = side === "right" && !!onTogglePin;
+              const showConfig = side === "right" && !!onConfig && !!hasConfig?.(it.key);
+              const pinned = showPin && (pinnedKeys ?? []).includes(it.key);
+              return (
+                <div
+                  key={it.key}
+                  className={`flex items-center gap-1 rounded-lg transition-colors ${
+                    marked ? "bg-accent/15 ring-1 ring-accent/40" : "hover:bg-hover"
                   }`}
                 >
-                  <Pin size={13} className={pinned ? "fill-accent-hover" : ""} />
-                </button>
-              )}
-            </div>
-          );
-        })}
+                  <button
+                    onClick={() => onToggleMark(side, it.key)}
+                    onDoubleClick={() => onMove(side, it.key)}
+                    className="flex min-w-0 flex-1 flex-col px-2.5 py-1.5 text-left"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      {it.system && (
+                        <span title={it.iconTitle ?? "AI Workspace"} className="shrink-0 text-muted">
+                          {it.icon ?? <Wrench size={12} />}
+                        </span>
+                      )}
+                      {pinned && <Pin size={11} className="shrink-0 fill-accent-hover text-accent-hover" />}
+                      <span className="truncate text-sm text-ink">{it.label}</span>
+                    </span>
+                    {it.sublabel && <span className="truncate font-mono text-[11px] text-muted">{it.sublabel}</span>}
+                  </button>
+                  {showPin && (
+                    <button
+                      onClick={() => onTogglePin!(it.key)}
+                      title={pinned
+                        ? "Fixada: sempre visível ao modelo, sem round-trip de busca. Clique p/ desafixar."
+                        : (pinHint || "Fixar: vira ferramenta de 1ª classe (o modelo chama direto, sem busca).")}
+                      className={`mr-1 shrink-0 rounded-md p-1 transition-colors ${
+                        pinned ? "text-accent-hover" : "text-muted hover:text-ink"
+                      }`}
+                    >
+                      <Pin size={13} className={pinned ? "fill-accent-hover" : ""} />
+                    </button>
+                  )}
+                  {showConfig && (
+                    <button
+                      onClick={() => onConfig!(it.key)}
+                      title="Configurar capacidade"
+                      className="mr-1 shrink-0 rounded-md p-1 text-muted transition-colors hover:text-ink"
+                    >
+                      <Settings size={13} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ))}
         {list.length === 0 && (
           <p className="px-2.5 py-6 text-center text-xs text-muted">
             {hasQuery ? "Nada encontrado." : side === "left" ? "Tudo selecionado." : "Nada selecionado."}
@@ -134,6 +169,8 @@ export default function TransferModal({
   pinnedKeys,
   onTogglePin,
   pinHint,
+  hasConfig,
+  onConfig,
 }: {
   title: string;
   items: TransferItem[];
@@ -147,6 +184,8 @@ export default function TransferModal({
   pinnedKeys?: string[];
   onTogglePin?: (key: string) => void;
   pinHint?: string;
+  hasConfig?: (key: string) => boolean;
+  onConfig?: (key: string) => void;
 }) {
   const ref = useClickOutside<HTMLDivElement>(onClose);
   const [q, setQ] = useState("");
@@ -160,7 +199,9 @@ export default function TransferModal({
     const f = q.trim().toLowerCase();
     if (!f) return list;
     return list.filter(
-      (i) => i.label.toLowerCase().includes(f) || (i.sublabel ?? "").toLowerCase().includes(f),
+      (i) => i.label.toLowerCase().includes(f)
+        || (i.sublabel ?? "").toLowerCase().includes(f)
+        || (i.group ?? "").toLowerCase().includes(f),
     );
   };
 
@@ -265,6 +306,8 @@ export default function TransferModal({
             onTogglePin={onTogglePin}
             pinnedKeys={pinnedKeys}
             pinHint={pinHint}
+            hasConfig={hasConfig}
+            onConfig={onConfig}
             hasQuery={!!q.trim()}
           />
         </div>

@@ -9,7 +9,13 @@ ação separada com confirmação).
 """
 from __future__ import annotations
 
-from aiworkspace.tools.loader import _tool_catalog, codespace_allow, codespace_pins, expand_tool_companions
+from aiworkspace.tools.loader import (
+    _tool_catalog,
+    codespace_allow,
+    codespace_pins,
+    context_direct_pins,
+    expand_tool_companions,
+)
 
 _ALL = {
     "code.graph.query", "code.files.browse", "code.flow.analyze",
@@ -87,3 +93,14 @@ def test_catalog_names_the_implicit_page_reader():
     catalog = _tool_catalog(["builtin:web.search.query"], [], allow)
     assert any(entry.startswith("Pesquisa na Web") for entry in catalog)
     assert any(entry.startswith("Ler Página") for entry in catalog)
+
+
+def test_web_context_pack_promotes_search_and_page_read_together():
+    """Web é uma capacidade frequente: schemas diretos eliminam discovery extra."""
+    allow = expand_tool_companions(["web.search.query"])
+    assert context_direct_pins(allow) == ["web.page.read", "web.search.query"]
+
+
+def test_context_pack_never_expands_permission_by_itself():
+    """O pack muda exposição, jamais adiciona uma ferramenta não liberada."""
+    assert context_direct_pins(["utils.time.now"]) == []

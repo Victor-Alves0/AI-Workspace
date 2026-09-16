@@ -42,6 +42,13 @@ def test_native_tools_note_mentions_user_owned_media():
     assert "photo" in note.lower()
 
 
+def test_context_direct_note_uses_the_flat_sift_function_names():
+    note = orch._context_direct_tools_note(["web.search.query", "web.page.read"])
+    assert "`web__search__query`" in note
+    assert "`web__page__read`" in note
+    assert "do NOT call search_tools first" in note
+
+
 # --------------------------------------------------------------------------- #
 # search_knowledge (item 4)
 # --------------------------------------------------------------------------- #

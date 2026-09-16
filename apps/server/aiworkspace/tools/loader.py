@@ -146,6 +146,17 @@ _TOOL_COMPANIONS: dict[str, tuple[str, ...]] = {
     "web.search.query": ("web.page.read",),
 }
 
+# Capacidades de uso recorrente merecem schemas diretos: economizam a rodada
+# ``search_tools -> execute_tool`` e dão ao modelo os parâmetros tipados certos.
+# Isto NÃO substitui o SIFT: o catálogo longo, integrações e ferramentas criadas
+# pelo usuário continuam sendo descobertos sob demanda. Mantenha a lista curta;
+# promover tudo recriaria o custo de contexto que o SIFT evita.
+_CONTEXT_DIRECT_PACKS: dict[str, tuple[str, ...]] = {
+    # Pesquisa sem leitura da fonte é uma armadilha comum. As duas operações são
+    # apresentadas juntas ao modelo, mas continuam uma única capacidade "Web" na UI.
+    "web.search.query": ("web.search.query", "web.page.read"),
+}
+
 
 def expand_tool_companions(allow: list[str]) -> list[str]:
     """Inclui companions seguros das tools já permitidas, sem abrir outros grupos."""
@@ -154,6 +165,21 @@ def expand_tool_companions(allow: list[str]) -> list[str]:
         if _allow_match(source, allow):
             expanded.update(companions)
     return sorted(expanded)
+
+
+def context_direct_pins(allow: list[str]) -> list[str]:
+    """Ferramentas curtas promovidas automaticamente pelo contexto selecionado.
+
+    Retorna somente paths que já estão liberados. Assim um pack nunca amplia a
+    permissão do modelo: ele apenas muda a forma de exposição de uma capacidade
+    já permitida, de descoberta genérica para chamada direta e validada.
+    """
+    out: set[str] = set()
+    for trigger, paths in _CONTEXT_DIRECT_PACKS.items():
+        if not _allow_match(trigger, allow):
+            continue
+        out.update(path for path in paths if _allow_match(path, allow))
+    return sorted(out)
 
 
 def codespace_allow(allow: list[str]) -> list[str]:
@@ -416,8 +442,14 @@ async def get_sift_for_user(
         # do run_code — o watchdog mataria e descartaria o resultado).
         if code_mode:
             pin_paths = [p for p in _CODE_MODE_PROMOTE if _allow_match(p, allow)]
+            direct_paths: list[str] = []
         else:
             pin_paths = _pinned_paths(sift_config.get("pinned") or [], rows)
+            # Packs automáticos são complementares aos pins escolhidos no editor.
+            # O primeiro dá boa UX para fluxos universais (Web); o segundo deixa
+            # cada modelo promover suas ferramentas especializadas.
+            direct_paths = context_direct_pins(effective_allow)
+            pin_paths = sorted(set(pin_paths) | set(direct_paths))
         if in_codespace:
             # num chat de projeto as tools de código são as "quentes" por
             # definição: entram como specs de 1ª classe (sem discovery), senão o
@@ -431,6 +463,7 @@ async def get_sift_for_user(
             logger.warning("Falha ao fixar tools SIFT (%s); escopo sem pin", exc)
             scope = full.scope(allow=allow)
             pin_paths = []
+            direct_paths = []
         # Modo Código: os specs pinados (nome flat com "__") entram como tools de
         # 1ª classe AO LADO do run_code (code_tools() não inclui pins).
         if code_mode and pin_paths:
@@ -449,6 +482,7 @@ async def get_sift_for_user(
             _allow_match("web.search.query", effective_allow)
             and _allow_match("web.page.read", effective_allow)
         )
+        scope.meta["context_direct_paths"] = direct_paths
         scope.meta["sift_mode"] = sift_config.get("mode") or "prompt"
         scope.meta["sift_prompt"] = sift_config.get("prompt") or ""
         # chat de projeto: o orchestrator usa isto p/ dar um teto de iterações maior

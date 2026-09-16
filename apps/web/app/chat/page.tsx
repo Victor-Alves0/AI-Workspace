@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, ChevronDown, ChevronUp, Code2, Copy, FlaskConical, GitBranch, Image as ImageIcon, Link2, Loader2, Menu, MessageSquareDashed, Mic, Pause, Play, RotateCcw, RotateCw, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
+import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, ChevronDown, ChevronUp, Code2, Copy, FlaskConical, GitBranch, Heart, Image as ImageIcon, Link2, Loader2, Map as MapIcon, Menu, MessageSquareDashed, Mic, Package, Pause, Play, RotateCcw, RotateCw, ScrollText, Search, Scissors, Share2, Shield, ShieldAlert, SlidersHorizontal, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamRoundtable } from "@/lib/sse";
@@ -33,7 +33,7 @@ import ArchivedModal from "@/components/ArchivedModal";
 import ChatManager from "@/components/ChatManager";
 import ChatInfoModal from "@/components/ChatInfo";
 import CompactionHistory from "@/components/CompactionHistory";
-import PromptBox, { type ReasoningEffort, type RefDoc } from "@/components/PromptBox";
+import PromptBox, { type MiniAppId, type ReasoningEffort, type RefDoc } from "@/components/PromptBox";
 import MessageItem from "@/components/MessageItem";
 import WorkspaceView, { type Section as WorkspaceSection } from "@/components/WorkspaceView";
 import type { ChatActions } from "@/components/ChatItem";
@@ -194,6 +194,9 @@ export default function ChatPage() {
   // anexos (imagens/arquivos) do próximo envio
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [active, setActive] = useState<Chat | null>(null);
+  // Mini Apps são contexto visual do chat. O primeiro, Imaginai, abre os dois
+  // docks do RPG sem mudar a geometria da coluna de mensagens.
+  const [activeMiniApp, setActiveMiniApp] = useState<MiniAppId | null>(null);
   // espelho do id do chat ativo: os handlers de stream (assíncronos) consultam
   // este ref para saber, a QUALQUER instante, se ainda estão pintando o chat que
   // o usuário está vendo — sem isso, o parcial de um chat vaza para outro ao trocar.
@@ -2293,7 +2296,7 @@ export default function ChatPage() {
                   onDragLeave={() => setCsDropOver(false)}
                   onDrop={handleComposerFileDrop}
                 >
-                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} temporary={temporary} />
+                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} activeMiniApp={activeMiniApp} onActiveMiniAppChange={setActiveMiniApp} temporary={temporary} />
                 </div>
                 {/* menu do "+" abre para baixo aqui (há espaço); na conversa abre para cima */}
                 {temporary && <p className="mt-2 text-xs text-muted">Chat temporário — esta conversa não será salva.</p>}
@@ -2327,18 +2330,19 @@ export default function ChatPage() {
                     da medição escondia o fim do conteúdo ("o scroll morre").
                     O pb-14 só afasta a última linha do gradiente; é constante e não
                     depende de medição nenhuma. */}
-                <div
-                  ref={scrollRef}
-                  onScroll={onScrollArea}
-                  onWheel={() => { forceBottomAfterLandingRef.current = false; }}
-                  onPointerDown={(event) => {
-                    forceBottomAfterLandingRef.current = false;
-                    if (event.button === 0) selectingTextRef.current = true;
-                  }}
-                  onPointerUp={() => { selectingTextRef.current = false; }}
-                  onPointerCancel={() => { selectingTextRef.current = false; }}
-                  className="chat-scroll flex-1 space-y-5 overflow-y-auto px-4 pb-14 pt-6 [scroll-padding-bottom:5rem]"
-                >
+                <div className="chat-game-stage relative flex min-h-0 flex-1">
+                  <div
+                    ref={scrollRef}
+                    onScroll={onScrollArea}
+                    onWheel={() => { forceBottomAfterLandingRef.current = false; }}
+                    onPointerDown={(event) => {
+                      forceBottomAfterLandingRef.current = false;
+                      if (event.button === 0) selectingTextRef.current = true;
+                    }}
+                    onPointerUp={() => { selectingTextRef.current = false; }}
+                    onPointerCancel={() => { selectingTextRef.current = false; }}
+                    className="chat-scroll flex-1 space-y-5 overflow-y-auto px-4 pb-14 pt-6 [scroll-padding-bottom:5rem]"
+                  >
                   {temporary && (
                     <div className="mx-auto w-fit rounded-full border border-border bg-surface px-4 py-1.5 text-center text-xs text-muted">
                       Chat temporário — não será salvo
@@ -2487,6 +2491,8 @@ export default function ChatPage() {
                   ) : (
                     sending && <Thinking />
                   ))}
+                  </div>
+                  {activeMiniApp === "imaginai" ? <ImaginaiDnd5eDocks /> : null}
                 </div>
                 {/* Composer NO FLUXO (shrink-0): ocupa espaço de verdade, então a área
                     de rolagem acima nunca fica maior que o disponível. Cresce (anexos,
@@ -2521,7 +2527,7 @@ export default function ChatPage() {
                           {showAsk && askSpec && (
                             <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                           )}
-                          <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
+                          <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={setActiveMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
                         </div>
                       </div>
                       {speakingMessageId && (
@@ -2927,6 +2933,100 @@ function SpeechController({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+const DND_CHARACTER_SECTIONS = [
+  { id: "inventory", label: "Inventário", icon: Package },
+  { id: "spells", label: "Magias", icon: Sparkles },
+  { id: "sheet", label: "Ficha", icon: ScrollText },
+] as const;
+
+const DND_WORLD_SECTIONS = [
+  { id: "journal", label: "Diário", icon: BookOpen },
+  { id: "map", label: "Mapa", icon: MapIcon },
+  { id: "codex", label: "Codex", icon: ScrollText },
+] as const;
+
+type CharacterSection = (typeof DND_CHARACTER_SECTIONS)[number]["id"];
+type WorldSection = (typeof DND_WORLD_SECTIONS)[number]["id"];
+
+/**
+ * Docks do primeiro sistema do Imaginai. Os dados ainda são o esqueleto visual de
+ * D&D 5e; a composição em dois painéis permite que sistemas futuros forneçam seus
+ * próprios campos sem alterar a coluna central do chat.
+ */
+function ImaginaiDnd5eDocks() {
+  const [characterSection, setCharacterSection] = useState<CharacterSection>("sheet");
+  const [worldSection, setWorldSection] = useState<WorldSection>("journal");
+
+  return (
+    <div className="imaginai-docks" aria-label="Painéis do Imaginai">
+      <aside className="imaginai-world-dock" aria-label="Worldinfo">
+        <section className="w-full max-w-[22rem] rounded-2xl border border-violet-400/20 bg-surface/95 p-3 shadow-prompt backdrop-blur">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">Worldinfo · D&amp;D 5e</p>
+          <h2 className="truncate text-sm font-semibold text-ink">Nome da Campanha</h2>
+          <div className="mt-3 grid grid-cols-3 gap-1.5" role="group" aria-label="Navegação da campanha">
+            {DND_WORLD_SECTIONS.map((section) => {
+              const Icon = section.icon;
+              const selected = worldSection === section.id;
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setWorldSection(section.id)}
+                  className={`flex min-w-0 flex-col items-center gap-1 rounded-xl px-1 py-2 text-[11px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/80 ${
+                    selected ? "bg-violet-500/25 text-violet-100" : "text-ink-soft hover:bg-hover hover:text-ink"
+                  }`}
+                >
+                  <Icon size={16} />
+                  <span className="truncate">{section.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      </aside>
+
+      <aside className="imaginai-character-dock" aria-label="Personagem">
+        <section className="w-full max-w-[22rem] rounded-2xl border border-violet-400/20 bg-surface/95 p-3 shadow-prompt backdrop-blur">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">Personagem · D&amp;D 5e</p>
+          <h2 className="truncate text-sm font-semibold text-ink">Nome do personagem</h2>
+          <p className="mt-0.5 truncate text-xs text-muted">Classe · Nível</p>
+          <div className="mt-3 space-y-2">
+            <div className="flex items-center justify-between rounded-xl border border-border bg-surface2/65 px-3 py-2">
+              <span className="flex items-center gap-1.5 text-xs font-medium text-ink-soft"><Heart size={14} className="text-rose-400" /> HP</span>
+              <span className="font-mono text-xs text-ink">— / —</span>
+            </div>
+            <div className="flex items-center justify-between rounded-xl border border-border bg-surface2/65 px-3 py-2">
+              <span className="flex items-center gap-1.5 text-xs font-medium text-ink-soft"><Shield size={14} className="text-sky-300" /> CA</span>
+              <span className="font-mono text-xs text-ink">—</span>
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-1.5" role="group" aria-label="Navegação do personagem">
+            {DND_CHARACTER_SECTIONS.map((section) => {
+              const Icon = section.icon;
+              const selected = characterSection === section.id;
+              return (
+                <button
+                  key={section.id}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setCharacterSection(section.id)}
+                  className={`flex min-w-0 flex-col items-center gap-1 rounded-xl px-1 py-2 text-[11px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/80 ${
+                    selected ? "bg-violet-500/25 text-violet-100" : "text-ink-soft hover:bg-hover hover:text-ink"
+                  }`}
+                >
+                  <Icon size={16} />
+                  <span className="truncate">{section.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      </aside>
     </div>
   );
 }

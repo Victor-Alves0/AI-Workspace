@@ -33,8 +33,7 @@ import httpx
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 
-from .. import extraction
-from .. import tracing
+from .. import extraction, tracing
 from ..config import get_settings
 from ..db import SessionLocal
 from ..knowledge import brain as brain_service
@@ -485,10 +484,18 @@ SEARCH_LANG_HINT = (
 # A busca devolve candidatos (URLs + snippets), não o conteúdo da fonte. Esta
 # instrução só entra nos escopos que possuem a cadeia completa, montada pelo loader.
 WEB_RESEARCH_WORKFLOW = (
-    "WEB RESEARCH WORKFLOW: `web.search.query` finds candidate URLs and snippets; "
-    "when you need to answer from a source's actual content, follow up with "
-    "`web.page.read` on the promising URL. Do not treat a search snippet as if you "
-    "had read the full page."
+    "WEB RESEARCH WORKFLOW: search finds candidate URLs and snippets; when you need "
+    "to answer from a source's actual content, follow up by reading the promising URL. "
+    "Do not treat a search snippet as if you had read the full page."
+)
+
+# Os packs de contexto do loader colocam poucas operações frequentes como schemas
+# de primeira classe. Isto evita que o prompt genérico do SIFT induza uma busca
+# redundante no catálogo antes de usar, por exemplo, a capacidade Web já equipada.
+_CONTEXT_DIRECT_TOOLS_NOTE = (
+    "CONTEXT TOOLS: these tools are ALREADY available as direct, typed calls: {names}. "
+    "Use the matching direct tool immediately; do NOT call search_tools first for them. "
+    "Use search_tools only for capabilities outside this short context pack."
 )
 
 
@@ -506,6 +513,19 @@ _NATIVE_TOOLS_NOTE = (
 
 def _native_tools_note(names: list[str]) -> str:
     return _NATIVE_TOOLS_NOTE.format(names=", ".join(f"`{n}`" for n in names))
+
+
+def _context_direct_tools_note(paths: list[str]) -> str:
+    """Instrui o modelo sobre o pequeno conjunto auto-promovido pelo loader.
+
+    A SIFT achata ``categoria.servico.acao`` em ``categoria__servico__acao``
+    quando um path é fixado no escopo. A instrução fica deliberadamente curta:
+    os schemas já trazem o "como" e não devemos enumerar o catálogo inteiro.
+    """
+    names = [path.replace(".", "__") for path in paths if isinstance(path, str) and path]
+    if not names:
+        return ""
+    return _CONTEXT_DIRECT_TOOLS_NOTE.format(names=", ".join(f"`{name}`" for name in names))
 
 
 def _compose_tool_prompt(base: str, catalog: list[str], mode: str, custom: str, meta: str) -> str:
@@ -1676,6 +1696,9 @@ def _assemble_tools_and_prompt(
         a.sift_prompt = _compose_tool_prompt(a.sift_prompt, catalog, mode, custom, meta)
         if sift_meta.get("web_research_chain"):
             a.sift_prompt += "\n\n" + WEB_RESEARCH_WORKFLOW
+        direct_note = _context_direct_tools_note(sift_meta.get("context_direct_paths") or [])
+        if direct_note:
+            a.sift_prompt += "\n\n" + direct_note
         # Codespace: postura de agente de código (agir com as tools, nunca fabricar
         # execução). scope.meta["codespace"] é montado pelo loader p/ chats de projeto.
         if sift_meta.get("codespace"):
@@ -2781,7 +2804,6 @@ async def run_turn(
     tools: Any = asm.tools
     _base_tools = asm.tools  # tools originais: p/ reabrir após um corte (ex.: steer)
     sift_prompt = asm.sift_prompt
-    has_tools = asm.has_tools
     skills_by_slug = asm.skills_by_slug
     genimage_on = asm.genimage_on
     kb_tool_on = asm.kb_tool_on

@@ -25,6 +25,79 @@ const TOOL_CFG: Record<string, { key: string; Panel: (p: any) => JSX.Element; ne
   "builtin:remote.terminal.run": { key: "remote", Panel: RemoteTerminalToolPanel, needsStatus: false },
 };
 
+/** Agrupa o catálogo pela capacidade que o usuário reconhece, não pelo módulo
+ * interno. As permissões seguem separadas no backend (por exemplo, ler, editar
+ * e executar no projeto), mas o seletor deixa de parecer uma lista solta de APIs. */
+function systemToolCapabilityGroup(tool: SystemTool): string {
+  const path = tool.path;
+  if (path.startsWith("github.public.")) return "Web e pesquisa";
+  if (path.startsWith("web.") || path.startsWith("research.") || path.startsWith("security.") || path.startsWith("finance.")) {
+    return "Web e pesquisa";
+  }
+  if (path.startsWith("code.") || path.startsWith("http.")) return "Projeto e código";
+  if (path.startsWith("investigation.")) return "Investigação";
+  if (path.startsWith("media.") || path.startsWith("diagram.") || path.startsWith("chart.") || path.startsWith("higgsfield.") || path.startsWith("elevenlabs.")) {
+    return "Criação e mídia";
+  }
+  if (tool.category === "integration") return "Integrações";
+  return "Produtividade e contexto";
+}
+
+type ToolCapabilityItem = TransferItem & { members: string[]; defaultMembers: string[] };
+
+/** Um card pode representar diversas operações relacionadas. A persistência
+ * continua usando os paths granulares do backend, para que cada operação guarde
+ * seu próprio schema e sua própria permissão. */
+function systemToolCapability(tool: SystemTool): Pick<ToolCapabilityItem, "key" | "label" | "sublabel" | "group"> {
+  const path = tool.path;
+  if (path.startsWith("web.")) {
+    return { key: "cap:web", label: "Web", sublabel: "Pesquisar, ler fontes e navegar páginas", group: "Web e pesquisa" };
+  }
+  if (path.startsWith("github.")) {
+    return { key: "cap:github", label: "GitHub", sublabel: "Pesquisa pública e repositórios conectados", group: "Integrações" };
+  }
+  if (path.startsWith("google.")) {
+    return { key: "cap:google", label: "Google Workspace", sublabel: "Gmail e Google Agenda", group: "Integrações" };
+  }
+  if (path.startsWith("code.")) {
+    return { key: "cap:workspace", label: "Workspace de código", sublabel: "Ler, editar, executar, pré-visualizar e gerenciar tarefas", group: "Projeto e código" };
+  }
+  if (path.startsWith("automation.")) {
+    return { key: "cap:automation", label: "Automações", sublabel: "Monitores e lembretes", group: "Produtividade e contexto" };
+  }
+  if (path.startsWith("skills.") || path.startsWith("prompts.")) {
+    return { key: "cap:libraries", label: "Bibliotecas", sublabel: "Skills e prompts reutilizáveis", group: "Produtividade e contexto" };
+  }
+  if (path.startsWith("utils.")) {
+    return { key: "cap:utilities", label: "Utilitários", sublabel: "Data, hora e cálculos", group: "Produtividade e contexto" };
+  }
+  if (path.startsWith("security.")) {
+    return { key: "cap:security", label: "Segurança", sublabel: "CVEs e Exploit-DB", group: "Web e pesquisa" };
+  }
+  return {
+    key: `builtin:${path}`,
+    label: tool.name,
+    sublabel: tool.description,
+    group: systemToolCapabilityGroup(tool),
+  };
+}
+
+function defaultCapabilityMembers(key: string, members: string[]): string[] {
+  // Ao ligar uma capacidade ampla, use um mínimo útil e seguro. O usuário abre a
+  // engrenagem para acrescentar ações que escrevem, executam ou mantêm uma aba viva.
+  if (key === "cap:web") {
+    return members.filter((member) => member === "builtin:web.search.query" || member === "builtin:web.page.read");
+  }
+  if (key === "cap:workspace") {
+    return members.filter((member) => (
+      member === "builtin:code.graph.query"
+      || member === "builtin:code.files.browse"
+      || member === "builtin:code.flow.analyze"
+    ));
+  }
+  return members;
+}
+
 /** Ícone de info com tooltip no hover — ao lado dos títulos de configuração.
  *  (Os textos são placeholders; ajuste conforme necessário.) */
 function InfoHint({ text }: { text: string }) {
@@ -790,6 +863,7 @@ export default function ModelEditor({
   }, [filters, filterQ, filterLabelOf]);
   // qual ferramenta interna está com o painel de config aberto + status dos segredos
   const [openToolCfg, setOpenToolCfg] = useState<string | null>(null);
+  const [openToolCapability, setOpenToolCapability] = useState<string | null>(null);
   const [openExtraction, setOpenExtraction] = useState(false);
   // busca dentro das listas de itens (ferramentas / skills equipadas)
   const [toolSearch, setToolSearch] = useState("");
@@ -938,7 +1012,7 @@ export default function ModelEditor({
         key: builtinKey(st.path),
         label: st.name,
         sublabel: st.description,
-        group: "Sistema",
+        group: systemToolCapabilityGroup(st),
         system: true,
         icon: toolCategoryIcon(st.category),
         iconTitle: toolCategoryTitle(st.category, st.integration),
@@ -947,25 +1021,82 @@ export default function ModelEditor({
         key: t.id,
         label: t.name || t.path,
         sublabel: t.path,
-        group: "Usuário",
+        group: "Ferramentas personalizadas",
       })),
     ],
     [systemTools, tools],
   );
+  // O seletor trabalha com capacidades (Web, GitHub, Workspace…), enquanto o
+  // banco continua armazenando os paths granulares que protegem cada operação.
+  const toolCapabilities: ToolCapabilityItem[] = useMemo(() => {
+    const byKey = new Map<string, ToolCapabilityItem>();
+    for (const tool of systemTools) {
+      const meta = systemToolCapability(tool);
+      let capability = byKey.get(meta.key);
+      if (!capability) {
+        capability = {
+          ...meta,
+          members: [],
+          defaultMembers: [],
+          system: true,
+          icon: toolCategoryIcon(tool.category),
+          iconTitle: toolCategoryTitle(tool.category, tool.integration),
+        };
+        byKey.set(meta.key, capability);
+      }
+      capability.members.push(builtinKey(tool.path));
+    }
+    for (const tool of tools) {
+      byKey.set(`custom:${tool.id}`, {
+        key: `custom:${tool.id}`,
+        label: tool.name || tool.path,
+        sublabel: tool.path,
+        group: "Ferramentas personalizadas",
+        members: [tool.id],
+        defaultMembers: [tool.id],
+      });
+    }
+    return [...byKey.values()].map((capability) => ({
+      ...capability,
+      defaultMembers: defaultCapabilityMembers(capability.key, capability.members),
+    }));
+  }, [systemTools, tools]);
   const toolLabel = (key: string) =>
     transferItems.find((i) => i.key === key)?.label ?? key;
-  // origem (ícone + hover) de uma ferramenta ativa; null p/ tools do usuário
-  const toolOrigin = (key: string) => {
-    if (!key.startsWith("builtin:")) return null;
-    const st = systemTools.find((s) => s.path === key.slice(8));
-    if (!st) return null;
-    return { icon: toolCategoryIcon(st.category, 13), title: toolCategoryTitle(st.category, st.integration) };
-  };
-  // ferramentas ativas visíveis (após a busca da lista)
+  const selectedCapabilityKeys = useMemo(
+    () => toolCapabilities
+      .filter((capability) => capability.members.some((member) => toolIds.includes(member)))
+      .map((capability) => capability.key),
+    [toolCapabilities, toolIds],
+  );
+  const setSelectedCapabilities = useCallback((nextKeys: string[]) => {
+    setToolIds((current) => {
+      const selected = new Set(
+        toolCapabilities
+          .filter((capability) => capability.members.some((member) => current.includes(member)))
+          .map((capability) => capability.key),
+      );
+      const next = new Set(nextKeys);
+      const removedMembers = new Set(
+        toolCapabilities
+          .filter((capability) => selected.has(capability.key) && !next.has(capability.key))
+          .flatMap((capability) => capability.members),
+      );
+      const addMembers = toolCapabilities
+        .filter((capability) => !selected.has(capability.key) && next.has(capability.key))
+        .flatMap((capability) => capability.defaultMembers);
+      return [...current.filter((id) => !removedMembers.has(id)), ...addMembers.filter((id) => !current.includes(id))];
+    });
+  }, [toolCapabilities]);
+  // capacidades ativas visíveis (após a busca da lista)
   const toolQuery = toolSearch.trim().toLowerCase();
-  const shownToolIds = toolQuery
-    ? toolIds.filter((tid) => toolLabel(tid).toLowerCase().includes(toolQuery))
-    : toolIds;
+  const shownToolCapabilities = toolCapabilities.filter((capability) =>
+    selectedCapabilityKeys.includes(capability.key)
+      && (!toolQuery
+        || capability.label.toLowerCase().includes(toolQuery)
+        || (capability.sublabel ?? "").toLowerCase().includes(toolQuery)
+        || (capability.group ?? "").toLowerCase().includes(toolQuery)),
+  );
 
   // skills equipadas (uuid) — mesmo padrão de transferência das ferramentas
   const skillItems: TransferItem[] = useMemo(
@@ -1609,16 +1740,16 @@ export default function ModelEditor({
             <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
               <span className="text-muted"><Wrench size={15} /></span>
               Ferramentas
-              <InfoHint text="A chave-mestra SIFT libera o uso de ferramentas. O modelo descobre e executa as ferramentas ativas via as meta-ferramentas do SIFT (o 'como usar')." />
+              <InfoHint text="O SIFT mantém o catálogo longo sob descoberta, poupando contexto. Capacidades frequentes no contexto certo — como Web e as ferramentas de um projeto — entram como chamadas diretas e tipadas." />
             </h2>
 
             {/* SIFT: chave-mestra. Sem ela, o modelo não usa nenhuma ferramenta. */}
             <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
               <span>
                 <span className="block text-sm font-medium text-ink">SIFT</span>
-                <span className="block text-xs text-muted">
-                  Ative para permitir que este modelo use ferramentas (busca via meta-tools do SIFT).
-                  Sem seleção, nenhuma ferramenta é usada.
+                  <span className="block text-xs text-muted">
+                  Ative para permitir que este modelo use ferramentas. O catálogo longo é descoberto sob demanda;
+                  capacidades frequentes podem ser chamadas diretamente.
                 </span>
               </span>
               <div className="flex shrink-0 items-center gap-1.5">
@@ -1700,7 +1831,7 @@ export default function ModelEditor({
                   <div className="flex items-center justify-between">
                     <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
                       Ferramentas ativas
-                      <InfoHint text="Ferramentas que este modelo pode usar. Dentro de “Gerenciar”, fixe (pin) as mais quentes para virarem chamadas diretas, sem round-trip de descoberta." />
+                      <InfoHint text="Ferramentas que este modelo pode usar, organizadas por capacidade. Dentro de “Gerenciar”, fixe (pin) as mais quentes para virarem chamadas diretas, sem round-trip de descoberta." />
                     </p>
                     <button
                       onClick={() => setToolsModal(true)}
@@ -1709,11 +1840,11 @@ export default function ModelEditor({
                       <Wrench size={13} /> Gerenciar
                     </button>
                   </div>
-                  {toolIds.length === 0 ? (
+                  {selectedCapabilityKeys.length === 0 ? (
                     <p className="text-xs text-muted">Nenhuma ferramenta selecionada — o modelo não usará ferramentas.</p>
                   ) : (
                     <div className="space-y-1.5">
-                      {toolIds.length > 4 && (
+                      {selectedCapabilityKeys.length > 4 && (
                         <div className="relative">
                           <Search size={13} className="pointer-events-none absolute left-2.5 top-2 text-muted" />
                           <input
@@ -1726,40 +1857,48 @@ export default function ModelEditor({
                       )}
                       {/* exatamente 4 linhas visíveis (~35px cada + gaps); o resto rola */}
                       <div className="max-h-[158px] space-y-1.5 overflow-y-auto pr-1">
-                        {shownToolIds.map((tid) => {
-                          const pinned = !codeMode && pinnedIds.includes(tid);
-                          const cfg = TOOL_CFG[tid];
-                          const origin = toolOrigin(tid);
+                        {shownToolCapabilities.map((capability) => {
+                          const enabledMembers = capability.members.filter((member) => toolIds.includes(member));
+                          const pinnedCount = !codeMode
+                            ? enabledMembers.filter((member) => pinnedIds.includes(member)).length
+                            : 0;
+                          const contextDirect = !codeMode
+                            && capability.key === "cap:web"
+                            && enabledMembers.includes("builtin:web.search.query");
                           return (
-                            <div key={tid} className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5">
-                              {origin && (
-                                <span title={origin.title} className="flex shrink-0 items-center text-muted">
-                                  {origin.icon}
+                            <div key={capability.key} className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5">
+                              {capability.system && (
+                                <span title={capability.iconTitle ?? "AI Workspace"} className="flex shrink-0 items-center text-muted">
+                                  {capability.icon ?? <Wrench size={13} />}
                                 </span>
                               )}
-                              {pinned && (
-                                <span title="Fixada (pin)" className="flex shrink-0 items-center text-accent-hover">
+                              {pinnedCount > 0 && (
+                                <span title={`${pinnedCount} operação(ões) fixada(s)`} className="flex shrink-0 items-center text-accent-hover">
                                   <Pin size={12} className="fill-accent-hover" />
                                 </span>
                               )}
-                              <span className="flex-1 truncate text-sm text-ink">{toolLabel(tid)}</span>
-                              {cfg && (
-                                <button
-                                  onClick={() => setOpenToolCfg(tid)}
-                                  title="Configurar esta ferramenta"
-                                  className="rounded-md p-1 text-muted transition-colors hover:text-ink"
-                                >
-                                  <Settings size={14} />
-                                </button>
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm text-ink">{capability.label}</span>
+                                {enabledMembers.length > 1 && (
+                                  <span className="block truncate text-[11px] text-muted">{enabledMembers.length} operações ativas</span>
+                                )}
+                              </span>
+                              {contextDirect && (
+                                <span title="A cadeia Web é chamada diretamente: pesquisar e ler a página não exigem uma rodada de descoberta." className="shrink-0 rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-hover">
+                                  Direta
+                                </span>
                               )}
-                              <button onClick={() => { toggleTool(tid); setOpenToolCfg((o) => (o === tid ? null : o)); }} title="Remover" className="rounded-md p-1 text-muted transition-colors hover:text-ink">
+                              <button onClick={() => setOpenToolCapability(capability.key)} title="Configurar operações" className="rounded-md p-1 text-muted transition-colors hover:text-ink">
+                                <Settings size={14} />
+                              </button>
+                              <button onClick={() => setSelectedCapabilities(selectedCapabilityKeys.filter((key) => key !== capability.key))} title="Remover capacidade" className="rounded-md p-1 text-muted transition-colors hover:text-ink">
                                 <X size={14} />
                               </button>
                             </div>
                           );
                         })}
-                        {shownToolIds.length === 0 && (
-                          <p className="px-1 py-2 text-xs text-muted">Nenhuma ferramenta corresponde à busca.</p>
+                        {shownToolCapabilities.length === 0 && (
+                          <p className="px-1 py-2 text-xs text-muted">Nenhuma capacidade corresponde à busca.</p>
                         )}
                       </div>
                     </div>
@@ -1767,9 +1906,9 @@ export default function ModelEditor({
                   {toolIds.length > 0 && !codeMode && (
                     <p className="text-[11px] text-muted">Use “Gerenciar” para fixar (pin) as ferramentas mais usadas.</p>
                   )}
-                  {toolIds.includes("builtin:web.search.query") && !toolIds.includes("builtin:web.page.read") && (
+                  {toolIds.includes("builtin:web.search.query") && (
                     <p className="text-[11px] text-muted">
-                      Pesquisa na Web também libera <span className="text-ink-soft">Ler Página</span> para abrir os links encontrados e verificar a fonte completa.
+                      <span className="text-ink-soft">Web</span> é uma única capacidade; abra a engrenagem para escolher Pesquisa, Ler Página e Navegador. Pesquisa e leitura entram diretamente no contexto para evitar uma rodada extra de descoberta.
                     </p>
                   )}
                 </div>
@@ -2318,17 +2457,16 @@ export default function ModelEditor({
 
       {toolsModal && (
         <TransferModal
-          title="Ferramentas do modelo"
-          items={transferItems}
-          selected={toolIds}
-          onChange={setToolIds}
+          title="Capacidades do modelo"
+          items={toolCapabilities}
+          selected={selectedCapabilityKeys}
+          onChange={setSelectedCapabilities}
           onClose={() => setToolsModal(false)}
           availableLabel="Disponíveis"
           selectedLabel="Ativadas"
-          searchPlaceholder="Buscar ferramentas…"
-          pinnedKeys={codeMode ? undefined : pinnedIds}
-          onTogglePin={codeMode ? undefined : togglePin}
-          pinHint="Fixar: vira ferramenta de 1ª classe (o modelo chama direto, sem busca). Ideal p/ tools quentes e de schema pequeno."
+          searchPlaceholder="Buscar capacidades…"
+          hasConfig={() => true}
+          onConfig={setOpenToolCapability}
         />
       )}
       {skillsModal && (
@@ -2430,6 +2568,67 @@ export default function ModelEditor({
           searchPlaceholder="Buscar modelos…"
         />
       )}
+
+      {/* Uma capacidade reúne operações afins na UI; cada toggle continua sendo
+          um path independente no backend para preservar schema e permissão. */}
+      {openToolCapability && (() => {
+        const capability = toolCapabilities.find((item) => item.key === openToolCapability);
+        if (!capability) return null;
+        return (
+          <CfgModal title={`Configurar — ${capability.label}`} onClose={() => setOpenToolCapability(null)}>
+            <p className="mb-4 text-xs leading-5 text-muted">
+              Escolha as operações que este modelo pode usar. Elas aparecem como uma única capacidade no seletor,
+              mas cada operação mantém sua própria validação e permissão de segurança.
+            </p>
+            <div className="space-y-2">
+              {capability.members.map((member) => {
+                const item = transferItems.find((tool) => tool.key === member);
+                const enabled = toolIds.includes(member);
+                const pinned = !codeMode && pinnedIds.includes(member);
+                const configurable = !!TOOL_CFG[member];
+                return (
+                  <div key={member} className="rounded-xl border border-border bg-surface px-3 py-2.5">
+                    <div className="flex items-center gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-ink">{item?.label ?? member}</p>
+                        {item?.sublabel && <p className="mt-0.5 text-xs leading-4 text-muted">{item.sublabel}</p>}
+                      </div>
+                      <Toggle on={enabled} onChange={() => toggleTool(member)} />
+                    </div>
+                    {enabled && (configurable || !codeMode) && (
+                      <div className="mt-2 flex items-center gap-2 border-t border-border pt-2">
+                        {configurable && (
+                          <button
+                            onClick={() => setOpenToolCfg(member)}
+                            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink"
+                          >
+                            <Settings size={13} /> Opções
+                          </button>
+                        )}
+                        {!codeMode && (
+                          <button
+                            onClick={() => togglePin(member)}
+                            title="Fixar expõe esta operação como chamada direta, sem uma rodada de descoberta."
+                            className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-colors ${pinned ? "border-accent/40 bg-accent/10 text-accent-hover" : "border-border text-muted hover:bg-hover hover:text-ink"}`}
+                          >
+                            <Pin size={12} className={pinned ? "fill-accent-hover" : ""} />
+                            {pinned ? "Direta" : "Fixar"}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {capability.key === "cap:web" && toolIds.includes("builtin:web.search.query") && (
+              <p className="mt-4 rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-xs leading-5 text-ink-soft">
+                Com Pesquisa na Web ativa, Pesquisa e Ler Página são promovidas automaticamente como chamadas diretas.
+              </p>
+            )}
+          </CfgModal>
+        );
+      })()}
 
       {/* Config de ferramenta (Pesquisa na Web / Finanças / Deep Search) em janela */}
       {openToolCfg && TOOL_CFG[openToolCfg] && (() => {
