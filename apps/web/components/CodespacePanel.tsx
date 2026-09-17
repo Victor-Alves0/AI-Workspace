@@ -1101,8 +1101,10 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
   const [busyId, setBusyId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
   const confirm = useConfirm();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const projectFileRef = useRef<HTMLInputElement>(null);
 
   function exportProjects() {
     // exporta só a DEFINIÇÃO dos projetos (sem código nem chaves) — mesma ideia do
@@ -1111,8 +1113,9 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
       name: p.name, source: p.source, repo_url: p.repo_url, branch: p.branch,
       default_model: p.default_model, setup_command: p.setup_command,
       test_command: p.test_command, exec_enabled: p.exec_enabled, local_path: p.local_path,
+      scope: p.scope,
     }));
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify({ format: "ai-workspace/codespace-projects", version: 1, items: data }, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -1122,6 +1125,64 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
   }
 
   const load = () => api.get<CodespaceProject[]>("/codespace/projects").then(setProjects).catch(() => {});
+
+  async function importProjects(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    let imported = 0;
+    let failed = 0;
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      const items = Array.isArray(parsed)
+        ? parsed
+        : parsed && typeof parsed === "object" && Array.isArray((parsed as { items?: unknown }).items)
+          ? (parsed as { items: unknown[] }).items
+          : null;
+      if (!items) throw new Error("Escolha um arquivo de exportação de projetos válido.");
+      for (const item of items) {
+        if (!item || typeof item !== "object") { failed += 1; continue; }
+        const project = item as Record<string, unknown>;
+        const source = project.source;
+        const name = project.name;
+        const repoUrl = project.repo_url;
+        if ((source !== "git" && source !== "git-ssh" && source !== "local" && source !== "folder") || typeof name !== "string") {
+          failed += 1;
+          continue;
+        }
+        if ((source === "git" || source === "git-ssh") && (typeof repoUrl !== "string" || !repoUrl.trim())) {
+          failed += 1;
+          continue;
+        }
+        try {
+          const created = await api.post<CodespaceProject>("/codespace/projects", {
+            name,
+            source,
+            repo_url: typeof repoUrl === "string" ? repoUrl : "",
+            branch: typeof project.branch === "string" ? project.branch : "main",
+            local_path: typeof project.local_path === "string" ? project.local_path : "",
+          });
+          const scope = project.scope && typeof project.scope === "object" ? project.scope as Record<string, unknown> : {};
+          const asStrings = (value: unknown) => Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : [];
+          const defaultModel = typeof project.default_model === "string" && !project.default_model.startsWith("custom:")
+            ? project.default_model : undefined;
+          await api.patch(`/codespace/projects/${created.id}`, {
+            scope: { allow: asStrings(scope.allow), deny: asStrings(scope.deny) },
+            ...(defaultModel !== undefined ? { default_model: defaultModel } : {}),
+            ...(typeof project.setup_command === "string" ? { setup_command: project.setup_command } : {}),
+            ...(typeof project.test_command === "string" ? { test_command: project.test_command } : {}),
+            ...(typeof project.exec_enabled === "boolean" ? { exec_enabled: project.exec_enabled } : {}),
+          });
+          imported += 1;
+        } catch { failed += 1; }
+      }
+      await load();
+      setNotice(failed ? `${imported} projeto(s) importado(s); ${failed} não puderam ser importados.` : `${imported} projeto(s) importado(s).`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Não foi possível ler o arquivo.");
+    } finally {
+      if (projectFileRef.current) projectFileRef.current.value = "";
+    }
+  }
 
   useEffect(() => {
     Promise.all([
@@ -1136,6 +1197,12 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
     if (live) pollRef.current = setInterval(load, 2000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [projects]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 4500);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   const openProject = projects.find((p) => p.id === openId) ?? null;
 
@@ -1186,7 +1253,8 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filtrar projetos…"
               className="w-56 rounded-full border border-border bg-surface py-1.5 pl-9 pr-3 text-sm text-ink outline-none transition-[border-color] focus:border-accent/50 placeholder:text-muted" />
           </div>
-          <button onClick={() => alert("Importar: em breve")}
+          <input ref={projectFileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => void importProjects(e.target.files)} />
+          <button onClick={() => projectFileRef.current?.click()}
             className="whitespace-nowrap rounded-full border border-border bg-surface px-4 py-1.5 text-ink-soft transition-colors hover:bg-surface2">
             <Upload size={14} className="mr-1.5 inline" />Importar
           </button>
@@ -1200,6 +1268,8 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
           </button>
         </div>
       </div>
+
+      {notice && <p role="status" className="mb-4 rounded-xl border border-border bg-surface px-3 py-2 text-sm text-ink-soft">{notice}</p>}
 
       {loading ? (
         <p className="py-10 text-center text-sm text-muted">Carregando…</p>

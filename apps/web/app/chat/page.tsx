@@ -622,7 +622,20 @@ export default function ChatPage() {
   };
   const scrollToBottom = () => {
     const el = scrollRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    if (!el) return;
+    // Esta é uma ação explícita do usuário. Uma animação `smooth` podia terminar
+    // antes de o streaming/imagens terminarem de alterar a altura do painel,
+    // deixando o botão aparentemente "no meio" da última resposta.
+    selectingTextRef.current = false;
+    forceBottomAfterLandingRef.current = true;
+    lastStickyHeightRef.current = -1;
+    setAtBottom(true);
+    const moveToEnd = () => {
+      const current = scrollRef.current;
+      if (current) current.scrollTop = current.scrollHeight;
+    };
+    moveToEnd();
+    requestAnimationFrame(moveToEnd);
   };
   useEffect(() => () => {
     if (stickFrameRef.current !== null) cancelAnimationFrame(stickFrameRef.current);

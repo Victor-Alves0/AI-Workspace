@@ -320,6 +320,8 @@ export default function WorkspaceView({
   const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const modelFileRef = useRef<HTMLInputElement>(null);
+  const promptFileRef = useRef<HTMLInputElement>(null);
   const skillFileRef = useRef<HTMLInputElement>(null);
   const [toast, setToast] = useState<string | null>(null);
   // editingTool: undefined = não editando; null = nova; Tool = editar. valvesTool: engrenagem
@@ -380,6 +382,56 @@ export default function WorkspaceView({
 
   const author = user ? user.email.split("@")[0] : "";
 
+  function downloadJson(filename: string, data: unknown) {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function importItems(value: unknown): Record<string, unknown>[] {
+    const list = Array.isArray(value)
+      ? value
+      : value && typeof value === "object" && Array.isArray((value as { items?: unknown }).items)
+        ? (value as { items: unknown[] }).items
+        : null;
+    if (!list) throw new Error("Escolha um arquivo de exportação válido.");
+    return list.filter((item): item is Record<string, unknown> => !!item && typeof item === "object");
+  }
+
+  const record = (value: unknown) => value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown> : {};
+  const textOrNull = (value: unknown) => typeof value === "string" ? value : null;
+  const textList = (value: unknown) => Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : [];
+
+  function uniquePromptCommand(source: string, used: Set<string>) {
+    const root = source.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") || "prompt";
+    for (let n = 1; ; n += 1) {
+      const suffix = n === 1 ? "-copia" : `-copia-${n}`;
+      const candidate = `${root.slice(0, 64 - suffix.length)}${suffix}`;
+      if (!used.has(candidate)) {
+        used.add(candidate);
+        return candidate;
+      }
+    }
+  }
+
+  function uniqueModelSlug(source: unknown, used: Set<string>) {
+    if (typeof source !== "string" || !source.trim()) return null;
+    const root = source.trim().slice(0, 64);
+    for (let n = 1; ; n += 1) {
+      const suffix = n === 1 ? "-copia" : `-copia-${n}`;
+      const candidate = n === 1 && !used.has(root) ? root : `${root.slice(0, 64 - suffix.length)}${suffix}`;
+      if (!used.has(candidate)) {
+        used.add(candidate);
+        return candidate;
+      }
+    }
+  }
+
   function openSection(s: Section) {
     setSection(s);
     setQ("");
@@ -435,18 +487,78 @@ export default function WorkspaceView({
   }
 
   function exportModels() {
-    const blob = new Blob([JSON.stringify(models, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "modelos.json";
-    a.click();
-    URL.revokeObjectURL(url);
+    // IDs, datas e vínculos de dono pertencem à instância de origem; exportamos
+    // somente o preset que pode ser recriado em outra instalação.
+    downloadJson("modelos.json", {
+      format: "ai-workspace/models", version: 1,
+      items: models.map((m) => ({
+        base_model: m.base_model, name: m.name, slug: m.slug,
+        description: m.description, avatar_url: m.avatar_url, system_prompt: m.system_prompt,
+        params: m.params, capabilities: m.capabilities, filter_config: m.filter_config ?? {},
+        tools_enabled: m.tools_enabled, tool_ids: m.tool_ids, code_mode: m.code_mode,
+        sift_config: m.sift_config ?? {}, skill_ids: m.skill_ids,
+        prompt_suggestions: m.prompt_suggestions, tts_voice: m.tts_voice, enabled: m.enabled,
+      })),
+    });
+  }
+
+  async function cloneModel(m: ModelConfig) {
+    await api.post("/models", {
+      base_model: m.base_model, name: `${m.name} (cópia)`, slug: null,
+      description: m.description, avatar_url: m.avatar_url, system_prompt: m.system_prompt,
+      params: m.params, capabilities: m.capabilities, filter_config: m.filter_config ?? {},
+      tools_enabled: m.tools_enabled, tool_ids: m.tool_ids, code_mode: m.code_mode,
+      sift_config: m.sift_config ?? {}, skill_ids: m.skill_ids,
+      prompt_suggestions: m.prompt_suggestions, tts_voice: m.tts_voice, enabled: m.enabled,
+    });
+    await loadModels();
+    setToast("Modelo clonado.");
+  }
+
+  async function importModelFile(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    let imported = 0;
+    let failed = 0;
+    try {
+      const usedSlugs = new Set(models.map((m) => m.slug).filter((slug): slug is string => !!slug));
+      for (const item of importItems(JSON.parse(await file.text()))) {
+        const baseModel = textOrNull(item.base_model);
+        const name = textOrNull(item.name);
+        if (!baseModel || !name) { failed += 1; continue; }
+        try {
+          await api.post("/models", {
+            base_model: baseModel, name, slug: uniqueModelSlug(item.slug, usedSlugs),
+            description: textOrNull(item.description), avatar_url: textOrNull(item.avatar_url),
+            system_prompt: textOrNull(item.system_prompt), params: record(item.params),
+            capabilities: record(item.capabilities), filter_config: record(item.filter_config),
+            tools_enabled: item.tools_enabled === true, tool_ids: textList(item.tool_ids),
+            code_mode: item.code_mode === true, sift_config: record(item.sift_config),
+            skill_ids: textList(item.skill_ids), prompt_suggestions: textList(item.prompt_suggestions),
+            tts_voice: textOrNull(item.tts_voice), enabled: item.enabled !== false,
+          });
+          imported += 1;
+        } catch { failed += 1; }
+      }
+      await loadModels();
+      setToast(failed ? `${imported} modelo(s) importado(s); ${failed} não puderam ser importados.` : `${imported} modelo(s) importado(s).`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Não foi possível ler o arquivo.");
+    } finally {
+      if (modelFileRef.current) modelFileRef.current.value = "";
+    }
   }
 
   async function deletePrompt(id: string) {
     await api.del(`/prompts/${id}`);
     loadPrompts();
+  }
+
+  async function clonePrompt(p: Prompt) {
+    const command = uniquePromptCommand(p.command, new Set(prompts.map((prompt) => prompt.command)));
+    await api.post("/prompts", { command, title: `${p.title} (cópia)`, content: p.content, enabled: p.enabled });
+    await loadPrompts();
+    setToast("Prompt clonado.");
   }
 
   async function deleteSkill(id: string) {
@@ -503,14 +615,37 @@ export default function WorkspaceView({
     setToast(failed ? `Importação falhou: ${failed}` : `${ok} skill${ok === 1 ? "" : "s"} importada${ok === 1 ? "" : "s"}.`);
   }
   function exportPrompts() {
-    const data = prompts.map((p) => ({ command: p.command, title: p.title, content: p.content }));
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "prompts.json";
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadJson("prompts.json", {
+      format: "ai-workspace/prompts", version: 1,
+      items: prompts.map((p) => ({ command: p.command, title: p.title, content: p.content, enabled: p.enabled })),
+    });
+  }
+
+  async function importPromptFile(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    let imported = 0;
+    let failed = 0;
+    try {
+      const used = new Set(prompts.map((p) => p.command));
+      for (const item of importItems(JSON.parse(await file.text()))) {
+        const title = textOrNull(item.title);
+        const sourceCommand = textOrNull(item.command);
+        if (!title || !sourceCommand) { failed += 1; continue; }
+        try {
+          const command = used.has(sourceCommand) ? uniquePromptCommand(sourceCommand, used) : sourceCommand;
+          used.add(command);
+          await api.post("/prompts", { command, title, content: textOrNull(item.content) ?? "", enabled: item.enabled !== false });
+          imported += 1;
+        } catch { failed += 1; }
+      }
+      await loadPrompts();
+      setToast(failed ? `${imported} prompt(s) importado(s); ${failed} não puderam ser importados.` : `${imported} prompt(s) importado(s).`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Não foi possível ler o arquivo.");
+    } finally {
+      if (promptFileRef.current) promptFileRef.current.value = "";
+    }
   }
 
   const filteredModels = useMemo(
@@ -673,7 +808,8 @@ export default function WorkspaceView({
           filter={<FilterPill value={q} onChange={setQ} placeholder="Filtrar modelos…" />}
           actions={
             <>
-              <button className={BTN_GHOST} onClick={() => alert("Importar: em breve")}><Upload size={14} className="mr-1.5 inline" />Importar</button>
+              <input ref={modelFileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => void importModelFile(e.target.files)} />
+              <button className={BTN_GHOST} onClick={() => modelFileRef.current?.click()}><Upload size={14} className="mr-1.5 inline" />Importar</button>
               <button className={BTN_GHOST} onClick={exportModels}><Download size={14} className="mr-1.5 inline" />Exportar</button>
               <button className={BTN_PRIMARY} onClick={() => setEditingModel(null)}><Plus size={15} />Novo Modelo</button>
             </>
@@ -701,6 +837,8 @@ export default function WorkspaceView({
                   {menu === m.id && (
                     <AnchoredMenu anchorRef={menuBtnRef} onClose={() => setMenu(null)} align="left">
                       <MenuItem icon={<Pencil size={15} />} onClick={() => { setEditingModel(m); setMenu(null); }}>Editar</MenuItem>
+                      <MenuItem icon={<Copy size={15} />} onClick={() => { void cloneModel(m); setMenu(null); }}>Clonar</MenuItem>
+                      <MenuItem icon={<Download size={15} />} onClick={() => { downloadJson(`${m.slug || m.name || "modelo"}.json`, { format: "ai-workspace/models", version: 1, items: [{ base_model: m.base_model, name: m.name, slug: m.slug, description: m.description, avatar_url: m.avatar_url, system_prompt: m.system_prompt, params: m.params, capabilities: m.capabilities, filter_config: m.filter_config ?? {}, tools_enabled: m.tools_enabled, tool_ids: m.tool_ids, code_mode: m.code_mode, sift_config: m.sift_config ?? {}, skill_ids: m.skill_ids, prompt_suggestions: m.prompt_suggestions, tts_voice: m.tts_voice, enabled: m.enabled }] }); setMenu(null); }}>Exportar</MenuItem>
                       <MenuItem danger icon={<Trash2 size={15} />} onClick={() => { deleteModel(m.id); setMenu(null); }}>Excluir</MenuItem>
                     </AnchoredMenu>
                   )}
@@ -802,7 +940,8 @@ export default function WorkspaceView({
           onBack={backHome}
           actions={
             <>
-              <button className={BTN_GHOST} onClick={() => alert("Importar: em breve")}><Upload size={14} className="mr-1.5 inline" />Importar</button>
+              <input ref={promptFileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => void importPromptFile(e.target.files)} />
+              <button className={BTN_GHOST} onClick={() => promptFileRef.current?.click()}><Upload size={14} className="mr-1.5 inline" />Importar</button>
               <button className={BTN_GHOST} onClick={exportPrompts}><Download size={14} className="mr-1.5 inline" />Exportar</button>
               <button className={BTN_PRIMARY} onClick={() => setEditingPrompt(null)}><Plus size={15} />Novo Prompt</button>
             </>
@@ -833,6 +972,8 @@ export default function WorkspaceView({
                   {menu === p.id && (
                     <AnchoredMenu anchorRef={menuBtnRef} onClose={() => setMenu(null)} align="left">
                       <MenuItem icon={<Pencil size={15} />} onClick={() => { setEditingPrompt(p); setMenu(null); }}>Editar</MenuItem>
+                      <MenuItem icon={<Copy size={15} />} onClick={() => { void clonePrompt(p); setMenu(null); }}>Clonar</MenuItem>
+                      <MenuItem icon={<Download size={15} />} onClick={() => { downloadJson(`${p.command || "prompt"}.json`, { format: "ai-workspace/prompts", version: 1, items: [{ command: p.command, title: p.title, content: p.content, enabled: p.enabled }] }); setMenu(null); }}>Exportar</MenuItem>
                       <MenuItem danger icon={<Trash2 size={15} />} onClick={() => { deletePrompt(p.id); setMenu(null); }}>Excluir</MenuItem>
                     </AnchoredMenu>
                   )}
