@@ -397,7 +397,7 @@ def test_terminal_provider_error_survives_return_projection(monkeypatch):
     assert result["stop_tool_loop"] is True
 
 
-def test_transport_failure_exposes_recovery_request_id_without_new_submit(monkeypatch):
+def test_transport_failure_replays_same_external_id_then_stops_tool_loop(monkeypatch):
     calls = []
 
     def fake_request(method, url, headers=None, json=None, params=None, timeout=None):
@@ -408,6 +408,15 @@ def test_transport_failure_exposes_recovery_request_id_without_new_submit(monkey
     result = _dispatch(_make_sift("token"), {"action": "generate", "prompt": "a moon city"})
     assert result["error_code"] == "upstream_unavailable"
     assert result["stop_tool_loop"] is True
-    assert uuid.UUID(result["request_id"]).version == 4
     assert len(calls) == 2
-    assert calls[0]["externalId"] == calls[1]["externalId"] == result["request_id"]
+    assert calls[0]["externalId"] == calls[1]["externalId"]
+    assert uuid.UUID(calls[0]["externalId"]).version == 4
+
+
+def test_discovery_tells_model_to_generate_directly_from_a_selected_lora_url():
+    sift = _make_sift("token")
+    raw = sift.dispatch("search_tools", {"query": "generate image", "domain": "civitai"})
+    result = raw if isinstance(raw, str) else json.dumps(raw)
+    assert "put it directly in generate.model" in result
+    assert "workflow_id (never any other id)" in result
+    assert "request_id" not in result

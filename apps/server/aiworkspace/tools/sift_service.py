@@ -3413,10 +3413,13 @@ def _register_builtins(
                 "generation spends Buzz. "
                 f"{civitai_connection_instruction} Generated media is downloaded and shown "
                 "automatically; never paste its URL. generate is self-contained: prompt is "
-                "required; Civitai URL/model_id/version_id are resolved internally. Call generate "
-                "ONCE per user request. Never guess engines, workflow templates, or advanced API "
-                "fields; do not probe variants after an error. Search only when the user asks to "
-                "compare/select a model."
+                "required; Civitai URL/model_id/version_id are resolved internally. If the user "
+                "gave a model or LoRA URL, put it directly in generate.model: do NOT call action "
+                "model, search for a base checkpoint, or replace the selected LoRA yourself. Call "
+                "generate ONCE per user request. To poll a returned job, action=status requires "
+                "workflow_id (never any other id). Never guess engines, workflow templates, or "
+                "advanced API fields; do not probe variants after an error. Search only when the "
+                "user asks to compare/select a model."
             ),
             params={
                 "action": "string:n::search_models | model | version | search_images | estimate | generate | status",
@@ -3442,14 +3445,13 @@ def _register_builtins(
                 "negative_prompt": "string:o::negative prompt where supported",
                 "seed": "number:o::reproducible seed",
                 "workflow_id": "string:o::status: id returned by generate",
-                "request_id": "string:o::reuse only the request_id returned after a Civitai transport failure",
                 "confirm": "boolean:o:false:set true only after the user confirms a Buzz-spending generation",
             },
             returns=["items", "metadata", "id", "name", "type", "creator", "nsfw", "versions",
                      "can_generate", "workflow_id", "status", "cost", "transactions", "kind", "url",
                      "media", "prompt", "model", "error", "error_code", "retryable", "stop_tool_loop",
                      "hint", "air", "base_model", "trained_words", "description", "source_note",
-                     "estimate", "note", "question", "options", "allow_custom", "custom_label", "request_id"],
+                     "estimate", "note", "question", "options", "allow_custom", "custom_label"],
             examples=[
                 "search Civitai for photorealistic Flux models that support generation",
                 "show the versions of Civitai model 12345",
@@ -3465,7 +3467,7 @@ def _register_builtins(
             supports_generation: Any = False, prompt: str = "", model: str = "",
             width: Any = 1024, height: Any = 1024,
             quantity: Any = 1, negative_prompt: str = "", seed: Any = None,
-            workflow_id: str = "", request_id: str = "", confirm: Any = False,
+            workflow_id: str = "", confirm: Any = False,
         ) -> dict[str, Any]:
             from ..integrations import civitai_service as cv
 
@@ -3539,7 +3541,6 @@ def _register_builtins(
                     quantity=_int(quantity, 1), negative_prompt=negative_prompt,
                     seed=_int(seed, 0) if seed not in (None, "") else None,
                     mature=mature_ok, whatif=act == "estimate", wait_seconds=60,
-                    request_id=request_id or None,
                 )
                 if workflow.get("error"):
                     return _civitai_normalize_error(workflow)
