@@ -35,6 +35,15 @@ from .task_ledger import TaskLedger
 from .api_key import ApiKey, ApiRequest
 from .trace import ObsTrace, ObsSpan
 from .remote_host import RemoteHost
+from .imaginai import (
+    ImaginaiActionAttempt,
+    ImaginaiCampaign,
+    ImaginaiEntity,
+    ImaginaiEvent,
+    ImaginaiFact,
+    ImaginaiKnowledge,
+    ImaginaiJournalEntry,
+)
 
 __all__ = [
     "AuditEvent",
@@ -92,4 +101,11 @@ __all__ = [
     "ObsTrace",
     "ObsSpan",
     "RemoteHost",
+    "ImaginaiCampaign",
+    "ImaginaiEntity",
+    "ImaginaiEvent",
+    "ImaginaiFact",
+    "ImaginaiKnowledge",
+    "ImaginaiActionAttempt",
+    "ImaginaiJournalEntry",
 ]

@@ -152,6 +152,13 @@ class HiggsfieldConfig:
 
 
 @dataclass
+class CivitaiConfig:
+    """Token da API Civitai. A mesma credencial autentica a Site API e a
+    Orchestration API; buscas públicas funcionam mesmo quando ``conn`` está vazio."""
+    conn: dict = field(default_factory=dict)
+
+
+@dataclass
 class NotionConfig:
     """Config por-modelo da tool Notion. Como a do GitHub, o TOKEN não mora aqui (é
     buscado ao vivo por conta em cada chamada); só as contas liberadas, as operações
@@ -340,6 +347,10 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # no chat pelos cards de imagem/vídeo.
     {"path": "higgsfield.media.generate", "name": "Higgsfield (Imagem/Vídeo)", "description": "Gera imagens (Soul, Seedream, FLUX) e vídeos a partir de imagem (DoP, Kling, Seedance) com os modelos da Higgsfield.",
      "model_desc": "Generate images (Soul, Seedream, FLUX) and image-to-video (DoP, Kling, Seedance) via Higgsfield."},
+    # Civitai: UMA ferramenta reúne descoberta do catálogo e geração, diferenciadas
+    # pelo parâmetro action (não fragmentar em civitai.search/civitai.generate/etc.).
+    {"path": "civitai.media.use", "name": "Civitai (Modelos/Mídia)", "description": "Pesquisa modelos, versões e imagens no Civitai e gera imagens pela Orchestration API oficial.",
+     "model_desc": "Search Civitai models, versions and images, and generate images through the official Civitai Orchestration API."},
     # ElevenLabs (requer conexão em Configurações → Conexões). Gera fala premium de
     # qualquer texto e efeitos sonoros; o áudio é guardado e tocado no chat.
     {"path": "elevenlabs.audio.generate", "name": "ElevenLabs (Áudio)", "description": "Gera fala premium (TTS) de qualquer texto e efeitos sonoros com a ElevenLabs; o áudio aparece no chat.",
@@ -680,6 +691,7 @@ _INTEGRATION_PREFIXES: dict[str, str] = {
     "slack.": "Slack",
     "messaging.": "Mensagens",
     "higgsfield.": "Higgsfield",
+    "civitai.": "Civitai",
     "elevenlabs.": "ElevenLabs",
     "vercel.": "Vercel",
     "spotify.": "Spotify",
@@ -1005,6 +1017,7 @@ def _register_builtins(
     vercel_cfg: "VercelConfig | None" = None,
     spotify_cfg: "SpotifyConfig | None" = None,
     remote_cfg: "RemoteConfig | None" = None,
+    civitai_cfg: "CivitaiConfig | None" = None,
 ) -> None:
     """Registra as ferramentas de sistema. `allowed=None` = todas; caso contrário
     apenas os paths presentes no conjunto."""
@@ -3304,7 +3317,187 @@ def _register_builtins(
             return {"query": q, "kind": k if k in ("track", "artist", "album", "playlist") else "track",
                     "results": results}
 
-    # ------------------------------ GitHub ------------------------------------ #
+    # ------------------------------ Civitai ----------------------------------- #
+    if want("civitai.media.use"):
+        civitai_token = (civitai_cfg.conn.get("token", "") if civitai_cfg else "")
+
+        def _civitai_summary(workflow: dict[str, Any]) -> dict[str, Any]:
+            """Resposta enxuta: a resposta completa do workflow pode carregar muita
+            telemetria e gastar contexto sem ajudar o modelo a decidir o próximo passo."""
+            return {
+                "workflow_id": workflow.get("id"),
+                "status": workflow.get("status"),
+                "transactions": workflow.get("transactions") or [],
+                "steps": [
+                    {
+                        "name": step.get("name"), "$type": step.get("$type"),
+                        "status": step.get("status"), "reason": step.get("reason"),
+                    }
+                    for step in (workflow.get("steps") or [])
+                ],
+            }
+
+        def _civitai_finish(workflow: dict[str, Any], prompt_: str, model_: str) -> dict[str, Any]:
+            from ..integrations import civitai_service as cv
+            from ..providers import image_gen
+
+            outputs = cv.workflow_outputs(workflow)
+            if not outputs:
+                return {"error": "Civitai terminou o workflow sem mídia utilizável",
+                        **_civitai_summary(workflow)}
+            stored: list[dict[str, Any]] = []
+            chat_id = toolctx.current_chat_id.get()
+            for output in outputs[:4]:
+                got = cv.download(str(output["url"]))
+                if isinstance(got, dict):
+                    if not stored:
+                        return got
+                    break
+                data, mime = got
+                kind = "video" if mime.startswith("video/") else output.get("kind", "image")
+                iid = asyncio.run(_store_media(
+                    user_id, chat_id, data, mime=mime, prompt=prompt_, model=model_,
+                ))
+                if iid:
+                    stored.append({"kind": kind, "url": image_gen.sign_image_url(iid)})
+            if not stored:
+                return {"error": "a mídia foi gerada, mas não pôde ser armazenada"}
+            first = stored[0]
+            return {
+                "kind": first["kind"], "url": first["url"], "media": stored,
+                "prompt": prompt_, "model": model_ or "civitai", **_civitai_summary(workflow),
+            }
+
+        @sift.tool(
+            "civitai.media.use",
+            description=(
+                "Use Civitai through ONE unified tool. `action`: `search_models` searches "
+                "the public model catalog; `model` gets a model and its versions; `version` "
+                "gets one version/AIR identifier; `search_images` browses gallery images; "
+                "`estimate` validates and estimates Buzz cost without generating; `generate` "
+                "submits an official imageGen workflow; `status` resumes a pending workflow. "
+                "Catalog actions work without a connection. Generation requires the user's "
+                "Civitai API token and spends Buzz. Generated media is downloaded and shown "
+                "automatically, so do not paste its URL into the answer. Prefer a generatable "
+                "model/version found through search before supplying an advanced model."
+            ),
+            params={
+                "action": "string:n::search_models | model | version | search_images | estimate | generate | status",
+                "query": "string:o::search_models: name or keywords",
+                "model_id": "number:o::model/search_images: Civitai model id",
+                "version_id": "number:o::version/search_images: Civitai model version id",
+                "model_type": "string:o::search_models: Checkpoint, LORA, TextualInversion, etc.",
+                "base_model": "string:o::search_models: SDXL 1.0, Flux.1 D, etc.",
+                "username": "string:o::search_images: creator username",
+                "sort": "string:o::catalog sort order",
+                "period": "string:o::AllTime | Year | Month | Week | Day",
+                "limit": "number:o:10:number of catalog results (1-50)",
+                "page": "number:o:1:catalog page",
+                "cursor": "string:o::search_models: metadata.nextCursor from a previous query page",
+                "nsfw": "string:o::None | Soft | Mature | X (gallery); true also enables mature model search",
+                "supports_generation": "boolean:o:false:search only models usable by the orchestration API",
+                "prompt": "string:o::estimate/generate: image prompt",
+                "engine": "string:o:flux:orchestration engine; use flux for the simple default",
+                "model": "string:o::model id/AIR URN required by advanced engines",
+                "ecosystem": "string:o::advanced engines: e.g. flux1, sdxl",
+                "width": "number:o:1024:image width",
+                "height": "number:o:1024:image height",
+                "quantity": "number:o:1:number of images (1-4)",
+                "negative_prompt": "string:o::negative prompt where supported",
+                "seed": "number:o::reproducible seed",
+                "options_json": "string:o::advanced engine input as a JSON object (operation, loras, sampler, images, etc.)",
+                "workflow_id": "string:o::status: id returned by generate",
+            },
+            returns=["items", "metadata", "workflow_id", "status", "transactions", "kind",
+                     "url", "media", "prompt", "model", "error"],
+            examples=[
+                "search Civitai for photorealistic Flux models that support generation",
+                "show the versions of Civitai model 12345",
+                "estimate the Buzz cost for a 1024x1024 image of a lunar city",
+                "generate an image of a lunar city with Civitai",
+            ],
+        )
+        def _civitai_use(
+            action: str = "", query: str = "", model_id: Any = None,
+            version_id: Any = None, model_type: str = "", base_model: str = "",
+            username: str = "", sort: str = "", period: str = "", limit: Any = 10,
+            page: Any = 1, cursor: str = "", nsfw: str = "None", supports_generation: Any = False,
+            prompt: str = "", engine: str = "flux", model: str = "",
+            ecosystem: str = "", width: Any = 1024, height: Any = 1024,
+            quantity: Any = 1, negative_prompt: str = "", seed: Any = None,
+            options_json: str = "", workflow_id: str = "",
+        ) -> dict[str, Any]:
+            from ..integrations import civitai_service as cv
+
+            act = (action or "").strip().lower()
+
+            def _int(value: Any, default: int) -> int:
+                try:
+                    return int(value) if value not in (None, "") else default
+                except (TypeError, ValueError):
+                    return default
+
+            if act == "search_models":
+                mature = str(nsfw).strip().lower() in {"true", "soft", "mature", "x"}
+                return cv.search_models(
+                    civitai_token, query, model_type, base_model,
+                    sort or "Highest Rated", period or "AllTime", _int(limit, 10),
+                    _int(page, 1), mature,
+                    supports_generation is True or str(supports_generation).lower() == "true",
+                    cursor,
+                )
+            if act == "model":
+                mid = _int(model_id, 0)
+                return cv.get_model(civitai_token, mid) if mid > 0 else {"error": "provide model_id"}
+            if act == "version":
+                vid = _int(version_id, 0)
+                return cv.get_model_version(civitai_token, vid) if vid > 0 else {"error": "provide version_id"}
+            if act == "search_images":
+                return cv.search_images(
+                    civitai_token, _int(model_id, 0) or None, _int(version_id, 0) or None,
+                    username, sort or "Most Reactions", period or "AllTime",
+                    _int(limit, 10), _int(page, 1), nsfw or "None",
+                )
+            if act == "status":
+                wid = workflow_id.strip()
+                if not wid:
+                    return {"error": "provide workflow_id"}
+                workflow = cv.get_workflow(civitai_token, wid)
+                if workflow.get("error"):
+                    return workflow
+                status_ = str(workflow.get("status") or "").lower()
+                if status_ == "succeeded":
+                    return _civitai_finish(workflow, prompt, model or engine)
+                if status_ in {"failed", "expired", "canceled"}:
+                    return {"error": f"Civitai workflow {status_}", **_civitai_summary(workflow)}
+                return {**_civitai_summary(workflow),
+                        "note": "workflow ainda em andamento; consulte status novamente"}
+            if act in {"estimate", "generate"}:
+                if not civitai_token:
+                    return {"error": "Civitai is not connected. Ask the user to add an API "
+                                     "token in Settings → Integrations → Civitai."}
+                workflow = cv.submit_image(
+                    civitai_token, prompt, engine=engine or "flux", model=model,
+                    ecosystem=ecosystem, width=_int(width, 1024), height=_int(height, 1024),
+                    quantity=_int(quantity, 1), negative_prompt=negative_prompt,
+                    seed=_int(seed, 0) if seed not in (None, "") else None,
+                    options_json=options_json, whatif=act == "estimate", wait_seconds=60,
+                )
+                if workflow.get("error"):
+                    return workflow
+                if act == "estimate":
+                    return {"estimate": True, **_civitai_summary(workflow)}
+                status_ = str(workflow.get("status") or "").lower()
+                if status_ == "succeeded":
+                    return _civitai_finish(workflow, prompt, model or engine)
+                if status_ in {"failed", "expired", "canceled"}:
+                    return {"error": f"Civitai workflow {status_}", **_civitai_summary(workflow)}
+                return {**_civitai_summary(workflow),
+                        "note": "generation is still running; use action 'status' with workflow_id"}
+            return {"error": "unknown action; use search_models/model/version/search_images/"
+                             "estimate/generate/status"}
+
+    # ----------------------------- Higgsfield -------------------------------- #
     if want("higgsfield.media.generate"):
         hf_conn = higgsfield_cfg.conn if higgsfield_cfg else {}
 
@@ -4345,6 +4538,7 @@ def _signature(
     vercel_cfg: "VercelConfig | None" = None,
     spotify_cfg: "SpotifyConfig | None" = None,
     remote_cfg: "RemoteConfig | None" = None,
+    civitai_cfg: "CivitaiConfig | None" = None,
 ) -> tuple:
     rows = tuple(
         sorted(
@@ -4419,6 +4613,7 @@ def _signature(
     # config Spotify: o client_id identifica a conexão; o secret entra só como bool.
     spc = ((spotify_cfg.conn.get("id", ""), bool(spotify_cfg.conn.get("secret")))
            if spotify_cfg else ())
+    cvc = ((civitai_cfg.conn.get("token", ""),) if civitai_cfg else ())
     return (
         rows,
         search_cfg.provider,
@@ -4447,6 +4642,7 @@ def _signature(
         elc,
         vlc,
         spc,
+        cvc,
         # Remote Terminal: máquinas liberadas + ops + piso de confirmação. Endereço e
         # token NÃO entram (resolvidos ao vivo): trocar o token não deve rebuildar o
         # índice, mas liberar/remover uma máquina deve.
@@ -4507,6 +4703,7 @@ def build_user_sift(
     vercel_cfg: "VercelConfig | None" = None,
     spotify_cfg: "SpotifyConfig | None" = None,
     remote_cfg: "RemoteConfig | None" = None,
+    civitai_cfg: "CivitaiConfig | None" = None,
 ) -> Sift | None:
     """Constrói a instância SIFT completa do usuário (builtins + tools dele).
 
@@ -4531,7 +4728,7 @@ def build_user_sift(
             on_result=_record_call,
             index_cache=_index_cache_path(user_id),
         )
-        _register_builtins(sift, search_cfg, None, finance_cfg, deep_cfg, user_id, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg, remote_cfg)
+        _register_builtins(sift, search_cfg, None, finance_cfg, deep_cfg, user_id, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg, remote_cfg, civitai_cfg)
         for t in tool_rows:
             if not t.enabled:
                 continue
@@ -4574,12 +4771,13 @@ def get_user_sift(
     vercel_cfg: "VercelConfig | None" = None,
     spotify_cfg: "SpotifyConfig | None" = None,
     remote_cfg: "RemoteConfig | None" = None,
+    civitai_cfg: "CivitaiConfig | None" = None,
 ) -> Sift | None:
-    sig = _signature(tool_rows, search_cfg, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg, remote_cfg)
+    sig = _signature(tool_rows, search_cfg, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg, remote_cfg, civitai_cfg)
     cached = _cache.get(user_id)
     if cached is not None and cached[0] == sig:
         return cached[1]
-    sift = build_user_sift(tool_rows, search_cfg, user_id, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg, remote_cfg)
+    sift = build_user_sift(tool_rows, search_cfg, user_id, finance_cfg, deep_cfg, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg, remote_cfg, civitai_cfg)
     _cache[user_id] = (sig, sift)
     return sift
 
@@ -4727,6 +4925,12 @@ def higgsfield_config_from_secrets(conn: dict | None) -> "HiggsfieldConfig | Non
     if not conn:
         return None
     return HiggsfieldConfig(conn=conn)
+
+
+def civitai_config_from_secret(token: str | None) -> "CivitaiConfig":
+    """A tool continua disponível sem token para consultar o catálogo público;
+    geração/estimativa respondem com a orientação de conexão."""
+    return CivitaiConfig(conn={"token": token or ""})
 
 
 def elevenlabs_config_from_secrets(conn: dict | None) -> "ElevenLabsConfig | None":

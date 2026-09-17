@@ -27,8 +27,9 @@ from .turn_setup import (
     _code_mode,
     _final_message_fields,
     _flag_budget,
-    _mem_agent_id,
+    _imaginai_turn_kwargs,
     _media_opts,
+    _mem_agent_id,
     _memory_opts,
     _ordered_messages,
     _prepare_turn,
@@ -129,20 +130,29 @@ async def resume_chat_turn(
                 # conteúdo, da mais recente p/ a mais antiga) — senão iriam duplicadas ao
                 # modelo: uma vez no histórico e outra como a pergunta atual.
                 restantes = list(convo)
+                source_ids: list[str] = []
                 for t in reversed(texts):
                     alvo = t.strip()
                     for i in range(len(restantes) - 1, -1, -1):
                         m = restantes[i]
                         if m.role == "user" and (m.content or "").strip() == alvo:
+                            source_ids.append(str(m.id))
                             restantes.pop(i)
                             break
                 history = [{"role": m.role, "content": m.content} for m in restantes]
                 injected_text = "\n\n".join(texts).strip()
+                stable_sources = ":".join(reversed(source_ids))
+                turn_key = "queue:" + (
+                    stable_sources
+                    or str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{cid}:{injected_text}"))
+                )
             else:
                 history = [{"role": m.role, "content": m.content} for m in convo]
                 # registra a nota como mensagem do usuário (transcrição legível do chat)
-                db.add(Message(chat_id=cid, role="user", content=injected_text))
+                source_message = Message(chat_id=cid, role="user", content=injected_text)
+                db.add(source_message)
                 await db.commit()
+                turn_key = str(source_message.id)
             user_id = str(user.id)
             project_id = str(chat.project_id) if chat.project_id else None
             arts_kwargs = await _artifacts_kwargs(db, cid, user, arts_on, model_config)
@@ -150,6 +160,7 @@ async def resume_chat_turn(
             brain = await _brain_setup(db, user, chat, model_config)
             memory = _memory_opts(chat, model_config, user)
             media = await _media_opts(db, user, model_config)
+            imaginai_kwargs = await _imaginai_turn_kwargs(db, user, chat, turn_key)
 
         async def _finish(collected: dict, emit) -> None:
             # Mesmo contrato do envio normal: preserva texto/raciocínio parcial e a
@@ -187,8 +198,8 @@ async def resume_chat_turn(
             if arts_changed:
                 await emit({"type": "artifacts", "ids": arts_changed})
             if notify:
-                from ..push_service import send_to_user
                 from .. import bg
+                from ..push_service import send_to_user
                 bg.spawn(send_to_user(user.id, notify_title, notify_body or content.strip(), "/"))
 
         # steer/fila também valem na continuação (steering durante o wake, encadear filas)
@@ -216,6 +227,7 @@ async def resume_chat_turn(
             params=params,
             base_url=base_url,
             **arts_kwargs,
+            **imaginai_kwargs,
             session=TurnSession(
                 user_id=user_id, user_tz=_session_tz(user, ""), chat_id=str(cid),
                 agent_id=_mem_agent_id(model_config, model),

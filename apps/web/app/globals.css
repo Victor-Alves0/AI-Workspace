@@ -361,39 +361,338 @@ select:focus-visible {
   }
 }
 
-/* Imaginai ocupa as laterais da ÁREA DAS MENSAGENS, nunca o compositor. A grade
- * replica a largura central de 50rem: assim os docks não empurram texto, código
- * ou tabelas. Abaixo desse limiar eles simplesmente não montam visualmente. */
+/* Imaginai ocupa as laterais da ÁREA DAS MENSAGENS, nunca o compositor. No
+ * mobile ficam apenas duas linguetas nas bordas; cada uma abre seu drawer. */
 .chat-game-stage {
   container: chat-game / inline-size;
 }
 .imaginai-docks {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+.imaginai-mobile-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  border: 0;
+  background: rgb(0 0 0 / 0.28);
+  pointer-events: auto;
+}
+.imaginai-edge-tab {
+  position: absolute;
+  top: 58%;
+  z-index: 3;
+  display: flex;
+  min-height: 44px;
+  min-width: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  border: 1px solid rgb(var(--c-border));
+  background: rgb(var(--c-surface) / 0.96);
+  color: rgb(var(--c-ink-soft));
+  box-shadow: 0 4px 24px rgb(0 0 0 / 0.45), 0 1px 3px rgb(0 0 0 / 0.3);
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease;
+}
+.imaginai-edge-tab:hover,
+.imaginai-edge-tab[aria-expanded="true"] {
+  border-color: rgb(139 92 246 / 0.55);
+  background: rgb(139 92 246 / 0.18);
+  color: rgb(237 233 254);
+}
+.imaginai-edge-tab-left {
+  left: 0;
+  border-left: 0;
+  border-radius: 0 12px 12px 0;
+}
+.imaginai-edge-tab-right {
+  right: 0;
+  border-right: 0;
+  border-radius: 12px 0 0 12px;
+}
+.imaginai-world-dock,
+.imaginai-character-dock {
   display: none;
+}
+.imaginai-world-dock[data-mobile-open="true"],
+.imaginai-character-dock[data-mobile-open="true"] {
+  position: absolute;
+  bottom: 0.75rem;
+  z-index: 2;
+  display: flex;
+  width: min(18rem, calc(100% - 1.5rem));
+  max-height: calc(100% - 1.5rem);
+  overflow-y: auto;
+  pointer-events: auto;
+}
+.imaginai-world-dock[data-mobile-open="true"] {
+  left: 0.75rem;
+}
+.imaginai-character-dock[data-mobile-open="true"] {
+  right: 0.75rem;
+}
+.imaginai-dock-card {
+  width: 100%;
+  max-width: 18rem;
+  border: 1px solid rgb(167 139 250 / 0.22);
+  border-radius: 1rem;
+  background: rgb(var(--c-surface) / 0.97);
+  padding: 0.625rem;
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.35);
+  backdrop-filter: blur(14px);
+}
+.imaginai-feature {
+  min-width: 0;
+}
+.imaginai-feature-back,
+.imaginai-small-button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  border-radius: 0.55rem;
+  padding: 0 0.45rem;
+  color: rgb(var(--c-muted));
+  font-size: 0.675rem;
+  font-weight: 500;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+.imaginai-feature-back:hover,
+.imaginai-small-button:hover {
+  background: rgb(var(--c-hover));
+  color: rgb(var(--c-ink));
+}
+.imaginai-feature-scroll {
+  max-height: min(56vh, 31rem);
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--c-border)) transparent;
+}
+.imaginai-field {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgb(var(--c-border));
+  border-radius: 0.65rem;
+  background: rgb(var(--c-surface2) / 0.72);
+  padding: 0.55rem 0.65rem;
+  color: rgb(var(--c-ink));
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+.imaginai-field::placeholder {
+  color: rgb(var(--c-muted));
+}
+.imaginai-field:focus {
+  border-color: rgb(167 139 250 / 0.72);
+  background: rgb(var(--c-surface2));
+}
+.imaginai-primary-button,
+.imaginai-icon-button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border-radius: 0.65rem;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease;
+}
+.imaginai-primary-button {
+  background: rgb(124 58 237 / 0.82);
+  padding: 0 0.7rem;
+  color: white;
+  font-size: 0.675rem;
+  font-weight: 600;
+}
+.imaginai-primary-button:hover {
+  background: rgb(139 92 246);
+}
+.imaginai-primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+.imaginai-icon-button {
+  min-width: 44px;
+  border: 1px solid rgb(var(--c-border));
+  color: rgb(var(--c-muted));
+}
+.imaginai-icon-button:hover {
+  border-color: rgb(167 139 250 / 0.35);
+  background: rgb(var(--c-hover));
+  color: rgb(var(--c-ink));
+}
+.imaginai-primary-button:focus-visible,
+.imaginai-icon-button:focus-visible,
+.imaginai-feature-back:focus-visible,
+.imaginai-small-button:focus-visible,
+.imaginai-field:focus-visible {
+  outline: 2px solid rgb(167 139 250 / 0.8);
+  outline-offset: 1px;
+}
+.imaginai-redaction {
+  height: 0.52rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgb(var(--c-border)), rgb(var(--c-surface2)), rgb(var(--c-border)));
+  background-size: 180% 100%;
+  animation: imaginai-redaction-pulse 2.4s ease-in-out infinite;
+}
+@keyframes imaginai-redaction-pulse {
+  0%, 100% { background-position: 0 0; opacity: 0.62; }
+  50% { background-position: 100% 0; opacity: 0.9; }
+}
+.imaginai-ability-row {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid rgb(var(--c-border));
+  border-radius: 0.75rem;
+  background: linear-gradient(110deg, rgb(var(--c-surface2) / 0.9), rgb(var(--c-surface) / 0.82));
+}
+.imaginai-ability-score {
+  display: flex;
+  width: 3.35rem;
+  flex: 0 0 3.35rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-right: 1px solid rgb(167 139 250 / 0.18);
+  background: rgb(0 0 0 / 0.14);
+  padding: 0.4rem 0.2rem;
+}
+.imaginai-ability-score span {
+  color: rgb(var(--c-muted));
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.imaginai-ability-score strong {
+  color: rgb(var(--c-ink));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 1rem;
+  line-height: 1.15rem;
+}
+.imaginai-ability-score em {
+  color: rgb(196 181 253);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.6rem;
+  font-style: normal;
+}
+.imaginai-dock-action {
+  display: flex;
+  min-width: 0;
+  min-height: 44px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.2rem;
+  border-radius: 0.65rem;
+  padding: 0.3rem 0.2rem;
+  color: rgb(var(--c-ink-soft));
+  font-size: 0.675rem;
+  font-weight: 500;
+  line-height: 1rem;
+  touch-action: manipulation;
+  cursor: pointer;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pop,
+  .animate-fade-up {
+    animation: none;
+  }
+  .imaginai-edge-tab,
+  .imaginai-dock-action,
+  .imaginai-feature-back,
+  .imaginai-small-button,
+  .imaginai-primary-button,
+  .imaginai-icon-button,
+  .imaginai-field {
+    transition: none;
+  }
+  .imaginai-redaction {
+    animation: none;
+  }
+}
+.imaginai-dock-action:hover {
+  background: rgb(var(--c-hover));
+  color: rgb(var(--c-ink));
+}
+.imaginai-dock-action:focus-visible {
+  outline: 2px solid rgb(167 139 250 / 0.8);
+  outline-offset: 1px;
+}
+.imaginai-dock-action-active,
+.imaginai-dock-action-active:hover {
+  background: rgb(139 92 246 / 0.24);
+  color: rgb(237 233 254);
 }
 @container chat-game (min-width: 1300px) {
   .imaginai-docks {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 50rem) minmax(0, 1fr);
-    align-items: start;
-    pointer-events: none;
+    align-items: end;
+  }
+  .imaginai-mobile-scrim,
+  .imaginai-edge-tab {
+    display: none;
   }
   .imaginai-world-dock,
-  .imaginai-character-dock {
+  .imaginai-character-dock,
+  .imaginai-world-dock[data-mobile-open],
+  .imaginai-character-dock[data-mobile-open] {
+    position: static;
     display: flex;
+    width: auto;
+    max-height: none;
     min-width: 0;
-    padding-top: 1.5rem;
+    overflow: visible;
+    padding-bottom: 1.25rem;
     pointer-events: auto;
   }
-  .imaginai-world-dock {
+  .imaginai-world-dock,
+  .imaginai-world-dock[data-mobile-open] {
     grid-column: 1;
-    padding-inline: 1.5rem 1rem;
+    justify-content: flex-start;
+    padding-inline: 1.25rem 0.75rem;
   }
-  .imaginai-character-dock {
+  .imaginai-character-dock,
+  .imaginai-character-dock[data-mobile-open] {
     grid-column: 3;
-    padding-inline: 1rem 1.5rem;
+    justify-content: flex-end;
+    padding-inline: 0.75rem 1.25rem;
+  }
+  .imaginai-dock-action {
+    min-height: 38px;
+  }
+  .imaginai-feature-back,
+  .imaginai-small-button {
+    min-height: 32px;
+  }
+  .imaginai-field {
+    min-height: 40px;
+    font-size: 0.75rem;
+  }
+  .imaginai-primary-button,
+  .imaginai-icon-button {
+    min-height: 38px;
+  }
+  .imaginai-icon-button {
+    min-width: 38px;
   }
 }
 

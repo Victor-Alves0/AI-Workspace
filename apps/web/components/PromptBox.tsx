@@ -303,34 +303,34 @@ function MiniAppsMenu({
         <div
           role="dialog"
           aria-label="Mini Apps"
-          className={`animate-pop absolute left-0 z-50 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-border bg-surface shadow-menu ${menuPosition}`}
+          className={`animate-pop absolute left-0 z-50 w-[min(12rem,calc(100vw-1.25rem))] overflow-hidden rounded-xl border border-border bg-surface shadow-menu ${menuPosition}`}
         >
-          <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
-            <Search size={15} className="shrink-0 text-muted" />
+          <div className="flex items-center gap-1.5 border-b border-border px-2.5 py-2">
+            <Search size={14} className="shrink-0 text-muted" />
             <input
               autoFocus
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Buscar Mini Apps…"
-              className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
+              placeholder="Buscar…"
+              className="w-full min-w-0 bg-transparent text-xs text-ink outline-none placeholder:text-muted"
             />
             <button
               type="button"
               onClick={() => setOpen(false)}
               aria-label="Fechar Mini Apps"
-              className="rounded-md p-1 text-muted transition-colors hover:bg-hover hover:text-ink"
+              className="-mr-2 flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted transition-colors hover:bg-hover hover:text-ink sm:mr-0 sm:min-h-7 sm:min-w-7"
             >
               <X size={14} />
             </button>
           </div>
-          <div className="max-h-[19rem] overflow-y-auto p-3">
+          <div className="max-h-[12rem] overflow-y-auto p-2">
             {matches.length ? (
-              <div className="grid grid-cols-3 gap-2" aria-label="Catálogo de Mini Apps">
+              <div className="grid grid-cols-3 gap-1.5" aria-label="Catálogo de Mini Apps">
                 {matches.map((app) => {
                   const Icon = app.icon;
                   const selected = activeApp === app.id;
                   return (
-                    <div key={app.id} className="group relative">
+                    <div key={app.id}>
                       <button
                         type="button"
                         onClick={() => {
@@ -339,20 +339,15 @@ function MiniAppsMenu({
                         }}
                         aria-label={`${app.name}: ${app.description}`}
                         aria-pressed={selected}
-                        className={`flex aspect-square w-full flex-col items-center justify-center gap-2 rounded-xl border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/80 ${
+                        title={`${app.name} — ${selected ? "Ativo" : app.description}`}
+                        className={`flex aspect-square w-full items-center justify-center rounded-lg border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/80 ${
                           selected
                             ? "border-violet-400/80 bg-violet-500/30 text-violet-100 shadow-[0_0_0_1px_rgb(139_92_246_/_0.22)]"
                             : "border-accent/25 bg-accent/[0.07] text-accent-hover hover:border-accent/55 hover:bg-accent/[0.12]"
                         }`}
                       >
-                        <Icon size={27} strokeWidth={1.7} />
+                        <Icon size={20} strokeWidth={1.8} />
                       </button>
-                      <span
-                        role="tooltip"
-                        className="pointer-events-none absolute bottom-[calc(100%+0.45rem)] left-1/2 z-10 w-max max-w-52 -translate-x-1/2 rounded-lg border border-border bg-surface2 px-2 py-1 text-xs text-ink opacity-0 shadow-menu transition-opacity group-hover:opacity-100"
-                      >
-                        {app.name} · {selected ? "Ativo" : app.description}
-                      </span>
                     </div>
                   );
                 })}
@@ -360,15 +355,15 @@ function MiniAppsMenu({
                   <div
                     key={`upcoming-${index}`}
                     aria-hidden="true"
-                    className="aspect-square rounded-xl border border-dashed border-border/70 bg-surface2/30"
+                    className="aspect-square rounded-lg border border-dashed border-border/60 bg-surface2/25"
                   />
                 ))}
               </div>
             ) : (
-              <p className="py-10 text-center text-sm text-muted">Nenhum Mini App encontrado.</p>
+              <p className="py-6 text-center text-xs text-muted">Nenhum Mini App encontrado.</p>
             )}
           </div>
-          <p className="border-t border-border px-3 py-2 text-[11px] text-muted">Novas experiências interativas aparecerão aqui.</p>
+          <p className="truncate border-t border-border px-2.5 py-1.5 text-[10px] text-muted">Mais Mini Apps em breve.</p>
         </div>
       ) : null}
     </div>

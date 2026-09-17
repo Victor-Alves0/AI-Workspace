@@ -1445,6 +1445,20 @@ class SubagentOpts:
     worker_memory: bool = False
 
 
+@dataclass
+class NativeToolOpts:
+    """Ferramentas internas de um domínio do app, fora da SIFT.
+
+    O schema continua pequeno para o modelo, enquanto ``run`` executa no servidor
+    com a identidade já fixada pelo turno. Isso evita transformar integrações
+    autoritativas, como o Imaginai, em ferramentas genéricas configuráveis.
+    """
+
+    specs: list[dict[str, Any]] | None = None
+    prompt: str = ""
+    run: Any | None = None
+
+
 # --------------------------------------------------------------------------- #
 # Fases do turno (extraídas do corpo do run_turn; o loop agêntico fica nele)
 # --------------------------------------------------------------------------- #
@@ -1648,6 +1662,7 @@ def _assemble_tools_and_prompt(
     skill_learning: bool | None,
     subagents: list[dict[str, Any]],
     run_subagent: Any | None,
+    native: NativeToolOpts,
     kb_present: bool = False,
 ) -> _AssembledTools:
     """Fase 2 — monta a lista de tools anunciadas ao modelo e a seção de
@@ -1774,6 +1789,21 @@ def _assemble_tools_and_prompt(
     if a.subagents_on:
         a.tools = list(a.tools) + [_delegate_tool(subagents)]
         native_names.append("delegate")
+
+    # Ferramentas de domínio fornecidas pelo chamador do turno. O runner recebe
+    # apenas nome+argumentos; identidade/campanha ficam capturadas no servidor.
+    if native.specs and native.run is not None:
+        a.tools = list(a.tools) + list(native.specs)
+        domain_names = [
+            str((spec.get("function") or {}).get("name") or "")
+            for spec in native.specs
+            if isinstance(spec, dict)
+        ]
+        native_names.extend(name for name in domain_names if name)
+        if native.prompt:
+            a.sift_prompt = "\n\n".join(
+                part for part in (a.sift_prompt, native.prompt.strip()) if part
+            )
 
     # aviso das tools nativas: só faz sentido com a SIFT ligada (é o prompt dela que
     # ensina o `search_tools` como caminho único de descoberta).
@@ -2056,6 +2086,8 @@ class _ToolDispatcher:
     subagent_pass_context: bool
     subagent_worker_memory: bool
     run_subagent: Any
+    native_tool_names: frozenset[str]
+    native_tool_runner: Any
     # docs explicitamente enviados em turnos anteriores; usados quando o usuário pede
     # "outro/mais/diferente" para a busca não devolver o mesmo item de novo.
     seen_kb_doc_ids: set[str] = field(default_factory=set)
@@ -2101,6 +2133,8 @@ class _ToolDispatcher:
         elif name == "delegate":
             async for ev in self._delegate(args, tc):
                 yield ev
+        elif name in self.native_tool_names and self.native_tool_runner is not None:
+            self.result = await self.native_tool_runner(name, args)
         elif self.sift is None:
             self.result = {"error": "ferramentas indisponíveis"}
         elif name == "run_code" and not self.code_mode:
@@ -2561,6 +2595,15 @@ def _shape_tool_result(result: Any) -> tuple[str, Any]:
     elif isinstance(event_result, dict) and event_result.get("kind") == "knowledge":
         content = event_result.get("_model") or ""
         event_result = {k: v for k, v in event_result.items() if k != "_model"}
+    elif isinstance(event_result, dict) and event_result.get("kind") == "private_context":
+        # Contexto GM-only (ex.: persona e conhecimento individual de um NPC) entra
+        # no modelo, mas jamais no evento da UI nem no histórico persistido.
+        content = json.dumps(event_result.get("_model") or {}, ensure_ascii=False, default=str)
+        event_result = {
+            "kind": "private_context",
+            "ok": bool(event_result.get("ok", True)),
+            "note": event_result.get("note") or "Contexto privado carregado para atuação.",
+        }
     return content, event_result
 
 
@@ -2722,6 +2765,7 @@ async def run_turn(
     memory: MemoryOpts | None = None,
     media: MediaOpts | None = None,
     subagent: SubagentOpts | None = None,
+    native_tools: NativeToolOpts | None = None,
 ) -> AsyncGenerator[dict[str, Any], None]:
     settings = get_settings()
 
@@ -2736,6 +2780,7 @@ async def run_turn(
     _md = media or MediaOpts()
     genimage, image_output = _md.genimage, _md.image_output
     _sa = subagent or SubagentOpts()
+    _native = native_tools or NativeToolOpts()
     subagents, run_subagent = _sa.agents, _sa.run
     subagent_mode, subagent_max_calls = _sa.mode, _sa.max_calls
     subagent_pass_context, subagent_worker_memory = _sa.pass_context, _sa.worker_memory
@@ -2800,6 +2845,7 @@ async def run_turn(
         genimage=genimage, kb_tool_on=bool(g.kb_bases_tool), kb_present=bool(g.kb_bases),
         brain=brain, skill_learning=skill_learning,
         subagents=subagents, run_subagent=run_subagent,
+        native=_native,
     )
     tools: Any = asm.tools
     _base_tools = asm.tools  # tools originais: p/ reabrir após um corte (ex.: steer)
@@ -2828,6 +2874,11 @@ async def run_turn(
         subagent_max_calls=subagent_max_calls,
         subagent_pass_context=subagent_pass_context,
         subagent_worker_memory=subagent_worker_memory, run_subagent=run_subagent,
+        native_tool_names=frozenset(
+            str((spec.get("function") or {}).get("name") or "")
+            for spec in (_native.specs or []) if isinstance(spec, dict)
+        ),
+        native_tool_runner=_native.run,
     )
 
     static_system = _build_static_system(chat_system_prompt, sift_prompt)

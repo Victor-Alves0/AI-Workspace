@@ -76,6 +76,7 @@ import VercelPanel from "./VercelPanel";
 import SpotifyPanel from "./SpotifyPanel";
 import RemoteTerminalPanel from "./RemoteTerminalPanel";
 import HiggsfieldPanel from "./HiggsfieldPanel";
+import CivitaiPanel from "./CivitaiPanel";
 import SubscriptionsPanel from "./SubscriptionsPanel";
 import OllamaPanel from "./OllamaPanel";
 import ProvidersPanel from "./ProvidersPanel";
@@ -173,6 +174,8 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Chave Brave Search", cat: "connections", view: "apis/search" },
   { label: "Chave Finnhub", cat: "connections", view: "apis/finance" },
   { label: "Chave Alpha Vantage", cat: "connections", view: "apis/finance" },
+  { label: "Civitai", cat: "integrations", view: "civitai" },
+  { label: "API token Civitai", cat: "integrations", view: "civitai" },
   { label: "Chave do provedor de voz", cat: "connections", view: "apis/voice" },
   { label: "Provedores", cat: "connections", view: "providers" },
   { label: "LiteLLM", cat: "connections", view: "providers" },
@@ -644,6 +647,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                 <GitHubPanel onBack={() => setIntegView(null)} />
               ) : integView === "higgsfield" ? (
                 <HiggsfieldPanel onBack={() => setIntegView(null)} />
+              ) : integView === "civitai" ? (
+                <CivitaiPanel onBack={() => setIntegView(null)} />
               ) : integView === "notion" ? (
                 <NotionPanel onBack={() => setIntegView(null)} />
               ) : integView === "slack" ? (
@@ -731,6 +736,16 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       </span>
                       <span className="text-sm font-medium text-ink">Higgsfield</span>
                       <span className="text-xs leading-4 text-muted">Geração de imagem e vídeo</span>
+                    </button>
+                    <button
+                      onClick={() => setIntegView("civitai")}
+                      className="group flex flex-col items-center gap-2.5 rounded-2xl border border-border bg-surface px-4 py-7 text-center transition-all duration-150 hover:border-accent/40 hover:bg-hover"
+                    >
+                      <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
+                        <Sparkles size={22} />
+                      </span>
+                      <span className="text-sm font-medium text-ink">Civitai</span>
+                      <span className="text-xs leading-4 text-muted">Modelos e geração de imagens</span>
                     </button>
                     <button
                       onClick={() => setIntegView("notion")}

@@ -1413,6 +1413,64 @@ async def higgsfield_test(
     return {"ok": False, "error": result.get("error") or "Não foi possível conectar à Higgsfield."}
 
 
+# --------------------------------------------------------------------------- #
+# Civitai — token POR-USUÁRIO. Catálogo público + geração via Orchestration API.
+# --------------------------------------------------------------------------- #
+@router.get("/civitai")
+async def civitai_status(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    from .integrations import civitai_service
+
+    connected = await civitai_service.is_configured(db, str(user.id))
+    return {"connected": connected}
+
+
+class CivitaiConfigIn(BaseModel):
+    api_key: str
+
+
+@router.put("/civitai")
+async def civitai_set_config(
+    body: CivitaiConfigIn,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    from .integrations import civitai_service
+
+    if not body.api_key.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "API token é obrigatório")
+    await civitai_service.set_token(db, str(user.id), body.api_key)
+    sift_service.invalidate(str(user.id))
+    return {"ok": True}
+
+
+@router.delete("/civitai")
+async def civitai_disconnect(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    from .integrations import civitai_service
+
+    await civitai_service.delete_token(db, str(user.id))
+    sift_service.invalidate(str(user.id))
+    return {"ok": True}
+
+
+@router.post("/civitai/test")
+async def civitai_test(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    from .integrations import civitai_service
+
+    token = await civitai_service.get_token(db, str(user.id))
+    if not token:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Civitai não configurado.")
+    result = await run_in_threadpool(civitai_service.test_connection, token)
+    if result.get("ok"):
+        return result
+    return {"ok": False, "error": result.get("error") or "Não foi possível conectar ao Civitai."}
+
+
 @router.get("/messaging/connections")
 async def messaging_connections(
     user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)

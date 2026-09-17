@@ -23,11 +23,12 @@ from ..tools.loader import get_sift_for_user
 from ..usage_service import usage_event_from_record
 from . import artifacts as artifacts_service
 from . import compaction_service, generation
-from .orchestrator import TurnSession, run_turn, run_turn_guarded
+from .orchestrator import TurnSession, run_turn_guarded
 from .titles import generate_title
 from .turn_setup import (
     _artifacts_enabled,
     _artifacts_kwargs,
+    _brain_setup,
     _clean_attachments,
     _code_mode,
     _effective_chat_model,
@@ -35,6 +36,7 @@ from .turn_setup import (
     _flag_budget,
     _get_model_config,
     _get_owned_chat,
+    _imaginai_turn_kwargs,
     _load_skills,
     _make_subagent_runner,
     _media_opts,
@@ -44,21 +46,20 @@ from .turn_setup import (
     _params_with_chat_reasoning,
     _prepare_attachments,
     _prepare_turn,
-    _brain_setup,
-    _resolve_guards,
     _realtime_datetime,
-    _resolve_knowledge,
-    _resolve_provider,
-    _skill_learning,
-    _resolve_subagents,
     _ref_chats,
     _ref_docs,
+    _remember_tz,
+    _resolve_guards,
+    _resolve_knowledge,
+    _resolve_provider,
+    _resolve_subagents,
+    _session_tz,
+    _skill_learning,
     _sse,
     _sse_stream,
     _subagent_opts,
     _subscribe,
-    _remember_tz,
-    _session_tz,
     _tz_from_header,
     _usage_record,
     _use_context,
@@ -181,6 +182,18 @@ async def send_message(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mensagem vazia")
     await budget_service.enforce_or_raise(db, user)  # orçamento pessoal (modo "pausar")
     _remember_tz(user, user_tz)  # canais (sem navegador) usam o fuso salvo aqui
+
+    if body.mini_app == "imaginai":
+        from ..imaginai import service as imaginai_service
+        from ..schemas.imaginai import CampaignCreate
+
+        # Idempotente: garante que até a PRIMEIRA mensagem já passe pelo World
+        # Kernel, mesmo se o efeito de ativação do frontend ainda estiver em voo.
+        await imaginai_service.create_campaign(
+            db,
+            user.id,
+            CampaignCreate(chat_id=chat.id),
+        )
 
     # ENVIO DURANTE GERAÇÃO ATIVA: não abre uma 2ª geração (corrida de duas respostas no
     # mesmo chat). Persiste a mensagem (visível) e a ENFILEIRA na geração em curso —
@@ -362,6 +375,7 @@ async def send_message(
         params=params,
         base_url=base_url,
         **(await _artifacts_kwargs(db, chat_id, user, arts_on, model_config)),
+        **(await _imaginai_turn_kwargs(db, user, chat, str(user_msg.id))),
         session=TurnSession(
             user_id=user_id, user_tz=_session_tz(user, user_tz), chat_id=str(chat_id),
             agent_id=_mem_agent_id(model_config, model),
@@ -440,6 +454,15 @@ async def edit_message(
     msg = await db.get(Message, message_id)
     if msg is None or msg.chat_id != chat_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Mensagem não encontrada")
+    if msg.role == "user":
+        from ..imaginai import service as imaginai_service
+
+        if await imaginai_service.turn_has_attempt(db, user.id, chat_id, str(msg.id)):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Esta mensagem já alterou o mundo da campanha. Envie uma nova ação; "
+                "edição com ramificação será suportada em uma próxima etapa.",
+            )
     msg.content = body.content
     await db.commit()
     await db.refresh(msg)
@@ -458,6 +481,15 @@ async def delete_message(
     msg = await db.get(Message, message_id)
     if msg is None or msg.chat_id != chat_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Mensagem não encontrada")
+    if msg.role == "user":
+        from ..imaginai import service as imaginai_service
+
+        if await imaginai_service.turn_has_attempt(db, user.id, chat_id, str(msg.id)):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Esta mensagem faz parte do histórico autoritativo da campanha e não "
+                "pode ser apagada isoladamente.",
+            )
     await db.delete(msg)
     await db.commit()
 
@@ -485,6 +517,7 @@ async def regenerate_message(
         # "Tentar novamente" NA MENSAGEM DO USUÁRIO (ex.: depois de editá-la):
         # a IA pensa a partir dela — a mensagem fica; tudo que veio depois sai.
         user_text = rows[idx].content
+        turn_key = str(rows[idx].id)
         user_attachments = _clean_attachments(rows[idx].attachments or [])
         if not user_text and not user_attachments:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mensagem vazia")
@@ -505,6 +538,7 @@ async def regenerate_message(
         for i in range(len(prior) - 1, -1, -1):
             if prior[i].role == "user":
                 user_text = prior[i].content
+                turn_key = str(prior[i].id)
                 user_attachments = _clean_attachments(prior[i].attachments or [])
                 cut = i
                 break
@@ -575,6 +609,7 @@ async def regenerate_message(
         params=params,
         base_url=base_url,
         **(await _artifacts_kwargs(db, chat_id, user, arts_on, model_config)),
+        **(await _imaginai_turn_kwargs(db, user, chat, turn_key)),
         session=TurnSession(
             user_id=user_id, user_tz=_session_tz(user, user_tz), chat_id=str(chat_id),
             agent_id=_mem_agent_id(model_config, model),

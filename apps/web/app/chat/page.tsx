@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, ChevronDown, ChevronUp, Code2, Copy, FlaskConical, GitBranch, Heart, Image as ImageIcon, Link2, Loader2, Map as MapIcon, Menu, MessageSquareDashed, Mic, Package, Pause, Play, RotateCcw, RotateCw, ScrollText, Search, Scissors, Share2, Shield, ShieldAlert, SlidersHorizontal, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
+import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Code2, Copy, FlaskConical, GitBranch, Heart, Image as ImageIcon, Link2, Loader2, LockKeyhole, Map as MapIcon, Menu, MessageSquareDashed, Mic, Package, Pause, Pencil, Pin, Play, Plus, RotateCcw, RotateCw, ScrollText, Search, Scissors, Settings, Share2, Shield, ShieldAlert, SlidersHorizontal, Sparkles, Square, Trash2, Users, Volume2, Wrench, X, type LucideIcon } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamRoundtable } from "@/lib/sse";
@@ -41,6 +41,100 @@ import { SHORTCUTS, eventToCombo, resolveBinding, comboHasModifier, type Shortcu
 import { useGeneration } from "./useGeneration";
 
 type RoundtableStream = { speaker: Speaker; content: string; reasoning: string };
+
+type ImaginaiEntity = {
+  id: string;
+  kind: string;
+  key: string;
+  name: string;
+  description: string;
+  location_id: string | null;
+  owner_entity_id: string | null;
+  state: Record<string, unknown>;
+  active: boolean;
+};
+
+type ImaginaiSnapshot = {
+  campaign: {
+    id: string;
+    chat_id: string;
+    name: string;
+    system_key: string;
+    system_version: string;
+    status: string;
+    world_tick: number;
+    settings?: {
+      narration_style?: "balanced" | "cinematic" | "gritty";
+      difficulty?: "story" | "balanced" | "challenging";
+      [key: string]: unknown;
+    };
+  };
+  character: ImaginaiEntity | null;
+  location: ImaginaiEntity | null;
+};
+
+type ImaginaiSystemDefinition = {
+  key: string;
+  name: string;
+  version: string;
+  inventory: {
+    weight: { supported: boolean; default_enabled: boolean; unit: string };
+    currency_weight: { supported: boolean; default_enabled: boolean };
+    currencies: { key: string; label: string; name: string; weight: number }[];
+    equipment_slots: string[];
+  };
+  sheet: {
+    summary: { key: string; label: string }[];
+    attributes: { key: string; label: string; short: string; skills: string[] }[];
+    skills: Record<string, string>;
+  };
+};
+
+type ImaginaiJournalEntry = {
+  id: string;
+  title: string;
+  content: string;
+  tags: string[];
+  pinned: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+type ImaginaiInventory = {
+  items: {
+    id: string;
+    name: string;
+    description: string;
+    quantity: number;
+    weight: number;
+    equipped: boolean;
+    slot: string | null;
+    container: string | null;
+    charges: number | null;
+  }[];
+  currencies: Record<string, number>;
+  total_weight: number;
+  weight?: {
+    enabled: boolean;
+    currency_enabled: boolean;
+    items: number;
+    currencies: number;
+    total: number;
+    unit: string;
+  };
+};
+
+type ImaginaiCodexResult = {
+  id: string;
+  result_type: "entity" | "lore";
+  kind: string;
+  name: string;
+  knowledge: "aware" | "rumor" | "known";
+  description: string | Record<string, unknown> | null;
+  subject?: string | null;
+  confidence?: number;
+  redacted: string[];
+};
 
 // Override reservado do composer, persistido no Chat sem alterar o preset do
 // modelo. O backend consome e remove esta chave antes de chamar o provider.
@@ -194,9 +288,23 @@ export default function ChatPage() {
   // anexos (imagens/arquivos) do próximo envio
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [active, setActive] = useState<Chat | null>(null);
-  // Mini Apps são contexto visual do chat. O primeiro, Imaginai, abre os dois
-  // docks do RPG sem mudar a geometria da coluna de mensagens.
-  const [activeMiniApp, setActiveMiniApp] = useState<MiniAppId | null>(null);
+  // Mini Apps pertencem ao chat, não à página inteira. A seleção por id impede
+  // o Imaginai de aparecer ou materializar campanha ao navegar para outro chat.
+  const [miniAppByChat, setMiniAppByChat] = useState<Record<string, MiniAppId | undefined>>({});
+  const activeMiniApp = active?.id ? miniAppByChat[active.id] ?? null : null;
+  const setActiveMiniApp = useCallback((app: MiniAppId | null) => {
+    const chatId = active?.id;
+    if (!chatId) return;
+    setMiniAppByChat((current) => {
+      if (app) return { ...current, [chatId]: app };
+      const next = { ...current };
+      delete next[chatId];
+      return next;
+    });
+  }, [active?.id]);
+  const [imaginaiSnapshot, setImaginaiSnapshot] = useState<ImaginaiSnapshot | null>(null);
+  const [imaginaiLoading, setImaginaiLoading] = useState(false);
+  const [imaginaiError, setImaginaiError] = useState<string | null>(null);
   // espelho do id do chat ativo: os handlers de stream (assíncronos) consultam
   // este ref para saber, a QUALQUER instante, se ainda estão pintando o chat que
   // o usuário está vendo — sem isso, o parcial de um chat vaza para outro ao trocar.
@@ -229,6 +337,37 @@ export default function ChatPage() {
   } = gen;
   // mantém o espelho do chat ativo em dia (cobre todos os setActive de uma vez)
   useEffect(() => { activeIdRef.current = active?.id ?? null; }, [active?.id]);
+
+  // Ativar o Imaginai materializa um World Kernel por chat. O POST é idempotente:
+  // voltar ao mini app apenas recupera a mesma campanha, sem duplicar entidades.
+  useEffect(() => {
+    const chatId = active?.id;
+    if (activeMiniApp !== "imaginai" || !chatId) {
+      setImaginaiSnapshot(null);
+      setImaginaiLoading(false);
+      setImaginaiError(null);
+      return;
+    }
+    let cancelled = false;
+    setImaginaiLoading(true);
+    setImaginaiError(null);
+    api.post<ImaginaiSnapshot>("/mini-apps/imaginai/campaigns", {
+      chat_id: chatId,
+      name: "Nome da Campanha",
+      system_key: "dnd5e",
+      system_version: "5e",
+      character_name: "Nome do personagem",
+    }).then((snapshot) => {
+      if (!cancelled) setImaginaiSnapshot(snapshot);
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      setImaginaiSnapshot(null);
+      setImaginaiError(error instanceof Error ? error.message : "Não foi possível abrir a campanha");
+    }).finally(() => {
+      if (!cancelled) setImaginaiLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [active?.id, activeMiniApp]);
   // Artefatos (janela dedicada): lista do chat + qual está aberto (o "ao vivo"
   // vive no hook de geração)
   const [chatArtifacts, setChatArtifacts] = useState<ChatArtifact[]>([]);
@@ -1084,6 +1223,7 @@ export default function ChatPage() {
     activeIdRef.current = null;
     leaveViewOnce();
     setActive(null);
+    setActiveMiniApp(null);
     setDraftRt(null);
     setMessages([]);
     setStreaming("");
@@ -1148,6 +1288,7 @@ export default function ChatPage() {
     const renderedActiveId = active?.id ?? null;
     // Bloqueia imediatamente handlers do chat anterior enquanto o destino carrega.
     activeIdRef.current = id;
+    if (active?.id !== id) setActiveMiniApp(null);
     setTemporary(false);
     setWorkspaceOpen(false);
     leaveViewOnce(id);
@@ -1389,6 +1530,7 @@ export default function ChatPage() {
     const turnRefChats = override ? [] : refChats;
     const turnRefChatIds = turnRefChats.map((r) => r.id);
     if (!override) setRefChats([]);
+    const turnMiniApp = activeMiniApp;
     const temporaryMessageId = `tmp-${Date.now()}`;
     setMessages((m) => [...m, { id: temporaryMessageId, role: "user", content: text, attachments: turnAttachments, created_at: new Date().toISOString() }]);
     setAtBottom(true); // enviar re-engata o auto-scroll (acompanhar a resposta)
@@ -1446,7 +1588,7 @@ export default function ChatPage() {
         // persistente: o servidor cancela a geração e salva o parcial
         const cid = chat.id;
         stopRef.current = () => { api.post(`/chats/${cid}/stop`).catch(() => {}); };
-        await streamMessage(chat.id, text, onEvent, undefined, turnSkillIds, turnAttachments, turnAgentId, turnRefDocIds, turnRefChatIds);
+        await streamMessage(chat.id, text, onEvent, undefined, turnSkillIds, turnAttachments, turnAgentId, turnRefDocIds, turnRefChatIds, turnMiniApp);
         refreshChats();
         // só recarrega/limpa a tela se o usuário AINDA está neste chat — senão
         // sobrescreveria o chat para onde ele navegou (a resposta já ficou salva
@@ -2492,7 +2634,14 @@ export default function ChatPage() {
                     sending && <Thinking />
                   ))}
                   </div>
-                  {activeMiniApp === "imaginai" ? <ImaginaiDnd5eDocks /> : null}
+                  {activeMiniApp === "imaginai" ? (
+                    <ImaginaiDnd5eDocks
+                      snapshot={imaginaiSnapshot}
+                      loading={imaginaiLoading}
+                      error={imaginaiError}
+                      onSnapshotChange={setImaginaiSnapshot}
+                    />
+                  ) : null}
                 </div>
                 {/* Composer NO FLUXO (shrink-0): ocupa espaço de verdade, então a área
                     de rolagem acima nunca fica maior que o disponível. Cresce (anexos,
@@ -2953,80 +3102,681 @@ type CharacterSection = (typeof DND_CHARACTER_SECTIONS)[number]["id"];
 type WorldSection = (typeof DND_WORLD_SECTIONS)[number]["id"];
 
 /**
- * Docks do primeiro sistema do Imaginai. Os dados ainda são o esqueleto visual de
- * D&D 5e; a composição em dois painéis permite que sistemas futuros forneçam seus
- * próprios campos sem alterar a coluna central do chat.
+ * Docks do primeiro sistema do Imaginai. A composição em dois painéis permite que
+ * sistemas futuros forneçam seus próprios campos sem alterar a coluna central.
  */
-function ImaginaiDnd5eDocks() {
-  const [characterSection, setCharacterSection] = useState<CharacterSection>("sheet");
-  const [worldSection, setWorldSection] = useState<WorldSection>("journal");
+function ImaginaiDnd5eDocks({
+  snapshot,
+  loading,
+  error,
+  onSnapshotChange,
+}: {
+  snapshot: ImaginaiSnapshot | null;
+  loading: boolean;
+  error: string | null;
+  onSnapshotChange: (snapshot: ImaginaiSnapshot) => void;
+}) {
+  const [characterSection, setCharacterSection] = useState<CharacterSection | null>(null);
+  const [worldSection, setWorldSection] = useState<WorldSection | null>(null);
+  const [system, setSystem] = useState<ImaginaiSystemDefinition | null>(null);
+  const [systemError, setSystemError] = useState<string | null>(null);
+  const [mobilePanel, setMobilePanel] = useState<"world" | "character" | null>(null);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [campaignNameDraft, setCampaignNameDraft] = useState("");
+  const [narrationDraft, setNarrationDraft] = useState<"balanced" | "cinematic" | "gritty">("balanced");
+  const [difficultyDraft, setDifficultyDraft] = useState<"story" | "balanced" | "challenging">("balanced");
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const dnd = (snapshot?.character?.state.dnd5e ?? {}) as Record<string, unknown>;
+  const hp = (dnd.hp ?? {}) as Record<string, unknown>;
+  const className = typeof dnd.class === "string" ? dnd.class : "Classe";
+  const level = typeof dnd.level === "number" ? dnd.level : 1;
+  const hpCurrent = typeof hp.current === "number" ? hp.current : null;
+  const hpMax = typeof hp.max === "number" ? hp.max : null;
+  const armorClass = typeof dnd.armor_class === "number" ? dnd.armor_class : null;
+  const campaignName = snapshot?.campaign.name ?? "Nome da Campanha";
+  const characterName = snapshot?.character?.name ?? "Nome do personagem";
+  const status = loading ? "Abrindo mundo…" : error ? "Mundo indisponível" : snapshot?.location?.name;
+
+  useEffect(() => {
+    const systemKey = snapshot?.campaign.system_key;
+    if (!systemKey) {
+      setSystem(null);
+      setSystemError(null);
+      return;
+    }
+    let cancelled = false;
+    setSystem(null);
+    setSystemError(null);
+    api.get<ImaginaiSystemDefinition>(`/mini-apps/imaginai/systems/${systemKey}`)
+      .then((definition) => { if (!cancelled) setSystem(definition); })
+      .catch((loadError: unknown) => {
+        if (!cancelled) setSystemError(loadError instanceof Error ? loadError.message : "Sistema indisponível");
+      });
+    return () => { cancelled = true; };
+  }, [snapshot?.campaign.system_key]);
+
+  useEffect(() => {
+    if (!configOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setConfigOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [configOpen]);
+
+  function openCampaignConfig() {
+    if (!snapshot) return;
+    setCampaignNameDraft(snapshot.campaign.name);
+    setNarrationDraft(snapshot.campaign.settings?.narration_style ?? "balanced");
+    setDifficultyDraft(snapshot.campaign.settings?.difficulty ?? "balanced");
+    setConfigError(null);
+    setConfigOpen(true);
+  }
+
+  async function saveCampaignConfig(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!snapshot || !campaignNameDraft.trim()) return;
+    setSavingConfig(true);
+    setConfigError(null);
+    try {
+      const updated = await api.patch<ImaginaiSnapshot>(
+        `/mini-apps/imaginai/campaigns/${snapshot.campaign.id}`,
+        {
+          name: campaignNameDraft.trim(),
+          narration_style: narrationDraft,
+          difficulty: difficultyDraft,
+        },
+      );
+      onSnapshotChange(updated);
+      setConfigOpen(false);
+    } catch (saveError) {
+      setConfigError(saveError instanceof Error ? saveError.message : "Não foi possível salvar a campanha");
+    } finally {
+      setSavingConfig(false);
+    }
+  }
 
   return (
-    <div className="imaginai-docks" aria-label="Painéis do Imaginai">
-      <aside className="imaginai-world-dock" aria-label="Worldinfo">
-        <section className="w-full max-w-[22rem] rounded-2xl border border-violet-400/20 bg-surface/95 p-3 shadow-prompt backdrop-blur">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">Worldinfo · D&amp;D 5e</p>
-          <h2 className="truncate text-sm font-semibold text-ink">Nome da Campanha</h2>
-          <div className="mt-3 grid grid-cols-3 gap-1.5" role="group" aria-label="Navegação da campanha">
-            {DND_WORLD_SECTIONS.map((section) => {
-              const Icon = section.icon;
-              const selected = worldSection === section.id;
-              return (
-                <button
-                  key={section.id}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => setWorldSection(section.id)}
-                  className={`flex min-w-0 flex-col items-center gap-1 rounded-xl px-1 py-2 text-[11px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/80 ${
-                    selected ? "bg-violet-500/25 text-violet-100" : "text-ink-soft hover:bg-hover hover:text-ink"
-                  }`}
-                >
-                  <Icon size={16} />
-                  <span className="truncate">{section.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </section>
-      </aside>
+    <>
+      <div className="imaginai-docks" aria-label="Painéis do Imaginai">
+        {mobilePanel ? (
+          <button
+            type="button"
+            aria-label="Fechar painel do Imaginai"
+            className="imaginai-mobile-scrim"
+            onClick={() => setMobilePanel(null)}
+          />
+        ) : null}
 
-      <aside className="imaginai-character-dock" aria-label="Personagem">
-        <section className="w-full max-w-[22rem] rounded-2xl border border-violet-400/20 bg-surface/95 p-3 shadow-prompt backdrop-blur">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">Personagem · D&amp;D 5e</p>
-          <h2 className="truncate text-sm font-semibold text-ink">Nome do personagem</h2>
-          <p className="mt-0.5 truncate text-xs text-muted">Classe · Nível</p>
-          <div className="mt-3 space-y-2">
-            <div className="flex items-center justify-between rounded-xl border border-border bg-surface2/65 px-3 py-2">
-              <span className="flex items-center gap-1.5 text-xs font-medium text-ink-soft"><Heart size={14} className="text-rose-400" /> HP</span>
-              <span className="font-mono text-xs text-ink">— / —</span>
+        <button
+          type="button"
+          aria-label="Abrir Worldinfo"
+          aria-expanded={mobilePanel === "world"}
+          onClick={() => setMobilePanel((current) => current === "world" ? null : "world")}
+          className="imaginai-edge-tab imaginai-edge-tab-left"
+        >
+          <BookOpen size={17} />
+          <ChevronRight size={14} />
+        </button>
+        <button
+          type="button"
+          aria-label="Abrir personagem"
+          aria-expanded={mobilePanel === "character"}
+          onClick={() => setMobilePanel((current) => current === "character" ? null : "character")}
+          className="imaginai-edge-tab imaginai-edge-tab-right"
+        >
+          <ChevronLeft size={14} />
+          <Users size={17} />
+        </button>
+
+        <aside className="imaginai-world-dock" data-mobile-open={mobilePanel === "world"} aria-label="Worldinfo">
+          <section className="imaginai-dock-card">
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">Worldinfo</p>
+              <button
+                type="button"
+                onClick={openCampaignConfig}
+                disabled={!snapshot || loading}
+                title="Configurar campanha"
+                aria-label="Configurar campanha"
+                className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Settings size={15} />
+              </button>
             </div>
-            <div className="flex items-center justify-between rounded-xl border border-border bg-surface2/65 px-3 py-2">
-              <span className="flex items-center gap-1.5 text-xs font-medium text-ink-soft"><Shield size={14} className="text-sky-300" /> CA</span>
-              <span className="font-mono text-xs text-ink">—</span>
-            </div>
-          </div>
-          <div className="mt-3 grid grid-cols-3 gap-1.5" role="group" aria-label="Navegação do personagem">
-            {DND_CHARACTER_SECTIONS.map((section) => {
-              const Icon = section.icon;
-              const selected = characterSection === section.id;
-              return (
-                <button
-                  key={section.id}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => setCharacterSection(section.id)}
-                  className={`flex min-w-0 flex-col items-center gap-1 rounded-xl px-1 py-2 text-[11px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/80 ${
-                    selected ? "bg-violet-500/25 text-violet-100" : "text-ink-soft hover:bg-hover hover:text-ink"
-                  }`}
-                >
-                  <Icon size={16} />
-                  <span className="truncate">{section.label}</span>
+            {worldSection ? (
+              <div className="imaginai-feature">
+                <button type="button" onClick={() => setWorldSection(null)} className="imaginai-feature-back">
+                  <ChevronLeft size={15} /> Voltar
                 </button>
-              );
-            })}
+                {worldSection === "journal" && snapshot ? <ImaginaiJournalPanel campaignId={snapshot.campaign.id} /> : null}
+                {worldSection === "codex" && snapshot ? <ImaginaiCodexPanel campaignId={snapshot.campaign.id} /> : null}
+                {worldSection === "map" ? <ImaginaiEmptyFeature icon={MapIcon} title="Mapa" text="O mapa da campanha será construído a partir dos locais descobertos." /> : null}
+              </div>
+            ) : (
+              <>
+                <h2 className="truncate text-sm font-semibold text-ink" title={campaignName}>{campaignName}</h2>
+                {status ? (
+                  <p className={`mt-0.5 truncate text-[11px] ${error ? "text-rose-400" : "text-muted"}`} title={error ?? status}>
+                    {status}
+                  </p>
+                ) : null}
+                <div className="mt-2 grid grid-cols-3 gap-1" role="group" aria-label="Navegação da campanha">
+                  {DND_WORLD_SECTIONS.map((section) => {
+                    const Icon = section.icon;
+                    return (
+                      <button
+                        key={section.id}
+                        type="button"
+                        onClick={() => setWorldSection(section.id)}
+                        className="imaginai-dock-action"
+                      >
+                        <Icon size={15} />
+                        <span className="truncate">{section.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </section>
+        </aside>
+
+        <aside className="imaginai-character-dock" data-mobile-open={mobilePanel === "character"} aria-label="Personagem">
+          <section className="imaginai-dock-card">
+            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">Personagem</p>
+            {characterSection ? (
+              <div className="imaginai-feature">
+                <button type="button" onClick={() => setCharacterSection(null)} className="imaginai-feature-back">
+                  <ChevronLeft size={15} /> Voltar
+                </button>
+                {characterSection === "inventory" && snapshot ? (
+                  <ImaginaiInventoryPanel campaignId={snapshot.campaign.id} system={system} />
+                ) : null}
+                {characterSection === "sheet" ? (
+                  <ImaginaiSheetPanel character={snapshot?.character ?? null} system={system} error={systemError} />
+                ) : null}
+                {characterSection === "spells" ? <ImaginaiEmptyFeature icon={Sparkles} title="Magias" text="As magias conhecidas, preparadas e seus recursos aparecerão aqui." /> : null}
+              </div>
+            ) : (
+              <>
+                <h2 className="truncate text-sm font-semibold text-ink" title={characterName}>{characterName}</h2>
+                <p className="mt-0.5 truncate text-[11px] text-muted">{className} · Nível {level}</p>
+                <div className="mt-2 grid grid-cols-2 gap-1.5">
+                  <div className="flex items-center justify-between rounded-lg border border-border bg-surface2/65 px-2.5 py-1.5">
+                    <span className="flex items-center gap-1.5 text-[11px] font-medium text-ink-soft"><Heart size={13} className="text-rose-400" /> HP</span>
+                    <span className="font-mono text-[11px] text-ink">{hpCurrent ?? "—"}/{hpMax ?? "—"}</span>
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-border bg-surface2/65 px-2.5 py-1.5">
+                    <span className="flex items-center gap-1.5 text-[11px] font-medium text-ink-soft"><Shield size={13} className="text-sky-300" /> CA</span>
+                    <span className="font-mono text-[11px] text-ink">{armorClass ?? "—"}</span>
+                  </div>
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-1" role="group" aria-label="Navegação do personagem">
+                  {DND_CHARACTER_SECTIONS.map((section) => {
+                    const Icon = section.icon;
+                    return (
+                      <button
+                        key={section.id}
+                        type="button"
+                        onClick={() => setCharacterSection(section.id)}
+                        className="imaginai-dock-action"
+                      >
+                        <Icon size={15} />
+                        <span className="truncate">{section.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </section>
+        </aside>
+      </div>
+
+      {configOpen && snapshot ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm" onMouseDown={() => setConfigOpen(false)}>
+          <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="imaginai-campaign-settings-title"
+            onSubmit={saveCampaignConfig}
+            onMouseDown={(event) => event.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl border border-border bg-surface p-4 shadow-menu"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">Imaginai</p>
+                <h2 id="imaginai-campaign-settings-title" className="mt-0.5 text-base font-semibold text-ink">Configurar campanha</h2>
+              </div>
+              <button type="button" onClick={() => setConfigOpen(false)} aria-label="Fechar configurações" className="flex h-10 w-10 items-center justify-center rounded-xl text-muted transition-colors hover:bg-hover hover:text-ink">
+                <X size={17} />
+              </button>
+            </div>
+            <label className="mt-4 block text-xs font-medium text-ink-soft">
+              Nome da campanha
+              <input
+                autoFocus
+                value={campaignNameDraft}
+                onChange={(event) => setCampaignNameDraft(event.target.value)}
+                maxLength={255}
+                required
+                className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-ink outline-none transition-colors focus:border-violet-400/70"
+              />
+            </label>
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <label className="block text-xs font-medium text-ink-soft">
+                Narração
+                <select value={narrationDraft} onChange={(event) => setNarrationDraft(event.target.value as typeof narrationDraft)} className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-ink outline-none focus:border-violet-400/70">
+                  <option value="balanced">Equilibrada</option>
+                  <option value="cinematic">Cinematográfica</option>
+                  <option value="gritty">Realista</option>
+                </select>
+              </label>
+              <label className="block text-xs font-medium text-ink-soft">
+                Dificuldade
+                <select value={difficultyDraft} onChange={(event) => setDifficultyDraft(event.target.value as typeof difficultyDraft)} className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-ink outline-none focus:border-violet-400/70">
+                  <option value="story">Narrativa</option>
+                  <option value="balanced">Equilibrada</option>
+                  <option value="challenging">Desafiadora</option>
+                </select>
+              </label>
+            </div>
+            {configError ? <p className="mt-3 text-xs text-rose-400">{configError}</p> : null}
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setConfigOpen(false)} className="min-h-11 cursor-pointer rounded-xl px-3 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">Cancelar</button>
+              <button type="submit" disabled={savingConfig || !campaignNameDraft.trim()} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-xl bg-violet-500 px-4 text-sm font-medium text-white transition-colors hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50">
+                {savingConfig ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                Salvar
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function ImaginaiEmptyFeature({
+  icon: Icon,
+  title,
+  text,
+}: {
+  icon: LucideIcon;
+  title: string;
+  text: string;
+}) {
+  return (
+    <div className="imaginai-feature-scroll flex min-h-52 flex-col items-center justify-center px-4 text-center">
+      <span className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl border border-violet-400/20 bg-violet-500/10 text-violet-300">
+        <Icon size={20} />
+      </span>
+      <h3 className="text-sm font-semibold text-ink">{title}</h3>
+      <p className="mt-1 max-w-52 text-xs leading-5 text-muted">{text}</p>
+    </div>
+  );
+}
+
+function ImaginaiFeatureStatus({ children, error = false }: { children: React.ReactNode; error?: boolean }) {
+  return (
+    <div className={`flex min-h-36 items-center justify-center px-4 text-center text-xs leading-5 ${error ? "text-rose-400" : "text-muted"}`}>
+      {children}
+    </div>
+  );
+}
+
+function ImaginaiJournalPanel({ campaignId }: { campaignId: string }) {
+  const [entries, setEntries] = useState<ImaginaiJournalEntry[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState("");
+  const [content, setContent] = useState("");
+  const [tags, setTags] = useState("");
+  const [pinned, setPinned] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const selected = entries.find((entry) => entry.id === selectedId) ?? null;
+
+  const loadEntries = useCallback(async (query = "") => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await api.get<{ entries: ImaginaiJournalEntry[] }>(
+        `/mini-apps/imaginai/campaigns/${campaignId}/journal?search=${encodeURIComponent(query)}`,
+      );
+      setEntries(result.entries);
+      setSelectedId((current) => current && result.entries.some((entry) => entry.id === current) ? current : null);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Não foi possível abrir o diário");
+    } finally {
+      setLoading(false);
+    }
+  }, [campaignId]);
+
+  useEffect(() => { void loadEntries(); }, [loadEntries]);
+
+  function beginNew() {
+    setSelectedId(null);
+    setTitle("");
+    setContent("");
+    setTags("");
+    setPinned(false);
+    setEditing(true);
+    setError(null);
+  }
+
+  function beginEdit(entry: ImaginaiJournalEntry) {
+    setSelectedId(entry.id);
+    setTitle(entry.title);
+    setContent(entry.content);
+    setTags(entry.tags.join(", "));
+    setPinned(entry.pinned);
+    setEditing(true);
+    setError(null);
+  }
+
+  async function saveEntry(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!title.trim()) return;
+    setSaving(true);
+    setError(null);
+    const body = {
+      title: title.trim(),
+      content,
+      tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean),
+      pinned,
+    };
+    try {
+      const saved = selectedId
+        ? await api.patch<ImaginaiJournalEntry>(`/mini-apps/imaginai/campaigns/${campaignId}/journal/${selectedId}`, body)
+        : await api.post<ImaginaiJournalEntry>(`/mini-apps/imaginai/campaigns/${campaignId}/journal`, body);
+      await loadEntries(search);
+      setSelectedId(saved.id);
+      setEditing(false);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Não foi possível salvar a anotação");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteEntry(entryId: string) {
+    if (deletingId !== entryId) {
+      setDeletingId(entryId);
+      return;
+    }
+    setError(null);
+    try {
+      await api.del<void>(`/mini-apps/imaginai/campaigns/${campaignId}/journal/${entryId}`);
+      setDeletingId(null);
+      setSelectedId(null);
+      setEditing(false);
+      await loadEntries(search);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Não foi possível apagar a anotação");
+    }
+  }
+
+  if (editing) {
+    return (
+      <form onSubmit={saveEntry} className="imaginai-feature-scroll space-y-2" aria-label={selectedId ? "Editar anotação" : "Nova anotação"}>
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-ink">{selectedId ? "Editar anotação" : "Nova anotação"}</h3>
+          <button type="button" onClick={() => setEditing(false)} className="imaginai-small-button">Cancelar</button>
+        </div>
+        <input aria-label="Título da anotação" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Título" maxLength={180} required className="imaginai-field" />
+        <textarea aria-label="Conteúdo da anotação" value={content} onChange={(event) => setContent(event.target.value)} placeholder="Escreva suas anotações…" rows={9} className="imaginai-field resize-y leading-5" />
+        <input aria-label="Tags da anotação" value={tags} onChange={(event) => setTags(event.target.value)} placeholder="Tags separadas por vírgula" className="imaginai-field" />
+        <label className="flex min-h-11 cursor-pointer items-center gap-2 rounded-lg px-1 text-xs text-ink-soft">
+          <input type="checkbox" checked={pinned} onChange={(event) => setPinned(event.target.checked)} className="accent-violet-500" />
+          Fixar no topo
+        </label>
+        {error ? <p className="text-xs text-rose-400">{error}</p> : null}
+        <button type="submit" disabled={saving || !title.trim()} className="imaginai-primary-button w-full">
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Salvar anotação
+        </button>
+      </form>
+    );
+  }
+
+  if (selected) {
+    return (
+      <div className="imaginai-feature-scroll">
+        <div className="flex items-start justify-between gap-2">
+          <button type="button" onClick={() => { setSelectedId(null); setDeletingId(null); }} className="imaginai-small-button"><ChevronLeft size={14} /> Lista</button>
+          <div className="flex gap-1">
+            <button type="button" onClick={() => beginEdit(selected)} className="imaginai-icon-button" title="Editar anotação" aria-label="Editar anotação"><Pencil size={14} /></button>
+            <button type="button" onClick={() => void deleteEntry(selected.id)} onBlur={() => setDeletingId(null)} className={`imaginai-icon-button ${deletingId === selected.id ? "text-rose-300" : ""}`} title={deletingId === selected.id ? "Clique novamente para apagar" : "Apagar anotação"} aria-label={deletingId === selected.id ? "Confirmar exclusão" : "Apagar anotação"}><Trash2 size={14} /></button>
           </div>
-        </section>
-      </aside>
+        </div>
+        {deletingId === selected.id ? (
+          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void deleteEntry(selected.id)} className="mt-2 flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-rose-400/30 bg-rose-500/10 px-2 text-xs font-medium text-rose-300">
+            <Trash2 size={14} /> Confirmar exclusão
+          </button>
+        ) : null}
+        <div className="mt-3 flex items-center gap-2">
+          {selected.pinned ? <Pin size={13} className="shrink-0 text-violet-300" /> : null}
+          <h3 className="min-w-0 text-sm font-semibold text-ink">{selected.title}</h3>
+        </div>
+        <p className="mt-1 text-[10px] text-muted">Atualizada em {new Date(selected.updated_at).toLocaleDateString("pt-BR")}</p>
+        <p className="mt-3 whitespace-pre-wrap break-words text-xs leading-5 text-ink-soft">{selected.content || "Sem conteúdo."}</p>
+        {selected.tags.length ? <div className="mt-3 flex flex-wrap gap-1">{selected.tags.map((tag) => <span key={tag} className="rounded-full bg-violet-500/10 px-2 py-1 text-[10px] text-violet-200">{tag}</span>)}</div> : null}
+        {error ? <p className="mt-3 text-xs text-rose-400">{error}</p> : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="imaginai-feature-scroll">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-ink">Diário</h3>
+        <button type="button" onClick={beginNew} className="imaginai-primary-button"><Plus size={14} /> Nova</button>
+      </div>
+      <form onSubmit={(event) => { event.preventDefault(); void loadEntries(search); }} className="mt-2 flex gap-1.5">
+        <label className="relative min-w-0 flex-1">
+          <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+          <span className="sr-only">Buscar anotações</span>
+          <input aria-label="Buscar anotações" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar anotações" className="imaginai-field pl-8" />
+        </label>
+        <button type="submit" className="imaginai-icon-button" aria-label="Buscar"><Search size={14} /></button>
+      </form>
+      {loading ? <ImaginaiFeatureStatus><Loader2 size={17} className="animate-spin" /></ImaginaiFeatureStatus> : error ? <ImaginaiFeatureStatus error>{error}</ImaginaiFeatureStatus> : entries.length === 0 ? <ImaginaiFeatureStatus>Seu diário está vazio. Crie uma anotação para registrar pistas, planos ou acontecimentos.</ImaginaiFeatureStatus> : (
+        <div className="mt-2 space-y-1">
+          {entries.map((entry) => (
+            <button key={entry.id} type="button" onClick={() => setSelectedId(entry.id)} className="w-full rounded-xl border border-border bg-surface2/55 p-2.5 text-left transition-colors hover:border-violet-400/30 hover:bg-hover">
+              <span className="flex items-center gap-1.5 text-xs font-medium text-ink">{entry.pinned ? <Pin size={12} className="shrink-0 text-violet-300" /> : null}<span className="truncate">{entry.title}</span></span>
+              <span className="mt-1 block truncate text-[10px] text-muted">{entry.content || "Sem conteúdo"}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function codexDescription(value: ImaginaiCodexResult["description"]): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  return Object.entries(value).map(([key, item]) => `${key.replaceAll("_", " ")}: ${String(item)}`).join(" · ");
+}
+
+function ImaginaiCodexPanel({ campaignId }: { campaignId: string }) {
+  const [query, setQuery] = useState("");
+  const [kind, setKind] = useState("all");
+  const [results, setResults] = useState<ImaginaiCodexResult[]>([]);
+  const [selected, setSelected] = useState<ImaginaiCodexResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const searchCodex = useCallback(async (search = query, resultKind = kind) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await api.get<{ results: ImaginaiCodexResult[] }>(`/mini-apps/imaginai/campaigns/${campaignId}/codex?search=${encodeURIComponent(search)}&kind=${encodeURIComponent(resultKind)}`);
+      setResults(response.results);
+      setSelected(null);
+    } catch (searchError) {
+      setError(searchError instanceof Error ? searchError.message : "Não foi possível consultar o Codex");
+    } finally {
+      setLoading(false);
+    }
+  }, [campaignId, kind, query]);
+
+  useEffect(() => { void searchCodex("", "all"); }, [campaignId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (selected) {
+    const hidden = selected.knowledge === "aware";
+    return (
+      <div className="imaginai-feature-scroll">
+        <button type="button" onClick={() => setSelected(null)} className="imaginai-small-button"><ChevronLeft size={14} /> Resultados</button>
+        <div className="mt-3 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-[10px] uppercase tracking-wider text-violet-300">{selected.kind}</p>
+            <h3 className="mt-0.5 text-sm font-semibold text-ink">{selected.name}</h3>
+          </div>
+          {selected.knowledge === "rumor" ? <span className="rounded-full bg-amber-400/10 px-2 py-1 text-[9px] text-amber-300">Rumor</span> : null}
+        </div>
+        {selected.subject ? <p className="mt-1 text-[10px] text-muted">Sobre {selected.subject}</p> : null}
+        {hidden ? (
+          <div className="mt-4 rounded-xl border border-dashed border-border bg-surface2/35 p-3">
+            <div className="flex items-center gap-2 text-xs text-muted"><LockKeyhole size={14} /> Informação ainda não descoberta</div>
+            <div className="imaginai-redaction mt-3 w-full" /><div className="imaginai-redaction mt-2 w-4/5" /><div className="imaginai-redaction mt-2 w-2/3" />
+          </div>
+        ) : (
+          <p className="mt-4 whitespace-pre-wrap break-words text-xs leading-5 text-ink-soft">{codexDescription(selected.description) || "Nenhum detalhe registrado."}</p>
+        )}
+        {selected.confidence != null ? <p className="mt-3 text-[10px] text-muted">Confiança da fonte: {Math.round(selected.confidence * 100)}%</p> : null}
+      </div>
+    );
+  }
+
+  const categories = [{ key: "all", label: "Tudo" }, { key: "npc", label: "NPCs" }, { key: "location", label: "Locais" }, { key: "item", label: "Itens" }, { key: "lore", label: "Lore" }];
+  return (
+    <div className="imaginai-feature-scroll">
+      <h3 className="text-sm font-semibold text-ink">Codex</h3>
+      <p className="mt-0.5 text-[10px] leading-4 text-muted">Somente conhecimento descoberto pelo personagem.</p>
+      <form onSubmit={(event) => { event.preventDefault(); void searchCodex(); }} className="mt-2 flex gap-1.5">
+        <label className="relative min-w-0 flex-1">
+          <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+          <span className="sr-only">Buscar no Codex</span>
+          <input aria-label="Buscar no Codex" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar no mundo" className="imaginai-field pl-8" />
+        </label>
+        <button type="submit" className="imaginai-icon-button" aria-label="Buscar no Codex"><Search size={14} /></button>
+      </form>
+      <div className="mt-2 flex gap-1 overflow-x-auto pb-1" aria-label="Categorias do Codex">
+        {categories.map((category) => <button key={category.key} type="button" onClick={() => { setKind(category.key); void searchCodex(query, category.key); }} className={`min-h-11 shrink-0 rounded-lg px-2 text-[10px] transition-colors ${kind === category.key ? "bg-violet-500/20 text-violet-100" : "text-muted hover:bg-hover hover:text-ink"}`}>{category.label}</button>)}
+      </div>
+      {loading ? <ImaginaiFeatureStatus><Loader2 size={17} className="animate-spin" /></ImaginaiFeatureStatus> : error ? <ImaginaiFeatureStatus error>{error}</ImaginaiFeatureStatus> : results.length === 0 ? <ImaginaiFeatureStatus>Nada conhecido corresponde à busca. Segredos do mundo não aparecem antes de serem descobertos.</ImaginaiFeatureStatus> : (
+        <div className="space-y-1">
+          {results.map((result) => <button key={`${result.result_type}-${result.id}`} type="button" onClick={() => setSelected(result)} className="flex w-full items-center gap-2 rounded-xl border border-border bg-surface2/55 p-2.5 text-left transition-colors hover:border-violet-400/30 hover:bg-hover">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300">{result.knowledge === "aware" ? <LockKeyhole size={14} /> : result.kind === "item" ? <Package size={14} /> : result.kind === "location" ? <MapIcon size={14} /> : <BookOpen size={14} />}</span>
+            <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-ink">{result.name}</span><span className="block truncate text-[10px] capitalize text-muted">{result.knowledge === "aware" ? "Detalhes ocultos" : result.kind}</span></span>
+            <ChevronRight size={14} className="shrink-0 text-muted" />
+          </button>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ImaginaiInventoryPanel({ campaignId, system }: { campaignId: string; system: ImaginaiSystemDefinition | null }) {
+  const [inventory, setInventory] = useState<ImaginaiInventory | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    api.get<ImaginaiInventory>(`/mini-apps/imaginai/campaigns/${campaignId}/inventory`)
+      .then((value) => { if (!cancelled) setInventory(value); })
+      .catch((loadError: unknown) => { if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Não foi possível abrir o inventário"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [campaignId]);
+  if (loading) return <ImaginaiFeatureStatus><Loader2 size={17} className="animate-spin" /></ImaginaiFeatureStatus>;
+  if (error || !inventory) return <ImaginaiFeatureStatus error>{error ?? "Inventário indisponível"}</ImaginaiFeatureStatus>;
+  const currencies = system?.inventory.currencies ?? Object.keys(inventory.currencies).map((key) => ({ key, label: key.toUpperCase(), name: key, weight: 0 }));
+  return (
+    <div className="imaginai-feature-scroll">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-ink">Inventário</h3>
+        {inventory.weight?.enabled ? <span title={inventory.weight.currency_enabled ? `${inventory.weight.currencies.toLocaleString("pt-BR")} ${inventory.weight.unit} em moedas` : "Moedas sem peso neste sistema"} className="text-[10px] text-muted">{inventory.weight.total.toLocaleString("pt-BR")} {inventory.weight.unit}</span> : null}
+      </div>
+      <div className="mt-2 grid grid-cols-5 gap-1" aria-label="Moedas">
+        {currencies.map((currency) => <div key={currency.key} title={`${currency.name}${inventory.weight?.currency_enabled ? ` · ${currency.weight} ${inventory.weight.unit} cada` : ""}`} className="rounded-lg border border-border bg-surface2/55 px-1 py-1.5 text-center"><span className="block text-[9px] font-semibold text-amber-300">{currency.label}</span><span className="mt-0.5 block font-mono text-[10px] text-ink">{inventory.currencies[currency.key] ?? 0}</span></div>)}
+      </div>
+      {inventory.items.length === 0 ? <ImaginaiFeatureStatus>Nenhum item carregado. O inventário reflete apenas itens que pertencem ao personagem.</ImaginaiFeatureStatus> : <div className="mt-2 space-y-1">
+        {inventory.items.map((item) => <article key={item.id} className="rounded-xl border border-border bg-surface2/55 p-2.5">
+          <div className="flex items-start justify-between gap-2"><div className="min-w-0"><h4 className="truncate text-xs font-medium text-ink">{item.name}</h4><p className="mt-0.5 truncate text-[10px] text-muted">{item.equipped ? `Equipado${item.slot ? ` · ${item.slot.replaceAll("_", " ")}` : ""}` : item.container ? `Em ${item.container}` : "Carregado"}</p></div><span className="shrink-0 font-mono text-[10px] text-ink-soft">×{item.quantity}</span></div>
+          {(item.description || (system?.inventory.weight.supported && item.weight > 0)) ? <div className="mt-2 flex items-end justify-between gap-2"><p className="line-clamp-2 text-[10px] leading-4 text-muted">{item.description}</p>{system?.inventory.weight.supported && item.weight > 0 ? <span className="shrink-0 text-[9px] text-muted">{item.weight} {system.inventory.weight.unit}</span> : null}</div> : null}
+        </article>)}
+      </div>}
+    </div>
+  );
+}
+
+function numericState(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function abilityScore(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (value && typeof value === "object") {
+    return numericState((value as Record<string, unknown>).score, 10);
+  }
+  return 10;
+}
+
+function signed(value: number): string {
+  return value >= 0 ? `+${value}` : String(value);
+}
+
+function ImaginaiSheetPanel({ character, system, error }: { character: ImaginaiEntity | null; system: ImaginaiSystemDefinition | null; error: string | null }) {
+  if (error) return <ImaginaiFeatureStatus error>{error}</ImaginaiFeatureStatus>;
+  if (!character || !system) return <ImaginaiFeatureStatus><Loader2 size={17} className="animate-spin" /></ImaginaiFeatureStatus>;
+  const dnd = (character.state.dnd5e ?? character.state) as Record<string, unknown>;
+  const attributes = (dnd.attributes ?? {}) as Record<string, unknown>;
+  const skills = (dnd.skills ?? {}) as Record<string, unknown>;
+  const saves = (dnd.saving_throws ?? {}) as Record<string, unknown>;
+  const proficiency = numericState(dnd.proficiency_bonus, 2);
+  return (
+    <div className="imaginai-feature-scroll">
+      <h3 className="text-sm font-semibold text-ink">Ficha</h3>
+      <div className="mt-2 grid grid-cols-3 gap-1">
+        {system.sheet.summary.map((field) => <div key={field.key} className="rounded-lg border border-border bg-surface2/55 px-1.5 py-1.5 text-center"><span className="block truncate text-[8px] uppercase tracking-wide text-muted">{field.label}</span><span className="mt-0.5 block font-mono text-[11px] text-ink">{numericState(dnd[field.key], field.key === "speed" ? 30 : field.key === "proficiency_bonus" ? 2 : 0)}</span></div>)}
+      </div>
+      <div className="mt-2 space-y-1.5">
+        {system.sheet.attributes.map((attribute) => {
+          const attributeState = attributes[attribute.key];
+          const score = abilityScore(attributeState);
+          const modifier = Math.floor((score - 10) / 2);
+          const saveState = saves[attribute.key] ?? (
+            attributeState && typeof attributeState === "object"
+              ? (attributeState as Record<string, unknown>).save_proficient
+              : undefined
+          );
+          const saveProficient = saveState === true || (typeof saveState === "object" && saveState !== null && Boolean((saveState as Record<string, unknown>).proficient));
+          return <section key={attribute.key} className="imaginai-ability-row">
+            <div className="imaginai-ability-score" title={attribute.label}><span>{attribute.short}</span><strong>{score}</strong><em>{signed(modifier)}</em></div>
+            <div className="min-w-0 flex-1 py-1.5 pr-2">
+              <div className="flex items-center justify-between gap-2 border-b border-border/70 pb-1"><span className="truncate text-[10px] font-medium text-ink-soft">Salvaguarda</span><span className="flex items-center gap-1 font-mono text-[10px] text-ink"><i className={`h-1.5 w-1.5 rounded-full ${saveProficient ? "bg-violet-300" : "border border-muted"}`} />{signed(modifier + (saveProficient ? proficiency : 0))}</span></div>
+              <div className="mt-1 space-y-0.5">{attribute.skills.length ? attribute.skills.map((skillKey) => {
+                const skillState = skills[skillKey];
+                const explicit = typeof skillState === "number" ? skillState : typeof skillState === "object" && skillState !== null ? (skillState as Record<string, unknown>).value : undefined;
+                const rank = skillState === true ? 1 : typeof skillState === "object" && skillState !== null ? numericState((skillState as Record<string, unknown>).proficiency, Boolean((skillState as Record<string, unknown>).proficient) ? 1 : 0) : 0;
+                const value = typeof explicit === "number" ? explicit : modifier + proficiency * Math.min(2, rank);
+                return <div key={skillKey} className="flex items-center justify-between gap-2 text-[9px]"><span className="truncate text-muted">{system.sheet.skills[skillKey] ?? skillKey}</span><span className="flex items-center gap-1 font-mono text-ink-soft"><i className={`h-1.5 w-1.5 rounded-full ${rank >= 2 ? "ring-1 ring-violet-300 bg-violet-300" : rank === 1 ? "bg-violet-300" : "border border-muted"}`} />{signed(value)}</span></div>;
+              }) : <span className="text-[9px] text-muted">Sem perícias associadas</span>}</div>
+            </div>
+          </section>;
+        })}
+      </div>
+      <p className="mt-2 text-[9px] leading-4 text-muted">Ponto cheio: proficiente · aro: especialização. Os valores vêm do estado autoritativo da campanha.</p>
     </div>
   );
 }

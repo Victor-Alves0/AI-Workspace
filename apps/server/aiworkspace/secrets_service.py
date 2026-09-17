@@ -22,6 +22,8 @@ ALPHAVANTAGE_KEY = "alphavantage_api_key"
 # Provedor de geração de imagens compatível com OpenAI (DALL-E, SD local). O modelo
 # de imagem via OpenRouter usa a própria chave do OpenRouter — esta é só p/ o provedor externo.
 IMAGEGEN_KEY = "imagegen_api_key"
+# Civitai: Site API (catálogo) + Orchestration API (geração paga em Buzz).
+CIVITAI_KEY = "civitai_api_key"
 # Config da wake word (JSON cifrado): {picovoice_key, ppn_url, vosk_model_url}.
 # A AccessKey do Picovoice é chave de cliente (vai ao navegador), mas fica cifrada
 # em repouso — sai do profile (texto claro) e não vaza no dump de backup.

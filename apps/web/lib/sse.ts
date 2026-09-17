@@ -114,6 +114,7 @@ export async function streamMessage(
   agentModelConfigId?: string | null,
   refDocIds?: string[],
   refChatIds?: string[],
+  miniApp?: "imaginai" | null,
 ): Promise<void> {
   const t0 = performance.now();
   const res = await authedFetch(`/chats/${chatId}/messages`, {
@@ -125,6 +126,7 @@ export async function streamMessage(
       ...(agentModelConfigId ? { agent_model_config_id: agentModelConfigId } : {}),
       ...(refDocIds && refDocIds.length ? { ref_doc_ids: refDocIds } : {}),
       ...(refChatIds && refChatIds.length ? { ref_chat_ids: refChatIds } : {}),
+      ...(miniApp ? { mini_app: miniApp } : {}),
     }),
     signal,
   });

@@ -973,6 +973,26 @@ function ToolEventRow({ event, running = false }: { event: ToolEvent; running?: 
   }, [open]);
   if (event.kind === "guard") return <GuardEventRow event={event} />;
   const isCall = event.kind === "call";
+  const toolLabel = (() => {
+    if (event.name !== "imaginai_world") return event.name;
+    const data = (event.data ?? {}) as Record<string, unknown>;
+    const action = typeof data.action === "string" ? data.action : "";
+    const kind = typeof data.kind === "string" ? data.kind : "";
+    const operation = action || ({
+      imaginai_context: "context",
+      private_context: "roleplay",
+      imaginai_resolution: "resolve",
+      imaginai_roll: "roll",
+      imaginai_adjudication: "adjudicate",
+    } as Record<string, string>)[kind];
+    return ({
+      context: "Mundo · contexto",
+      roleplay: "Mundo · personagem",
+      resolve: "Mundo · validar ação",
+      roll: "Mundo · rolagem",
+      adjudicate: "Mundo · consequência",
+    } as Record<string, string>)[operation] ?? "Mundo · ação";
+  })();
   return (
     <div className={`overflow-hidden rounded-lg border bg-bg text-xs ${running ? "border-accent/40" : "border-border/70"}`}>
       <button
@@ -986,7 +1006,7 @@ function ToolEventRow({ event, running = false }: { event: ToolEvent; running?: 
         ) : (
           <Check size={12} className="shrink-0 text-green-400" />
         )}
-        <span className="font-mono">{running ? "executando" : isCall ? "chamada" : "resultado"} · {event.name}</span>
+        <span className="font-mono">{running ? "executando" : isCall ? "chamada" : "resultado"} · {toolLabel}</span>
         {!!event.tokens && (
           <span
             title={`Este bloco ocupou ~${event.tokens.toLocaleString("pt-BR")} tokens do contexto (${(event.chars ?? 0).toLocaleString("pt-BR")} caracteres)`}

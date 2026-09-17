@@ -44,6 +44,7 @@ from .folders_routes import router as folders_router
 from .finance_routes import router as finance_router
 from .integration_routes import router as integration_router
 from .image_routes import router as image_router
+from .imaginai_routes import router as imaginai_router
 from .models_routes import router as models_router
 from .observability import install_logging, metrics
 from .observability_routes import router as observability_router
@@ -421,6 +422,7 @@ def create_app() -> FastAPI:
     app.include_router(integration_router)
     app.include_router(whatsapp_router)
     app.include_router(image_router)
+    app.include_router(imaginai_router)
     app.include_router(automation_router)
     app.include_router(debug_router)
     app.include_router(admin_router)

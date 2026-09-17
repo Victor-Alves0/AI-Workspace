@@ -1187,3 +1187,16 @@ async def _ordered_messages(db: AsyncSession, chat_id: uuid.UUID) -> list[Messag
         select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at)
     )
     return list(rows)
+
+
+async def _imaginai_turn_kwargs(
+    db: AsyncSession,
+    user: User,
+    chat: Chat,
+    turn_key: str,
+) -> dict[str, Any]:
+    """Ativa o World Kernel somente em chats que já possuem campanha ativa."""
+    from ..imaginai.turns import prepare_turn_tools
+
+    tools = await prepare_turn_tools(db, user.id, chat.id, turn_key)
+    return {"native_tools": tools} if tools is not None else {}

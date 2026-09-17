@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -139,6 +139,9 @@ class SendMessageIn(BaseModel):
     # curso (entre iterações do loop); steer=False (padrão) enfileira p/ um turno de
     # continuação após o atual terminar. Sem geração ativa, é um turno normal.
     steer: bool = False
+    # Mini App ativo neste envio. Permite ao servidor materializar o mundo antes
+    # do primeiro turno, eliminando a corrida entre o clique e o POST da mensagem.
+    mini_app: Literal["imaginai"] | None = None
 
 
 class FolderCreate(BaseModel):
