@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1423,11 +1423,28 @@ async def civitai_status(
     from .integrations import civitai_service
 
     connected = await civitai_service.is_configured(db, str(user.id))
-    return {"connected": connected}
+    generation = await civitai_service.get_generation_config(db, str(user.id))
+    return {"connected": connected, "generation": generation}
 
 
 class CivitaiConfigIn(BaseModel):
     api_key: str
+
+
+class CivitaiGenerationConfigIn(BaseModel):
+    """Perfil explícito usado quando a pessoa não escolhe um modelo no chat."""
+
+    model: str = Field(min_length=1, max_length=512)
+    model_name: str = Field(default="", max_length=255)
+    version_name: str = Field(default="", max_length=255)
+    base_model: str = Field(default="", max_length=120)
+    model_id: int | None = Field(default=None, ge=1)
+    version_id: int | None = Field(default=None, ge=1)
+    width: int | None = Field(default=None, ge=64, le=4096)
+    height: int | None = Field(default=None, ge=64, le=4096)
+    steps: int | None = Field(default=None, ge=1, le=100)
+    cfg_scale: float | None = Field(default=None, ge=0.1, le=30)
+    sampler: str = Field(default="", max_length=120)
 
 
 @router.put("/civitai")
@@ -1443,6 +1460,52 @@ async def civitai_set_config(
     await civitai_service.set_token(db, str(user.id), body.api_key)
     sift_service.invalidate(str(user.id))
     return {"ok": True}
+
+
+@router.put("/civitai/generation")
+async def civitai_set_generation_config(
+    body: CivitaiGenerationConfigIn,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    from .integrations import civitai_service
+
+    try:
+        generation = await civitai_service.set_generation_config(
+            db, str(user.id), body.model_dump(exclude_none=True)
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    sift_service.invalidate(str(user.id))
+    return {"ok": True, "generation": generation}
+
+
+@router.get("/civitai/models")
+async def civitai_search_generation_models(
+    query: str = "",
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    """Catálogo pequeno para o seletor do perfil; evita expor URLs e prompts."""
+    from .integrations import civitai_service
+
+    token = await civitai_service.get_token(db, str(user.id)) or ""
+    result = await run_in_threadpool(
+        civitai_service.search_models,
+        token,
+        query.strip()[:120],
+        "Checkpoint",
+        "",
+        "Highest Rated",
+        "AllTime",
+        4,
+        1,
+        False,
+        True,
+    )
+    if result.get("error"):
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, result["error"])
+    return result
 
 
 @router.delete("/civitai")

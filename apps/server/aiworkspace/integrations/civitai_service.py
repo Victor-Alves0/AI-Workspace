@@ -8,6 +8,7 @@ deve baixar e persistir os bytes antes de mostrá-los no chat.
 from __future__ import annotations
 
 import html
+import json
 import re
 import time
 import uuid
@@ -18,7 +19,13 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import UserSecret
-from ..secrets_service import CIVITAI_KEY, get_secret, has_secret, set_secret
+from ..secrets_service import (
+    CIVITAI_GENERATION_CONFIG_KEY,
+    CIVITAI_KEY,
+    get_secret,
+    has_secret,
+    set_secret,
+)
 
 SITE_BASE = "https://civitai.com/api/v1"
 # O endpoint legado ainda responde, mas não acompanha o contrato de geração
@@ -90,10 +97,69 @@ async def set_token(db: AsyncSession, user_id: str, token: str) -> None:
     await set_secret(db, uuid.UUID(user_id), CIVITAI_KEY, token.strip())
 
 
+def _generation_config(value: object) -> dict[str, Any]:
+    """Projeta o perfil salvo para campos seguros e previsíveis.
+
+    O token nunca faz parte desse JSON. Mesmo uma configuração legada/corrompida
+    não pode acabar sendo encaminhada ao modelo ou ao workflow como campos livres.
+    """
+    raw = value if isinstance(value, dict) else {}
+    out: dict[str, Any] = {}
+    for key, limit in (("model", 512), ("model_name", 255), ("version_name", 255), ("base_model", 120), ("sampler", 120)):
+        text = raw.get(key)
+        if isinstance(text, str) and text.strip():
+            out[key] = text.strip()[:limit]
+    for key, lower, upper in (("width", 64, 4096), ("height", 64, 4096), ("steps", 1, 100)):
+        try:
+            number = int(raw.get(key))
+        except (TypeError, ValueError):
+            continue
+        if lower <= number <= upper:
+            out[key] = number
+    try:
+        cfg_scale = float(raw.get("cfg_scale"))
+    except (TypeError, ValueError):
+        cfg_scale = None
+    if cfg_scale is not None and 0.1 <= cfg_scale <= 30:
+        out["cfg_scale"] = cfg_scale
+    for key in ("model_id", "version_id"):
+        try:
+            number = int(raw.get(key))
+        except (TypeError, ValueError):
+            continue
+        if number > 0:
+            out[key] = number
+    return out
+
+
+async def get_generation_config(db: AsyncSession, user_id: str) -> dict[str, Any]:
+    raw = await get_secret(db, uuid.UUID(user_id), CIVITAI_GENERATION_CONFIG_KEY)
+    if not raw:
+        return {}
+    try:
+        return _generation_config(json.loads(raw))
+    except (TypeError, ValueError):
+        return {}
+
+
+async def set_generation_config(db: AsyncSession, user_id: str, config: dict[str, Any]) -> dict[str, Any]:
+    normalized = _generation_config(config)
+    if not normalized.get("model"):
+        raise ValueError("Selecione uma versão de checkpoint antes de salvar o perfil")
+    await set_secret(
+        db,
+        uuid.UUID(user_id),
+        CIVITAI_GENERATION_CONFIG_KEY,
+        json.dumps(normalized, ensure_ascii=False, separators=(",", ":")),
+    )
+    return normalized
+
+
 async def delete_token(db: AsyncSession, user_id: str) -> None:
     await db.execute(
         sa_delete(UserSecret).where(
-            UserSecret.user_id == uuid.UUID(user_id), UserSecret.name == CIVITAI_KEY
+            UserSecret.user_id == uuid.UUID(user_id),
+            UserSecret.name.in_([CIVITAI_KEY, CIVITAI_GENERATION_CONFIG_KEY]),
         )
     )
     await db.commit()
@@ -162,6 +228,45 @@ def _catalog_text(value: Any, limit: int = _CATALOG_TEXT_LIMIT) -> str:
     return " ".join(text.split())[:limit]
 
 
+def _generation_recipe(version: dict[str, Any]) -> dict[str, Any]:
+    """Extrai somente os parâmetros úteis de uma imagem-exemplo da versão.
+
+    Prompts e URLs dos uploads da comunidade não entram aqui. A receita serve
+    para inicializar a UI com medidas/sampler compatíveis, não para repassar texto
+    não confiável ao modelo de chat.
+    """
+    images = version.get("images") if isinstance(version.get("images"), list) else []
+    image = next((item for item in images if isinstance(item, dict)), {})
+    meta = image.get("meta") if isinstance(image.get("meta"), dict) else {}
+    recipe: dict[str, Any] = {}
+
+    def number(keys: tuple[str, ...], lower: float, upper: float, *, integer: bool = True) -> int | float | None:
+        for key in keys:
+            try:
+                value = float(meta.get(key, image.get(key)))
+            except (TypeError, ValueError):
+                continue
+            if lower <= value <= upper:
+                return int(value) if integer else value
+        return None
+
+    for key, names, lower, upper in (
+        ("width", ("width", "Width"), 64, 4096),
+        ("height", ("height", "Height"), 64, 4096),
+        ("steps", ("steps", "Steps"), 1, 100),
+    ):
+        value = number(names, lower, upper)
+        if value is not None:
+            recipe[key] = value
+    cfg_scale = number(("cfgScale", "CFG scale", "cfg_scale"), 0.1, 30, integer=False)
+    if cfg_scale is not None:
+        recipe["cfg_scale"] = cfg_scale
+    sampler = _catalog_text(meta.get("Sampler") or meta.get("sampler"), 120)
+    if sampler:
+        recipe["sampler"] = sampler
+    return recipe
+
+
 def _compact_version(
     version: dict[str, Any], *, include_triggers: bool = False
 ) -> dict[str, Any]:
@@ -172,6 +277,9 @@ def _compact_version(
         "air": version.get("air"),
         "can_generate": version.get("canGenerate", version.get("supportsGeneration")),
     }
+    recipe = _generation_recipe(version)
+    if recipe:
+        out["recipe"] = recipe
     # Gatilhos podem ajudar ao consultar UMA versão específica, mas devolvê-los em
     # toda busca de catálogo multiplica o contexto por dezenas de milhares de tokens.
     if include_triggers:
@@ -393,6 +501,7 @@ def submit_image(
     token: str, prompt: str, *, model: str = "", model_id: int | None = None,
     version_id: int | None = None, width: int = 1024, height: int = 1024,
     quantity: int = 1, negative_prompt: str = "", seed: int | None = None,
+    steps: int | None = None, cfg_scale: float | None = None, sampler: str = "",
     mature: bool = False, whatif: bool = False, wait_seconds: int = 60,
     request_id: str | None = None,
 ) -> dict[str, Any]:
@@ -419,6 +528,12 @@ def submit_image(
         step_input["negativePrompt"] = negative_prompt.strip()[:4000]
     if seed is not None:
         step_input["seed"] = int(seed)
+    if steps is not None:
+        step_input["steps"] = max(1, min(int(steps), 100))
+    if cfg_scale is not None:
+        step_input["cfgScale"] = max(0.1, min(float(cfg_scale), 30.0))
+    if sampler.strip():
+        step_input["sampler"] = sampler.strip()[:120]
     body: dict[str, Any] = {
         "steps": [{"$type": "textToImage", "name": "image_0", "input": step_input}],
         # Sem isto o orquestrador esconde URLs de mídia madura e o chat não

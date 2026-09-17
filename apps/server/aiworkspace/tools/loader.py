@@ -356,9 +356,11 @@ async def _assemble_configs(db: AsyncSession, user_id: uuid.UUID, model_config: 
     # geração fica bloqueada até o usuário conectar a API nas Integrações.
     civitai_cfg = None
     if any(tid == f"{_BUILTIN_PREFIX}civitai.media.use" for tid in tool_ids):
+        from ..integrations import civitai_service
         cv_token = await get_secret(db, user_id, CIVITAI_KEY)
+        cv_generation = await civitai_service.get_generation_config(db, str(user_id))
         civitai_cfg = sift_service.civitai_config_from_secret(
-            cv_token, confirm_actions=confirm_actions,
+            cv_token, cv_generation, confirm_actions=confirm_actions,
         )
     # Remote Terminal: máquinas do usuário com agente instalado, filtradas pelas
     # liberadas neste modelo (tools_cfg.remote.hosts; vazio = todas). Token, certificado

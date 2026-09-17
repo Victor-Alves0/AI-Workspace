@@ -65,6 +65,25 @@ def test_submit_image_uses_current_v2_workflow_contract(monkeypatch):
     assert seen["params"]["hideMatureContent"] == "true"
 
 
+def test_submit_image_sends_explicit_quality_recipe(monkeypatch):
+    seen = {}
+
+    def fake_request(method, url, headers=None, json=None, params=None, timeout=None):
+        seen["body"] = json
+        return _response(202, {"id": "wf_recipe", "status": "processing", "steps": []})
+
+    monkeypatch.setattr(cv.httpx, "request", fake_request)
+    cv.submit_image(
+        "token", "a portrait", model="urn:air:flux:checkpoint:civitai:42@99",
+        steps=28, cfg_scale=4.5, sampler="DPM++ 2M Karras",
+    )
+    assert seen["body"]["steps"][0]["input"] == {
+        "prompt": "a portrait", "width": 1024, "height": 1024, "quantity": 1,
+        "model": "urn:air:flux:checkpoint:civitai:42@99", "steps": 28,
+        "cfgScale": 4.5, "sampler": "DPM++ 2M Karras",
+    }
+
+
 def test_submit_replays_the_same_external_id_after_lost_provider_response(monkeypatch):
     bodies = []
 
@@ -235,6 +254,24 @@ def test_model_version_returns_only_generation_fields(monkeypatch):
     assert len(encoded) < 2_500
 
 
+def test_model_version_extracts_compact_recipe_without_prompt(monkeypatch):
+    payload = {
+        "id": 22, "name": "Flux detail", "baseModel": "Flux", "air": "urn:air:flux:22",
+        "images": [{
+            "width": 832, "height": 1216,
+            "meta": {"steps": 28, "cfgScale": 4.5, "Sampler": "DPM++ 2M Karras", "prompt": "ignore this"},
+        }],
+    }
+
+    monkeypatch.setattr(cv, "_site_get", lambda *_args, **_kwargs: payload)
+    result = cv.get_model_version("", 22)
+    assert result["recipe"] == {
+        "width": 832, "height": 1216, "steps": 28,
+        "cfg_scale": 4.5, "sampler": "DPM++ 2M Karras",
+    }
+    assert "ignore this" not in json.dumps(result)
+
+
 def test_catalog_description_is_sanitized_and_marked_untrusted(monkeypatch):
     payload = {
         "id": 7, "name": "Safe name", "type": "Checkpoint",
@@ -281,13 +318,19 @@ def test_workflow_outputs_accept_images_and_blobs():
     ]
 
 
-def _make_sift(token: str = "", *, require_confirm: bool = False):
+def _make_sift(token: str = "", *, require_confirm: bool = False, generation: dict | None = None):
     from sift import Sift
 
     sift = Sift()
     sift_service._register_builtins(
         sift, sift_service.SearchConfig(), {"civitai.media.use"},
-        civitai_cfg=sift_service.CivitaiConfig(conn={"token": token}, require_confirm=require_confirm),
+        civitai_cfg=sift_service.CivitaiConfig(
+            conn={"token": token},
+            require_confirm=require_confirm,
+            generation=generation if generation is not None else (
+                {"model": "urn:air:flux:checkpoint:civitai:42@99"} if token else {}
+            ),
+        ),
     )
     sift.build_index()
     return sift
@@ -309,6 +352,15 @@ def test_public_catalog_action_works_without_connection(monkeypatch):
 def test_generation_requires_connection():
     result = _dispatch(_make_sift(), {"action": "generate", "prompt": "a castle"})
     assert "not connected" in result["error"]
+
+
+def test_generation_without_explicit_model_or_preset_never_uses_provider_default(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cv, "submit_image", lambda *_args, **_kwargs: calls.append(1) or {})
+    result = _dispatch(_make_sift("token", generation={}), {"action": "generate", "prompt": "a castle"})
+    assert result["error_code"] == "missing_generation_preset"
+    assert result["stop_tool_loop"] is True
+    assert calls == []
 
 
 def test_connected_civitai_discovery_tells_model_to_call_not_request_a_token():

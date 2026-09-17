@@ -24,6 +24,9 @@ ALPHAVANTAGE_KEY = "alphavantage_api_key"
 IMAGEGEN_KEY = "imagegen_api_key"
 # Civitai: Site API (catálogo) + Orchestration API (geração paga em Buzz).
 CIVITAI_KEY = "civitai_api_key"
+# Perfil de geração (sem credencial) para o Civitai. Fica ao lado do token para
+# que cada usuário escolha um checkpoint explícito, em vez do fallback do provedor.
+CIVITAI_GENERATION_CONFIG_KEY = "civitai_generation_config"
 # Config da wake word (JSON cifrado): {picovoice_key, ppn_url, vosk_model_url}.
 # A AccessKey do Picovoice é chave de cliente (vai ao navegador), mas fica cifrada
 # em repouso — sai do profile (texto claro) e não vaza no dump de backup.

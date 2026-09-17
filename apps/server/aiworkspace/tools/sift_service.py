@@ -157,6 +157,7 @@ class CivitaiConfig:
     Orchestration API; buscas públicas funcionam mesmo quando ``conn`` está vazio."""
     conn: dict = field(default_factory=dict)
     require_confirm: bool = False
+    generation: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -3336,6 +3337,15 @@ def _register_builtins(
             "generate/estimate returns a connection error should you tell the user to connect it "
             "in Settings → Integrations → Civitai."
         )
+        civitai_generation = dict(civitai_cfg.generation or {}) if civitai_cfg else {}
+        civitai_preset_instruction = (
+            "A generation preset is configured for this chat. For ordinary generate calls, "
+            "use it directly and do not search the catalog first."
+            if civitai_generation.get("model")
+            else "No generation preset is configured. Do not let Civitai choose a hidden default: "
+            "ask the user to select a checkpoint in Settings → Integrations → Civitai, or use an "
+            "explicit model URL/ID/AIR they provided."
+        )
 
         def _civitai_summary(workflow: dict[str, Any]) -> dict[str, Any]:
             """Resposta enxuta: a resposta completa do workflow pode carregar muita
@@ -3419,7 +3429,7 @@ def _register_builtins(
                 "generate ONCE per user request. To poll a returned job, action=status requires "
                 "workflow_id (never any other id). Never guess engines, workflow templates, or "
                 "advanced API fields; do not probe variants after an error. Search only when the "
-                "user asks to compare/select a model."
+                f"user asks to compare/select a model. {civitai_preset_instruction}"
             ),
             params={
                 "action": "string:n::search_models | model | version | search_images | estimate | generate | status",
@@ -3439,11 +3449,14 @@ def _register_builtins(
                 "supports_generation": "boolean:o:false:search only models usable by the orchestration API",
                 "prompt": "string:o::estimate/generate: image prompt",
                 "model": "string:o::Civitai model URL, model ID, or AIR URN; resolved internally",
-                "width": "number:o:1024:image width",
-                "height": "number:o:1024:image height",
+                "width": "number:o::image width; preset is used when omitted",
+                "height": "number:o::image height; preset is used when omitted",
                 "quantity": "number:o:1:number of images (1-4)",
                 "negative_prompt": "string:o::negative prompt where supported",
                 "seed": "number:o::reproducible seed",
+                "steps": "number:o::sampling steps; preset is used when omitted",
+                "cfg_scale": "number:o::guidance/CFG scale; preset is used when omitted",
+                "sampler": "string:o::sampler; preset is used when omitted",
                 "workflow_id": "string:o::status: id returned by generate",
                 "confirm": "boolean:o:false:set true only after the user confirms a Buzz-spending generation",
             },
@@ -3465,8 +3478,9 @@ def _register_builtins(
             username: str = "", sort: str = "", period: str = "", limit: Any = 10,
             page: Any = 1, cursor: str = "", mature: Any = False, maturity: str = "None",
             supports_generation: Any = False, prompt: str = "", model: str = "",
-            width: Any = 1024, height: Any = 1024,
+            width: Any = None, height: Any = None,
             quantity: Any = 1, negative_prompt: str = "", seed: Any = None,
+            steps: Any = None, cfg_scale: Any = None, sampler: str = "",
             workflow_id: str = "", confirm: Any = False,
         ) -> dict[str, Any]:
             from ..integrations import civitai_service as cv
@@ -3478,6 +3492,19 @@ def _register_builtins(
                     return int(value) if value not in (None, "") else default
                 except (TypeError, ValueError):
                     return default
+
+            def _preset_int(value: Any, key: str, default: int, minimum: int, maximum: int) -> int:
+                raw = value if value not in (None, "") else civitai_generation.get(key)
+                return max(minimum, min(_int(raw, default), maximum))
+
+            def _preset_float(value: Any, key: str) -> float | None:
+                raw = value if value not in (None, "") else civitai_generation.get(key)
+                if raw in (None, ""):
+                    return None
+                try:
+                    return max(0.1, min(float(raw), 30.0))
+                except (TypeError, ValueError):
+                    return None
 
             if act == "search_models":
                 return cv.search_models(
@@ -3508,7 +3535,10 @@ def _register_builtins(
                     return _civitai_normalize_error(workflow)
                 status_ = str(workflow.get("status") or "").lower()
                 if status_ == "succeeded":
-                    return _civitai_finish(workflow, prompt, model)
+                    return _civitai_finish(
+                        workflow, prompt,
+                        model.strip() or str(civitai_generation.get("model") or "").strip(),
+                    )
                 if status_ in {"failed", "expired", "canceled"}:
                     return _civitai_error(
                         f"Civitai workflow {status_}", code="workflow_failed", stop_tool_loop=True,
@@ -3524,6 +3554,15 @@ def _register_builtins(
                     )
                 mature_ok = mature is True or str(mature).strip().lower() in {"true", "1", "yes"}
                 confirmed = confirm is True or str(confirm).strip().lower() in {"true", "1", "yes", "sim", "on"}
+                effective_model = model.strip() or str(civitai_generation.get("model") or "").strip()
+                effective_model_id = _int(model_id, 0) or _int(civitai_generation.get("model_id"), 0) or None
+                effective_version_id = _int(version_id, 0) or _int(civitai_generation.get("version_id"), 0) or None
+                if act == "generate" and not (effective_model or effective_model_id or effective_version_id):
+                    return _civitai_error(
+                        "No Civitai generation preset is selected. Ask the user to choose a checkpoint in "
+                        "Settings → Integrations → Civitai, or use the explicit model they provided.",
+                        code="missing_generation_preset", stop_tool_loop=True,
+                    )
                 if act == "generate" and civitai_cfg and civitai_cfg.require_confirm and not confirmed and not toolctx.background.get():
                     from .interaction import ask_options
                     return ask_options(
@@ -3534,12 +3573,16 @@ def _register_builtins(
                         ],
                         allow_custom=False,
                     )
+                effective_sampler = sampler.strip() or str(civitai_generation.get("sampler") or "").strip()
                 workflow = cv.submit_image(
-                    civitai_token, prompt, model=model,
-                    model_id=_int(model_id, 0) or None, version_id=_int(version_id, 0) or None,
-                    width=_int(width, 1024), height=_int(height, 1024),
+                    civitai_token, prompt, model=effective_model,
+                    model_id=effective_model_id, version_id=effective_version_id,
+                    width=_preset_int(width, "width", 1024, 64, 4096),
+                    height=_preset_int(height, "height", 1024, 64, 4096),
                     quantity=_int(quantity, 1), negative_prompt=negative_prompt,
                     seed=_int(seed, 0) if seed not in (None, "") else None,
+                    steps=_preset_int(steps, "steps", 0, 1, 100) if steps not in (None, "") or civitai_generation.get("steps") else None,
+                    cfg_scale=_preset_float(cfg_scale, "cfg_scale"), sampler=effective_sampler,
                     mature=mature_ok, whatif=act == "estimate", wait_seconds=60,
                 )
                 if workflow.get("error"):
@@ -3548,7 +3591,7 @@ def _register_builtins(
                     return {"estimate": True, **_civitai_summary(workflow)}
                 status_ = str(workflow.get("status") or "").lower()
                 if status_ == "succeeded":
-                    return _civitai_finish(workflow, prompt, model)
+                    return _civitai_finish(workflow, prompt, effective_model)
                 if status_ in {"failed", "expired", "canceled"}:
                     return _civitai_error(
                         f"Civitai workflow {status_}", code="workflow_failed", stop_tool_loop=True,
@@ -4678,7 +4721,14 @@ def _signature(
            if spotify_cfg else ())
     # Nunca deixe o token bruto entrar na assinatura do cache em memória.  Basta
     # saber se existe conexão e se gerações exigem confirmação para invalidar a SIFT.
-    cvc = ((bool(civitai_cfg.conn.get("token")), civitai_cfg.require_confirm) if civitai_cfg else ())
+    cvc = (
+        (
+            bool(civitai_cfg.conn.get("token")),
+            civitai_cfg.require_confirm,
+            hash(json.dumps(civitai_cfg.generation or {}, sort_keys=True, default=str)),
+        )
+        if civitai_cfg else ()
+    )
     return (
         rows,
         search_cfg.provider,
@@ -4992,10 +5042,16 @@ def higgsfield_config_from_secrets(conn: dict | None) -> "HiggsfieldConfig | Non
     return HiggsfieldConfig(conn=conn)
 
 
-def civitai_config_from_secret(token: str | None, *, confirm_actions: bool = False) -> "CivitaiConfig":
+def civitai_config_from_secret(
+    token: str | None, generation: dict | None = None, *, confirm_actions: bool = False,
+) -> "CivitaiConfig":
     """A tool continua disponível sem token para consultar o catálogo público;
     geração/estimativa respondem com a orientação de conexão."""
-    return CivitaiConfig(conn={"token": token or ""}, require_confirm=bool(confirm_actions))
+    return CivitaiConfig(
+        conn={"token": token or ""},
+        require_confirm=bool(confirm_actions),
+        generation=dict(generation or {}),
+    )
 
 
 def elevenlabs_config_from_secrets(conn: dict | None) -> "ElevenLabsConfig | None":
