@@ -460,6 +460,27 @@ async def create_entity(
     return _entity_out(entity)
 
 
+async def world_builder_entities(
+    db: AsyncSession,
+    campaign: ImaginaiCampaign,
+) -> dict[str, Any]:
+    """Catálogo do proprietário para montar o mundo, separado do Codex do jogador."""
+    entities = list(await db.scalars(
+        select(ImaginaiEntity)
+        .where(ImaginaiEntity.campaign_id == campaign.id)
+        .order_by(ImaginaiEntity.kind, ImaginaiEntity.name)
+    ))
+    return {
+        "entities": [
+            {
+                **_entity_out(entity),
+                "private_notes": entity.private_notes or "",
+            }
+            for entity in entities
+        ]
+    }
+
+
 async def create_fact(
     db: AsyncSession,
     campaign: ImaginaiCampaign,

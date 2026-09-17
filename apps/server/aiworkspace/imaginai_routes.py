@@ -131,6 +131,20 @@ async def create_entity(
         _raise_domain_error(exc)
 
 
+@router.get("/campaigns/{campaign_id}/world/entities")
+async def get_world_builder_entities(
+    campaign_id: uuid.UUID,
+    user: ApprovedUser,
+    db: DbSession,
+):
+    """Visão de autoria — não é o Codex filtrado que chega ao personagem."""
+    try:
+        campaign = await service.owned_campaign(db, user.id, campaign_id)
+        return await service.world_builder_entities(db, campaign)
+    except Exception as exc:  # noqa: BLE001
+        _raise_domain_error(exc)
+
+
 @router.post("/campaigns/{campaign_id}/facts", status_code=status.HTTP_201_CREATED)
 async def create_fact(
     campaign_id: uuid.UUID,
