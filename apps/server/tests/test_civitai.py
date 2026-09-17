@@ -472,3 +472,75 @@ def test_discovery_tells_model_to_generate_directly_from_a_selected_lora_url():
     assert "put it directly in generate.model" in result
     assert "workflow_id (never any other id)" in result
     assert "request_id" not in result
+
+
+def test_pending_generation_registers_a_wake_instead_of_promising_the_image(monkeypatch):
+    """Geração lenta: a tool precisa AGENDAR o wake e mandar a IA encerrar o turno.
+
+    Antes, o resultado só dizia "ainda rodando" e o turno acabava com a IA prometendo
+    uma imagem que nunca chegava (ninguém voltava a consultar o workflow)."""
+    from aiworkspace.tools import toolctx
+
+    monkeypatch.setattr(cv, "submit_image", lambda *_args, **_kwargs: {
+        "id": "wf_pending", "status": "processing", "cost": {}, "steps": [],
+    })
+    cv._pending_watch.clear()
+    token = toolctx.current_chat_id.set("chat-42")
+    try:
+        result = _dispatch(_make_sift("token"), {"action": "generate", "prompt": "a moon city"})
+    finally:
+        toolctx.current_chat_id.reset(token)
+
+    assert result["workflow_id"] == "wf_pending"
+    assert "WOKEN" in result["note"] and "end your turn" in result["note"]
+    watch = cv._pending_watch["wf_pending"]
+    assert watch["chat_id"] == "chat-42" and watch["token"] == "token"
+    cv._pending_watch.clear()
+
+
+def test_generation_without_a_chat_keeps_the_manual_status_note(monkeypatch):
+    """API pública/canal sem chat: não há quem acordar — mantém a instrução antiga."""
+    monkeypatch.setattr(cv, "submit_image", lambda *_args, **_kwargs: {
+        "id": "wf_headless", "status": "processing", "cost": {}, "steps": [],
+    })
+    cv._pending_watch.clear()
+    result = _dispatch(_make_sift("token"), {"action": "generate", "prompt": "a moon city"})
+    assert result["note"] == "generation is still running; use action 'status' with workflow_id"
+    assert cv.pending_count() == 0
+
+
+def test_watch_poller_wakes_the_chat_when_the_workflow_finishes(monkeypatch):
+    """O poller: workflow terminou + chat ocioso → um turno novo continua sozinho."""
+    import asyncio
+
+    woken: list[tuple[str, str]] = []
+
+    async def fake_resume(chat_id, note, **_kwargs):
+        woken.append((chat_id, note))
+
+    # Substitui o ATRIBUTO nos módulos reais: trocar a entrada em sys.modules só
+    # surtiria efeito enquanto `aiworkspace.chat.resume` não tivesse sido importado
+    # por outro teste — na bateria inteira ele já está, e o poller chamaria o resume
+    # de verdade (banco).
+    from aiworkspace.chat import generation as real_generation
+    from aiworkspace.chat import resume as real_resume
+
+    monkeypatch.setattr(cv, "_WATCH_POLL_S", 0.01)
+    monkeypatch.setattr(cv, "get_workflow", lambda _token, wid: {"id": wid, "status": "succeeded"})
+    monkeypatch.setattr(real_resume, "resume_chat_turn", fake_resume)
+    monkeypatch.setattr(real_generation, "get_active", lambda _chat_id: None)
+
+    async def run() -> None:
+        cv._pending_watch.clear()
+        assert cv.watch_workflow("token", "wf_done", chat_id="chat-42", prompt="a moon city")
+        task = asyncio.ensure_future(cv._watch_poller())
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if woken:
+                break
+        task.cancel()
+
+    asyncio.run(run())
+    assert woken and woken[0][0] == "chat-42"
+    assert "wf_done" in woken[0][1] and "action='status'" in woken[0][1]
+    assert cv.pending_count() == 0

@@ -3426,7 +3426,10 @@ def _register_builtins(
                 "required; Civitai URL/model_id/version_id are resolved internally. If the user "
                 "gave a model or LoRA URL, put it directly in generate.model: do NOT call action "
                 "model, search for a base checkpoint, or replace the selected LoRA yourself. Call "
-                "generate ONCE per user request. To poll a returned job, action=status requires "
+                "generate ONCE per user request. A slow generation returns still running: when the "
+                "result says you will be woken, say it is rendering and END your turn — a new turn "
+                "starts by itself when the image is ready. Never tell the user an image will appear "
+                "on its own without that. To poll a returned job, action=status requires "
                 "workflow_id (never any other id). Never guess engines, workflow templates, or "
                 "advanced API fields; do not probe variants after an error. Search only when the "
                 f"user asks to compare/select a model. {civitai_preset_instruction}"
@@ -3597,8 +3600,23 @@ def _register_builtins(
                         f"Civitai workflow {status_}", code="workflow_failed", stop_tool_loop=True,
                         hint="The workflow reached a terminal failure. Do not submit it again automatically.",
                     ) | _civitai_summary(workflow)
+                # Ainda rodando quando a espera inline acabou. Registra o wake: o chat é
+                # acordado num turno novo quando o workflow terminar. Sem isto o turno
+                # encerrava com a imagem "a caminho" e ela nunca chegava.
+                watching = cv.watch_workflow(
+                    civitai_token, str(workflow.get("id") or ""),
+                    chat_id=toolctx.current_chat_id.get(),
+                    prompt=prompt, model=effective_model,
+                )
                 return {**_civitai_summary(workflow),
-                        "note": "generation is still running; use action 'status' with workflow_id"}
+                        "note": (
+                            "generation is still running — you WILL BE WOKEN in a new turn when "
+                            "it finishes, and only then you show the image. Tell the user it is "
+                            "rendering, end your turn, and do NOT claim the image is already "
+                            "here, do not poll in a loop and do not generate again."
+                            if watching else
+                            "generation is still running; use action 'status' with workflow_id"
+                        )}
             return _civitai_error(
                 "unknown action; use search_models/model/version/search_images/estimate/generate/status"
             )

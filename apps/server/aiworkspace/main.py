@@ -158,6 +158,13 @@ async def lifespan(app: FastAPI):
         preview_service.start_ready_poller()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível iniciar o reaper/poller de previews (%s)", exc)
+    # poller das gerações do Civitai: um workflow pode passar do watchdog da tool, então
+    # o chat é ACORDADO quando ele termina (senão a IA promete a imagem e ela não vem).
+    try:
+        from .integrations import civitai_service
+        civitai_service.start_watch_poller()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Não foi possível iniciar o poller do Civitai (%s)", exc)
     try:
         yield
     finally:
@@ -195,6 +202,11 @@ async def lifespan(app: FastAPI):
         try:
             from .integrations import slack_socket
             await slack_socket.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from .integrations import civitai_service
+            await civitai_service.stop_watch_poller()
         except Exception:  # noqa: BLE001
             pass
         try:

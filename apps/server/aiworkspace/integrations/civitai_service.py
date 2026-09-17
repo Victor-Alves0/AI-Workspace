@@ -658,3 +658,133 @@ def download(url: str, max_bytes: int = 100 * 1024 * 1024) -> tuple[bytes, str] 
             return b"".join(chunks), mime
     except httpx.HTTPError as exc:
         return {"error": f"download do Civitai falhou: {exc}"}
+
+
+# --------------------------------------------------------------------------- #
+# Geração longa -> WAKE: a espera inline cabe no watchdog da tool (~2 min), mas um
+# workflow do Civitai pode levar bem mais. Sem isto, a tool devolvia "ainda rodando"
+# e o turno acabava com a IA PROMETENDO a imagem — que nunca aparecia, porque
+# ninguém voltava para buscar o resultado. Aqui a geração pendente é registrada e um
+# poller no MAIN loop acorda o chat quando o workflow termina. Mesmo desenho do
+# preview_service.watch_ready (readiness -> wake).
+# --------------------------------------------------------------------------- #
+_pending_watch: dict[str, dict[str, Any]] = {}   # workflow_id -> dados do wake
+_WATCH_MAX_WAIT = 1800                            # 30 min: teto de uma fila cheia
+_WATCH_POLL_S = 10
+
+
+def watch_workflow(
+    token: str, workflow_id: str, *, chat_id: str | None,
+    prompt: str = "", model: str = "",
+) -> bool:
+    """Registra "me acorde quando este workflow terminar". Devolve False quando não há
+    chat para acordar (API pública, canal sem chat) — aí o chamador mantém o texto
+    antigo, pedindo que a própria IA consulte o status."""
+    workflow_id = (workflow_id or "").strip()
+    chat_id = (chat_id or "").strip()
+    if not workflow_id or not chat_id or not token:
+        return False
+    _pending_watch[workflow_id] = {
+        "token": token, "chat_id": chat_id, "prompt": prompt, "model": model,
+        "deadline": time.monotonic() + _WATCH_MAX_WAIT, "dispatched": False,
+    }
+    return True
+
+
+def pending_count() -> int:
+    """Quantos workflows aguardam wake (usado pelo /debug/primitives e pelos testes)."""
+    return len(_pending_watch)
+
+
+def _wake_note(workflow_id: str, status: str, prompt: str) -> tuple[str, str]:
+    """Texto do turno de continuação. O resultado NÃO viaja na nota: a IA chama
+    `action=status`, que baixa, guarda e EXIBE a mídia pelo caminho normal da tool."""
+    short = (prompt or "").strip().replace("\n", " ")[:120]
+    if status == "succeeded":
+        return (
+            "Imagem pronta no Civitai",
+            f"[Geração do Civitai concluída] O workflow `{workflow_id}` terminou com sucesso"
+            f"{f' (prompt: {short})' if short else ''}. Chame civitai.media.use com "
+            f"action='status' e workflow_id='{workflow_id}' AGORA para exibir a mídia ao "
+            "usuário e siga de onde parou. Não gere de novo.",
+        )
+    if status == "timeout":
+        return (
+            "Geração do Civitai demorando",
+            f"[Geração do Civitai demorando] O workflow `{workflow_id}` passou de "
+            f"{_WATCH_MAX_WAIT // 60} minutos sem terminar. Cheque com action='status' e "
+            "avise o usuário — não submeta outra geração automaticamente.",
+        )
+    return (
+        "Geração do Civitai falhou",
+        f"[Geração do Civitai {status}] O workflow `{workflow_id}` terminou como '{status}'. "
+        "Avise o usuário com o motivo (action='status' traz os passos) e NÃO tente de novo "
+        "sem que ele peça.",
+    )
+
+
+async def _watch_poller() -> None:
+    """No MAIN loop: observa os workflows pendentes e acorda o chat quando terminam.
+    Espera a geração corrente ficar ociosa antes (evita dois turnos concorrentes, como
+    o exec_jobs). Nunca levanta."""
+    import asyncio
+    import logging
+
+    from starlette.concurrency import run_in_threadpool
+
+    logger = logging.getLogger(__name__)
+    while True:
+        try:
+            await asyncio.sleep(_WATCH_POLL_S)
+            if not _pending_watch:
+                continue
+            # import DENTRO do try: um ciclo de import não pode matar o poller
+            from ..chat import generation, resume
+            for wid, watch in list(_pending_watch.items()):
+                if watch["dispatched"]:
+                    continue
+                expired = time.monotonic() >= watch["deadline"]
+                status = "timeout"
+                if not expired:
+                    # HTTP síncrono: sai do loop p/ não segurar o event loop
+                    workflow = await run_in_threadpool(get_workflow, watch["token"], wid)
+                    if workflow.get("error"):
+                        # falha transitória de rede: tenta de novo no próximo ciclo
+                        continue
+                    status = str(workflow.get("status") or "").lower()
+                    if status not in _TERMINAL:
+                        continue
+                gen = generation.get_active(watch["chat_id"])
+                if gen is not None and not gen.done:
+                    continue                       # chat ocupado: tenta no próximo ciclo
+                watch["dispatched"] = True
+                _pending_watch.pop(wid, None)
+                title, note = _wake_note(wid, status, watch.get("prompt", ""))
+                try:
+                    await resume.resume_chat_turn(
+                        watch["chat_id"], note, notify_title=title,
+                        notify_body=(watch.get("prompt") or "")[:90],
+                    )
+                except Exception:  # noqa: BLE001 - wake é best-effort
+                    logger.exception("wake do Civitai falhou (workflow %s)", wid)
+        except asyncio.CancelledError:  # pragma: no cover
+            raise
+        except Exception:  # noqa: BLE001
+            logger.warning("poller do Civitai: erro no ciclo", exc_info=True)
+
+
+_watch_task = None
+
+
+def start_watch_poller() -> None:
+    global _watch_task
+    import asyncio
+    if _watch_task is None or _watch_task.done():
+        _watch_task = asyncio.create_task(_watch_poller())
+
+
+async def stop_watch_poller() -> None:
+    global _watch_task
+    if _watch_task is not None:
+        _watch_task.cancel()
+        _watch_task = None
