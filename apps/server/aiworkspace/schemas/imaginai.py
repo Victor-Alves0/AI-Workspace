@@ -20,6 +20,10 @@ class CampaignUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     narration_style: Literal["balanced", "cinematic", "gritty"] | None = None
     difficulty: Literal["story", "balanced", "challenging"] | None = None
+    premise: str | None = Field(default=None, max_length=5_000)
+    opening_scene: str | None = Field(default=None, max_length=5_000)
+    starting_location_name: str | None = Field(default=None, min_length=1, max_length=255)
+    starting_location_description: str | None = Field(default=None, max_length=5_000)
 
 
 class AbilityScoresUpdate(BaseModel):

@@ -66,6 +66,8 @@ type ImaginaiSnapshot = {
     settings?: {
       narration_style?: "balanced" | "cinematic" | "gritty";
       difficulty?: "story" | "balanced" | "challenging";
+      premise?: string;
+      opening_scene?: string;
       [key: string]: unknown;
     };
   };
@@ -3167,6 +3169,10 @@ function ImaginaiDnd5eDocks({
   const [campaignNameDraft, setCampaignNameDraft] = useState("");
   const [narrationDraft, setNarrationDraft] = useState<"balanced" | "cinematic" | "gritty">("balanced");
   const [difficultyDraft, setDifficultyDraft] = useState<"story" | "balanced" | "challenging">("balanced");
+  const [premiseDraft, setPremiseDraft] = useState("");
+  const [openingSceneDraft, setOpeningSceneDraft] = useState("");
+  const [startingLocationNameDraft, setStartingLocationNameDraft] = useState("");
+  const [startingLocationDescriptionDraft, setStartingLocationDescriptionDraft] = useState("");
   const [savingConfig, setSavingConfig] = useState(false);
   const [configError, setConfigError] = useState<string | null>(null);
   const dnd = (snapshot?.character?.state.dnd5e ?? {}) as Record<string, unknown>;
@@ -3212,6 +3218,10 @@ function ImaginaiDnd5eDocks({
     setCampaignNameDraft(snapshot.campaign.name);
     setNarrationDraft(snapshot.campaign.settings?.narration_style ?? "balanced");
     setDifficultyDraft(snapshot.campaign.settings?.difficulty ?? "balanced");
+    setPremiseDraft(snapshot.campaign.settings?.premise ?? "");
+    setOpeningSceneDraft(snapshot.campaign.settings?.opening_scene ?? "");
+    setStartingLocationNameDraft(snapshot.location?.name ?? "Local inicial");
+    setStartingLocationDescriptionDraft(snapshot.location?.description ?? "");
     setConfigError(null);
     setConfigOpen(true);
   }
@@ -3228,6 +3238,10 @@ function ImaginaiDnd5eDocks({
           name: campaignNameDraft.trim(),
           narration_style: narrationDraft,
           difficulty: difficultyDraft,
+          premise: premiseDraft,
+          opening_scene: openingSceneDraft,
+          starting_location_name: startingLocationNameDraft.trim(),
+          starting_location_description: startingLocationDescriptionDraft,
         },
       );
       onSnapshotChange(updated);
@@ -3391,7 +3405,7 @@ function ImaginaiDnd5eDocks({
             aria-labelledby="imaginai-campaign-settings-title"
             onSubmit={saveCampaignConfig}
             onMouseDown={(event) => event.stopPropagation()}
-            className="w-full max-w-sm rounded-2xl border border-border bg-surface p-4 shadow-menu"
+            className="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-surface p-4 shadow-menu"
           >
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -3430,6 +3444,23 @@ function ImaginaiDnd5eDocks({
                   <option value="challenging">Desafiadora</option>
                 </select>
               </label>
+            </div>
+            <div className="mt-4 border-t border-border pt-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">Fundação do mundo</p>
+              <label className="mt-2 block text-xs font-medium text-ink-soft">Premissa
+                <textarea value={premiseDraft} onChange={(event) => setPremiseDraft(event.target.value)} maxLength={5000} rows={3} placeholder="O que torna esta campanha única?" className="mt-1.5 w-full resize-y rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm leading-5 text-ink outline-none focus:border-violet-400/70" />
+              </label>
+              <label className="mt-3 block text-xs font-medium text-ink-soft">Cena de abertura
+                <textarea value={openingSceneDraft} onChange={(event) => setOpeningSceneDraft(event.target.value)} maxLength={5000} rows={3} placeholder="Onde a história começa e o que está acontecendo?" className="mt-1.5 w-full resize-y rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm leading-5 text-ink outline-none focus:border-violet-400/70" />
+              </label>
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <label className="block text-xs font-medium text-ink-soft">Local inicial
+                  <input value={startingLocationNameDraft} onChange={(event) => setStartingLocationNameDraft(event.target.value)} maxLength={255} required className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-ink outline-none focus:border-violet-400/70" />
+                </label>
+                <label className="block text-xs font-medium text-ink-soft">Descrição do local
+                  <textarea value={startingLocationDescriptionDraft} onChange={(event) => setStartingLocationDescriptionDraft(event.target.value)} maxLength={5000} rows={2} placeholder="O que o personagem percebe?" className="mt-1.5 w-full resize-y rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm leading-5 text-ink outline-none focus:border-violet-400/70" />
+                </label>
+              </div>
             </div>
             {configError ? <p className="mt-3 text-xs text-rose-400">{configError}</p> : null}
             <div className="mt-5 flex justify-end gap-2">

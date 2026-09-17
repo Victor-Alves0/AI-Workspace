@@ -200,7 +200,7 @@ async def create_campaign(
         key="starting-location",
         name="Local inicial",
         description="",
-        state={"discovered": True},
+        state={"discovered": True, "map": {"x": 50, "y": 50}},
     )
     db.add(starting_location)
     await db.flush()
@@ -279,7 +279,25 @@ async def update_campaign(
         settings["narration_style"] = body.narration_style
     if body.difficulty is not None:
         settings["difficulty"] = body.difficulty
+    for key in ("premise", "opening_scene"):
+        value = getattr(body, key)
+        if value is not None:
+            settings[key] = value.strip()
     campaign.settings = settings
+    if body.starting_location_name is not None or body.starting_location_description is not None:
+        location = await db.scalar(
+            select(ImaginaiEntity).where(
+                ImaginaiEntity.campaign_id == campaign.id,
+                ImaginaiEntity.kind == "location",
+                ImaginaiEntity.key == "starting-location",
+            ).with_for_update()
+        )
+        if location is None:
+            raise WorldNotFoundError("Local inicial não encontrado")
+        if body.starting_location_name is not None:
+            location.name = body.starting_location_name.strip()
+        if body.starting_location_description is not None:
+            location.description = body.starting_location_description.strip()
     await db.commit()
     await db.refresh(campaign)
     return await public_snapshot(db, campaign)

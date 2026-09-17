@@ -20,7 +20,7 @@ from aiworkspace.imaginai.service import (
     _spells_from_state,
 )
 from aiworkspace.imaginai.systems import system_definition
-from aiworkspace.schemas.imaginai import CharacterUpdate, JournalCreate
+from aiworkspace.schemas.imaginai import CampaignUpdate, CharacterUpdate, JournalCreate
 
 
 def entity(
@@ -571,6 +571,18 @@ def test_spell_snapshot_normalizes_lists_and_preserves_preparation_state():
     assert [spell["name"] for spell in spells] == ["Luz", "Bola de Fogo"]
     assert spells[0]["level"] == 0
     assert spells[1]["prepared"] is False
+
+
+def test_campaign_setup_accepts_a_persistent_opening_world_seed():
+    setup = CampaignUpdate(
+        premise="Uma cidade suspensa sobre as nuvens.",
+        opening_scene="O sino de alarme toca durante a feira.",
+        starting_location_name="Mercado Celeste",
+        starting_location_description="Barracas balançam ao vento.",
+    )
+
+    assert setup.starting_location_name == "Mercado Celeste"
+    assert "alarme" in (setup.opening_scene or "")
 
 
 def test_private_npc_context_never_reaches_ui_event():
