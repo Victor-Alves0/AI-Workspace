@@ -21,6 +21,7 @@ def test_civitai_is_one_builtin_integration_tool():
     tools = {tool["path"]: tool for tool in sift_service.system_tools()}
     assert "civitai.media.use" in tools
     assert "call generate directly" in tools["civitai.media.use"]["model_desc"]
+    assert "never ask for" in tools["civitai.media.use"]["model_desc"]
     assert sift_service.tool_category("civitai.media.use") == {
         "category": "integration", "integration": "Civitai",
     }
@@ -225,6 +226,31 @@ def test_public_catalog_action_works_without_connection(monkeypatch):
 def test_generation_requires_connection():
     result = _dispatch(_make_sift(), {"action": "generate", "prompt": "a castle"})
     assert "not connected" in result["error"]
+
+
+def test_connected_civitai_discovery_tells_model_to_call_not_request_a_token():
+    """A saved token is deliberately invisible, but its ready state must be visible.
+
+    Otherwise the model sees the generic API requirement and asks the person for a
+    second token instead of executing the tool already enabled for this chat.
+    """
+    token = "a-secret-that-must-never-appear-in-tool-metadata"
+    sift = _make_sift(token)
+    raw = sift.dispatch("search_tools", {"query": "generate image", "domain": "civitai"})
+    result = raw if isinstance(raw, str) else json.dumps(raw)
+
+    assert "Civitai is connected for this chat" in result
+    assert "call this tool immediately" in result
+    assert token not in result
+
+
+def test_disconnected_civitai_discovery_defers_connection_prompt_until_tool_error():
+    sift = _make_sift()
+    raw = sift.dispatch("search_tools", {"query": "generate image", "domain": "civitai"})
+    result = raw if isinstance(raw, str) else json.dumps(raw)
+
+    assert "Civitai is not connected for this chat" in result
+    assert "only if generate/estimate returns a connection error" in result
 
 
 def test_unknown_action_lists_recovery_path():

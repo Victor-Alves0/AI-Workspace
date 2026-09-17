@@ -350,7 +350,7 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # Civitai: UMA ferramenta reúne descoberta do catálogo e geração, diferenciadas
     # pelo parâmetro action (não fragmentar em civitai.search/civitai.generate/etc.).
     {"path": "civitai.media.use", "name": "Civitai (Modelos/Mídia)", "description": "Pesquisa modelos, versões e imagens no Civitai e gera imagens pela Orchestration API oficial.",
-     "model_desc": "Generate images through the official Civitai Orchestration API. For normal image requests call generate directly: prompt is sufficient and Flux is the default; search models/gallery only when the user explicitly requests a model or reference."},
+     "model_desc": "Generate images through the official Civitai Orchestration API. The user's saved Civitai connection is injected privately when available: never ask for, reveal, or paste an API token; call generate directly and let the tool report a connection error only if it is actually unavailable. For normal image requests prompt is sufficient and Flux is the default; search models/gallery only when the user explicitly requests a model or reference."},
     # ElevenLabs (requer conexão em Configurações → Conexões). Gera fala premium de
     # qualquer texto e efeitos sonoros; o áudio é guardado e tocado no chat.
     {"path": "elevenlabs.audio.generate", "name": "ElevenLabs (Áudio)", "description": "Gera fala premium (TTS) de qualquer texto e efeitos sonoros com a ElevenLabs; o áudio aparece no chat.",
@@ -3319,7 +3319,22 @@ def _register_builtins(
 
     # ------------------------------ Civitai ----------------------------------- #
     if want("civitai.media.use"):
-        civitai_token = (civitai_cfg.conn.get("token", "") if civitai_cfg else "")
+        civitai_token = (civitai_cfg.conn.get("token", "") if civitai_cfg else "").strip()
+        # A credencial é resolvida antes de a SIFT ser montada, mas nunca pode
+        # aparecer no prompt/modelo. Sem este estado, modelos tendem a ler
+        # "requires an API token" e pedir uma chave que o usuário já salvou em
+        # Integrações, sem sequer tentar a ferramenta. Declare apenas a condição
+        # operacional: a descrição é construída por usuário e o token continua
+        # fechado no closure da chamada.
+        civitai_connection_instruction = (
+            "Civitai is connected for this chat. Its API token is already injected privately: "
+            "for generate or estimate, call this tool immediately and NEVER ask the user "
+            "for a token or API key."
+            if civitai_token
+            else "Civitai is not connected for this chat. Catalog actions still work; only if "
+            "generate/estimate returns a connection error should you tell the user to connect it "
+            "in Settings → Integrations → Civitai."
+        )
 
         def _civitai_summary(workflow: dict[str, Any]) -> dict[str, Any]:
             """Resposta enxuta: a resposta completa do workflow pode carregar muita
@@ -3376,8 +3391,8 @@ def _register_builtins(
                 "gets one version/AIR identifier; `search_images` browses gallery images; "
                 "`estimate` validates and estimates Buzz cost without generating; `generate` "
                 "submits an official imageGen workflow; `status` resumes a pending workflow. "
-                "Catalog actions work without a connection. Generation requires the user's "
-                "Civitai API token and spends Buzz. Generated media is downloaded and shown "
+                "Catalog actions work without a connection. Generation spends Buzz. "
+                f"{civitai_connection_instruction} Generated media is downloaded and shown "
                 "automatically, so do not paste its URL into the answer. `generate` is "
                 "self-contained: `prompt` is its only required input and the default "
                 "engine=flux builds the official workflow internally. For an ordinary request, "
