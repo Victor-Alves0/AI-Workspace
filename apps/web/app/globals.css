@@ -426,6 +426,9 @@ select:focus-visible {
   bottom: 0.75rem;
   z-index: 2;
   display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 0.5rem;
   width: min(18rem, calc(100% - 1.5rem));
   max-height: calc(100% - 1.5rem);
   overflow-y: auto;
@@ -437,15 +440,44 @@ select:focus-visible {
 .imaginai-character-dock[data-mobile-open="true"] {
   right: 0.75rem;
 }
+/* Mesma moldura da promptbox: borda neutra, cantos 3xl e sombra "prompt". */
 .imaginai-dock-card {
   width: 100%;
   max-width: 18rem;
-  border: 1px solid rgb(167 139 250 / 0.22);
-  border-radius: 1rem;
-  background: rgb(var(--c-surface) / 0.97);
-  padding: 0.625rem;
+  flex-shrink: 0;
+  border: 1px solid rgb(var(--c-border));
+  border-radius: 1.5rem;
+  background: rgb(var(--c-surface));
+  padding: 0.875rem 1rem 0.75rem;
   box-shadow: 0 8px 30px rgb(0 0 0 / 0.35);
-  backdrop-filter: blur(14px);
+  transition: border-color 200ms ease;
+}
+.imaginai-dock-card:hover,
+.imaginai-dock-card:focus-within {
+  border-color: rgb(var(--c-accent) / 0.3);
+}
+/* Aba que abre ACIMA do card: fica no fluxo da coluna, então cresce para cima
+ * sem cobrir o card nem mudar a posição dele. */
+.imaginai-feature-sheet {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 0.5rem;
+  overflow: hidden;
+}
+.imaginai-feature-sheet .imaginai-feature {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+.imaginai-feature-sheet .imaginai-feature-scroll {
+  min-height: 0;
+}
+.imaginai-feature-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 .imaginai-feature {
   min-width: 0;
@@ -491,6 +523,9 @@ select:focus-visible {
   font-size: 1rem;
   outline: none;
   transition: border-color 160ms ease, background-color 160ms ease;
+}
+.imaginai-field.imaginai-field-icon {
+  padding-left: 2.1rem;
 }
 .imaginai-field::placeholder {
   color: rgb(var(--c-muted));
@@ -665,16 +700,24 @@ select:focus-visible {
     pointer-events: auto;
   }
   .imaginai-world-dock,
+  .imaginai-character-dock,
+  .imaginai-world-dock[data-mobile-open],
+  .imaginai-character-dock[data-mobile-open] {
+    max-height: 100%;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding-inline: 1rem;
+    padding-top: 1rem;
+  }
+  .imaginai-world-dock,
   .imaginai-world-dock[data-mobile-open] {
     grid-column: 1;
-    justify-content: flex-start;
-    padding-inline: 1.25rem 0.75rem;
   }
   .imaginai-character-dock,
   .imaginai-character-dock[data-mobile-open] {
     grid-column: 3;
-    justify-content: flex-end;
-    padding-inline: 0.75rem 1.25rem;
   }
   .imaginai-dock-action {
     min-height: 38px;

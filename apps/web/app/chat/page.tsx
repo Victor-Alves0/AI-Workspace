@@ -3220,6 +3220,18 @@ function ImaginaiDnd5eDocks({
     return () => { cancelled = true; };
   }, [snapshot?.campaign.system_key]);
 
+  // Esc fecha as abas abertas acima dos cards (o modal de configuração tem o seu).
+  useEffect(() => {
+    if (configOpen || (!worldSection && !characterSection)) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setWorldSection(null);
+      setCharacterSection(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [configOpen, worldSection, characterSection]);
+
   useEffect(() => {
     if (!configOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
@@ -3303,8 +3315,18 @@ function ImaginaiDnd5eDocks({
         </button>
 
         <aside className="imaginai-world-dock" data-mobile-open={mobilePanel === "world"} aria-label="Worldinfo">
+          {worldSection && snapshot ? (
+            <section className="imaginai-dock-card imaginai-feature-sheet animate-pop" aria-label={DND_WORLD_SECTIONS.find((section) => section.id === worldSection)?.label}>
+              <ImaginaiSheetHead label="Worldinfo" onClose={() => setWorldSection(null)} />
+              <div className="imaginai-feature">
+                {worldSection === "journal" ? <ImaginaiJournalPanel campaignId={snapshot.campaign.id} /> : null}
+                {worldSection === "codex" ? <ImaginaiCodexPanel campaignId={snapshot.campaign.id} /> : null}
+                {worldSection === "map" ? <ImaginaiMapPanel campaignId={snapshot.campaign.id} /> : null}
+              </div>
+            </section>
+          ) : null}
           <section className="imaginai-dock-card">
-            <div className="mb-1.5 flex items-center justify-between gap-2">
+            <div className="flex min-h-7 items-center justify-between gap-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">Worldinfo</p>
               <button
                 type="button"
@@ -3312,57 +3334,42 @@ function ImaginaiDnd5eDocks({
                 disabled={!snapshot || loading}
                 title="Configurar campanha"
                 aria-label="Configurar campanha"
-                className="flex h-11 w-11 cursor-pointer items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                className="-mr-1.5 flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Settings size={15} />
               </button>
             </div>
-            {worldSection ? (
-              <div className="imaginai-feature">
-                <button type="button" onClick={() => setWorldSection(null)} className="imaginai-feature-back">
-                  <ChevronLeft size={15} /> Voltar
-                </button>
-                {worldSection === "journal" && snapshot ? <ImaginaiJournalPanel campaignId={snapshot.campaign.id} /> : null}
-                {worldSection === "codex" && snapshot ? <ImaginaiCodexPanel campaignId={snapshot.campaign.id} /> : null}
-                {worldSection === "map" && snapshot ? <ImaginaiMapPanel campaignId={snapshot.campaign.id} /> : null}
-              </div>
-            ) : (
-              <>
-                <h2 className="truncate text-sm font-semibold text-ink" title={campaignName}>{campaignName}</h2>
-                {status ? (
-                  <p className={`mt-0.5 truncate text-[11px] ${error ? "text-rose-400" : "text-muted"}`} title={error ?? status}>
-                    {status}
-                  </p>
-                ) : null}
-                <div className="mt-2 grid grid-cols-3 gap-1" role="group" aria-label="Navegação da campanha">
-                  {DND_WORLD_SECTIONS.map((section) => {
-                    const Icon = section.icon;
-                    return (
-                      <button
-                        key={section.id}
-                        type="button"
-                        onClick={() => setWorldSection(section.id)}
-                        className="imaginai-dock-action"
-                      >
-                        <Icon size={15} />
-                        <span className="truncate">{section.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
-            )}
+            <h2 className="mt-1.5 truncate text-sm font-semibold leading-5 text-ink" title={campaignName}>{campaignName}</h2>
+            <p className={`mt-0.5 truncate text-[11px] leading-4 ${error ? "text-rose-400" : "text-muted"}`} title={error ?? status ?? undefined}>
+              {status || "\u00a0"}
+            </p>
+            <div className="mt-3 grid grid-cols-3 gap-1 border-t border-border pt-2" role="group" aria-label="Navegação da campanha">
+              {DND_WORLD_SECTIONS.map((section) => {
+                const Icon = section.icon;
+                const selected = worldSection === section.id;
+                return (
+                  <button
+                    key={section.id}
+                    type="button"
+                    disabled={!snapshot}
+                    aria-pressed={selected}
+                    onClick={() => setWorldSection(selected ? null : section.id)}
+                    className={`imaginai-dock-action ${selected ? "imaginai-dock-action-active" : ""}`}
+                  >
+                    <Icon size={16} />
+                    <span className="truncate">{section.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </section>
         </aside>
 
         <aside className="imaginai-character-dock" data-mobile-open={mobilePanel === "character"} aria-label="Personagem">
-          <section className="imaginai-dock-card">
-            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">Personagem</p>
-            {characterSection ? (
+          {characterSection && (snapshot || characterSection === "sheet") ? (
+            <section className="imaginai-dock-card imaginai-feature-sheet animate-pop" aria-label={DND_CHARACTER_SECTIONS.find((section) => section.id === characterSection)?.label}>
+              <ImaginaiSheetHead label="Personagem" onClose={() => setCharacterSection(null)} />
               <div className="imaginai-feature">
-                <button type="button" onClick={() => setCharacterSection(null)} className="imaginai-feature-back">
-                  <ChevronLeft size={15} /> Voltar
-                </button>
                 {characterSection === "inventory" && snapshot ? (
                   <ImaginaiInventoryPanel campaignId={snapshot.campaign.id} system={system} />
                 ) : null}
@@ -3377,38 +3384,42 @@ function ImaginaiDnd5eDocks({
                 ) : null}
                 {characterSection === "spells" && snapshot ? <ImaginaiSpellsPanel campaignId={snapshot.campaign.id} /> : null}
               </div>
-            ) : (
-              <>
-                <h2 className="truncate text-sm font-semibold text-ink" title={characterName}>{characterName}</h2>
-                <p className="mt-0.5 truncate text-[11px] text-muted">{className} · Nível {level}</p>
-                <div className="mt-2 grid grid-cols-2 gap-1.5">
-                  <div className="flex items-center justify-between rounded-lg border border-border bg-surface2/65 px-2.5 py-1.5">
-                    <span className="flex items-center gap-1.5 text-[11px] font-medium text-ink-soft"><Heart size={13} className="text-rose-400" /> HP</span>
-                    <span className="font-mono text-[11px] text-ink">{hpCurrent ?? "—"}/{hpMax ?? "—"}</span>
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border border-border bg-surface2/65 px-2.5 py-1.5">
-                    <span className="flex items-center gap-1.5 text-[11px] font-medium text-ink-soft"><Shield size={13} className="text-sky-300" /> CA</span>
-                    <span className="font-mono text-[11px] text-ink">{armorClass ?? "—"}</span>
-                  </div>
-                </div>
-                <div className="mt-2 grid grid-cols-3 gap-1" role="group" aria-label="Navegação do personagem">
-                  {DND_CHARACTER_SECTIONS.map((section) => {
-                    const Icon = section.icon;
-                    return (
-                      <button
-                        key={section.id}
-                        type="button"
-                        onClick={() => setCharacterSection(section.id)}
-                        className="imaginai-dock-action"
-                      >
-                        <Icon size={15} />
-                        <span className="truncate">{section.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
-            )}
+            </section>
+          ) : null}
+          <section className="imaginai-dock-card">
+            <div className="flex min-h-7 items-center">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">Personagem</p>
+            </div>
+            <h2 className="mt-1.5 truncate text-sm font-semibold leading-5 text-ink" title={characterName}>{characterName}</h2>
+            <p className="mt-0.5 truncate text-[11px] leading-4 text-muted">{className} · Nível {level}</p>
+            <div className="mt-2.5 grid grid-cols-2 gap-1.5">
+              <div className="flex min-w-0 items-center justify-between gap-2 rounded-xl bg-surface2/70 px-2.5 py-1.5">
+                <span className="flex items-center gap-1.5 text-[11px] font-medium text-ink-soft"><Heart size={13} className="shrink-0 text-rose-400" /> HP</span>
+                <span className="truncate font-mono text-[11px] text-ink">{hpCurrent ?? "—"}/{hpMax ?? "—"}</span>
+              </div>
+              <div className="flex min-w-0 items-center justify-between gap-2 rounded-xl bg-surface2/70 px-2.5 py-1.5">
+                <span className="flex items-center gap-1.5 text-[11px] font-medium text-ink-soft"><Shield size={13} className="shrink-0 text-sky-300" /> CA</span>
+                <span className="truncate font-mono text-[11px] text-ink">{armorClass ?? "—"}</span>
+              </div>
+            </div>
+            <div className="mt-2.5 grid grid-cols-3 gap-1 border-t border-border pt-2" role="group" aria-label="Navegação do personagem">
+              {DND_CHARACTER_SECTIONS.map((section) => {
+                const Icon = section.icon;
+                const selected = characterSection === section.id;
+                return (
+                  <button
+                    key={section.id}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setCharacterSection(selected ? null : section.id)}
+                    className={`imaginai-dock-action ${selected ? "imaginai-dock-action-active" : ""}`}
+                  >
+                    <Icon size={16} />
+                    <span className="truncate">{section.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </section>
         </aside>
       </div>
@@ -3492,6 +3503,17 @@ function ImaginaiDnd5eDocks({
       ) : null}
       {worldBuilderOpen && snapshot ? <ImaginaiWorldBuilder campaignId={snapshot.campaign.id} onClose={() => setWorldBuilderOpen(false)} /> : null}
     </>
+  );
+}
+
+function ImaginaiSheetHead({ label, onClose }: { label: string; onClose: () => void }) {
+  return (
+    <div className="imaginai-feature-head">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">{label}</p>
+      <button type="button" onClick={onClose} title="Fechar" aria-label="Fechar aba" className="-mr-1.5 flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-ink">
+        <X size={15} />
+      </button>
+    </div>
   );
 }
 
@@ -3765,7 +3787,7 @@ function ImaginaiJournalPanel({ campaignId }: { campaignId: string }) {
         <label className="relative min-w-0 flex-1">
           <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
           <span className="sr-only">Buscar anotações</span>
-          <input aria-label="Buscar anotações" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar anotações" className="imaginai-field pl-8" />
+          <input aria-label="Buscar anotações" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar anotações" className="imaginai-field imaginai-field-icon" />
         </label>
         <button type="submit" className="imaginai-icon-button" aria-label="Buscar"><Search size={14} /></button>
       </form>
@@ -3936,7 +3958,7 @@ function ImaginaiCodexPanel({ campaignId }: { campaignId: string }) {
         <label className="relative min-w-0 flex-1">
           <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
           <span className="sr-only">Buscar no Codex</span>
-          <input aria-label="Buscar no Codex" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar no mundo" className="imaginai-field pl-8" />
+          <input aria-label="Buscar no Codex" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar no mundo" className="imaginai-field imaginai-field-icon" />
         </label>
         <button type="submit" className="imaginai-icon-button" aria-label="Buscar no Codex"><Search size={14} /></button>
       </form>
@@ -3995,7 +4017,7 @@ function ImaginaiSpellsPanel({ campaignId }: { campaignId: string }) {
     <div className="imaginai-feature-scroll">
       <div className="flex items-center justify-between gap-2"><div><h3 className="text-sm font-semibold text-ink">Magias</h3><p className="mt-0.5 text-[10px] text-muted">Apenas magias da ficha autoritativa.</p></div>{data.save_dc > 0 ? <span className="rounded-lg border border-border bg-surface2/55 px-2 py-1 text-[10px] text-ink-soft">CD {data.save_dc}</span> : null}</div>
       {Object.keys(data.slots).length ? <div className="mt-2 grid grid-cols-4 gap-1">{Object.entries(data.slots).map(([level, slot]) => <div key={level} className="rounded-lg border border-border bg-surface2/55 px-1.5 py-1.5 text-center"><span className="block text-[8px] uppercase tracking-wide text-muted">{level}º nível</span><span className="mt-0.5 block font-mono text-[11px] text-ink">{slot.current}/{slot.max}</span></div>)}</div> : null}
-      <label className="relative mt-2 block"><Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" /><span className="sr-only">Buscar magia</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar magia" className="imaginai-field pl-8" /></label>
+      <label className="relative mt-2 block"><Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" /><span className="sr-only">Buscar magia</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar magia" className="imaginai-field imaginai-field-icon" /></label>
       {filtered.length === 0 ? <ImaginaiFeatureStatus>O grimório está vazio. Ao definir ou aprender uma magia, ela aparecerá aqui.</ImaginaiFeatureStatus> : <div className="mt-2 space-y-3">{[...groups.entries()].map(([level, spells]) => <section key={level}><p className="mb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-violet-300">{level === 0 ? "Truques" : `${level}º nível`}</p><div className="space-y-1">{spells.map((spell) => <button key={spell.key} type="button" onClick={() => setSelected(spell)} className="flex w-full items-center gap-2 rounded-xl border border-border bg-surface2/55 p-2.5 text-left transition-colors hover:border-violet-400/30 hover:bg-hover"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300"><Sparkles size={14} /></span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-ink">{spell.name}</span><span className="block truncate text-[10px] text-muted">{spell.school || "Magia"}{spell.concentration ? " · concentração" : ""}</span></span>{!spell.prepared ? <span title="Não preparada" className="h-2 w-2 shrink-0 rounded-full bg-amber-300" /> : null}<ChevronRight size={14} className="shrink-0 text-muted" /></button>)}</div></section>)}</div>}
     </div>
   );
@@ -4125,15 +4147,15 @@ function ImaginaiSheetPanel({
           const saveProficient = saveState === true || (typeof saveState === "object" && saveState !== null && Boolean((saveState as Record<string, unknown>).proficient));
           return <section key={attribute.key} className="imaginai-ability-row">
             <div className="imaginai-ability-score" title={attribute.label}><span>{attribute.short}</span><strong>{score}</strong><em>{signed(modifier)}</em></div>
-            <div className="min-w-0 flex-1 py-1.5 pr-2">
-              <div className="flex items-center justify-between gap-2 border-b border-border/70 pb-1"><span className="truncate text-[10px] font-medium text-ink-soft">Salvaguarda</span><span className="flex items-center gap-1 font-mono text-[10px] text-ink"><i className={`h-1.5 w-1.5 rounded-full ${saveProficient ? "bg-violet-300" : "border border-muted"}`} />{signed(modifier + (saveProficient ? proficiency : 0))}</span></div>
-              <div className="mt-1 space-y-0.5">{attribute.skills.length ? attribute.skills.map((skillKey) => {
+            <div className="min-w-0 flex-1 py-2 pl-3 pr-2.5">
+              <div className="flex items-center justify-between gap-2 border-b border-border/70 pb-1.5"><span className="truncate text-[10px] font-medium text-ink-soft">Salvaguarda</span><span className="flex shrink-0 items-center gap-1.5 font-mono text-[10px] text-ink"><i className={`h-1.5 w-1.5 shrink-0 rounded-full ${saveProficient ? "bg-violet-300" : "border border-muted"}`} />{signed(modifier + (saveProficient ? proficiency : 0))}</span></div>
+              <div className="mt-1.5 space-y-1">{attribute.skills.length ? attribute.skills.map((skillKey) => {
                 const skillState = skills[skillKey];
                 const explicit = typeof skillState === "number" ? skillState : typeof skillState === "object" && skillState !== null ? (skillState as Record<string, unknown>).value : undefined;
                 const rank = skillState === true ? 1 : typeof skillState === "object" && skillState !== null ? numericState((skillState as Record<string, unknown>).proficiency, Boolean((skillState as Record<string, unknown>).proficient) ? 1 : 0) : 0;
                 const value = typeof explicit === "number" ? explicit : modifier + proficiency * Math.min(2, rank);
-                return <div key={skillKey} className="flex items-center justify-between gap-2 text-[9px]"><span className="truncate text-muted">{system.sheet.skills[skillKey] ?? skillKey}</span><span className="flex items-center gap-1 font-mono text-ink-soft"><i className={`h-1.5 w-1.5 rounded-full ${rank >= 2 ? "ring-1 ring-violet-300 bg-violet-300" : rank === 1 ? "bg-violet-300" : "border border-muted"}`} />{signed(value)}</span></div>;
-              }) : <span className="text-[9px] text-muted">Sem perícias associadas</span>}</div>
+                return <div key={skillKey} className="flex items-center justify-between gap-2 text-[10px] leading-4"><span className="truncate text-muted">{system.sheet.skills[skillKey] ?? skillKey}</span><span className="flex shrink-0 items-center gap-1.5 font-mono text-ink-soft"><i className={`h-1.5 w-1.5 shrink-0 rounded-full ${rank >= 2 ? "ring-1 ring-violet-300 bg-violet-300" : rank === 1 ? "bg-violet-300" : "border border-muted"}`} />{signed(value)}</span></div>;
+              }) : <span className="text-[10px] leading-4 text-muted">Sem perícias associadas</span>}</div>
             </div>
           </section>;
         })}

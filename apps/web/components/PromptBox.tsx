@@ -363,7 +363,6 @@ function MiniAppsMenu({
               <p className="py-6 text-center text-xs text-muted">Nenhum Mini App encontrado.</p>
             )}
           </div>
-          <p className="truncate border-t border-border px-2.5 py-1.5 text-[10px] text-muted">Mais Mini Apps em breve.</p>
         </div>
       ) : null}
     </div>
