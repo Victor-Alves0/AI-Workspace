@@ -42,7 +42,7 @@ def test_connection_uses_bearer_token(monkeypatch):
     assert seen["headers"]["Authorization"] == "Bearer secret-token"
 
 
-def test_submit_image_uses_v2_workflow_contract(monkeypatch):
+def test_submit_image_uses_current_v2_workflow_contract(monkeypatch):
     seen = {}
 
     def fake_request(method, url, headers=None, json=None, params=None, timeout=None):
@@ -50,19 +50,48 @@ def test_submit_image_uses_v2_workflow_contract(monkeypatch):
         return _response(202, {"id": "wf_1", "status": "processing", "steps": []})
 
     monkeypatch.setattr(cv.httpx, "request", fake_request)
-    result = cv.submit_image(
-        "token", "a moon city", engine="flux", width=1024, height=768,
-        options_json='{"guidanceScale": 4}',
-    )
+    result = cv.submit_image("token", "a moon city", width=1024, height=768,
+                             options_json='{"guidanceScale": 4}')
     assert result["id"] == "wf_1"
     assert seen["method"] == "POST"
+    assert seen["url"].startswith("https://orchestration-new.civitai.com/")
     assert seen["url"].endswith("/v2/consumer/workflows")
     assert seen["headers"]["Authorization"] == "Bearer token"
     step = seen["body"]["steps"][0]
-    assert step["$type"] == "imageGen"
-    assert step["input"]["engine"] == "flux"
+    assert step["$type"] == "textToImage"
+    assert "engine" not in step["input"]
     assert step["input"]["guidanceScale"] == 4
     assert seen["params"]["hideMatureContent"] == "true"
+
+
+def test_submit_image_enables_mature_output_and_resolves_model_url(monkeypatch):
+    seen = {}
+
+    def fake_get(url, headers=None, params=None, timeout=None, follow_redirects=None):
+        assert url.endswith("/model-versions/3239376")
+        return _response(200, {
+            "id": 3239376, "modelId": 1171727,
+            "air": "urn:air:anima:lora:civitai:1171727@3239376",
+            "model": {"type": "LORA"},
+        })
+
+    def fake_request(method, url, headers=None, json=None, params=None, timeout=None):
+        seen.update(url=url, body=json, params=params)
+        return _response(202, {"id": "wf_1", "status": "processing", "steps": []})
+
+    monkeypatch.setattr(cv.httpx, "get", fake_get)
+    monkeypatch.setattr(cv.httpx, "request", fake_request)
+    result = cv.submit_image(
+        "token", "an anime scene", model="https://civitai.com/models/1171727?modelVersionId=3239376",
+        mature=True,
+    )
+
+    assert result["id"] == "wf_1"
+    assert seen["body"]["allowMatureContent"] is True
+    assert seen["params"]["hideMatureContent"] == "false"
+    assert seen["body"]["steps"][0]["input"]["additionalNetworks"] == {
+        "urn:air:anima:lora:civitai:1171727@3239376": {"type": "Lora", "strength": 1.0}
+    }
 
 
 def test_model_query_uses_cursor_instead_of_incompatible_page(monkeypatch):

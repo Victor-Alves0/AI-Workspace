@@ -8,6 +8,7 @@ deve baixar e persistir os bytes antes de mostrá-los no chat.
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from typing import Any
@@ -20,7 +21,9 @@ from ..models import UserSecret
 from ..secrets_service import CIVITAI_KEY, get_secret, has_secret, set_secret
 
 SITE_BASE = "https://civitai.com/api/v1"
-ORCHESTRATION_BASE = "https://orchestration.civitai.com"
+# O endpoint legado ainda responde, mas não acompanha o contrato de geração
+# atual (e passou a rejeitar o antigo ``imageGen.engine=flux``).
+ORCHESTRATION_BASE = "https://orchestration-new.civitai.com"
 _TIMEOUT = 30.0
 _TERMINAL = {"succeeded", "failed", "expired", "canceled"}
 
@@ -203,6 +206,62 @@ def get_model_version(token: str, version_id: int) -> dict[str, Any]:
     return out
 
 
+_MODEL_URL_RE = re.compile(r"(?:^|/)models/(\d+)(?:[/?#]|$)", re.IGNORECASE)
+_VERSION_URL_RE = re.compile(r"(?:modelVersionId=|/model-versions/)(\d+)", re.IGNORECASE)
+
+
+def _model_reference(token: str, model: str, model_id: int | None, version_id: int | None) -> dict[str, Any]:
+    """Converte URL/ID/AIR da pessoa para o contrato de geração atual.
+
+    A normalização acontece dentro da tool, evitando um loop do agente de buscar
+    catálogo, descobrir um AIR, testar engines e repetir a geração.
+    """
+    raw_model = (model or "").strip()
+    parsed_model_id = int(model_id or 0)
+    parsed_version_id = int(version_id or 0)
+    if raw_model.startswith("urn:air:"):
+        parts = raw_model.split(":")
+        resource_type = parts[2].lower() if len(parts) > 2 else ""
+        if resource_type in {"lora", "lycoris", "locon", "dora"}:
+            return {"additionalNetworks": {raw_model: {"type": "Lora", "strength": 1.0}}}
+        return {"model": raw_model}
+    if raw_model:
+        version_match = _VERSION_URL_RE.search(raw_model)
+        model_match = _MODEL_URL_RE.search(raw_model)
+        if version_match:
+            parsed_version_id = int(version_match.group(1))
+        if model_match:
+            parsed_model_id = int(model_match.group(1))
+        elif raw_model.isdigit() and not parsed_model_id:
+            parsed_model_id = int(raw_model)
+        elif not (version_match or raw_model.isdigit()):
+            return {"error": "modelo inválido: use uma URL do Civitai, ID ou AIR URN"}
+
+    if not (parsed_model_id or parsed_version_id):
+        return {}
+    if not parsed_version_id:
+        catalog = _site_get(token, f"models/{parsed_model_id}")
+        if catalog.get("error"):
+            return catalog
+        versions = catalog.get("modelVersions") or []
+        selected = next((v for v in versions if v.get("canGenerate")), None) or (versions[0] if versions else None)
+        if not selected or not selected.get("id"):
+            return {"error": "o modelo selecionado não possui versão utilizável para geração"}
+        parsed_version_id = int(selected["id"])
+    version = _site_get(token, f"model-versions/{parsed_version_id}")
+    if version.get("error"):
+        return version
+    if parsed_model_id and int(version.get("modelId") or 0) not in {0, parsed_model_id}:
+        return {"error": "a versão indicada não pertence ao modelo selecionado"}
+    air = str(version.get("air") or "").strip()
+    if not air:
+        return {"error": "a versão selecionada não possui AIR URN para geração"}
+    resource_type = str((version.get("model") or {}).get("type") or "").lower()
+    if resource_type in {"lora", "lycoris", "locon", "dora"}:
+        return {"additionalNetworks": {air: {"type": "Lora", "strength": 1.0}}}
+    return {"model": air}
+
+
 def search_images(
     token: str = "", model_id: int | None = None, version_id: int | None = None,
     username: str = "", sort: str = "Most Reactions", period: str = "AllTime",
@@ -265,28 +324,31 @@ def _workflow_request(
 
 
 def submit_image(
-    token: str, prompt: str, *, engine: str = "flux", model: str = "",
-    ecosystem: str = "", width: int = 1024, height: int = 1024, quantity: int = 1,
+    token: str, prompt: str, *, engine: str = "", model: str = "",
+    model_id: int | None = None, version_id: int | None = None, ecosystem: str = "",
+    width: int = 1024, height: int = 1024, quantity: int = 1,
     negative_prompt: str = "", seed: int | None = None, options_json: str = "",
-    whatif: bool = False, wait_seconds: int = 60,
+    mature: bool = False, whatif: bool = False, wait_seconds: int = 60,
 ) -> dict[str, Any]:
-    """Submete um passo ``imageGen``. ``options_json`` libera parâmetros avançados
-    do engine sem transformar cada knob do Civitai em uma ferramenta separada."""
+    """Submete uma geração atual em uma única chamada.
+
+    O payload antigo ``imageGen.engine=flux`` passou a ser rejeitado pelo
+    orquestrador e induzia novas tentativas caras. O contrato atual usa
+    ``textToImage``; URL/ID de modelo são resolvidos internamente.
+    """
     clean_prompt = prompt.strip()
     if not clean_prompt:
         return {"error": "prompt é obrigatório"}
     step_input: dict[str, Any] = {
-        "engine": (engine or "flux").strip(),
         "prompt": clean_prompt[:4000],
         "width": max(64, min(int(width), 4096)),
         "height": max(64, min(int(height), 4096)),
         "quantity": max(1, min(int(quantity), 4)),
     }
-    if model.strip():
-        # sdcpp chama o recurso de diffuserModel; os demais engines usam model.
-        step_input["diffuserModel" if step_input["engine"] == "sdcpp" else "model"] = model.strip()
-    if ecosystem.strip():
-        step_input["ecosystem"] = ecosystem.strip()
+    selected = _model_reference(token, model, model_id, version_id)
+    if selected.get("error"):
+        return selected
+    step_input.update(selected)
     if negative_prompt.strip():
         step_input["negativePrompt"] = negative_prompt.strip()[:4000]
     if seed is not None:
@@ -301,16 +363,21 @@ def submit_image(
         if not isinstance(advanced, dict):
             return {"error": "options_json deve ser um objeto JSON"}
         # Identidade do passo e callbacks pertencem ao envelope, nunca ao input.
-        for key in ("$type", "callbacks", "tags", "metadata", "allowMatureContent"):
+        for key in ("$type", "callbacks", "tags", "metadata", "allowMatureContent", "engine", "ecosystem"):
             advanced.pop(key, None)
         step_input.update(advanced)
-    body = {"steps": [{"$type": "imageGen", "input": step_input}]}
+    body = {
+        "steps": [{"$type": "textToImage", "name": "image_0", "input": step_input}],
+        # Sem isto o orquestrador esconde URLs de mídia madura e o chat não
+        # consegue baixar o resultado. Permissão/saldo continuam validados pela API.
+        "allowMatureContent": bool(mature),
+    }
     return _workflow_request(
         token, "POST", "v2/consumer/workflows", body=body,
         params={
             "whatif": "true" if whatif else "false",
             "wait": max(0, min(int(wait_seconds), 90)),
-            "hideMatureContent": "true",
+            "hideMatureContent": "false" if mature else "true",
         },
     )
 

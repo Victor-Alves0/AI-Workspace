@@ -3394,12 +3394,12 @@ def _register_builtins(
                 "Catalog actions work without a connection. Generation spends Buzz. "
                 f"{civitai_connection_instruction} Generated media is downloaded and shown "
                 "automatically, so do not paste its URL into the answer. `generate` is "
-                "self-contained: `prompt` is its only required input and the default "
-                "engine=flux builds the official workflow internally. For an ordinary request, "
-                "call generate directly; do NOT search the catalog, inspect a workflow schema, "
-                "browse gallery images, or switch providers first. Search only when the user "
-                "explicitly asks for a model or a specific style requires one, use limit=3, "
-                "and choose from that single result."
+                "self-contained: `prompt` is its only required input. A Civitai model URL, "
+                "model_id or version_id is resolved internally; do NOT infer engines/workflow "
+                "schemas or probe variants. For each user request call generate ONCE. For an "
+                "ordinary request, do NOT search the catalog, inspect a workflow schema, browse "
+                "gallery images, or switch providers first. Search only when the user explicitly "
+                "asks to compare models; use limit=3 and choose from that single result."
             ),
             params={
                 "action": "string:n::search_models | model | version | search_images | estimate | generate | status",
@@ -3417,8 +3417,8 @@ def _register_builtins(
                 "nsfw": "string:o::None | Soft | Mature | X (gallery); true also enables mature model search",
                 "supports_generation": "boolean:o:false:search only models usable by the orchestration API",
                 "prompt": "string:o::estimate/generate: image prompt",
-                "engine": "string:o:flux:orchestration engine; use flux for the simple default",
-                "model": "string:o::model id/AIR URN required by advanced engines",
+                "engine": "string:o::deprecated compatibility field; omit it",
+                "model": "string:o::Civitai model URL, model ID, or AIR URN; resolved internally",
                 "ecosystem": "string:o::advanced engines: e.g. flux1, sdxl",
                 "width": "number:o:1024:image width",
                 "height": "number:o:1024:image height",
@@ -3429,7 +3429,8 @@ def _register_builtins(
                 "workflow_id": "string:o::status: id returned by generate",
             },
             returns=["items", "metadata", "workflow_id", "status", "transactions", "kind",
-                     "url", "media", "prompt", "model", "error"],
+                     "url", "media", "prompt", "model", "error", "air", "base_model",
+                     "trained_words", "description", "estimate", "note"],
             examples=[
                 "search Civitai for photorealistic Flux models that support generation",
                 "show the versions of Civitai model 12345",
@@ -3442,7 +3443,7 @@ def _register_builtins(
             version_id: Any = None, model_type: str = "", base_model: str = "",
             username: str = "", sort: str = "", period: str = "", limit: Any = 10,
             page: Any = 1, cursor: str = "", nsfw: str = "None", supports_generation: Any = False,
-            prompt: str = "", engine: str = "flux", model: str = "",
+            prompt: str = "", engine: str = "", model: str = "",
             ecosystem: str = "", width: Any = 1024, height: Any = 1024,
             quantity: Any = 1, negative_prompt: str = "", seed: Any = None,
             options_json: str = "", workflow_id: str = "",
@@ -3496,12 +3497,14 @@ def _register_builtins(
                 if not civitai_token:
                     return {"error": "Civitai is not connected. Ask the user to add an API "
                                      "token in Settings → Integrations → Civitai."}
+                mature = str(nsfw).strip().lower() in {"true", "soft", "mature", "x", "1", "yes"}
                 workflow = cv.submit_image(
-                    civitai_token, prompt, engine=engine or "flux", model=model,
+                    civitai_token, prompt, engine=engine, model=model,
+                    model_id=_int(model_id, 0) or None, version_id=_int(version_id, 0) or None,
                     ecosystem=ecosystem, width=_int(width, 1024), height=_int(height, 1024),
                     quantity=_int(quantity, 1), negative_prompt=negative_prompt,
                     seed=_int(seed, 0) if seed not in (None, "") else None,
-                    options_json=options_json, whatif=act == "estimate", wait_seconds=60,
+                    options_json=options_json, mature=mature, whatif=act == "estimate", wait_seconds=60,
                 )
                 if workflow.get("error"):
                     return workflow
