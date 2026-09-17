@@ -102,6 +102,19 @@ type ImaginaiJournalEntry = {
   updated_at: string;
 };
 
+type ImaginaiEvent = {
+  id: string;
+  sequence: number;
+  world_tick: number;
+  event_type: string;
+  actor_id: string | null;
+  target_id: string | null;
+  location_id: string | null;
+  payload: Record<string, unknown>;
+  visibility: string;
+  created_at: string;
+};
+
 type ImaginaiInventory = {
   items: {
     id: string;
@@ -3586,6 +3599,7 @@ function ImaginaiFeatureStatus({ children, error = false }: { children: React.Re
 }
 
 function ImaginaiJournalPanel({ campaignId }: { campaignId: string }) {
+  const [section, setSection] = useState<"notes" | "history">("notes");
   const [entries, setEntries] = useState<ImaginaiJournalEntry[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -3681,6 +3695,10 @@ function ImaginaiJournalPanel({ campaignId }: { campaignId: string }) {
     }
   }
 
+  if (section === "history") {
+    return <ImaginaiCampaignHistory campaignId={campaignId} onShowNotes={() => setSection("notes")} />;
+  }
+
   if (editing) {
     return (
       <form onSubmit={saveEntry} className="imaginai-feature-scroll space-y-2" aria-label={selectedId ? "Editar anotação" : "Nova anotação"}>
@@ -3733,8 +3751,15 @@ function ImaginaiJournalPanel({ campaignId }: { campaignId: string }) {
   return (
     <div className="imaginai-feature-scroll">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-ink">Diário</h3>
+        <div>
+          <h3 className="text-sm font-semibold text-ink">Diário</h3>
+          <p className="mt-0.5 text-[10px] text-muted">Suas anotações, separadas do que aconteceu no mundo.</p>
+        </div>
         <button type="button" onClick={beginNew} className="imaginai-primary-button"><Plus size={14} /> Nova</button>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-1 rounded-xl border border-border bg-surface2/45 p-1" role="tablist" aria-label="Conteúdo do diário">
+        <button type="button" role="tab" aria-selected className="min-h-9 rounded-lg bg-violet-500/20 px-2 text-[10px] font-medium text-violet-100">Anotações</button>
+        <button type="button" role="tab" aria-selected={false} onClick={() => setSection("history")} className="min-h-9 rounded-lg px-2 text-[10px] text-muted transition-colors hover:bg-hover hover:text-ink">Histórico</button>
       </div>
       <form onSubmit={(event) => { event.preventDefault(); void loadEntries(search); }} className="mt-2 flex gap-1.5">
         <label className="relative min-w-0 flex-1">
@@ -3753,6 +3778,94 @@ function ImaginaiJournalPanel({ campaignId }: { campaignId: string }) {
             </button>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+function eventString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function campaignEventCopy(event: ImaginaiEvent): { title: string; detail: string } {
+  const payload = event.payload ?? {};
+  const itemName = eventString(payload.item_name);
+  const summary = eventString(payload.summary);
+  const attackName = eventString(payload.attack_name) ?? eventString(payload.spell_name);
+  const result = eventString(payload.result);
+  const success = payload.success === true;
+  const hasRoll = Array.isArray(payload.rolls);
+
+  if (hasRoll && event.event_type !== "attack_resolved" && event.event_type !== "spell_attack_resolved") {
+    const total = typeof payload.total === "number" ? ` · total ${payload.total}` : "";
+    return {
+      title: result === "success" || success ? "Teste bem-sucedido" : "Teste falhou",
+      detail: `${eventString(payload.skill) ?? eventString(payload.ability) ?? "Teste"}${total}`,
+    };
+  }
+
+  switch (event.event_type) {
+    case "item_taken": return { title: "Item recolhido", detail: itemName ? `${itemName} entrou no inventário.` : "Um item foi recolhido." };
+    case "item_dropped": return { title: "Item deixado", detail: itemName ? `${itemName} foi deixado no local.` : "Um item foi deixado no local." };
+    case "item_equipped": return { title: "Item equipado", detail: itemName ? `${itemName} foi equipado.` : "Um item foi equipado." };
+    case "item_unequipped": return { title: "Item guardado", detail: itemName ? `${itemName} deixou de estar equipado.` : "Um item deixou de estar equipado." };
+    case "item_used": return { title: "Item usado", detail: itemName ? `${itemName} foi usado.` : "Um item foi usado." };
+    case "attack_resolved":
+    case "spell_attack_resolved": {
+      const damage = typeof payload.damage === "number" ? ` · ${payload.damage} de dano` : "";
+      return { title: success ? "Ataque acertou" : "Ataque falhou", detail: `${attackName ?? "Ataque"}${damage}` };
+    }
+    case "ability_check_resolved": {
+      const total = typeof payload.total === "number" ? ` · total ${payload.total}` : "";
+      return { title: result === "success" ? "Teste bem-sucedido" : "Teste falhou", detail: `${eventString(payload.skill) ?? eventString(payload.ability) ?? "Teste"}${total}` };
+    }
+    case "narrative_outcome": return { title: "Consequência registrada", detail: summary ?? "A cena avançou." };
+    default: return { title: "Acontecimento", detail: summary ?? "Uma ação foi registrada na campanha." };
+  }
+}
+
+function ImaginaiCampaignHistory({ campaignId, onShowNotes }: { campaignId: string; onShowNotes: () => void }) {
+  const [events, setEvents] = useState<ImaginaiEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadEvents = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await api.get<{ events: ImaginaiEvent[] }>(`/mini-apps/imaginai/campaigns/${campaignId}/events?limit=100`);
+      setEvents(result.events);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Não foi possível abrir o histórico");
+    } finally {
+      setLoading(false);
+    }
+  }, [campaignId]);
+
+  useEffect(() => { void loadEvents(); }, [loadEvents]);
+
+  return (
+    <div className="imaginai-feature-scroll">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-ink">Histórico</h3>
+          <p className="mt-0.5 text-[10px] text-muted">Ações confirmadas pelo mundo, em ordem cronológica.</p>
+        </div>
+        <button type="button" onClick={() => void loadEvents()} disabled={loading} className="imaginai-icon-button" title="Atualizar histórico" aria-label="Atualizar histórico"><RotateCw size={14} className={loading ? "animate-spin" : ""} /></button>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-1 rounded-xl border border-border bg-surface2/45 p-1" role="tablist" aria-label="Conteúdo do diário">
+        <button type="button" role="tab" aria-selected={false} onClick={onShowNotes} className="min-h-9 rounded-lg px-2 text-[10px] text-muted transition-colors hover:bg-hover hover:text-ink">Anotações</button>
+        <button type="button" role="tab" aria-selected className="min-h-9 rounded-lg bg-violet-500/20 px-2 text-[10px] font-medium text-violet-100">Histórico</button>
+      </div>
+      {loading ? <ImaginaiFeatureStatus><Loader2 size={17} className="animate-spin" /></ImaginaiFeatureStatus> : error ? <ImaginaiFeatureStatus error>{error}</ImaginaiFeatureStatus> : events.length === 0 ? <ImaginaiFeatureStatus>Ainda não há ações confirmadas. Quando a aventura avançar, os acontecimentos aparecerão aqui.</ImaginaiFeatureStatus> : (
+        <ol className="mt-3 space-y-2 border-l border-violet-400/25 pl-3">
+          {[...events].reverse().map((event) => {
+            const copy = campaignEventCopy(event);
+            const at = new Date(event.created_at);
+            const when = Number.isNaN(at.getTime()) ? "" : at.toLocaleString("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+            return <li key={event.id} className="relative rounded-xl border border-border bg-surface2/55 p-2.5"><span aria-hidden className="absolute -left-[1.06rem] top-3 h-2 w-2 rounded-full border border-violet-200/60 bg-violet-400" /><div className="flex items-start justify-between gap-2"><h4 className="text-xs font-medium text-ink">{copy.title}</h4><span className="shrink-0 text-[9px] text-muted">Turno {event.world_tick}</span></div><p className="mt-1 text-[10px] leading-4 text-ink-soft">{copy.detail}</p>{when ? <p className="mt-1.5 text-[9px] text-muted">{when}</p> : null}</li>;
+          })}
+        </ol>
       )}
     </div>
   );
