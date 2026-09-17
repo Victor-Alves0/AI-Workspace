@@ -6,6 +6,7 @@ mídia gerada não é dado sensível). Honra `Range` (206) para o <video> buscar
 
 from __future__ import annotations
 
+import mimetypes
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -21,7 +22,8 @@ router = APIRouter(tags=["images"])
 
 @router.get("/images/{image_id}")
 async def get_image(
-    image_id: uuid.UUID, request: Request, t: str = "", db: AsyncSession = Depends(get_db)
+    image_id: uuid.UUID, request: Request, t: str = "", download: bool = False,
+    db: AsyncSession = Depends(get_db),
 ):
     if not image_gen.verify_image_token(str(image_id), t):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Token inválido")
@@ -30,6 +32,13 @@ async def get_image(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Imagem não encontrada")
     blob = bytes(row.data)
     mime = row.mime or "image/png"
+    headers = {
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "Accept-Ranges": "bytes",
+    }
+    if download:
+        ext = mimetypes.guess_extension(mime) or ".png"
+        headers["Content-Disposition"] = f'attachment; filename="ai-workspace-{image_id}{ext}"'
     rng = _parse_range(request.headers.get("range", ""), len(blob))
     if rng is not None:
         start, end = rng
@@ -37,17 +46,10 @@ async def get_image(
             content=blob[start : end + 1],
             status_code=status.HTTP_206_PARTIAL_CONTENT,
             media_type=mime,
-            headers={
-                "Content-Range": f"bytes {start}-{end}/{len(blob)}",
-                "Accept-Ranges": "bytes",
-                "Cache-Control": "public, max-age=31536000, immutable",
-            },
+            headers={**headers, "Content-Range": f"bytes {start}-{end}/{len(blob)}"},
         )
     return Response(
         content=blob,
         media_type=mime,
-        headers={
-            "Cache-Control": "public, max-age=31536000, immutable",
-            "Accept-Ranges": "bytes",
-        },
+        headers=headers,
     )

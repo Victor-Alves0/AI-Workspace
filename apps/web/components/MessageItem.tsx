@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Loader2, Mail, MessageSquarePlus, Pencil, Play, RotateCcw, Send, ShieldAlert, Square, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench } from "lucide-react";
+import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, Download, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Loader2, Mail, MessageSquarePlus, Pencil, Play, RotateCcw, Send, ShieldAlert, Square, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench, X, ZoomIn } from "lucide-react";
+import { createPortal } from "react-dom";
 import type { ActivityStep, BrainNoteEvent, ChartSpec, ChatArtifact, DeepResearch, Message, SkillProposal, StockQuote, ToolEvent } from "@/lib/types";
 import { api, ApiError, API_URL } from "@/lib/api";
 import { fmtHM, fmtDayShort } from "@/lib/format";
@@ -679,14 +680,125 @@ function AudioCard({ url, prompt }: { url: string; prompt?: string }) {
 
 function ImageCard({ url, prompt }: { url: string; prompt?: string }) {
   const src = url.startsWith("http") ? url : `${API_URL}${url}`;
+  const downloadSrc = `${src}${src.includes("?") ? "&" : "?"}download=true`;
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open]);
+
+  async function copyPrompt() {
+    if (!prompt || !(await copyText(prompt))) return;
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  }
+
   return (
-    <div className="my-2 max-w-md overflow-hidden rounded-xl border border-border bg-surface">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <a href={src} target="_blank" rel="noreferrer noopener">
-        <img src={src} alt={prompt || "imagem gerada"} loading="lazy" className="block h-auto w-full" />
-      </a>
-      {prompt && <p className="truncate px-3 py-1.5 text-xs text-muted" title={prompt}>{prompt}</p>}
-    </div>
+    <>
+      <div className="my-2 max-w-md overflow-hidden rounded-xl border border-border bg-surface">
+        <div className="group relative">
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            className="block w-full cursor-zoom-in text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+            aria-label="Ampliar imagem"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={src} alt={prompt || "imagem gerada"} loading="lazy" className="block h-auto w-full" />
+          </button>
+          <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+            <a
+              href={downloadSrc}
+              download
+              onClick={(event) => event.stopPropagation()}
+              title="Baixar imagem"
+              aria-label="Baixar imagem"
+              className="rounded-lg border border-white/10 bg-black/60 p-2 text-white shadow-lg backdrop-blur-sm transition-colors hover:bg-black/85"
+            >
+              <Download size={16} />
+            </a>
+          </div>
+          <span className="pointer-events-none absolute bottom-2 right-2 flex items-center gap-1 rounded-md bg-black/55 px-2 py-1 text-[11px] text-white opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
+            <ZoomIn size={13} /> Ampliar
+          </span>
+        </div>
+        {prompt && (
+          <div className="flex items-center gap-1 border-t border-border px-2 py-1.5">
+            <p className="min-w-0 flex-1 truncate px-1 text-xs text-muted" title={prompt}>{prompt}</p>
+            <button
+              type="button"
+              onClick={copyPrompt}
+              title={copied ? "Prompt copiado" : "Copiar prompt"}
+              aria-label={copied ? "Prompt copiado" : "Copiar prompt"}
+              className={`shrink-0 rounded-md p-1.5 transition-colors hover:bg-hover ${copied ? "text-green-400" : "text-muted hover:text-ink"}`}
+            >
+              {copied ? <Check size={15} /> : <Copy size={15} />}
+            </button>
+          </div>
+        )}
+      </div>
+
+      {open && typeof document !== "undefined" && createPortal(
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Imagem ampliada"
+          onMouseDown={() => setOpen(false)}
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
+        >
+          <div
+            onMouseDown={(event) => event.stopPropagation()}
+            className="relative flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#111217] shadow-2xl"
+          >
+            <div className="absolute right-3 top-3 z-10 flex gap-2">
+              <a
+                href={downloadSrc}
+                download
+                title="Baixar imagem"
+                aria-label="Baixar imagem"
+                className="rounded-lg border border-white/10 bg-black/60 p-2 text-white backdrop-blur-sm transition-colors hover:bg-black/85"
+              >
+                <Download size={18} />
+              </a>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                title="Fechar"
+                aria-label="Fechar imagem ampliada"
+                className="rounded-lg border border-white/10 bg-black/60 p-2 text-white backdrop-blur-sm transition-colors hover:bg-black/85"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto bg-black/30 p-2 sm:p-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={src} alt={prompt || "imagem gerada"} className="mx-auto block max-h-[78vh] max-w-full object-contain" />
+            </div>
+            {prompt && (
+              <div className="flex items-center gap-2 border-t border-white/10 px-3 py-2.5">
+                <p className="min-w-0 flex-1 truncate text-xs text-muted" title={prompt}>{prompt}</p>
+                <button
+                  type="button"
+                  onClick={copyPrompt}
+                  title={copied ? "Prompt copiado" : "Copiar prompt"}
+                  aria-label={copied ? "Prompt copiado" : "Copiar prompt"}
+                  className={`rounded-md p-1.5 transition-colors hover:bg-hover ${copied ? "text-green-400" : "text-muted hover:text-white"}`}
+                >
+                  {copied ? <Check size={16} /> : <Copy size={16} />}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
 
