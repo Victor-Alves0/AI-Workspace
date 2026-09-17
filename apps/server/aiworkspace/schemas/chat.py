@@ -61,6 +61,7 @@ class MessageOut(BaseModel):
     tool_events: list[dict[str, Any]] | None = None
     memories_used: list[dict[str, Any]] | None = None
     attachments: list[dict[str, Any]] | None = None
+    mini_app: str | None = None
     is_summary: bool = False
     compacted: bool = False
     # mesa-redonda: quem falou (assistant multi-modelo); null = humano

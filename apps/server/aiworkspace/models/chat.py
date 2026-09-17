@@ -122,6 +122,10 @@ class Message(Base):
     # anexos da mensagem do usuário (imagens/arquivos):
     #   [{"type":"image","name":...,"url":<data url>} | {"type":"file","name":...,"text":...}]
     attachments: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    # domínio opcional que estruturou ESTE turno. A campanha continua pertencendo ao
+    # chat, mas o seu protocolo/ferramentas não podem vazar para uma mensagem comum
+    # enviada depois de o Mini App ser desligado.
+    mini_app: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     # marca a mensagem-resumo (divisor) criada pela compactação de contexto;
     # renderizada como um divisor visual no chat (o texto do resumo fica no nó do
     # Grafo de contexto), e é a única mensagem-resumo que ENTRA no contexto da IA.

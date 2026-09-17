@@ -203,7 +203,13 @@ async def send_message(
     if active_gen is not None and not active_gen.done:
         mc = await _get_model_config(db, chat.model_config_id, user)
         atts = await _prepare_attachments([a.model_dump() for a in body.attachments], mc)
-        db.add(Message(chat_id=chat.id, role="user", content=body.content, attachments=atts or None))
+        db.add(Message(
+            chat_id=chat.id,
+            role="user",
+            content=body.content,
+            attachments=atts or None,
+            mini_app=body.mini_app,
+        ))
         await db.commit()
         await active_gen.enqueue(body.content, steer=body.steer)
         # corrida rara: o turno pode ter terminado DURANTE o enqueue (o driver já drenou e
@@ -256,7 +262,11 @@ async def send_message(
     # persiste a mensagem do usuário (extraindo texto de docs; sem guardar o binário)
     attachments = await _prepare_attachments([a.model_dump() for a in body.attachments], model_config)
     user_msg = Message(
-        chat_id=chat.id, role="user", content=body.content, attachments=attachments or None
+        chat_id=chat.id,
+        role="user",
+        content=body.content,
+        attachments=attachments or None,
+        mini_app=body.mini_app,
     )
     db.add(user_msg)
     # primeiro título do chat = início da primeira mensagem (fallback instantâneo)
@@ -375,7 +385,9 @@ async def send_message(
         params=params,
         base_url=base_url,
         **(await _artifacts_kwargs(db, chat_id, user, arts_on, model_config)),
-        **(await _imaginai_turn_kwargs(db, user, chat, str(user_msg.id))),
+        **(await _imaginai_turn_kwargs(
+            db, user, chat, str(user_msg.id), mini_app=body.mini_app
+        )),
         session=TurnSession(
             user_id=user_id, user_tz=_session_tz(user, user_tz), chat_id=str(chat_id),
             agent_id=_mem_agent_id(model_config, model),
@@ -513,12 +525,14 @@ async def regenerate_message(
     if idx is None or rows[idx].role not in ("assistant", "user"):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Mensagem não encontrada")
 
+    source_user_message: Message | None = None
     if rows[idx].role == "user":
         # "Tentar novamente" NA MENSAGEM DO USUÁRIO (ex.: depois de editá-la):
         # a IA pensa a partir dela — a mensagem fica; tudo que veio depois sai.
-        user_text = rows[idx].content
-        turn_key = str(rows[idx].id)
-        user_attachments = _clean_attachments(rows[idx].attachments or [])
+        source_user_message = rows[idx]
+        user_text = source_user_message.content
+        turn_key = str(source_user_message.id)
+        user_attachments = _clean_attachments(source_user_message.attachments or [])
         if not user_text and not user_attachments:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mensagem vazia")
         history = [
@@ -537,9 +551,10 @@ async def regenerate_message(
         cut = len(prior)
         for i in range(len(prior) - 1, -1, -1):
             if prior[i].role == "user":
-                user_text = prior[i].content
-                turn_key = str(prior[i].id)
-                user_attachments = _clean_attachments(prior[i].attachments or [])
+                source_user_message = prior[i]
+                user_text = source_user_message.content
+                turn_key = str(source_user_message.id)
+                user_attachments = _clean_attachments(source_user_message.attachments or [])
                 cut = i
                 break
         if not user_text:
@@ -609,7 +624,13 @@ async def regenerate_message(
         params=params,
         base_url=base_url,
         **(await _artifacts_kwargs(db, chat_id, user, arts_on, model_config)),
-        **(await _imaginai_turn_kwargs(db, user, chat, turn_key)),
+        **(await _imaginai_turn_kwargs(
+            db,
+            user,
+            chat,
+            turn_key,
+            mini_app=source_user_message.mini_app if source_user_message else None,
+        )),
         session=TurnSession(
             user_id=user_id, user_tz=_session_tz(user, user_tz), chat_id=str(chat_id),
             agent_id=_mem_agent_id(model_config, model),

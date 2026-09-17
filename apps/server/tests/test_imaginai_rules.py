@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -11,6 +12,7 @@ from aiworkspace.chat.orchestrator import (
     _assemble_tools_and_prompt,
     _shape_tool_result,
 )
+from aiworkspace.chat.turn_setup import _imaginai_turn_kwargs
 from aiworkspace.imaginai.rules import ActionIntent, EntitySnapshot, ruleset_for
 from aiworkspace.imaginai.service import (
     WorldConflictError,
@@ -621,3 +623,25 @@ def test_imaginai_native_tool_is_available_without_sift():
 
     assert [tool["function"]["name"] for tool in assembled.tools] == ["imaginai_world"]
     assert "protocolo do mundo" in assembled.sift_prompt
+
+
+@pytest.mark.asyncio
+async def test_imaginai_world_kernel_requires_explicit_turn_activation(monkeypatch):
+    native = NativeToolOpts(specs=[], prompt="world", run=lambda *_: None)
+    prepare = AsyncMock(return_value=native)
+    monkeypatch.setattr("aiworkspace.imaginai.turns.prepare_turn_tools", prepare)
+    db = object()
+    user = SimpleNamespace(id="user-id")
+    chat = SimpleNamespace(id="chat-id")
+
+    disabled = await _imaginai_turn_kwargs(
+        db, user, chat, "turn-id", mini_app=None
+    )
+    assert disabled == {}
+    prepare.assert_not_awaited()
+
+    enabled = await _imaginai_turn_kwargs(
+        db, user, chat, "turn-id", mini_app="imaginai"
+    )
+    assert enabled == {"native_tools": native}
+    prepare.assert_awaited_once_with(db, "user-id", "chat-id", "turn-id")

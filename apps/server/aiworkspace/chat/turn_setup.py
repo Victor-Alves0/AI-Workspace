@@ -1194,8 +1194,17 @@ async def _imaginai_turn_kwargs(
     user: User,
     chat: Chat,
     turn_key: str,
+    *,
+    mini_app: str | None,
 ) -> dict[str, Any]:
-    """Ativa o World Kernel somente em chats que já possuem campanha ativa."""
+    """Ativa o World Kernel somente para um turno Imaginai explicitamente marcado.
+
+    Uma campanha ativa é estado persistente do chat, não uma instrução global para
+    toda mensagem futura. Sem esse gate, fechar o Mini App ainda deixava o protocolo
+    de RPG e a ferramenta ``imaginai_world`` no contexto de conversas normais.
+    """
+    if mini_app != "imaginai":
+        return {}
     from ..imaginai.turns import prepare_turn_tools
 
     tools = await prepare_turn_tools(db, user.id, chat.id, turn_key)

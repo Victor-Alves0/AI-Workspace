@@ -110,6 +110,7 @@ async def resume_chat_turn(
                 m for m in rows
                 if m.role in ("user", "assistant") and m.content and not m.compacted
             ]
+            turn_mini_app: str | None = None
             if already_persisted:
                 # `texts` são as mensagens que o usuário enviou DURANTE a geração: a rota já
                 # as persistiu e quem chamou aqui já as DRENOU da fila. A drenagem
@@ -131,12 +132,14 @@ async def resume_chat_turn(
                 # modelo: uma vez no histórico e outra como a pergunta atual.
                 restantes = list(convo)
                 source_ids: list[str] = []
+                source_messages: list[Message] = []
                 for t in reversed(texts):
                     alvo = t.strip()
                     for i in range(len(restantes) - 1, -1, -1):
                         m = restantes[i]
                         if m.role == "user" and (m.content or "").strip() == alvo:
                             source_ids.append(str(m.id))
+                            source_messages.append(m)
                             restantes.pop(i)
                             break
                 history = [{"role": m.role, "content": m.content} for m in restantes]
@@ -146,6 +149,11 @@ async def resume_chat_turn(
                     stable_sources
                     or str(_uuid.uuid5(_uuid.NAMESPACE_URL, f"{cid}:{injected_text}"))
                 )
+                # Uma fila pode receber mensagens após o Mini App ser desligado.
+                # Só reativa o kernel se TODAS as mensagens que compõem este turno
+                # pertenciam explicitamente ao Imaginai.
+                if source_messages and all(m.mini_app == "imaginai" for m in source_messages):
+                    turn_mini_app = "imaginai"
             else:
                 history = [{"role": m.role, "content": m.content} for m in convo]
                 # registra a nota como mensagem do usuário (transcrição legível do chat)
@@ -160,7 +168,9 @@ async def resume_chat_turn(
             brain = await _brain_setup(db, user, chat, model_config)
             memory = _memory_opts(chat, model_config, user)
             media = await _media_opts(db, user, model_config)
-            imaginai_kwargs = await _imaginai_turn_kwargs(db, user, chat, turn_key)
+            imaginai_kwargs = await _imaginai_turn_kwargs(
+                db, user, chat, turn_key, mini_app=turn_mini_app
+            )
 
         async def _finish(collected: dict, emit) -> None:
             # Mesmo contrato do envio normal: preserva texto/raciocínio parcial e a
