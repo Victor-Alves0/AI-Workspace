@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from types import SimpleNamespace
 
 from aiworkspace.integrations import civitai_service as cv
@@ -60,7 +61,25 @@ def test_submit_image_uses_current_v2_workflow_contract(monkeypatch):
     assert step["$type"] == "textToImage"
     assert "engine" not in step["input"]
     assert "guidanceScale" not in step["input"]
+    assert uuid.UUID(seen["body"]["externalId"]).version == 4
     assert seen["params"]["hideMatureContent"] == "true"
+
+
+def test_submit_replays_the_same_external_id_after_lost_provider_response(monkeypatch):
+    bodies = []
+
+    def fake_request(method, url, headers=None, json=None, params=None, timeout=None):
+        bodies.append(json)
+        if len(bodies) == 1:
+            return _response(500, text="upstream response was lost")
+        return _response(200, {"id": "wf_recovered", "status": "processing", "steps": []})
+
+    monkeypatch.setattr(cv.httpx, "request", fake_request)
+    result = cv.submit_image("token", "a moon city")
+    assert result["id"] == "wf_recovered"
+    assert len(bodies) == 2
+    assert bodies[0]["externalId"] == bodies[1]["externalId"]
+    assert uuid.UUID(bodies[0]["externalId"]).version == 4
 
 
 def test_submit_image_enables_mature_output_and_resolves_model_url(monkeypatch):
@@ -241,6 +260,7 @@ def test_validate_generation_is_a_whatif_without_buzz_job(monkeypatch):
 
     def fake_request(method, url, headers=None, json=None, params=None, timeout=None):
         seen["params"] = params
+        seen["body"] = json
         return _response(202, {"id": "wf_preview", "status": "planned", "cost": {"total": 3}})
 
     monkeypatch.setattr(cv.httpx, "request", fake_request)
@@ -248,6 +268,7 @@ def test_validate_generation_is_a_whatif_without_buzz_job(monkeypatch):
     assert result == {"ok": True, "cost": {"total": 3}, "status": "planned"}
     assert seen["params"]["whatif"] == "true"
     assert seen["params"]["wait"] == 0
+    assert "externalId" not in seen["body"]
 
 
 def test_workflow_outputs_accept_images_and_blobs():
@@ -374,3 +395,19 @@ def test_terminal_provider_error_survives_return_projection(monkeypatch):
     assert result["error_code"] == "invalid_request"
     assert result["retryable"] is False
     assert result["stop_tool_loop"] is True
+
+
+def test_transport_failure_exposes_recovery_request_id_without_new_submit(monkeypatch):
+    calls = []
+
+    def fake_request(method, url, headers=None, json=None, params=None, timeout=None):
+        calls.append(json)
+        return _response(500, text="temporary outage")
+
+    monkeypatch.setattr(cv.httpx, "request", fake_request)
+    result = _dispatch(_make_sift("token"), {"action": "generate", "prompt": "a moon city"})
+    assert result["error_code"] == "upstream_unavailable"
+    assert result["stop_tool_loop"] is True
+    assert uuid.UUID(result["request_id"]).version == 4
+    assert len(calls) == 2
+    assert calls[0]["externalId"] == calls[1]["externalId"] == result["request_id"]

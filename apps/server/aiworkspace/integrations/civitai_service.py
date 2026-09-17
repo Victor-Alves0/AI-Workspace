@@ -394,6 +394,7 @@ def submit_image(
     version_id: int | None = None, width: int = 1024, height: int = 1024,
     quantity: int = 1, negative_prompt: str = "", seed: int | None = None,
     mature: bool = False, whatif: bool = False, wait_seconds: int = 60,
+    request_id: str | None = None,
 ) -> dict[str, Any]:
     """Submete uma geração atual em uma única chamada.
 
@@ -418,20 +419,47 @@ def submit_image(
         step_input["negativePrompt"] = negative_prompt.strip()[:4000]
     if seed is not None:
         step_input["seed"] = int(seed)
-    body = {
+    body: dict[str, Any] = {
         "steps": [{"$type": "textToImage", "name": "image_0", "input": step_input}],
         # Sem isto o orquestrador esconde URLs de mídia madura e o chat não
         # consegue baixar o resultado. Permissão/saldo continuam validados pela API.
         "allowMatureContent": bool(mature),
     }
-    return _workflow_request(
-        token, "POST", "v2/consumer/workflows", body=body,
-        params={
-            "whatif": "true" if whatif else "false",
-            "wait": max(0, min(int(wait_seconds), 90)),
-            "hideMatureContent": "false" if mature else "true",
-        },
-    )
+    # `externalId` é a chave de idempotência do orquestrador. A Civitai pode
+    # aceitar/cobrar o job e perder a resposta HTTP; reenviar o mesmo externalId
+    # devolve o workflow original em vez de iniciar uma segunda geração. Nunca o
+    # mande em whatif: a própria Civitai reserva essa chave para submits reais.
+    if not whatif:
+        try:
+            external_id = str(uuid.UUID(str(request_id))) if request_id else str(uuid.uuid4())
+        except (TypeError, ValueError):
+            return {
+                "error": "request_id inválido", "error_code": "invalid_request",
+                "retryable": False,
+            }
+        body["externalId"] = external_id
+    else:
+        external_id = ""
+
+    params = {
+        "whatif": "true" if whatif else "false",
+        "wait": max(0, min(int(wait_seconds), 90)),
+        "hideMatureContent": "false" if mature else "true",
+    }
+    result = _workflow_request(token, "POST", "v2/consumer/workflows", body=body, params=params)
+    # Um único replay interno é seguro porque carrega a mesma chave. Ele recupera
+    # o workflow que a Civitai aceitou antes de devolver 5xx/uma falha de rede e
+    # impede que o modelo precise especular ou repetir uma geração paga.
+    if not whatif and result.get("error_code") in {"upstream_unavailable", "network_error"}:
+        result = _workflow_request(token, "POST", "v2/consumer/workflows", body=body, params=params)
+    if result.get("error") and external_id:
+        result.setdefault("request_id", external_id)
+        result.setdefault(
+            "hint",
+            "The Civitai response was lost after a protected replay. Do not submit a new generation automatically.",
+        )
+        result.setdefault("stop_tool_loop", True)
+    return result
 
 
 def validate_generation(token: str) -> dict[str, Any]:

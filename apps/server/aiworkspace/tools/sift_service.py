@@ -3442,13 +3442,14 @@ def _register_builtins(
                 "negative_prompt": "string:o::negative prompt where supported",
                 "seed": "number:o::reproducible seed",
                 "workflow_id": "string:o::status: id returned by generate",
+                "request_id": "string:o::reuse only the request_id returned after a Civitai transport failure",
                 "confirm": "boolean:o:false:set true only after the user confirms a Buzz-spending generation",
             },
             returns=["items", "metadata", "id", "name", "type", "creator", "nsfw", "versions",
                      "can_generate", "workflow_id", "status", "cost", "transactions", "kind", "url",
                      "media", "prompt", "model", "error", "error_code", "retryable", "stop_tool_loop",
                      "hint", "air", "base_model", "trained_words", "description", "source_note",
-                     "estimate", "note", "question", "options", "allow_custom", "custom_label"],
+                     "estimate", "note", "question", "options", "allow_custom", "custom_label", "request_id"],
             examples=[
                 "search Civitai for photorealistic Flux models that support generation",
                 "show the versions of Civitai model 12345",
@@ -3464,7 +3465,7 @@ def _register_builtins(
             supports_generation: Any = False, prompt: str = "", model: str = "",
             width: Any = 1024, height: Any = 1024,
             quantity: Any = 1, negative_prompt: str = "", seed: Any = None,
-            workflow_id: str = "", confirm: Any = False,
+            workflow_id: str = "", request_id: str = "", confirm: Any = False,
         ) -> dict[str, Any]:
             from ..integrations import civitai_service as cv
 
@@ -3538,6 +3539,7 @@ def _register_builtins(
                     quantity=_int(quantity, 1), negative_prompt=negative_prompt,
                     seed=_int(seed, 0) if seed not in (None, "") else None,
                     mature=mature_ok, whatif=act == "estimate", wait_seconds=60,
+                    request_id=request_id or None,
                 )
                 if workflow.get("error"):
                     return _civitai_normalize_error(workflow)
