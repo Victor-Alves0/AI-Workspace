@@ -36,6 +36,7 @@ class ActionDecision:
     reason_code: str
     reason: str
     consumes_turn: bool = False
+    tick_cost: int = 1
     mutations: tuple[dict[str, Any], ...] = ()
     event_type: str | None = None
     public_payload: dict[str, Any] = field(default_factory=dict)
@@ -63,6 +64,7 @@ class ActionDecision:
             "reason_code": self.reason_code,
             "reason": self.reason,
             "consumes_turn": self.consumes_turn,
+            "tick_cost": self.tick_cost,
             "mutations": list(self.mutations),
             "event_type": self.event_type,
             "public_payload": self.public_payload,
@@ -114,6 +116,56 @@ def _spell_record(actor: EntitySnapshot, requested: str) -> dict[str, Any] | Non
     return None
 
 
+def _inventory_state(entity: EntitySnapshot) -> dict[str, Any]:
+    inventory = entity.state.get("inventory")
+    return inventory if isinstance(inventory, dict) else entity.state
+
+
+def _safe_int(value: Any, fallback: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _attack_record(actor: EntitySnapshot, requested: str) -> dict[str, Any] | None:
+    attacks = _system_state(actor).get("attacks", [])
+    wanted = requested.strip().casefold()
+    if not wanted:
+        wanted = "unarmed"
+    if isinstance(attacks, dict):
+        attacks = [
+            {"key": str(key), **(value if isinstance(value, dict) else {})}
+            for key, value in attacks.items()
+        ]
+    if isinstance(attacks, list):
+        for raw in attacks:
+            if not isinstance(raw, dict):
+                continue
+            names = {
+                str(raw.get("key", "")).casefold(),
+                str(raw.get("name", "")).casefold(),
+            }
+            if wanted in names:
+                return raw
+    if wanted in {"unarmed", "desarmado", "ataque desarmado", "soco"}:
+        attributes = _system_state(actor).get("attributes", {})
+        attributes = attributes if isinstance(attributes, dict) else {}
+        strength = attributes.get("strength", 10)
+        if isinstance(strength, dict):
+            strength = strength.get("score", 10)
+        modifier = (_safe_int(strength, 10) - 10) // 2
+        return {
+            "key": "unarmed",
+            "name": "Ataque desarmado",
+            "attack_modifier": modifier
+            + _safe_int(_system_state(actor).get("proficiency_bonus", 2), 2),
+            "damage": f"1+{max(0, modifier)}",
+            "damage_type": "bludgeoning",
+        }
+    return None
+
+
 class Dnd5eRuleset:
     key = "dnd5e"
 
@@ -123,9 +175,19 @@ class Dnd5eRuleset:
 
         handlers = {
             "take_item": self._take_item,
+            "drop_item": self._drop_item,
+            "equip_item": self._equip_item,
+            "unequip_item": self._unequip_item,
+            "use_item": self._use_item,
+            "pay_currency": self._pay_currency,
             "interact": self._interact,
             "cast_spell": self._cast_spell,
             "examine": self._examine,
+            "move": self._move,
+            "travel": self._move,
+            "attack": self._attack,
+            "rest": self._rest,
+            "wait": self._wait,
         }
         handler = handlers.get(intent.action_type)
         if handler is None:
@@ -184,6 +246,172 @@ class Dnd5eRuleset:
             public_payload={"item_id": target.id, "item_name": target.name},
         )
 
+    def _drop_item(self, intent: ActionIntent) -> ActionDecision:
+        target = intent.target
+        if target is None or target.kind != "item" or target.owner_entity_id != intent.actor.id:
+            return _blocked("item_not_owned", "O personagem não possui esse objeto.")
+        if not intent.actor.location_id:
+            return _blocked("location_unknown", "Não há um local válido para deixar o objeto.")
+        return ActionDecision(
+            status="allowed",
+            reason_code="ok",
+            reason="O objeto pertence ao personagem e pode ser deixado aqui.",
+            consumes_turn=True,
+            mutations=(
+                {"op": "set_owner", "entity_id": target.id, "owner_entity_id": None},
+                {
+                    "op": "set_location",
+                    "entity_id": target.id,
+                    "location_id": intent.actor.location_id,
+                },
+                {"op": "set_item_equipped", "entity_id": target.id, "equipped": False},
+            ),
+            event_type="item_dropped",
+            public_payload={"item_id": target.id, "item_name": target.name},
+        )
+
+    def _equip_item(self, intent: ActionIntent) -> ActionDecision:
+        target = intent.target
+        if target is None or target.kind != "item" or target.owner_entity_id != intent.actor.id:
+            return _blocked("item_not_owned", "O personagem não possui esse objeto.")
+        inventory = _inventory_state(target)
+        requested_slot = str(intent.parameters.get("slot") or "").strip()
+        fixed_slot = str(inventory.get("slot") or "").strip()
+        allowed_item_slots = inventory.get("allowed_slots", [])
+        allowed_item_slots = (
+            {str(value) for value in allowed_item_slots}
+            if isinstance(allowed_item_slots, list)
+            else set()
+        )
+        slot = requested_slot or fixed_slot
+        allowed_slots = {"armor", "main_hand", "off_hand", "attuned"}
+        wrong_item_slot = bool(
+            requested_slot
+            and (
+                (allowed_item_slots and requested_slot not in allowed_item_slots)
+                or (fixed_slot and not allowed_item_slots and requested_slot != fixed_slot)
+            )
+        )
+        if (
+            inventory.get("equippable", bool(slot)) is False
+            or slot not in allowed_slots
+            or wrong_item_slot
+        ):
+            return _blocked(
+                "item_not_equippable", "Esse objeto não pode ser equipado nesse espaço."
+            )
+        return ActionDecision(
+            status="allowed",
+            reason_code="ok",
+            reason="O objeto pertence ao personagem e é compatível com o espaço.",
+            consumes_turn=True,
+            mutations=(
+                {
+                    "op": "set_item_equipped",
+                    "entity_id": target.id,
+                    "equipped": True,
+                    "slot": slot,
+                },
+            ),
+            event_type="item_equipped",
+            public_payload={"item_id": target.id, "item_name": target.name, "slot": slot},
+        )
+
+    def _unequip_item(self, intent: ActionIntent) -> ActionDecision:
+        target = intent.target
+        if target is None or target.kind != "item" or target.owner_entity_id != intent.actor.id:
+            return _blocked("item_not_owned", "O personagem não possui esse objeto.")
+        if not _inventory_state(target).get("equipped"):
+            return _blocked("item_not_equipped", "Esse objeto não está equipado.")
+        return ActionDecision(
+            status="allowed",
+            reason_code="ok",
+            reason="O objeto equipado pode ser guardado.",
+            consumes_turn=True,
+            mutations=({"op": "set_item_equipped", "entity_id": target.id, "equipped": False},),
+            event_type="item_unequipped",
+            public_payload={"item_id": target.id, "item_name": target.name},
+        )
+
+    def _use_item(self, intent: ActionIntent) -> ActionDecision:
+        target = intent.target
+        if target is None or target.kind != "item" or target.owner_entity_id != intent.actor.id:
+            return _blocked("item_not_owned", "O personagem não possui esse objeto.")
+        inventory = _inventory_state(target)
+        quantity = max(0, _safe_int(inventory.get("quantity", 1), 1))
+        if quantity <= 0:
+            return _blocked("item_depleted", "Esse objeto não possui usos restantes.")
+        effect = inventory.get("effect")
+        if not isinstance(effect, dict):
+            return ActionDecision(
+                status="needs_adjudication",
+                reason_code="item_effect_adjudication",
+                reason="O uso é possível, mas seu efeito depende da situação ficcional.",
+                consumes_turn=True,
+                event_type="item_used",
+                public_payload={"item_id": target.id, "item_name": target.name},
+            )
+        mutations: list[dict[str, Any]] = []
+        healing = max(0, _safe_int(effect.get("healing"), 0))
+        if healing:
+            mutations.append({"op": "adjust_hp", "entity_id": intent.actor.id, "amount": healing})
+        if inventory.get("consumable", False):
+            mutations.append({"op": "adjust_item_quantity", "entity_id": target.id, "amount": -1})
+        if not mutations:
+            return ActionDecision(
+                status="needs_adjudication",
+                reason_code="item_effect_adjudication",
+                reason="O efeito estruturado não altera um recurso mecânico conhecido.",
+                consumes_turn=True,
+                event_type="item_used",
+                public_payload={"item_id": target.id, "item_name": target.name},
+            )
+        return ActionDecision(
+            status="allowed",
+            reason_code="ok",
+            reason="O objeto possui um efeito mecânico autoritativo.",
+            consumes_turn=True,
+            mutations=tuple(mutations),
+            event_type="item_used",
+            public_payload={"item_id": target.id, "item_name": target.name},
+        )
+
+    def _pay_currency(self, intent: ActionIntent) -> ActionDecision:
+        target = intent.target
+        if target is None or not target.active or not _same_place(intent.actor, target):
+            return _blocked("target_not_present", "O destinatário não está presente.")
+        currency = str(intent.parameters.get("currency") or "gp").strip().lower()
+        if currency not in {"cp", "sp", "ep", "gp", "pp"}:
+            return _blocked("currency_invalid", "A moeda informada não pertence a este sistema.")
+        amount = _safe_int(intent.parameters.get("amount"), 0)
+        if amount <= 0:
+            return _blocked("amount_invalid", "Informe uma quantidade positiva de moedas.")
+        balance = _safe_int(_system_state(intent.actor).get("currencies", {}).get(currency), 0)
+        if balance < amount:
+            return _blocked("insufficient_funds", "O personagem não possui moedas suficientes.")
+        return ActionDecision(
+            status="allowed",
+            reason_code="ok",
+            reason="O saldo e o destinatário foram validados.",
+            consumes_turn=True,
+            mutations=(
+                {
+                    "op": "adjust_currency",
+                    "entity_id": intent.actor.id,
+                    "currency": currency,
+                    "amount": -amount,
+                },
+                {
+                    "op": "adjust_currency",
+                    "entity_id": target.id,
+                    "currency": currency,
+                    "amount": amount,
+                },
+            ),
+            event_type="currency_paid",
+            public_payload={"recipient_id": target.id, "currency": currency, "amount": amount},
+        )
+
     def _interact(self, intent: ActionIntent) -> ActionDecision:
         target = intent.target
         if target is None or target.kind not in {"npc", "character", "creature"}:
@@ -208,7 +436,9 @@ class Dnd5eRuleset:
         if spell.get("prepared", True) is False:
             return _blocked("spell_not_prepared", "Essa magia não está preparada.")
         if intent.parameters.get("_target_requested") and (
-            intent.target is None or not intent.target.active or not _same_place(intent.actor, intent.target)
+            intent.target is None
+            or not intent.target.active
+            or not _same_place(intent.actor, intent.target)
         ):
             return _blocked(
                 "target_not_present",
@@ -216,7 +446,7 @@ class Dnd5eRuleset:
             )
 
         level = int(spell.get("level", 0) or 0)
-        mutations: tuple[dict[str, Any], ...] = ()
+        mutations: list[dict[str, Any]] = []
         if level > 0:
             slots = _system_state(intent.actor).get("spell_slots", {})
             slot = slots.get(str(level), slots.get(level)) if isinstance(slots, dict) else None
@@ -226,21 +456,87 @@ class Dnd5eRuleset:
                     "spell_slot_unavailable",
                     f"O personagem não possui espaços de magia de {level}º nível disponíveis.",
                 )
-            mutations = (
+            mutations.append(
                 {
                     "op": "decrement_spell_slot",
                     "entity_id": intent.actor.id,
                     "level": level,
                     "amount": 1,
+                    "when": "always",
+                }
+            )
+
+        effect = spell.get("effect")
+        effect = effect if isinstance(effect, dict) else {}
+        roll_kind = str(effect.get("roll_kind") or "").strip().lower()
+        if roll_kind == "spell_attack":
+            target = intent.target
+            if target is None:
+                return _blocked("target_required", "Essa magia exige um alvo presente.")
+            hp = _system_state(target).get("hp", {})
+            if not isinstance(hp, dict) or "max" not in hp:
+                return ActionDecision(
+                    status="needs_adjudication",
+                    reason_code="target_mechanics_missing",
+                    reason="A magia é válida, mas o alvo ainda não possui estatísticas de combate.",
+                    consumes_turn=True,
+                    mutations=tuple(mutations),
+                    event_type="spell_adjudicated",
+                    public_payload={
+                        "spell_key": str(spell.get("key", requested)),
+                        "spell_name": str(spell.get("name", requested)),
+                        "level": level,
+                    },
+                )
+            actor_state = _system_state(intent.actor)
+            attack_modifier = _safe_int(
+                effect.get("attack_modifier", actor_state.get("spell_attack_modifier")), 0
+            )
+            return ActionDecision(
+                status="requires_check",
+                reason_code="spell_attack_roll_required",
+                reason="A magia e o alvo são válidos; resolva o ataque mágico no servidor.",
+                consumes_turn=True,
+                mutations=tuple(mutations),
+                event_type="spell_attack_resolved",
+                public_payload={
+                    "spell_key": str(spell.get("key", requested)),
+                    "spell_name": str(spell.get("name", requested)),
+                    "level": level,
+                    "roll_kind": "spell_attack",
+                    "attack_modifier": attack_modifier,
+                    "target_ac": max(1, _safe_int(_system_state(target).get("armor_class"), 10)),
+                    "damage": str(effect.get("damage") or "1"),
+                    "damage_type": str(effect.get("damage_type") or ""),
                 },
             )
+
+        healing = max(0, _safe_int(effect.get("healing"), 0))
+        if healing:
+            recipient = intent.target or intent.actor
+            recipient_hp = _system_state(recipient).get("hp", {})
+            if not isinstance(recipient_hp, dict) or "max" not in recipient_hp:
+                return ActionDecision(
+                    status="needs_adjudication",
+                    reason_code="target_mechanics_missing",
+                    reason="A magia é válida, mas o alvo não possui pontos de vida estruturados.",
+                    consumes_turn=True,
+                    mutations=tuple(mutations),
+                    event_type="spell_adjudicated",
+                    public_payload={
+                        "spell_key": str(spell.get("key", requested)),
+                        "spell_name": str(spell.get("name", requested)),
+                        "level": level,
+                    },
+                )
+            mutations.append({"op": "adjust_hp", "entity_id": recipient.id, "amount": healing})
 
         return ActionDecision(
             status="allowed",
             reason_code="ok",
             reason="A magia pertence à ficha e seus recursos estão disponíveis.",
             consumes_turn=True,
-            mutations=mutations,
+            mutations=tuple(mutations),
             event_type="spell_cast",
             public_payload={
                 "spell_key": str(spell.get("key", requested)),
@@ -271,6 +567,132 @@ class Dnd5eRuleset:
             consumes_turn=True,
             event_type="examination_attempted",
             public_payload={"target_id": target.id},
+        )
+
+    def _move(self, intent: ActionIntent) -> ActionDecision:
+        target = intent.target
+        if target is None or target.kind != "location" or not target.active:
+            return _blocked("destination_unknown", "Esse destino não está disponível.")
+        if target.id == intent.actor.location_id:
+            return _blocked("already_there", "O personagem já está nesse local.")
+        discovered = {
+            str(item) for item in _system_state(intent.actor).get("discovered_entity_ids", [])
+        }
+        if (
+            target.state.get("hidden")
+            and not target.state.get("discovered")
+            and target.id not in discovered
+        ):
+            return _blocked("destination_unknown", "Esse destino não está disponível.")
+        accessible_from = target.state.get("accessible_from", [])
+        known_route = target.state.get("open_access") is True or (
+            isinstance(accessible_from, list) and intent.actor.location_id in accessible_from
+        )
+        mutation = {
+            "op": "set_location",
+            "entity_id": intent.actor.id,
+            "location_id": target.id,
+        }
+        if not known_route:
+            return ActionDecision(
+                status="needs_adjudication",
+                reason_code="route_adjudication",
+                reason="O destino é conhecido, mas a rota e seus riscos dependem da ficção.",
+                consumes_turn=True,
+                mutations=(mutation,),
+                event_type="travel_resolved",
+                public_payload={"destination_id": target.id, "destination_name": target.name},
+            )
+        return ActionDecision(
+            status="allowed",
+            reason_code="ok",
+            reason="Há uma rota estabelecida e acessível até o destino.",
+            consumes_turn=True,
+            mutations=(mutation,),
+            event_type="entity_moved",
+            public_payload={"destination_id": target.id, "destination_name": target.name},
+        )
+
+    def _attack(self, intent: ActionIntent) -> ActionDecision:
+        target = intent.target
+        if (
+            target is None
+            or target.kind not in {"npc", "character", "creature"}
+            or not target.active
+            or not _same_place(intent.actor, target)
+        ):
+            return _blocked("target_not_present", "Não há um alvo correspondente ao alcance.")
+        if target.id == intent.actor.id:
+            return _blocked(
+                "invalid_target", "O personagem não pode ser o próprio alvo desta ação."
+            )
+        hp = _system_state(target).get("hp", {})
+        if not isinstance(hp, dict) or "max" not in hp:
+            return ActionDecision(
+                status="needs_adjudication",
+                reason_code="target_mechanics_missing",
+                reason="O confronto é possível, mas o alvo ainda não possui estatísticas de combate.",
+                consumes_turn=True,
+                event_type="attack_adjudicated",
+                public_payload={"target_id": target.id},
+            )
+        if _safe_int(hp.get("current"), 1) <= 0:
+            return _blocked("target_incapacitated", "O alvo já está incapacitado.")
+        requested = str(intent.parameters.get("attack") or intent.parameters.get("weapon") or "")
+        attack = _attack_record(intent.actor, requested)
+        if attack is None:
+            return _blocked("attack_unavailable", "O personagem não possui esse ataque disponível.")
+        target_ac = max(1, _safe_int(_system_state(target).get("armor_class"), 10))
+        return ActionDecision(
+            status="requires_check",
+            reason_code="attack_roll_required",
+            reason="O ataque e o alvo são válidos; resolva a jogada de ataque no servidor.",
+            consumes_turn=True,
+            event_type="attack_resolved",
+            public_payload={
+                "target_id": target.id,
+                "roll_kind": "attack",
+                "attack_key": str(attack.get("key", requested or "unarmed")),
+                "attack_name": str(attack.get("name", requested or "Ataque desarmado")),
+                "attack_modifier": _safe_int(attack.get("attack_modifier"), 0),
+                "target_ac": target_ac,
+                "damage": str(attack.get("damage") or "1"),
+                "damage_type": str(attack.get("damage_type") or ""),
+            },
+        )
+
+    def _rest(self, intent: ActionIntent) -> ActionDecision:
+        kind = str(intent.parameters.get("kind") or "short").strip().lower()
+        if kind not in {"short", "long"}:
+            return _blocked("rest_kind_invalid", "Use descanso curto ou longo.")
+        if _system_state(intent.actor).get("rest_blocked"):
+            return _blocked("rest_unavailable", "As condições atuais não permitem descansar.")
+        mutations: tuple[dict[str, Any], ...] = ()
+        tick_cost = 60
+        if kind == "long":
+            mutations = ({"op": "restore_long_rest", "entity_id": intent.actor.id},)
+            tick_cost = 480
+        return ActionDecision(
+            status="allowed",
+            reason_code="ok",
+            reason="As condições permitem o descanso solicitado.",
+            consumes_turn=True,
+            tick_cost=tick_cost,
+            mutations=mutations,
+            event_type="rest_completed",
+            public_payload={"kind": kind, "minutes": tick_cost},
+        )
+
+    def _wait(self, intent: ActionIntent) -> ActionDecision:
+        minutes = max(1, min(_safe_int(intent.parameters.get("minutes"), 1), 1440))
+        return ActionDecision(
+            status="allowed",
+            reason_code="ok",
+            reason="O tempo pode avançar sem alterar fatos não estabelecidos.",
+            consumes_turn=True,
+            tick_cost=minutes,
+            event_type="time_advanced",
+            public_payload={"minutes": minutes},
         )
 
 

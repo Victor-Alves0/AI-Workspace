@@ -22,6 +22,19 @@ _DND5E: dict[str, Any] = {
         ],
         "equipment_slots": ["armor", "main_hand", "off_hand", "attuned"],
     },
+    "combat": {
+        "attack_die": "1d20",
+        "natural_20": "critical",
+        "natural_1": "miss",
+        "critical_damage": "double_dice",
+        "hp_floor": 0,
+    },
+    "time": {
+        "unit": "minute",
+        "short_rest_minutes": 60,
+        "long_rest_minutes": 480,
+        "maximum_wait_minutes": 1440,
+    },
     "sheet": {
         "summary": [
             {"key": "armor_class", "label": "CA"},

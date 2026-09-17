@@ -20,6 +20,7 @@ def _response(status: int, payload: dict | None = None, text: str = ""):
 def test_civitai_is_one_builtin_integration_tool():
     tools = {tool["path"]: tool for tool in sift_service.system_tools()}
     assert "civitai.media.use" in tools
+    assert "call generate directly" in tools["civitai.media.use"]["model_desc"]
     assert sift_service.tool_category("civitai.media.use") == {
         "category": "integration", "integration": "Civitai",
     }
@@ -74,6 +75,116 @@ def test_model_query_uses_cursor_instead_of_incompatible_page(monkeypatch):
     cv.search_models("", "flux", page=9, cursor="opaque", limit=3)
     assert seen["params"]["cursor"] == "opaque"
     assert "page" not in seen["params"]
+
+
+def test_catalog_results_are_compact_and_bounded_for_agent_context(monkeypatch):
+    seen = {}
+    giant_trigger = "trigger " * 5_000
+    payload = {
+        "items": [
+            {
+                "id": index,
+                "name": f"Model {index}",
+                "type": "LORA",
+                "creator": {"username": "creator"},
+                "tags": ["unused"] * 50,
+                "stats": {"downloadCount": 999},
+                "modelVersions": [
+                    {
+                        "id": index * 100 + version,
+                        "name": f"Version {version}",
+                        "baseModel": "Flux",
+                        "trainedWords": [giant_trigger] * 20,
+                        "downloadUrl": "https://civitai.example/very-long-download-url",
+                    }
+                    for version in range(8)
+                ],
+            }
+            for index in range(10)
+        ],
+        "metadata": {"nextCursor": "cursor-2", "nextPage": "very-long-url"},
+    }
+
+    def fake_get(url, headers=None, params=None, timeout=None, follow_redirects=None):
+        seen["params"] = params
+        return _response(200, payload)
+
+    monkeypatch.setattr(cv.httpx, "get", fake_get)
+    result = cv.search_models("", "flux", limit=50)
+    encoded = json.dumps(result, ensure_ascii=False)
+
+    assert seen["params"]["limit"] == 4
+    assert len(result["items"]) == 4
+    assert all(len(item["versions"]) == 2 for item in result["items"])
+    assert "trained_words" not in encoded
+    assert "download_url" not in encoded
+    assert "nextPage" not in encoded
+    assert len(encoded) < 5_000
+
+
+def test_gallery_results_are_compact_and_bounded_for_agent_context(monkeypatch):
+    seen = {}
+    giant_prompt = "cinematic prompt " * 5_000
+    payload = {
+        "items": [
+            {
+                "id": index,
+                "url": "https://image.civitai.example/" + ("x" * 2_000),
+                "width": 1024,
+                "height": 1024,
+                "nsfwLevel": 1,
+                "username": "creator",
+                "stats": {"likeCount": 999_999},
+                "meta": {"prompt": giant_prompt, "negativePrompt": giant_prompt,
+                         "Model": "Flux", "Sampler": "Euler", "steps": 20},
+            }
+            for index in range(10)
+        ],
+        "metadata": {"nextCursor": "cursor-2", "nextPage": "very-long-url"},
+    }
+
+    def fake_get(url, headers=None, params=None, timeout=None, follow_redirects=None):
+        seen["params"] = params
+        return _response(200, payload)
+
+    monkeypatch.setattr(cv.httpx, "get", fake_get)
+    result = cv.search_images("", limit=50)
+    encoded = json.dumps(result, ensure_ascii=False)
+
+    assert seen["params"]["limit"] == 4
+    assert len(result["items"]) == 4
+    assert "https://image.civitai.example" not in encoded
+    assert "cinematic prompt" not in encoded
+    assert "likeCount" not in encoded
+    assert "nextPage" not in encoded
+    assert len(encoded) < 3_000
+
+
+def test_model_version_returns_only_generation_fields(monkeypatch):
+    giant = "metadata " * 5_000
+    payload = {
+        "id": 22,
+        "name": "Flux detail",
+        "baseModel": "Flux",
+        "air": "urn:air:flux:22",
+        "trainedWords": [giant] * 10,
+        "description": giant,
+        "files": [{"downloadUrl": "https://download.example/" + giant}],
+        "images": [{"url": "https://image.example/" + giant}],
+    }
+
+    def fake_get(url, headers=None, params=None, timeout=None, follow_redirects=None):
+        return _response(200, payload)
+
+    monkeypatch.setattr(cv.httpx, "get", fake_get)
+    result = cv.get_model_version("", 22)
+    encoded = json.dumps(result, ensure_ascii=False)
+
+    assert result["air"] == "urn:air:flux:22"
+    assert len(result["trained_words"]) == 6
+    assert "download.example" not in encoded
+    assert "image.example" not in encoded
+    assert len(encoded) < 2_500
 
 
 def test_workflow_outputs_accept_images_and_blobs():

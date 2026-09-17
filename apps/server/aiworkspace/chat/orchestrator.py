@@ -484,9 +484,9 @@ SEARCH_LANG_HINT = (
 # A busca devolve candidatos (URLs + snippets), não o conteúdo da fonte. Esta
 # instrução só entra nos escopos que possuem a cadeia completa, montada pelo loader.
 WEB_RESEARCH_WORKFLOW = (
-    "WEB RESEARCH WORKFLOW: search finds candidate URLs and snippets; when you need "
-    "to answer from a source's actual content, follow up by reading the promising URL. "
-    "Do not treat a search snippet as if you had read the full page."
+    "WEB RESEARCH WORKFLOW: web.search.query finds candidate URLs and snippets; when "
+    "you need to answer from a source's actual content, follow up with web.page.read on "
+    "the promising URL. Do not treat a search snippet as if you had read the full page."
 )
 
 # Os packs de contexto do loader colocam poucas operações frequentes como schemas
@@ -2086,8 +2086,8 @@ class _ToolDispatcher:
     subagent_pass_context: bool
     subagent_worker_memory: bool
     run_subagent: Any
-    native_tool_names: frozenset[str]
-    native_tool_runner: Any
+    native_tool_names: frozenset[str] = field(default_factory=frozenset)
+    native_tool_runner: Any = None
     # docs explicitamente enviados em turnos anteriores; usados quando o usuário pede
     # "outro/mais/diferente" para a busca não devolver o mesmo item de novo.
     seen_kb_doc_ids: set[str] = field(default_factory=set)

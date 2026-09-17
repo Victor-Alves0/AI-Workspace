@@ -350,7 +350,7 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # Civitai: UMA ferramenta reúne descoberta do catálogo e geração, diferenciadas
     # pelo parâmetro action (não fragmentar em civitai.search/civitai.generate/etc.).
     {"path": "civitai.media.use", "name": "Civitai (Modelos/Mídia)", "description": "Pesquisa modelos, versões e imagens no Civitai e gera imagens pela Orchestration API oficial.",
-     "model_desc": "Search Civitai models, versions and images, and generate images through the official Civitai Orchestration API."},
+     "model_desc": "Generate images through the official Civitai Orchestration API. For normal image requests call generate directly: prompt is sufficient and Flux is the default; search models/gallery only when the user explicitly requests a model or reference."},
     # ElevenLabs (requer conexão em Configurações → Conexões). Gera fala premium de
     # qualquer texto e efeitos sonoros; o áudio é guardado e tocado no chat.
     {"path": "elevenlabs.audio.generate", "name": "ElevenLabs (Áudio)", "description": "Gera fala premium (TTS) de qualquer texto e efeitos sonoros com a ElevenLabs; o áudio aparece no chat.",
@@ -3378,8 +3378,13 @@ def _register_builtins(
                 "submits an official imageGen workflow; `status` resumes a pending workflow. "
                 "Catalog actions work without a connection. Generation requires the user's "
                 "Civitai API token and spends Buzz. Generated media is downloaded and shown "
-                "automatically, so do not paste its URL into the answer. Prefer a generatable "
-                "model/version found through search before supplying an advanced model."
+                "automatically, so do not paste its URL into the answer. `generate` is "
+                "self-contained: `prompt` is its only required input and the default "
+                "engine=flux builds the official workflow internally. For an ordinary request, "
+                "call generate directly; do NOT search the catalog, inspect a workflow schema, "
+                "browse gallery images, or switch providers first. Search only when the user "
+                "explicitly asks for a model or a specific style requires one, use limit=3, "
+                "and choose from that single result."
             ),
             params={
                 "action": "string:n::search_models | model | version | search_images | estimate | generate | status",
@@ -3391,7 +3396,7 @@ def _register_builtins(
                 "username": "string:o::search_images: creator username",
                 "sort": "string:o::catalog sort order",
                 "period": "string:o::AllTime | Year | Month | Week | Day",
-                "limit": "number:o:10:number of catalog results (1-50)",
+                "limit": "number:o:3:number of compact catalog results (1-4)",
                 "page": "number:o:1:catalog page",
                 "cursor": "string:o::search_models: metadata.nextCursor from a previous query page",
                 "nsfw": "string:o::None | Soft | Mature | X (gallery); true also enables mature model search",

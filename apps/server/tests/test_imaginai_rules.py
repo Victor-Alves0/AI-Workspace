@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from aiworkspace.chat.orchestrator import (
@@ -10,6 +12,7 @@ from aiworkspace.chat.orchestrator import (
     _shape_tool_result,
 )
 from aiworkspace.imaginai.rules import ActionIntent, EntitySnapshot, ruleset_for
+from aiworkspace.imaginai.service import WorldConflictError, _apply_mutation, _roll_damage
 from aiworkspace.imaginai.systems import system_definition
 from aiworkspace.schemas.imaginai import JournalCreate
 
@@ -133,7 +136,13 @@ def test_known_prepared_spell_consumes_authoritative_slot():
     assert decision.allowed is True
     assert decision.public_payload["level"] == 3
     assert decision.mutations == (
-        {"op": "decrement_spell_slot", "entity_id": "hero", "level": 3, "amount": 1},
+        {
+            "op": "decrement_spell_slot",
+            "entity_id": "hero",
+            "level": 3,
+            "amount": 1,
+            "when": "always",
+        },
     )
 
 
@@ -149,9 +158,7 @@ def test_spell_without_slot_is_rejected():
         },
     )
     decision = ruleset_for("dnd5e").validate(
-        ActionIntent(
-            action_type="cast_spell", actor=actor, parameters={"spell": "fireball"}
-        )
+        ActionIntent(action_type="cast_spell", actor=actor, parameters={"spell": "fireball"})
     )
     assert decision.reason_code == "spell_slot_unavailable"
 
@@ -180,6 +187,55 @@ def test_spell_cannot_target_a_remote_creature():
 
     assert decision.allowed is False
     assert decision.reason_code == "target_not_present"
+
+
+def test_spell_attack_uses_sheet_modifier_and_effect_instead_of_player_claims():
+    actor = entity(
+        "hero",
+        kind="character",
+        state={
+            "dnd5e": {
+                "spell_attack_modifier": 6,
+                "spells": [
+                    {
+                        "key": "fire_bolt",
+                        "name": "Raio de Fogo",
+                        "level": 0,
+                        "effect": {
+                            "roll_kind": "spell_attack",
+                            "damage": "1d10",
+                            "damage_type": "fire",
+                        },
+                    }
+                ],
+            }
+        },
+    )
+    target = entity(
+        "goblin",
+        kind="creature",
+        state={"dnd5e": {"hp": {"current": 7, "max": 7}, "armor_class": 13}},
+    )
+
+    decision = ruleset_for("dnd5e").validate(
+        ActionIntent(
+            action_type="cast_spell",
+            actor=actor,
+            target=target,
+            parameters={
+                "spell": "Raio de Fogo",
+                "_target_requested": True,
+                "attack_modifier": 99,
+                "damage": "99d99",
+            },
+        )
+    )
+
+    assert decision.status == "requires_check"
+    assert decision.public_payload["roll_kind"] == "spell_attack"
+    assert decision.public_payload["attack_modifier"] == 6
+    assert decision.public_payload["target_ac"] == 13
+    assert decision.public_payload["damage"] == "1d10"
 
 
 def test_unknown_ruleset_fails_closed():
@@ -236,6 +292,210 @@ def test_hidden_detail_requests_a_check_without_rejecting_the_action():
     assert decision.allowed is True
     assert decision.status == "requires_check"
     assert decision.resolution == "check"
+
+
+def test_known_route_moves_character_without_inventing_a_destination():
+    actor = entity("hero", kind="character", location="village")
+    forest = entity(
+        "forest",
+        kind="location",
+        location=None,
+        state={"discovered": True, "accessible_from": ["village"]},
+    )
+
+    decision = ruleset_for("dnd5e").validate(
+        ActionIntent(action_type="move", actor=actor, target=forest)
+    )
+
+    assert decision.status == "allowed"
+    assert decision.mutations == (
+        {"op": "set_location", "entity_id": "hero", "location_id": "forest"},
+    )
+
+
+def test_known_destination_without_route_is_adjudicated_not_rejected():
+    actor = entity("hero", kind="character", location="village")
+    mountains = entity(
+        "mountains",
+        kind="location",
+        location=None,
+        state={"discovered": True},
+    )
+
+    decision = ruleset_for("dnd5e").validate(
+        ActionIntent(action_type="travel", actor=actor, target=mountains)
+    )
+
+    assert decision.status == "needs_adjudication"
+    assert decision.reason_code == "route_adjudication"
+    assert decision.mutations[0]["op"] == "set_location"
+
+
+def test_attack_uses_authoritative_attack_and_target_armor_class():
+    actor = entity(
+        "hero",
+        kind="character",
+        state={
+            "dnd5e": {
+                "attacks": [
+                    {
+                        "key": "longsword",
+                        "name": "Espada longa",
+                        "attack_modifier": 5,
+                        "damage": "1d8+3",
+                        "damage_type": "slashing",
+                    }
+                ]
+            }
+        },
+    )
+    goblin = entity(
+        "goblin",
+        kind="creature",
+        state={"dnd5e": {"hp": {"current": 7, "max": 7}, "armor_class": 15}},
+    )
+
+    decision = ruleset_for("dnd5e").validate(
+        ActionIntent(
+            action_type="attack",
+            actor=actor,
+            target=goblin,
+            parameters={"attack": "Espada longa", "damage": "999d999"},
+        )
+    )
+
+    assert decision.status == "requires_check"
+    assert decision.public_payload["target_ac"] == 15
+    assert decision.public_payload["damage"] == "1d8+3"
+
+
+def test_attack_without_target_sheet_is_adjudicated_instead_of_fabricating_hp():
+    actor = entity("hero", kind="character")
+    villager = entity("villager", kind="npc")
+
+    decision = ruleset_for("dnd5e").validate(
+        ActionIntent(action_type="attack", actor=actor, target=villager)
+    )
+
+    assert decision.status == "needs_adjudication"
+    assert decision.reason_code == "target_mechanics_missing"
+
+
+def test_payment_cannot_exceed_authoritative_balance():
+    actor = entity(
+        "hero",
+        kind="character",
+        state={"dnd5e": {"currencies": {"gp": 3}}},
+    )
+    merchant = entity("merchant", kind="npc")
+
+    denied = ruleset_for("dnd5e").validate(
+        ActionIntent(
+            action_type="pay_currency",
+            actor=actor,
+            target=merchant,
+            parameters={"currency": "gp", "amount": 4},
+        )
+    )
+    allowed = ruleset_for("dnd5e").validate(
+        ActionIntent(
+            action_type="pay_currency",
+            actor=actor,
+            target=merchant,
+            parameters={"currency": "gp", "amount": 2},
+        )
+    )
+
+    assert denied.reason_code == "insufficient_funds"
+    assert allowed.status == "allowed"
+    assert [mutation["amount"] for mutation in allowed.mutations] == [-2, 2]
+
+
+def test_item_cannot_be_equipped_in_a_player_invented_slot():
+    actor = entity("hero", kind="character")
+    armor = entity(
+        "chain-mail",
+        kind="item",
+        owner="hero",
+        location=None,
+        state={"inventory": {"equippable": True, "slot": "armor"}},
+    )
+
+    denied = ruleset_for("dnd5e").validate(
+        ActionIntent(
+            action_type="equip_item",
+            actor=actor,
+            target=armor,
+            parameters={"slot": "main_hand"},
+        )
+    )
+    allowed = ruleset_for("dnd5e").validate(
+        ActionIntent(action_type="equip_item", actor=actor, target=armor)
+    )
+
+    assert denied.reason_code == "item_not_equippable"
+    assert allowed.status == "allowed"
+    assert allowed.public_payload["slot"] == "armor"
+
+
+def test_long_rest_and_wait_advance_deterministic_world_time():
+    actor = entity("hero", kind="character")
+
+    rest = ruleset_for("dnd5e").validate(
+        ActionIntent(action_type="rest", actor=actor, parameters={"kind": "long"})
+    )
+    wait = ruleset_for("dnd5e").validate(
+        ActionIntent(action_type="wait", actor=actor, parameters={"minutes": 90})
+    )
+
+    assert rest.status == "allowed"
+    assert rest.tick_cost == 480
+    assert rest.mutations[0]["op"] == "restore_long_rest"
+    assert wait.tick_cost == 90
+
+
+def test_resource_mutations_keep_hp_currency_and_consumables_bounded():
+    actor = SimpleNamespace(
+        id="hero",
+        state={
+            "dnd5e": {
+                "hp": {"current": 8, "max": 10},
+                "currencies": {"gp": 3},
+                "spell_slots": {"1": {"current": 0, "max": 2}},
+            }
+        },
+        active=True,
+    )
+    potion = SimpleNamespace(
+        id="potion",
+        state={"inventory": {"quantity": 1, "consumable": True}},
+        active=True,
+    )
+    entities = {"hero": actor, "potion": potion}
+
+    _apply_mutation({"op": "adjust_hp", "entity_id": "hero", "amount": 99}, entities)
+    _apply_mutation(
+        {"op": "adjust_currency", "entity_id": "hero", "currency": "gp", "amount": -2},
+        entities,
+    )
+    _apply_mutation({"op": "adjust_item_quantity", "entity_id": "potion", "amount": -1}, entities)
+    _apply_mutation({"op": "restore_long_rest", "entity_id": "hero"}, entities)
+
+    assert actor.state["dnd5e"]["hp"]["current"] == 10
+    assert actor.state["dnd5e"]["currencies"]["gp"] == 1
+    assert actor.state["dnd5e"]["spell_slots"]["1"]["current"] == 2
+    assert potion.state["inventory"]["quantity"] == 0
+    assert potion.active is False
+
+
+def test_damage_dice_parser_is_bounded_and_never_evaluates_input():
+    damage, rolls, modifier = _roll_damage("2d6+3")
+
+    assert len(rolls) == 2
+    assert modifier == 3
+    assert 5 <= damage <= 15
+    with pytest.raises(WorldConflictError):
+        _roll_damage("__import__('os').system('echo unsafe')")
 
 
 def test_dnd5e_definition_drives_sheet_and_inventory_without_ui_hardcoding():

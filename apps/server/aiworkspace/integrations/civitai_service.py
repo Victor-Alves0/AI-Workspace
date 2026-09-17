@@ -96,35 +96,53 @@ def _site_get(token: str, path: str, params: dict[str, Any] | None = None) -> di
     return data if isinstance(data, dict) else {"items": data}
 
 
-def _compact_version(version: dict[str, Any]) -> dict[str, Any]:
-    return {
+_CATALOG_RESULT_LIMIT = 4
+_CATALOG_VERSION_LIMIT = 2
+_CATALOG_TEXT_LIMIT = 160
+_GALLERY_RESULT_LIMIT = 4
+_DETAIL_DESCRIPTION_LIMIT = 1_200
+
+
+def _catalog_text(value: Any, limit: int = _CATALOG_TEXT_LIMIT) -> str:
+    """Campo público do catálogo: nomes úteis, nunca um prompt/metadata gigante."""
+    return " ".join(str(value or "").split())[:limit]
+
+
+def _compact_version(
+    version: dict[str, Any], *, include_triggers: bool = False
+) -> dict[str, Any]:
+    out = {
         "id": version.get("id"),
-        "name": version.get("name"),
-        "base_model": version.get("baseModel"),
+        "name": _catalog_text(version.get("name")),
+        "base_model": _catalog_text(version.get("baseModel")),
         "air": version.get("air"),
         "can_generate": version.get("canGenerate", version.get("supportsGeneration")),
-        "created_at": version.get("createdAt"),
-        "download_url": version.get("downloadUrl"),
-        "trained_words": (version.get("trainedWords") or [])[:20],
     }
+    # Gatilhos podem ajudar ao consultar UMA versão específica, mas devolvê-los em
+    # toda busca de catálogo multiplica o contexto por dezenas de milhares de tokens.
+    if include_triggers:
+        out["trained_words"] = [
+            _catalog_text(word, 120) for word in (version.get("trainedWords") or [])[:6]
+        ]
+    return out
 
 
 def _compact_model(model: dict[str, Any], *, include_description: bool = False) -> dict[str, Any]:
     creator = model.get("creator") or {}
     out: dict[str, Any] = {
         "id": model.get("id"),
-        "name": model.get("name"),
-        "type": model.get("type"),
-        "creator": creator.get("username"),
+        "name": _catalog_text(model.get("name")),
+        "type": _catalog_text(model.get("type")),
+        "creator": _catalog_text(creator.get("username")),
         "nsfw": model.get("nsfw"),
-        "tags": (model.get("tags") or [])[:20],
-        "stats": model.get("stats") or {},
-        "versions": [_compact_version(v) for v in (model.get("modelVersions") or [])[:12]],
-        "url": f"https://civitai.com/models/{model.get('id')}" if model.get("id") else None,
+        "versions": [
+            _compact_version(v, include_triggers=include_description)
+            for v in (model.get("modelVersions") or [])[:_CATALOG_VERSION_LIMIT]
+        ],
     }
     if include_description:
         description = str(model.get("description") or "")
-        out["description"] = description[:4000]
+        out["description"] = description[:_DETAIL_DESCRIPTION_LIMIT]
     return out
 
 
@@ -135,7 +153,10 @@ def search_models(
     cursor: str = "",
 ) -> dict[str, Any]:
     params: dict[str, Any] = {
-        "limit": max(1, min(int(limit), 50)),
+        # Esta é uma ferramenta para o agente escolher um modelo, não uma página de
+        # catálogo. Quatro opções compactas dão decisão suficiente e evitam reencaminhar
+        # uma avalanche de versões/gatilhos a cada iteração do loop.
+        "limit": max(1, min(int(limit), _CATALOG_RESULT_LIMIT)),
         "sort": sort or "Highest Rated",
         "period": period or "AllTime",
         "nsfw": "true" if nsfw else "false",
@@ -157,8 +178,11 @@ def search_models(
     if data.get("error"):
         return data
     return {
-        "items": [_compact_model(item) for item in (data.get("items") or [])],
-        "metadata": data.get("metadata") or {},
+        "items": [
+            _compact_model(item)
+            for item in (data.get("items") or [])[:_CATALOG_RESULT_LIMIT]
+        ],
+        "metadata": {"next_cursor": (data.get("metadata") or {}).get("nextCursor")},
     }
 
 
@@ -171,23 +195,11 @@ def get_model_version(token: str, version_id: int) -> dict[str, Any]:
     data = _site_get(token, f"model-versions/{int(version_id)}")
     if data.get("error"):
         return data
-    out = _compact_version(data)
-    out.update({
-        "description": str(data.get("description") or "")[:3000],
-        "files": [
-            {
-                "id": f.get("id"), "name": f.get("name"), "size_kb": f.get("sizeKB"),
-                "type": f.get("type"), "format": ((f.get("metadata") or {}).get("format")),
-                "download_url": f.get("downloadUrl"),
-            }
-            for f in (data.get("files") or [])[:20]
-        ],
-        "images": [
-            {"url": i.get("url"), "width": i.get("width"), "height": i.get("height"),
-             "nsfw_level": i.get("nsfwLevel")}
-            for i in (data.get("images") or [])[:8]
-        ],
-    })
+    out = _compact_version(data, include_triggers=True)
+    # `version` existe para obter o AIR e os gatilhos de uma versão escolhida.
+    # Arquivos, downloads e previews longos não entram no workflow de geração e
+    # faziam uma consulta simples carregar milhares de caracteres no próximo turno.
+    out["description"] = _catalog_text(data.get("description"), _DETAIL_DESCRIPTION_LIMIT)
     return out
 
 
@@ -197,7 +209,10 @@ def search_images(
     limit: int = 10, page: int = 1, nsfw: str = "None",
 ) -> dict[str, Any]:
     params: dict[str, Any] = {
-        "limit": max(1, min(int(limit), 50)), "page": max(1, int(page)),
+        # A galeria é referência visual para o agente, não um feed a ser copiado
+        # para o contexto. Quatro cartões com metadados mínimos bastam para escolher
+        # uma referência sem reencaminhar URLs, prompts e estatísticas enormes.
+        "limit": max(1, min(int(limit), _GALLERY_RESULT_LIMIT)), "page": max(1, int(page)),
         "sort": sort or "Most Reactions", "period": period or "AllTime",
         "nsfw": nsfw or "None",
     }
@@ -213,19 +228,19 @@ def search_images(
     return {
         "items": [
             {
-                "id": item.get("id"), "url": item.get("url"),
+                "id": item.get("id"),
                 "width": item.get("width"), "height": item.get("height"),
-                "nsfw_level": item.get("nsfwLevel"), "username": item.get("username"),
-                "created_at": item.get("createdAt"), "stats": item.get("stats") or {},
+                "nsfw_level": item.get("nsfwLevel"),
+                "username": _catalog_text(item.get("username")),
                 "generation": {
-                    key: (item.get("meta") or {}).get(key)
-                    for key in ("prompt", "negativePrompt", "seed", "Model", "Sampler", "steps", "cfgScale")
+                    key: _catalog_text((item.get("meta") or {}).get(key), 240)
+                    for key in ("Model", "Sampler", "steps", "cfgScale", "seed")
                     if (item.get("meta") or {}).get(key) is not None
                 },
             }
-            for item in (data.get("items") or [])
+            for item in (data.get("items") or [])[:_GALLERY_RESULT_LIMIT]
         ],
-        "metadata": data.get("metadata") or {},
+        "metadata": {"next_cursor": (data.get("metadata") or {}).get("nextCursor")},
     }
 
 

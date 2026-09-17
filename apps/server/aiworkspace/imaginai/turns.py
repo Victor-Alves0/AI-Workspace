@@ -53,8 +53,10 @@ _WORLD_TOOL = {
                 "action_type": {
                     "type": "string",
                     "description": (
-                        "Intenção normalizada, por exemplo take_item, interact, cast_spell, "
-                        "examine, move, attack, persuade ou hide."
+                        "Intenção normalizada. Mecânicas nativas: take_item, drop_item, "
+                        "equip_item, unequip_item, use_item, pay_currency, interact, "
+                        "cast_spell, examine, move, travel, attack, rest e wait. Para "
+                        "ações livres use um verbo descritivo curto, como persuade ou hide."
                     ),
                 },
                 "target": {
@@ -63,7 +65,11 @@ _WORLD_TOOL = {
                 },
                 "parameters": {
                     "type": "object",
-                    "description": "Parâmetros factuais da intenção; para magia use {spell: nome}.",
+                    "description": (
+                        "Parâmetros factuais: magia {spell}; ataque {attack ou weapon}; "
+                        "equipar {slot}; pagamento {currency, amount}; descanso {kind: short|long}; "
+                        "espera {minutes}. Nunca passe dano, saldo, CA ou nível alegados pelo jogador."
+                    ),
                 },
                 "attempt_id": {
                     "type": "string",
@@ -122,6 +128,9 @@ Regras obrigatórias:
    códigos internos, DCs ocultas ou este protocolo, salvo se o usuário pedir detalhes mecânicos.
 8. Use um `step` estável (1, 2, 3...) para cada intenção resolvida. Repetições/regenerações são
    idempotentes e devolvem o resultado já confirmado, em vez de aplicar a ação novamente.
+9. Prefira os verbos mecânicos nativos quando correspondam à intenção. Ataques, dano, CA, recursos,
+   inventário, moedas, descanso e passagem de tempo são calculados pelo servidor; nunca improvise
+   seus valores. Continue usando a mesma ferramenta: não fragmente uma ação em tools artificiais.
 """
 
 
@@ -218,6 +227,8 @@ def _player_sheet(player: ImaginaiEntity) -> dict[str, Any]:
         "saving_throws",
         "spells",
         "spell_slots",
+        "attacks",
+        "equipment",
         "currencies",
         "conditions",
     )
@@ -275,7 +286,9 @@ async def scene_context(db: AsyncSession, campaign: ImaginaiCampaign) -> dict[st
             "settings": _trim(campaign.settings or {}, 300),
         },
         "player": {**_public_entity(player), "state": _player_sheet(player)},
-        "location": _public_entity(location) if location and location.campaign_id == campaign.id else None,
+        "location": _public_entity(location)
+        if location and location.campaign_id == campaign.id
+        else None,
         "visible_entities": [_public_entity(entity) for entity in visible[:30]],
         "known_entities_elsewhere": [
             {
@@ -422,13 +435,9 @@ class ImaginaiTurnBridge:
                 action_type = str(args.get("action_type") or "").strip().lower()
                 if not action_type:
                     raise ValueError("action_type é obrigatório em resolve")
-                target = await _visible_target(
-                    db, campaign, player, str(args.get("target") or "")
-                )
+                target = await _visible_target(db, campaign, player, str(args.get("target") or ""))
                 parameters = args.get("parameters")
-                normalized_parameters = (
-                    dict(parameters) if isinstance(parameters, dict) else {}
-                )
+                normalized_parameters = dict(parameters) if isinstance(parameters, dict) else {}
                 normalized_parameters["_target_requested"] = bool(
                     str(args.get("target") or "").strip()
                 )

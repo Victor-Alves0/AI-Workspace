@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import math
+import re
 import secrets
 import uuid
 from typing import Any
@@ -445,8 +446,7 @@ async def list_journal(
     if term:
         pattern = f"%{term[:100]}%"
         query = query.where(
-            ImaginaiJournalEntry.title.ilike(pattern)
-            | ImaginaiJournalEntry.content.ilike(pattern)
+            ImaginaiJournalEntry.title.ilike(pattern) | ImaginaiJournalEntry.content.ilike(pattern)
         )
     query = query.order_by(
         ImaginaiJournalEntry.pinned.desc(),
@@ -583,9 +583,7 @@ async def inventory_snapshot(
     campaign_inventory = campaign_inventory if isinstance(campaign_inventory, dict) else {}
     weight_enabled = bool(
         inventory_rules["weight"]["supported"]
-        and campaign_inventory.get(
-            "weight_enabled", inventory_rules["weight"]["default_enabled"]
-        )
+        and campaign_inventory.get("weight_enabled", inventory_rules["weight"]["default_enabled"])
     )
     currency_weight_enabled = bool(
         weight_enabled
@@ -752,9 +750,16 @@ def _set_dnd_state(entity: ImaginaiEntity, dnd_state: dict[str, Any]) -> None:
     entity.state = state
 
 
-def _apply_mutation(
-    mutation: dict[str, Any], entities: dict[str, ImaginaiEntity]
-) -> None:
+def _set_inventory_state(entity: ImaginaiEntity, inventory: dict[str, Any]) -> None:
+    state = copy.deepcopy(entity.state or {})
+    if isinstance(state.get("inventory"), dict):
+        state["inventory"] = inventory
+    else:
+        state = inventory
+    entity.state = state
+
+
+def _apply_mutation(mutation: dict[str, Any], entities: dict[str, ImaginaiEntity]) -> None:
     entity = entities.get(str(mutation.get("entity_id", "")))
     if entity is None:
         raise WorldConflictError("Mutação referencia uma entidade fora da ação")
@@ -782,7 +787,152 @@ def _apply_mutation(
         dnd["spell_slots"] = slots
         _set_dnd_state(entity, dnd)
         return
+    if op == "set_item_equipped":
+        outer = copy.deepcopy(entity.state or {})
+        inventory = copy.deepcopy(outer.get("inventory", outer))
+        inventory["equipped"] = bool(mutation.get("equipped"))
+        if mutation.get("slot"):
+            inventory["slot"] = str(mutation["slot"])
+        _set_inventory_state(entity, inventory)
+        return
+    if op == "adjust_item_quantity":
+        outer = copy.deepcopy(entity.state or {})
+        inventory = copy.deepcopy(outer.get("inventory", outer))
+        current = max(0, int(inventory.get("quantity", 1) or 0))
+        updated = max(0, current + int(mutation.get("amount", 0) or 0))
+        inventory["quantity"] = updated
+        _set_inventory_state(entity, inventory)
+        if updated == 0:
+            entity.active = False
+        return
+    if op == "adjust_currency":
+        outer = copy.deepcopy(entity.state or {})
+        dnd = copy.deepcopy(outer.get("dnd5e", outer))
+        currencies = copy.deepcopy(dnd.get("currencies", {}))
+        currency = str(mutation.get("currency") or "")
+        if currency not in {"cp", "sp", "ep", "gp", "pp"}:
+            raise WorldConflictError("Moeda inválida na mutação")
+        current = int(currencies.get(currency, 0) or 0)
+        updated = current + int(mutation.get("amount", 0) or 0)
+        if updated < 0:
+            raise WorldConflictError("O saldo mudou antes da ação ser confirmada")
+        currencies[currency] = updated
+        dnd["currencies"] = currencies
+        _set_dnd_state(entity, dnd)
+        return
+    if op == "adjust_hp":
+        outer = copy.deepcopy(entity.state or {})
+        dnd = copy.deepcopy(outer.get("dnd5e", outer))
+        hp = copy.deepcopy(dnd.get("hp", {}))
+        if not isinstance(hp, dict) or "max" not in hp:
+            raise WorldConflictError("A entidade não possui pontos de vida autoritativos")
+        maximum = max(0, int(hp.get("max", 0) or 0))
+        current = max(0, min(int(hp.get("current", maximum) or 0), maximum))
+        hp["current"] = max(
+            0,
+            min(maximum, current + int(mutation.get("amount", 0) or 0)),
+        )
+        dnd["hp"] = hp
+        _set_dnd_state(entity, dnd)
+        return
+    if op == "restore_long_rest":
+        outer = copy.deepcopy(entity.state or {})
+        dnd = copy.deepcopy(outer.get("dnd5e", outer))
+        hp = copy.deepcopy(dnd.get("hp", {}))
+        if isinstance(hp, dict) and "max" in hp:
+            hp["current"] = max(0, int(hp.get("max", 0) or 0))
+            dnd["hp"] = hp
+        slots = copy.deepcopy(dnd.get("spell_slots", {}))
+        if isinstance(slots, dict):
+            for level, raw_slot in list(slots.items()):
+                if isinstance(raw_slot, dict) and "max" in raw_slot:
+                    slot = copy.deepcopy(raw_slot)
+                    slot["current"] = max(0, int(slot.get("max", 0) or 0))
+                    slots[level] = slot
+            dnd["spell_slots"] = slots
+        _set_dnd_state(entity, dnd)
+        return
     raise WorldConflictError(f"Mutação não suportada: {op}")
+
+
+async def _mutation_entities(
+    db: AsyncSession,
+    campaign: ImaginaiCampaign,
+    actor: ImaginaiEntity,
+    target: ImaginaiEntity | None,
+    mutations: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+) -> dict[str, ImaginaiEntity]:
+    entities = {str(actor.id): actor}
+    if target is not None:
+        entities[str(target.id)] = target
+    for mutation in mutations:
+        raw_id = str(mutation.get("entity_id") or "")
+        if not raw_id or raw_id in entities:
+            continue
+        try:
+            entity_id = uuid.UUID(raw_id)
+        except ValueError as exc:
+            raise WorldConflictError("Mutação contém uma entidade inválida") from exc
+        entity = await _owned_entity(db, campaign, entity_id, lock=True)
+        entities[str(entity.id)] = entity
+    return entities
+
+
+async def _unequip_slot_conflicts(
+    db: AsyncSession,
+    campaign: ImaginaiCampaign,
+    owner: ImaginaiEntity,
+    equipped_item: ImaginaiEntity,
+    slot: str,
+) -> None:
+    """Mantém um único item por espaço, sob o mesmo lock da campanha."""
+    items = list(
+        await db.scalars(
+            select(ImaginaiEntity)
+            .where(
+                ImaginaiEntity.campaign_id == campaign.id,
+                ImaginaiEntity.user_id == campaign.user_id,
+                ImaginaiEntity.kind == "item",
+                ImaginaiEntity.owner_entity_id == owner.id,
+                ImaginaiEntity.active.is_(True),
+                ImaginaiEntity.id != equipped_item.id,
+            )
+            .with_for_update()
+        )
+    )
+    for item in items:
+        outer = item.state if isinstance(item.state, dict) else {}
+        inventory = outer.get("inventory", outer)
+        if not isinstance(inventory, dict):
+            continue
+        if inventory.get("equipped") and str(inventory.get("slot") or "") == slot:
+            _apply_mutation(
+                {"op": "set_item_equipped", "entity_id": str(item.id), "equipped": False},
+                {str(item.id): item},
+            )
+
+
+_DAMAGE_DICE_RE = re.compile(
+    r"^\s*(?:(\d{1,2})d(\d{1,3})|(\d+))\s*([+-]\s*\d+)?\s*$", re.IGNORECASE
+)
+
+
+def _roll_damage(expression: str, *, critical: bool = False) -> tuple[int, list[int], int]:
+    """Rola uma expressão pequena e segura (ex.: 1d8+3) sem avaliar código."""
+    match = _DAMAGE_DICE_RE.fullmatch(expression or "")
+    if match is None:
+        raise WorldConflictError("O dano do ataque não possui um formato válido")
+    count_raw, sides_raw, flat_raw, modifier_raw = match.groups()
+    modifier = int((modifier_raw or "0").replace(" ", ""))
+    if flat_raw is not None:
+        flat = max(0, min(int(flat_raw), 1000))
+        return max(0, flat + modifier), [], modifier
+    count = max(1, min(int(count_raw or 1), 20))
+    sides = max(2, min(int(sides_raw or 6), 100))
+    if critical:
+        count *= 2
+    rolls = [secrets.randbelow(sides) + 1 for _ in range(count)]
+    return max(0, sum(rolls) + modifier), rolls, modifier
 
 
 async def resolve_action(
@@ -837,13 +987,15 @@ async def resolve_action(
 
     event = None
     if decision.status == "allowed":
-        entities = {str(actor.id): actor}
-        if target is not None:
-            entities[str(target.id)] = target
+        entities = await _mutation_entities(db, campaign, actor, target, decision.mutations)
+        if body.action_type == "equip_item" and target is not None:
+            slot = str(decision.public_payload.get("slot") or "")
+            if slot:
+                await _unequip_slot_conflicts(db, campaign, actor, target, slot)
         for mutation in decision.mutations:
             _apply_mutation(mutation, entities)
         if decision.consumes_turn:
-            campaign.world_tick += 1
+            campaign.world_tick += max(1, int(decision.tick_cost or 1))
         event = ImaginaiEvent(
             campaign_id=campaign.id,
             user_id=user_id,
@@ -916,9 +1068,7 @@ def _dnd_check_modifier(
     definition = system_definition("dnd5e")
     attributes = definition["sheet"]["attributes"]
     skill_ability = {
-        skill_key: attribute["key"]
-        for attribute in attributes
-        for skill_key in attribute["skills"]
+        skill_key: attribute["key"] for attribute in attributes for skill_key in attribute["skills"]
     }
     if skill:
         if skill not in skill_ability:
@@ -946,9 +1096,7 @@ def _dnd_check_modifier(
         rank = 1 if state is True else 0
         if isinstance(state, dict):
             try:
-                rank = int(
-                    state.get("proficiency", 1 if state.get("proficient") else 0) or 0
-                )
+                rank = int(state.get("proficiency", 1 if state.get("proficient") else 0) or 0)
             except (TypeError, ValueError):
                 rank = 0
             explicit = state.get("value")
@@ -982,16 +1130,27 @@ async def resolve_check(
     if attempt.status not in {"requires_check", "needs_adjudication"}:
         raise WorldConflictError("Esta ação não está aguardando um teste")
     actor = await _owned_entity(db, campaign, attempt.actor_id, lock=True)
-    modifier, resolved_ability = _dnd_check_modifier(actor, ability, skill)
-    difficulty = max(5, min(int(dc), 30))
+    decision = attempt.decision or {}
+    public = decision.get("public_payload", {})
+    public = public if isinstance(public, dict) else {}
+    roll_kind = str(public.get("roll_kind") or "")
+    is_attack = attempt.action_type == "attack" or roll_kind == "spell_attack"
+    if is_attack:
+        modifier = int(public.get("attack_modifier", 0) or 0)
+        resolved_ability = "attack"
+        difficulty = max(1, int(public.get("target_ac", 10) or 10))
+    else:
+        modifier, resolved_ability = _dnd_check_modifier(actor, ability, skill)
+        difficulty = max(5, min(int(dc), 30))
     mode = advantage if advantage in {"normal", "advantage", "disadvantage"} else "normal"
     rolls = [secrets.randbelow(20) + 1]
     if mode != "normal":
         rolls.append(secrets.randbelow(20) + 1)
     die = max(rolls) if mode == "advantage" else min(rolls) if mode == "disadvantage" else rolls[0]
     total = die + modifier
-    success = total >= difficulty
-    campaign.world_tick += 1
+    success = die == 20 or (die != 1 and total >= difficulty)
+    tick_cost = max(1, int(decision.get("tick_cost", 1) or 1))
+    campaign.world_tick += tick_cost
     payload = {
         "attempt_id": str(attempt.id),
         "action_type": attempt.action_type,
@@ -1005,14 +1164,64 @@ async def resolve_check(
         "success": success,
         "result": "success" if success else "failure",
     }
+    event_type = decision.get("event_type") or "ability_check_resolved"
+    target = None
+    if attempt.target_id:
+        target = await _owned_entity(db, campaign, attempt.target_id, lock=True)
+    mutations = decision.get("mutations", [])
+    mutations = mutations if isinstance(mutations, list) else []
+    always_mutations = [
+        mutation
+        for mutation in mutations
+        if isinstance(mutation, dict) and mutation.get("when") == "always"
+    ]
+    success_mutations = [
+        mutation
+        for mutation in mutations
+        if isinstance(mutation, dict) and mutation.get("when", "success") == "success"
+    ]
+    applicable_mutations = always_mutations + (success_mutations if success else [])
+    if applicable_mutations:
+        entities = await _mutation_entities(db, campaign, actor, target, mutations)
+        for mutation in applicable_mutations:
+            _apply_mutation(mutation, entities)
+    if is_attack:
+        critical = die == 20
+        damage = 0
+        damage_rolls: list[int] = []
+        damage_modifier = 0
+        if success:
+            damage, damage_rolls, damage_modifier = _roll_damage(
+                str(public.get("damage") or "1"), critical=critical
+            )
+            if target is None:
+                raise WorldConflictError("O alvo do ataque não está mais disponível")
+            _apply_mutation(
+                {"op": "adjust_hp", "entity_id": str(target.id), "amount": -damage},
+                {str(target.id): target},
+            )
+        payload.update(
+            {
+                "attack_key": public.get("attack_key"),
+                "attack_name": public.get("attack_name"),
+                "spell_key": public.get("spell_key"),
+                "spell_name": public.get("spell_name"),
+                "target_ac": difficulty,
+                "critical": critical,
+                "damage": damage,
+                "damage_rolls": damage_rolls,
+                "damage_modifier": damage_modifier,
+                "damage_type": public.get("damage_type"),
+            }
+        )
     event = ImaginaiEvent(
         campaign_id=campaign.id,
         user_id=user_id,
         sequence=campaign.next_event_sequence,
         world_tick=campaign.world_tick,
-        event_type="ability_check_resolved",
+        event_type=event_type,
         actor_id=actor.id,
-        target_id=attempt.target_id,
+        target_id=target.id if target else None,
         location_id=actor.location_id,
         payload=payload,
         visibility="public",
@@ -1053,7 +1262,7 @@ async def adjudicate_attempt(
     result = outcome if outcome in {"success", "partial", "failure"} else "partial"
     decision = attempt.decision or {}
     if decision.get("consumes_turn"):
-        campaign.world_tick += 1
+        campaign.world_tick += max(1, int(decision.get("tick_cost", 1) or 1))
     payload = {
         "attempt_id": str(attempt.id),
         "action_type": attempt.action_type,
@@ -1061,6 +1270,26 @@ async def adjudicate_attempt(
         "summary": " ".join(summary.split())[:2000],
     }
     actor = await _owned_entity(db, campaign, attempt.actor_id, lock=True)
+    target = None
+    if attempt.target_id:
+        target = await _owned_entity(db, campaign, attempt.target_id, lock=True)
+    mutations = decision.get("mutations", [])
+    mutations = mutations if isinstance(mutations, list) else []
+    always_mutations = [
+        mutation
+        for mutation in mutations
+        if isinstance(mutation, dict) and mutation.get("when") == "always"
+    ]
+    success_mutations = [
+        mutation
+        for mutation in mutations
+        if isinstance(mutation, dict) and mutation.get("when", "success") == "success"
+    ]
+    applicable_mutations = always_mutations + (success_mutations if result == "success" else [])
+    if applicable_mutations:
+        entities = await _mutation_entities(db, campaign, actor, target, mutations)
+        for mutation in applicable_mutations:
+            _apply_mutation(mutation, entities)
     event = ImaginaiEvent(
         campaign_id=campaign.id,
         user_id=user_id,
@@ -1068,7 +1297,7 @@ async def adjudicate_attempt(
         world_tick=campaign.world_tick,
         event_type=decision.get("event_type") or "narrative_outcome",
         actor_id=actor.id,
-        target_id=attempt.target_id,
+        target_id=target.id if target else None,
         location_id=actor.location_id,
         payload=payload,
         visibility="public",
