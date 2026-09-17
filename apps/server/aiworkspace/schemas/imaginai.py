@@ -22,6 +22,35 @@ class CampaignUpdate(BaseModel):
     difficulty: Literal["story", "balanced", "challenging"] | None = None
 
 
+class AbilityScoresUpdate(BaseModel):
+    strength: int | None = Field(default=None, ge=1, le=30)
+    dexterity: int | None = Field(default=None, ge=1, le=30)
+    constitution: int | None = Field(default=None, ge=1, le=30)
+    intelligence: int | None = Field(default=None, ge=1, le=30)
+    wisdom: int | None = Field(default=None, ge=1, le=30)
+    charisma: int | None = Field(default=None, ge=1, le=30)
+
+
+class CharacterUpdate(BaseModel):
+    """Campos iniciais da ficha D&D 5e editáveis pelo jogador.
+
+    Recursos de jogo (itens, moedas, espaços de magia e vida durante um turno)
+    seguem sendo alterados exclusivamente pelo World Kernel.
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    character_class: str | None = Field(default=None, min_length=1, max_length=80)
+    level: int | None = Field(default=None, ge=1, le=20)
+    ancestry: str | None = Field(default=None, max_length=120)
+    background: str | None = Field(default=None, max_length=120)
+    alignment: str | None = Field(default=None, max_length=80)
+    hp_current: int | None = Field(default=None, ge=0, le=9_999)
+    hp_max: int | None = Field(default=None, ge=1, le=9_999)
+    armor_class: int | None = Field(default=None, ge=0, le=99)
+    speed: int | None = Field(default=None, ge=0, le=999)
+    attributes: AbilityScoresUpdate | None = None
+
+
 class EntityCreate(BaseModel):
     kind: str = Field(pattern=r"^[a-z][a-z0-9_-]{1,31}$")
     key: str = Field(pattern=r"^[a-zA-Z0-9_.:-]{1,120}$")

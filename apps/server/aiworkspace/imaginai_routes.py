@@ -17,6 +17,7 @@ from .schemas.imaginai import (
     ActionRequest,
     CampaignCreate,
     CampaignUpdate,
+    CharacterUpdate,
     EntityCreate,
     FactCreate,
     JournalCreate,
@@ -97,6 +98,22 @@ async def update_campaign(
         campaign = await service.owned_campaign(db, user.id, campaign_id)
         return await service.update_campaign(db, campaign, body)
     except Exception as exc:  # noqa: BLE001
+        _raise_domain_error(exc)
+
+
+@router.patch("/campaigns/{campaign_id}/character")
+async def update_character(
+    campaign_id: uuid.UUID,
+    body: CharacterUpdate,
+    user: ApprovedUser,
+    db: DbSession,
+):
+    """Edita a base da ficha; ações durante a aventura continuam no kernel."""
+    try:
+        campaign = await service.owned_campaign(db, user.id, campaign_id, lock=True)
+        return await service.update_player_character(db, campaign, body)
+    except Exception as exc:  # noqa: BLE001
+        await db.rollback()
         _raise_domain_error(exc)
 
 

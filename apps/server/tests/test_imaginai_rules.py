@@ -12,9 +12,14 @@ from aiworkspace.chat.orchestrator import (
     _shape_tool_result,
 )
 from aiworkspace.imaginai.rules import ActionIntent, EntitySnapshot, ruleset_for
-from aiworkspace.imaginai.service import WorldConflictError, _apply_mutation, _roll_damage
+from aiworkspace.imaginai.service import (
+    WorldConflictError,
+    _apply_mutation,
+    _merge_character_setup,
+    _roll_damage,
+)
 from aiworkspace.imaginai.systems import system_definition
-from aiworkspace.schemas.imaginai import JournalCreate
+from aiworkspace.schemas.imaginai import CharacterUpdate, JournalCreate
 
 
 def entity(
@@ -525,6 +530,33 @@ def test_journal_tags_are_normalized_and_deduplicated():
     entry = JournalCreate(tags=["  missão principal ", "MISSÃO PRINCIPAL", "NPCs"])
 
     assert entry.tags == ["missão principal", "NPCs"]
+
+
+def test_character_setup_derives_dnd5e_values_and_clamps_hp():
+    state = _merge_character_setup(
+        {
+            "dnd5e": {
+                "skills": {"perception": {"proficient": True}},
+                "spells": [{"key": "light", "name": "Luz", "level": 0}],
+            }
+        },
+        CharacterUpdate(
+            character_class="Mago",
+            level=5,
+            hp_current=999,
+            hp_max=28,
+            attributes={"dexterity": 16, "wisdom": 14},
+        ),
+    )
+    dnd = state["dnd5e"]
+
+    assert dnd["class"] == "Mago"
+    assert dnd["level"] == 5
+    assert dnd["hp"] == {"current": 28, "max": 28}
+    assert dnd["proficiency_bonus"] == 3
+    assert dnd["initiative"] == 3
+    assert dnd["passive_perception"] == 15
+    assert dnd["spells"] == [{"key": "light", "name": "Luz", "level": 0}]
 
 
 def test_private_npc_context_never_reaches_ui_event():

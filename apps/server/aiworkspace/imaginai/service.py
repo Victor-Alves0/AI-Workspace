@@ -28,6 +28,7 @@ from ..schemas.imaginai import (
     ActionRequest,
     CampaignCreate,
     CampaignUpdate,
+    CharacterUpdate,
     EntityCreate,
     FactCreate,
     JournalCreate,
@@ -279,6 +280,103 @@ async def update_campaign(
     if body.difficulty is not None:
         settings["difficulty"] = body.difficulty
     campaign.settings = settings
+    await db.commit()
+    await db.refresh(campaign)
+    return await public_snapshot(db, campaign)
+
+
+_ABILITY_KEYS = (
+    "strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma",
+)
+
+
+def _score(value: Any, fallback: int = 10) -> int:
+    if isinstance(value, dict):
+        value = value.get("score", fallback)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _proficiency_bonus(level: int) -> int:
+    """Progressão oficial 5e: +2 nos níveis 1–4 até +6 nos 17–20."""
+    return 2 + max(0, min(19, level - 1)) // 4
+
+
+def _merge_character_setup(state: dict[str, Any], body: CharacterUpdate) -> dict[str, Any]:
+    """Atualiza somente o setup da ficha e deriva valores que não são livres."""
+    result = copy.deepcopy(state if isinstance(state, dict) else {})
+    dnd = result.get("dnd5e")
+    dnd = copy.deepcopy(dnd) if isinstance(dnd, dict) else {}
+
+    if body.character_class is not None:
+        dnd["class"] = body.character_class.strip()
+    for key in ("ancestry", "background", "alignment"):
+        value = getattr(body, key)
+        if value is not None:
+            dnd[key] = value.strip()
+    if body.level is not None:
+        dnd["level"] = body.level
+    level = max(1, min(20, _score(dnd.get("level"), 1)))
+    dnd["level"] = level
+
+    attributes = dnd.get("attributes")
+    attributes = copy.deepcopy(attributes) if isinstance(attributes, dict) else {}
+    if body.attributes is not None:
+        for key, value in body.attributes.model_dump(exclude_none=True).items():
+            attributes[key] = value
+    for key in _ABILITY_KEYS:
+        attributes[key] = max(1, min(30, _score(attributes.get(key), 10)))
+    dnd["attributes"] = attributes
+
+    hp = dnd.get("hp")
+    hp = copy.deepcopy(hp) if isinstance(hp, dict) else {}
+    if body.hp_max is not None:
+        hp["max"] = body.hp_max
+    maximum_hp = max(1, _score(hp.get("max"), 10))
+    if body.hp_current is not None:
+        hp["current"] = body.hp_current
+    hp["max"] = maximum_hp
+    hp["current"] = max(0, min(maximum_hp, _score(hp.get("current"), maximum_hp)))
+    dnd["hp"] = hp
+
+    if body.armor_class is not None:
+        dnd["armor_class"] = body.armor_class
+    if body.speed is not None:
+        dnd["speed"] = body.speed
+    dnd["proficiency_bonus"] = _proficiency_bonus(level)
+    dexterity_modifier = (_score(attributes["dexterity"]) - 10) // 2
+    wisdom_modifier = (_score(attributes["wisdom"]) - 10) // 2
+    skills = dnd.get("skills") if isinstance(dnd.get("skills"), dict) else {}
+    perception = skills.get("perception", 0)
+    perception_rank = (
+        _score(perception.get("proficiency"), 1 if perception.get("proficient") else 0)
+        if isinstance(perception, dict) else _score(perception, 0)
+    )
+    dnd["initiative"] = dexterity_modifier
+    dnd["passive_perception"] = 10 + wisdom_modifier + dnd["proficiency_bonus"] * min(2, max(0, perception_rank))
+    result["dnd5e"] = dnd
+    return result
+
+
+async def update_player_character(
+    db: AsyncSession,
+    campaign: ImaginaiCampaign,
+    body: CharacterUpdate,
+) -> dict[str, Any]:
+    character = await db.scalar(
+        select(ImaginaiEntity).where(
+            ImaginaiEntity.campaign_id == campaign.id,
+            ImaginaiEntity.kind == "character",
+            ImaginaiEntity.key == "player",
+        ).with_for_update()
+    )
+    if character is None:
+        raise WorldNotFoundError("Personagem não encontrado")
+    if body.name is not None:
+        character.name = body.name.strip()
+    character.state = _merge_character_setup(character.state or {}, body)
     await db.commit()
     await db.refresh(campaign)
     return await public_snapshot(db, campaign)
