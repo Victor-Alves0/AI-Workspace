@@ -156,6 +156,7 @@ class CivitaiConfig:
     """Token da API Civitai. A mesma credencial autentica a Site API e a
     Orchestration API; buscas públicas funcionam mesmo quando ``conn`` está vazio."""
     conn: dict = field(default_factory=dict)
+    require_confirm: bool = False
 
 
 @dataclass
@@ -350,7 +351,7 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
     # Civitai: UMA ferramenta reúne descoberta do catálogo e geração, diferenciadas
     # pelo parâmetro action (não fragmentar em civitai.search/civitai.generate/etc.).
     {"path": "civitai.media.use", "name": "Civitai (Modelos/Mídia)", "description": "Pesquisa modelos, versões e imagens no Civitai e gera imagens pela Orchestration API oficial.",
-     "model_desc": "Generate images through the official Civitai Orchestration API. The user's saved Civitai connection is injected privately when available: never ask for, reveal, or paste an API token; call generate directly and let the tool report a connection error only if it is actually unavailable. For normal image requests prompt is sufficient and Flux is the default; search models/gallery only when the user explicitly requests a model or reference."},
+     "model_desc": "Generate images through the official Civitai Orchestration API. The user's saved connection is injected privately: never ask for, reveal, or paste an API token. For a normal request, call generate once with the prompt; pass a Civitai URL/ID only when the user selected a specific model. Search catalog or gallery only on request."},
     # ElevenLabs (requer conexão em Configurações → Conexões). Gera fala premium de
     # qualquer texto e efeitos sonoros; o áudio é guardado e tocado no chat.
     {"path": "elevenlabs.audio.generate", "name": "ElevenLabs (Áudio)", "description": "Gera fala premium (TTS) de qualquer texto e efeitos sonoros com a ElevenLabs; o áudio aparece no chat.",
@@ -3342,6 +3343,7 @@ def _register_builtins(
             return {
                 "workflow_id": workflow.get("id"),
                 "status": workflow.get("status"),
+                "cost": workflow.get("cost"),
                 "transactions": workflow.get("transactions") or [],
                 "steps": [
                     {
@@ -3383,23 +3385,38 @@ def _register_builtins(
                 "prompt": prompt_, "model": model_ or "civitai", **_civitai_summary(workflow),
             }
 
+        def _civitai_error(message: str, *, code: str = "invalid_request", retryable: bool = False,
+                           stop_tool_loop: bool = False, hint: str = "") -> dict[str, Any]:
+            """Stable failures let the orchestrator stop bad Civitai retry loops."""
+            out: dict[str, Any] = {
+                "error": message, "error_code": code, "retryable": retryable,
+            }
+            if stop_tool_loop:
+                out["stop_tool_loop"] = True
+            if hint:
+                out["hint"] = hint
+            return out
+
+        def _civitai_normalize_error(result: dict[str, Any]) -> dict[str, Any]:
+            if not result.get("error"):
+                return result
+            result.setdefault("error_code", "invalid_request")
+            result.setdefault("retryable", False)
+            return result
+
         @sift.tool(
             "civitai.media.use",
             description=(
-                "Use Civitai through ONE unified tool. `action`: `search_models` searches "
-                "the public model catalog; `model` gets a model and its versions; `version` "
-                "gets one version/AIR identifier; `search_images` browses gallery images; "
-                "`estimate` validates and estimates Buzz cost without generating; `generate` "
-                "submits an official imageGen workflow; `status` resumes a pending workflow. "
-                "Catalog actions work without a connection. Generation spends Buzz. "
+                "One unified Civitai tool. action: search_models (catalog), model (one model), "
+                "version (AIR/triggers), search_images (gallery), estimate (Buzz dry-run), "
+                "generate (image), status (pending workflow). Catalog works without a token; "
+                "generation spends Buzz. "
                 f"{civitai_connection_instruction} Generated media is downloaded and shown "
-                "automatically, so do not paste its URL into the answer. `generate` is "
-                "self-contained: `prompt` is its only required input. A Civitai model URL, "
-                "model_id or version_id is resolved internally; do NOT infer engines/workflow "
-                "schemas or probe variants. For each user request call generate ONCE. For an "
-                "ordinary request, do NOT search the catalog, inspect a workflow schema, browse "
-                "gallery images, or switch providers first. Search only when the user explicitly "
-                "asks to compare models; use limit=3 and choose from that single result."
+                "automatically; never paste its URL. generate is self-contained: prompt is "
+                "required; Civitai URL/model_id/version_id are resolved internally. Call generate "
+                "ONCE per user request. Never guess engines, workflow templates, or advanced API "
+                "fields; do not probe variants after an error. Search only when the user asks to "
+                "compare/select a model."
             ),
             params={
                 "action": "string:n::search_models | model | version | search_images | estimate | generate | status",
@@ -3414,23 +3431,24 @@ def _register_builtins(
                 "limit": "number:o:3:number of compact catalog results (1-4)",
                 "page": "number:o:1:catalog page",
                 "cursor": "string:o::search_models: metadata.nextCursor from a previous query page",
-                "nsfw": "string:o::None | Soft | Mature | X (gallery); true also enables mature model search",
+                "mature": "boolean:o:false:allow mature catalog results or generated output",
+                "maturity": "string:o:None:search_images: None | Soft | Mature | X",
                 "supports_generation": "boolean:o:false:search only models usable by the orchestration API",
                 "prompt": "string:o::estimate/generate: image prompt",
-                "engine": "string:o::deprecated compatibility field; omit it",
                 "model": "string:o::Civitai model URL, model ID, or AIR URN; resolved internally",
-                "ecosystem": "string:o::advanced engines: e.g. flux1, sdxl",
                 "width": "number:o:1024:image width",
                 "height": "number:o:1024:image height",
                 "quantity": "number:o:1:number of images (1-4)",
                 "negative_prompt": "string:o::negative prompt where supported",
                 "seed": "number:o::reproducible seed",
-                "options_json": "string:o::advanced engine input as a JSON object (operation, loras, sampler, images, etc.)",
                 "workflow_id": "string:o::status: id returned by generate",
+                "confirm": "boolean:o:false:set true only after the user confirms a Buzz-spending generation",
             },
-            returns=["items", "metadata", "workflow_id", "status", "transactions", "kind",
-                     "url", "media", "prompt", "model", "error", "air", "base_model",
-                     "trained_words", "description", "estimate", "note"],
+            returns=["items", "metadata", "id", "name", "type", "creator", "nsfw", "versions",
+                     "can_generate", "workflow_id", "status", "cost", "transactions", "kind", "url",
+                     "media", "prompt", "model", "error", "error_code", "retryable", "stop_tool_loop",
+                     "hint", "air", "base_model", "trained_words", "description", "source_note",
+                     "estimate", "note", "question", "options", "allow_custom", "custom_label"],
             examples=[
                 "search Civitai for photorealistic Flux models that support generation",
                 "show the versions of Civitai model 12345",
@@ -3442,11 +3460,11 @@ def _register_builtins(
             action: str = "", query: str = "", model_id: Any = None,
             version_id: Any = None, model_type: str = "", base_model: str = "",
             username: str = "", sort: str = "", period: str = "", limit: Any = 10,
-            page: Any = 1, cursor: str = "", nsfw: str = "None", supports_generation: Any = False,
-            prompt: str = "", engine: str = "", model: str = "",
-            ecosystem: str = "", width: Any = 1024, height: Any = 1024,
+            page: Any = 1, cursor: str = "", mature: Any = False, maturity: str = "None",
+            supports_generation: Any = False, prompt: str = "", model: str = "",
+            width: Any = 1024, height: Any = 1024,
             quantity: Any = 1, negative_prompt: str = "", seed: Any = None,
-            options_json: str = "", workflow_id: str = "",
+            workflow_id: str = "", confirm: Any = False,
         ) -> dict[str, Any]:
             from ..integrations import civitai_service as cv
 
@@ -3459,66 +3477,85 @@ def _register_builtins(
                     return default
 
             if act == "search_models":
-                mature = str(nsfw).strip().lower() in {"true", "soft", "mature", "x"}
                 return cv.search_models(
                     civitai_token, query, model_type, base_model,
                     sort or "Highest Rated", period or "AllTime", _int(limit, 10),
-                    _int(page, 1), mature,
+                    _int(page, 1), mature is True or str(mature).lower() in {"true", "1", "yes"},
                     supports_generation is True or str(supports_generation).lower() == "true",
                     cursor,
                 )
             if act == "model":
                 mid = _int(model_id, 0)
-                return cv.get_model(civitai_token, mid) if mid > 0 else {"error": "provide model_id"}
+                return cv.get_model(civitai_token, mid) if mid > 0 else _civitai_error("provide model_id")
             if act == "version":
                 vid = _int(version_id, 0)
-                return cv.get_model_version(civitai_token, vid) if vid > 0 else {"error": "provide version_id"}
+                return cv.get_model_version(civitai_token, vid) if vid > 0 else _civitai_error("provide version_id")
             if act == "search_images":
                 return cv.search_images(
                     civitai_token, _int(model_id, 0) or None, _int(version_id, 0) or None,
                     username, sort or "Most Reactions", period or "AllTime",
-                    _int(limit, 10), _int(page, 1), nsfw or "None",
+                    _int(limit, 10), _int(page, 1), maturity or "None",
                 )
             if act == "status":
                 wid = workflow_id.strip()
                 if not wid:
-                    return {"error": "provide workflow_id"}
+                    return _civitai_error("provide workflow_id")
                 workflow = cv.get_workflow(civitai_token, wid)
                 if workflow.get("error"):
-                    return workflow
+                    return _civitai_normalize_error(workflow)
                 status_ = str(workflow.get("status") or "").lower()
                 if status_ == "succeeded":
-                    return _civitai_finish(workflow, prompt, model or engine)
+                    return _civitai_finish(workflow, prompt, model)
                 if status_ in {"failed", "expired", "canceled"}:
-                    return {"error": f"Civitai workflow {status_}", **_civitai_summary(workflow)}
+                    return _civitai_error(
+                        f"Civitai workflow {status_}", code="workflow_failed", stop_tool_loop=True,
+                        hint="The workflow reached a terminal failure. Do not submit it again automatically.",
+                    ) | _civitai_summary(workflow)
                 return {**_civitai_summary(workflow),
                         "note": "workflow ainda em andamento; consulte status novamente"}
             if act in {"estimate", "generate"}:
                 if not civitai_token:
-                    return {"error": "Civitai is not connected. Ask the user to add an API "
-                                     "token in Settings → Integrations → Civitai."}
-                mature = str(nsfw).strip().lower() in {"true", "soft", "mature", "x", "1", "yes"}
+                    return _civitai_error(
+                        "Civitai is not connected. Ask the user to add an API token in "
+                        "Settings → Integrations → Civitai.", code="not_connected",
+                    )
+                mature_ok = mature is True or str(mature).strip().lower() in {"true", "1", "yes"}
+                confirmed = confirm is True or str(confirm).strip().lower() in {"true", "1", "yes", "sim", "on"}
+                if act == "generate" and civitai_cfg and civitai_cfg.require_confirm and not confirmed and not toolctx.background.get():
+                    from .interaction import ask_options
+                    return ask_options(
+                        f"Gerar {max(1, min(_int(quantity, 1), 4))} imagem(ns) no Civitai pode gastar Buzz. Confirmar geração?",
+                        [
+                            {"label": "Gerar", "value": "Sim, confirmo — gere agora com confirm=true."},
+                            {"label": "Cancelar", "value": "Cancele, não gere a imagem."},
+                        ],
+                        allow_custom=False,
+                    )
                 workflow = cv.submit_image(
-                    civitai_token, prompt, engine=engine, model=model,
+                    civitai_token, prompt, model=model,
                     model_id=_int(model_id, 0) or None, version_id=_int(version_id, 0) or None,
-                    ecosystem=ecosystem, width=_int(width, 1024), height=_int(height, 1024),
+                    width=_int(width, 1024), height=_int(height, 1024),
                     quantity=_int(quantity, 1), negative_prompt=negative_prompt,
                     seed=_int(seed, 0) if seed not in (None, "") else None,
-                    options_json=options_json, mature=mature, whatif=act == "estimate", wait_seconds=60,
+                    mature=mature_ok, whatif=act == "estimate", wait_seconds=60,
                 )
                 if workflow.get("error"):
-                    return workflow
+                    return _civitai_normalize_error(workflow)
                 if act == "estimate":
                     return {"estimate": True, **_civitai_summary(workflow)}
                 status_ = str(workflow.get("status") or "").lower()
                 if status_ == "succeeded":
-                    return _civitai_finish(workflow, prompt, model or engine)
+                    return _civitai_finish(workflow, prompt, model)
                 if status_ in {"failed", "expired", "canceled"}:
-                    return {"error": f"Civitai workflow {status_}", **_civitai_summary(workflow)}
+                    return _civitai_error(
+                        f"Civitai workflow {status_}", code="workflow_failed", stop_tool_loop=True,
+                        hint="The workflow reached a terminal failure. Do not submit it again automatically.",
+                    ) | _civitai_summary(workflow)
                 return {**_civitai_summary(workflow),
                         "note": "generation is still running; use action 'status' with workflow_id"}
-            return {"error": "unknown action; use search_models/model/version/search_images/"
-                             "estimate/generate/status"}
+            return _civitai_error(
+                "unknown action; use search_models/model/version/search_images/estimate/generate/status"
+            )
 
     # ----------------------------- Higgsfield -------------------------------- #
     if want("higgsfield.media.generate"):
@@ -4636,7 +4673,9 @@ def _signature(
     # config Spotify: o client_id identifica a conexão; o secret entra só como bool.
     spc = ((spotify_cfg.conn.get("id", ""), bool(spotify_cfg.conn.get("secret")))
            if spotify_cfg else ())
-    cvc = ((civitai_cfg.conn.get("token", ""),) if civitai_cfg else ())
+    # Nunca deixe o token bruto entrar na assinatura do cache em memória.  Basta
+    # saber se existe conexão e se gerações exigem confirmação para invalidar a SIFT.
+    cvc = ((bool(civitai_cfg.conn.get("token")), civitai_cfg.require_confirm) if civitai_cfg else ())
     return (
         rows,
         search_cfg.provider,
@@ -4950,10 +4989,10 @@ def higgsfield_config_from_secrets(conn: dict | None) -> "HiggsfieldConfig | Non
     return HiggsfieldConfig(conn=conn)
 
 
-def civitai_config_from_secret(token: str | None) -> "CivitaiConfig":
+def civitai_config_from_secret(token: str | None, *, confirm_actions: bool = False) -> "CivitaiConfig":
     """A tool continua disponível sem token para consultar o catálogo público;
     geração/estimativa respondem com a orientação de conexão."""
-    return CivitaiConfig(conn={"token": token or ""})
+    return CivitaiConfig(conn={"token": token or ""}, require_confirm=bool(confirm_actions))
 
 
 def elevenlabs_config_from_secrets(conn: dict | None) -> "ElevenLabsConfig | None":

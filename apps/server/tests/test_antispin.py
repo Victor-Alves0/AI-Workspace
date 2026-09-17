@@ -71,3 +71,34 @@ def test_antispin_forces_final_answer_on_repeat():
     # Sem anti-spin, moeria até o teto (8 no modo normal) e cairia no fallback.
     assert len(tool_calls) == 3, f"esperava 3 chamadas (limiar), veio {len(tool_calls)}"
     assert "Concluído" in done["content"], f"esperava resposta final real, veio: {done['content'][:80]!r}"
+
+
+def test_terminal_tool_error_forces_final_answer_without_retrying():
+    class TerminalSift(FakeSift):
+        def dispatch(self, name, args):
+            return '{"error":"provider rejected request","error_code":"invalid_request","stop_tool_loop":true}'
+
+    calls_with_tools = {"n": 0}
+
+    async def fake_stream(api_key, model, messages, *, tools=None, params=None,
+                          modalities=None, base_url=None):
+        if tools is None:
+            yield _text_chunk()
+        else:
+            calls_with_tools["n"] += 1
+            yield _tool_chunk()
+
+    orig = orch.openrouter.stream_chat
+    orch.openrouter.stream_chat = fake_stream
+    try:
+        async def go():
+            return [ev async for ev in run_turn(
+                api_key="k", model="m", history=[], user_text="faça isso",
+                chat_system_prompt=None, params={}, session=TurnSession(user_id="u"),
+                sift=TerminalSift(), use_tools=True)]
+        events = asyncio.run(go())
+    finally:
+        orch.openrouter.stream_chat = orig
+
+    assert calls_with_tools["n"] == 1
+    assert "Concluído" in [event for event in events if event["type"] == "done"][0]["content"]

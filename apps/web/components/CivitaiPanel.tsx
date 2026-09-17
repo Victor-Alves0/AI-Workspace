@@ -15,6 +15,7 @@ export default function CivitaiPanel({ onBack }: { onBack: () => void }) {
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [test, setTest] = useState<"idle" | "loading" | "ok" | "fail">("idle");
+  const [validating, setValidating] = useState(false);
   const [message, setMessage] = useState("");
 
   const load = useCallback(async () => {
@@ -72,6 +73,23 @@ export default function CivitaiPanel({ onBack }: { onBack: () => void }) {
     }
   }
 
+  async function validateGeneration() {
+    setValidating(true);
+    setMessage("");
+    try {
+      const result = await api.post<{ ok: boolean; cost?: unknown; error?: string }>("/integrations/civitai/validate-generation");
+      setTest(result.ok ? "ok" : "fail");
+      setMessage(result.ok
+        ? "Contrato de geração validado sem criar imagem nem gastar Buzz."
+        : result.error || "Não foi possível validar a geração.");
+    } catch (error) {
+      setTest("fail");
+      setMessage(error instanceof ApiError ? error.message : "Falha na validação da geração.");
+    } finally {
+      setValidating(false);
+    }
+  }
+
   const connected = status?.connected;
   return (
     <div className="pt-1">
@@ -113,6 +131,9 @@ export default function CivitaiPanel({ onBack }: { onBack: () => void }) {
               <button onClick={testConnection} disabled={test === "loading"} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover disabled:opacity-50">
                 {test === "loading" ? <Loader2 size={14} className="animate-spin" /> : <Wifi size={14} />} Testar
               </button>
+              <button onClick={validateGeneration} disabled={validating} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover disabled:opacity-50">
+                {validating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Validar geração
+              </button>
               <button onClick={disconnect} disabled={busy} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-muted transition-colors hover:border-red-400/40 hover:text-red-400 disabled:opacity-50">
                 <Trash2 size={14} /> Desconectar
               </button>
@@ -128,7 +149,7 @@ export default function CivitaiPanel({ onBack }: { onBack: () => void }) {
 
       <p className="mt-4 text-[11px] leading-4 text-muted">
         Depois de conectar, ative <span className="text-ink-soft">Civitai (Modelos/Mídia)</span> em Ferramentas no editor do modelo.
-        Buscar o catálogo é gratuito; gerar imagens usa o saldo Buzz da conta.
+        Buscar o catálogo é gratuito; gerar imagens usa o saldo Buzz da conta. <span className="text-ink-soft">Validar geração</span> usa uma simulação e não cria mídia.
       </p>
     </div>
   );

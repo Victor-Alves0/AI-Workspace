@@ -1471,6 +1471,26 @@ async def civitai_test(
     return {"ok": False, "error": result.get("error") or "Não foi possível conectar ao Civitai."}
 
 
+@router.post("/civitai/validate-generation")
+async def civitai_validate_generation(
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+):
+    """Checa o contrato atual do workflow com ``whatif=true`` (sem gerar/cobrar)."""
+    from .integrations import civitai_service
+
+    token = await civitai_service.get_token(db, str(user.id))
+    if not token:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Civitai não configurado.")
+    result = await run_in_threadpool(civitai_service.validate_generation, token)
+    if result.get("ok"):
+        return result
+    return {
+        "ok": False,
+        "error": result.get("error") or "A validação da geração falhou.",
+        "error_code": result.get("error_code"),
+    }
+
+
 @router.get("/messaging/connections")
 async def messaging_connections(
     user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)

@@ -3336,6 +3336,16 @@ async def run_turn(
             """Registra o resultado de UMA tool: evento p/ a UI, mensagem p/ o modelo e
             a contabilidade de tokens. Devolve o evento a emitir."""
             content, event_result = _shape_tool_result(result)
+            # Algumas falhas são definitivas para a requisição atual (por exemplo,
+            # contrato rejeitado pelo provedor). Repetir a tool com campos inventados
+            # só consome tokens e, em geradores, pode consumir saldo. A tool declara
+            # isso explicitamente; o loop sai para uma síntese limpa no próximo turno.
+            if isinstance(event_result, dict) and event_result.get("stop_tool_loop") is True:
+                if not _spin["stop"]:
+                    _health("tool_terminal", "stop", "warn", {
+                        "tool": name, "code": event_result.get("error_code", "unknown"),
+                    }, chat_id)
+                _spin["stop"] = True
             # anti-spin: assina (ferramenta, args, resultado). Mesma assinatura repetida =
             # o agente está refazendo a mesma coisa sem aprender nada → sinaliza p/ o topo
             # do loop forçar a resposta final (não conta polling que MUDA de resultado).

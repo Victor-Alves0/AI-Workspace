@@ -357,7 +357,9 @@ async def _assemble_configs(db: AsyncSession, user_id: uuid.UUID, model_config: 
     civitai_cfg = None
     if any(tid == f"{_BUILTIN_PREFIX}civitai.media.use" for tid in tool_ids):
         cv_token = await get_secret(db, user_id, CIVITAI_KEY)
-        civitai_cfg = sift_service.civitai_config_from_secret(cv_token)
+        civitai_cfg = sift_service.civitai_config_from_secret(
+            cv_token, confirm_actions=confirm_actions,
+        )
     # Remote Terminal: máquinas do usuário com agente instalado, filtradas pelas
     # liberadas neste modelo (tools_cfg.remote.hosts; vazio = todas). Token, certificado
     # e proxies NÃO entram na config — resolvidos ao vivo por máquina em cada chamada.
