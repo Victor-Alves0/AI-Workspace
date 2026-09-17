@@ -17,6 +17,7 @@ from aiworkspace.imaginai.service import (
     _apply_mutation,
     _merge_character_setup,
     _roll_damage,
+    _spells_from_state,
 )
 from aiworkspace.imaginai.systems import system_definition
 from aiworkspace.schemas.imaginai import CharacterUpdate, JournalCreate
@@ -557,6 +558,19 @@ def test_character_setup_derives_dnd5e_values_and_clamps_hp():
     assert dnd["initiative"] == 3
     assert dnd["passive_perception"] == 15
     assert dnd["spells"] == [{"key": "light", "name": "Luz", "level": 0}]
+
+
+def test_spell_snapshot_normalizes_lists_and_preserves_preparation_state():
+    spells = _spells_from_state({
+        "spells": [
+            {"key": "fireball", "name": "Bola de Fogo", "level": 3, "prepared": False},
+            "Luz",
+        ]
+    })
+
+    assert [spell["name"] for spell in spells] == ["Luz", "Bola de Fogo"]
+    assert spells[0]["level"] == 0
+    assert spells[1]["prepared"] is False
 
 
 def test_private_npc_context_never_reaches_ui_event():

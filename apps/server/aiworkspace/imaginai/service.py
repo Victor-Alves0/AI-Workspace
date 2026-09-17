@@ -714,6 +714,177 @@ async def inventory_snapshot(
     }
 
 
+def _player_dnd_state(player: ImaginaiEntity) -> dict[str, Any]:
+    state = player.state if isinstance(player.state, dict) else {}
+    dnd = state.get("dnd5e")
+    return dnd if isinstance(dnd, dict) else state
+
+
+def _known_entity_ids(player: ImaginaiEntity) -> set[str]:
+    raw = _player_dnd_state(player).get("discovered_entity_ids", [])
+    if not isinstance(raw, list):
+        return set()
+    return {
+        str(value)
+        for value in raw
+        if value
+    }
+
+
+def _visible_to_player(player: ImaginaiEntity, entity: ImaginaiEntity) -> bool:
+    state = entity.state if isinstance(entity.state, dict) else {}
+    discovery = str(state.get("discovery", "")).casefold()
+    return bool(
+        entity.id == player.id
+        or entity.id == player.location_id
+        or state.get("discovered")
+        or str(entity.id) in _known_entity_ids(player)
+        or discovery in {"aware", "known"}
+    )
+
+
+def _spells_from_state(dnd: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = dnd.get("spells", [])
+    records: list[dict[str, Any]] = []
+    if isinstance(raw, dict):
+        records = [
+            {"key": str(key), **(value if isinstance(value, dict) else {"name": str(key)})}
+            for key, value in raw.items()
+        ]
+    elif isinstance(raw, list):
+        for value in raw:
+            if isinstance(value, str):
+                records.append({"key": value, "name": value, "level": 0})
+            elif isinstance(value, dict):
+                records.append(value)
+    spells: list[dict[str, Any]] = []
+    for record in records[:100]:
+        name = str(record.get("name") or record.get("key") or "Magia")[:255]
+        key = str(record.get("key") or name.casefold().replace(" ", "-"))[:120]
+        level = max(0, min(9, _score(record.get("level"), 0)))
+        spells.append({
+            "key": key,
+            "name": name,
+            "level": level,
+            "school": str(record.get("school") or "")[:80],
+            "prepared": record.get("prepared", True) is not False,
+            "known": record.get("known", True) is not False,
+            "ritual": bool(record.get("ritual", False)),
+            "concentration": bool(record.get("concentration", False)),
+            "casting_time": str(record.get("casting_time") or record.get("castingTime") or "")[:80],
+            "range": str(record.get("range") or "")[:80],
+            "duration": str(record.get("duration") or "")[:80],
+            "components": record.get("components", []),
+            "description": str(record.get("description") or "")[:1_500],
+        })
+    return sorted(spells, key=lambda spell: (spell["level"], spell["name"].casefold()))
+
+
+async def spells_snapshot(db: AsyncSession, campaign: ImaginaiCampaign) -> dict[str, Any]:
+    player = await db.scalar(
+        select(ImaginaiEntity).where(
+            ImaginaiEntity.campaign_id == campaign.id,
+            ImaginaiEntity.kind == "character",
+            ImaginaiEntity.key == "player",
+        )
+    )
+    if player is None:
+        raise WorldNotFoundError("Personagem não encontrado")
+    dnd = _player_dnd_state(player)
+    raw_slots = dnd.get("spell_slots", {})
+    slots: dict[str, dict[str, int]] = {}
+    if isinstance(raw_slots, dict):
+        for level in range(1, 10):
+            raw = raw_slots.get(str(level), raw_slots.get(level))
+            if not isinstance(raw, dict):
+                continue
+            maximum = max(0, _score(raw.get("max"), 0))
+            slots[str(level)] = {
+                "current": max(0, min(maximum, _score(raw.get("current"), maximum))),
+                "max": maximum,
+            }
+    return {
+        "spells": _spells_from_state(dnd),
+        "slots": slots,
+        "spellcasting_ability": str(dnd.get("spellcasting_ability") or "") or None,
+        "attack_modifier": _score(dnd.get("spell_attack_modifier"), 0),
+        "save_dc": _score(dnd.get("spell_save_dc"), 0),
+    }
+
+
+def _map_coordinate(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return max(0.0, min(100.0, number)) if math.isfinite(number) else None
+
+
+async def map_snapshot(db: AsyncSession, campaign: ImaginaiCampaign) -> dict[str, Any]:
+    """Mapa do jogador: nunca retorna local/rota antes de serem descobertos."""
+    player = await db.scalar(
+        select(ImaginaiEntity).where(
+            ImaginaiEntity.campaign_id == campaign.id,
+            ImaginaiEntity.kind == "character",
+            ImaginaiEntity.key == "player",
+        )
+    )
+    if player is None:
+        raise WorldNotFoundError("Personagem não encontrado")
+    locations = list(await db.scalars(
+        select(ImaginaiEntity).where(
+            ImaginaiEntity.campaign_id == campaign.id,
+            ImaginaiEntity.kind == "location",
+            ImaginaiEntity.active.is_(True),
+        ).order_by(ImaginaiEntity.name)
+    ))
+    visible = [location for location in locations if _visible_to_player(player, location)]
+    by_reference = {
+        value: location
+        for location in visible
+        for value in (str(location.id), location.key, location.name.casefold())
+    }
+    nodes: list[dict[str, Any]] = []
+    for index, location in enumerate(visible):
+        state = location.state if isinstance(location.state, dict) else {}
+        map_state = state.get("map") if isinstance(state.get("map"), dict) else state
+        nodes.append({
+            "id": str(location.id),
+            "name": location.name,
+            "description": location.description[:600],
+            "current": location.id == player.location_id,
+            "x": _map_coordinate(map_state.get("x")),
+            "y": _map_coordinate(map_state.get("y")),
+            "index": index,
+        })
+    routes: list[dict[str, str]] = []
+    seen_routes: set[tuple[str, str]] = set()
+    for location in visible:
+        state = location.state if isinstance(location.state, dict) else {}
+        map_state = state.get("map") if isinstance(state.get("map"), dict) else state
+        raw_links = map_state.get("connections", map_state.get("routes", map_state.get("exits", [])))
+        if isinstance(raw_links, dict):
+            raw_links = [{"to": key, **(value if isinstance(value, dict) else {})} for key, value in raw_links.items()]
+        if not isinstance(raw_links, list):
+            continue
+        for raw in raw_links[:30]:
+            link = raw if isinstance(raw, dict) else {"to": raw}
+            reference = str(link.get("to") or link.get("location") or link.get("target") or "").strip()
+            target = by_reference.get(reference) or by_reference.get(reference.casefold())
+            if target is None or target.id == location.id:
+                continue
+            pair = tuple(sorted((str(location.id), str(target.id))))
+            if pair in seen_routes:
+                continue
+            seen_routes.add(pair)
+            routes.append({
+                "from": str(location.id),
+                "to": str(target.id),
+                "label": str(link.get("label") or link.get("travel") or "")[:120],
+            })
+    return {"locations": nodes, "routes": routes}
+
+
 async def codex_search(
     db: AsyncSession,
     campaign: ImaginaiCampaign,

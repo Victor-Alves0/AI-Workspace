@@ -28,6 +28,7 @@ export interface StreamState {
   reason: string;
   tools: ToolEvent[];
   steps: ActivityStep[];
+  imaginaiChanged: boolean;
 }
 
 /** Dependências reativas que o subsistema de geração precisa do componente. */
@@ -47,6 +48,8 @@ export interface GenerationDeps {
   // o provider recusou o nível de raciocínio pedido e o backend rebaixou; reflete
   // no seletor (ex.: "xhigh" pedido, "high" aceito).
   onReasoningEffort?: (effort: string) => void;
+  /** Recarrega os docks do RPG após uma ferramenta autoritativa alterar o mundo. */
+  onImaginaiTurnComplete?: (chatId: string) => Promise<void> | void;
 }
 
 /**
@@ -94,7 +97,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
 
   function makeStreamHandler(getOwnerId?: () => string | null) {
     const deps = getDeps();
-    const state: StreamState = { acc: "", reason: "", tools: [], steps: [] };
+    const state: StreamState = { acc: "", reason: "", tools: [], steps: [], imaginaiChanged: false };
     // dono deste stream ainda é o chat ativo? (checado ao vivo a cada evento).
     // Enquanto for, pinta o estado global; se o usuário trocou de chat, o handler
     // segue ACUMULANDO em `state` (p/ notify/persistência) mas NÃO toca a UI —
@@ -219,6 +222,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         }
       } else if (ev.type === "tool_result") {
         const t: ToolEvent = { kind: "result", name: ev.name, data: ev.result };
+        if (ev.name === "imaginai_world") state.imaginaiChanged = true;
         state.tools.push(t);
         state.steps.push({ kind: "tool", event: t });
         flush();
@@ -292,6 +296,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         if (Array.isArray(ev.tool_events)) {
           const evs = ev.tool_events as ToolEvent[];
           state.tools = evs;
+          if (evs.some((tool) => tool.name === "imaginai_world")) state.imaginaiChanged = true;
           if (paint()) setToolEvents(evs);
         }
         flush();
@@ -322,7 +327,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
   async function resumeStream(id: string) {
     const deps = getDeps();
     let started = false;
-    const { handler, dispose } = makeStreamHandler(() => id);
+    const { handler, state, dispose } = makeStreamHandler(() => id);
     resumeAbortRef.current?.abort();
     const controller = new AbortController();
     resumeAbortRef.current = controller;
@@ -365,6 +370,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       setStreamPhase("idle");
       setSending(false);
       await deps.reloadArtifacts(id);
+      if (state.imaginaiChanged) await deps.onImaginaiTurnComplete?.(id);
       deps.refreshChats();
     }
   }

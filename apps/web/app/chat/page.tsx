@@ -136,6 +136,35 @@ type ImaginaiCodexResult = {
   redacted: string[];
 };
 
+type ImaginaiSpell = {
+  key: string;
+  name: string;
+  level: number;
+  school: string;
+  prepared: boolean;
+  known: boolean;
+  ritual: boolean;
+  concentration: boolean;
+  casting_time: string;
+  range: string;
+  duration: string;
+  components: unknown;
+  description: string;
+};
+
+type ImaginaiSpells = {
+  spells: ImaginaiSpell[];
+  slots: Record<string, { current: number; max: number }>;
+  spellcasting_ability: string | null;
+  attack_modifier: number;
+  save_dc: number;
+};
+
+type ImaginaiMap = {
+  locations: { id: string; name: string; description: string; current: boolean; x: number | null; y: number | null; index: number }[];
+  routes: { from: string; to: string; label: string }[];
+};
+
 // Override reservado do composer, persistido no Chat sem alterar o preset do
 // modelo. O backend consome e remove esta chave antes de chamar o provider.
 const CHAT_REASONING_EFFORT_PARAM = "_chat_reasoning_effort";
@@ -327,6 +356,7 @@ export default function ChatPage() {
     artifactsEnabled, temporary, setArtifactOpen, setActive,
     reloadMessages, reloadArtifacts, refreshChats, isActiveChat, prepareStreamLanding,
     onReasoningEffort: (e: string) => setReasoningEffort(e as ReasoningEffort),
+    onImaginaiTurnComplete: refreshImaginaiCampaign,
   }));
   const {
     streaming, setStreaming, streamingReasoning, setStreamingReasoning, streamingSteps,
@@ -1263,6 +1293,15 @@ export default function ChatPage() {
     }
   }, []);
 
+  const refreshImaginaiCampaign = useCallback(async (chatId: string) => {
+    try {
+      const snapshot = await api.get<ImaginaiSnapshot>(`/mini-apps/imaginai/campaigns/by-chat/${chatId}`);
+      if (activeIdRef.current === chatId) setImaginaiSnapshot(snapshot);
+    } catch {
+      // O mini app pode ter sido fechado ou a campanha removida junto ao chat.
+    }
+  }, []);
+
   // poll leve: automações/lembretes criam chats e mensagens em background — sem
   // isto só apareceriam no F5. Lê o estado volátil via pollRef p/ não resetar o timer.
   useEffect(() => {
@@ -1602,6 +1641,7 @@ export default function ChatPage() {
           setStreaming("");
           setStreamingReasoning("");
           await reloadArtifacts(chat.id);
+          if (state.imaginaiChanged) await refreshImaginaiCampaign(chat.id);
           // as mensagens enfileiradas já "aterrissaram" (persistidas + no histórico):
           // limpa os chips. Se havia FILA (não-steer), o back disparou um turno de
           // continuação — re-assina p/ vê-lo ao vivo (best-effort; o poll é a rede).
@@ -1721,6 +1761,7 @@ export default function ChatPage() {
         setStreamingReasoning("");
         await reloadMessages(cid);
         await reloadArtifacts(cid);
+        if (state.imaginaiChanged) await refreshImaginaiCampaign(cid);
       }
       if (state.acc) notify("Resposta pronta", state.acc.replace(/\s+/g, " ").slice(0, 90));
     } finally {
@@ -1753,6 +1794,7 @@ export default function ChatPage() {
         setStreamingReasoning("");
         await reloadMessages(cid);
         await reloadArtifacts(cid);
+        if (state.imaginaiChanged) await refreshImaginaiCampaign(cid);
       }
       if (state.acc) notify("Resposta continuada", state.acc.replace(/\s+/g, " ").slice(0, 90));
     } finally {
@@ -3252,7 +3294,7 @@ function ImaginaiDnd5eDocks({
                 </button>
                 {worldSection === "journal" && snapshot ? <ImaginaiJournalPanel campaignId={snapshot.campaign.id} /> : null}
                 {worldSection === "codex" && snapshot ? <ImaginaiCodexPanel campaignId={snapshot.campaign.id} /> : null}
-                {worldSection === "map" ? <ImaginaiEmptyFeature icon={MapIcon} title="Mapa" text="O mapa da campanha será construído a partir dos locais descobertos." /> : null}
+                {worldSection === "map" && snapshot ? <ImaginaiMapPanel campaignId={snapshot.campaign.id} /> : null}
               </div>
             ) : (
               <>
@@ -3303,7 +3345,7 @@ function ImaginaiDnd5eDocks({
                     onSnapshotChange={onSnapshotChange}
                   />
                 ) : null}
-                {characterSection === "spells" ? <ImaginaiEmptyFeature icon={Sparkles} title="Magias" text="As magias conhecidas, preparadas e seus recursos aparecerão aqui." /> : null}
+                {characterSection === "spells" && snapshot ? <ImaginaiSpellsPanel campaignId={snapshot.campaign.id} /> : null}
               </div>
             ) : (
               <>
@@ -3686,6 +3728,80 @@ function ImaginaiCodexPanel({ campaignId }: { campaignId: string }) {
           </button>)}
         </div>
       )}
+    </div>
+  );
+}
+
+function spellComponents(value: unknown): string {
+  if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean).join(", ");
+  return typeof value === "string" ? value : "";
+}
+
+function ImaginaiSpellsPanel({ campaignId }: { campaignId: string }) {
+  const [data, setData] = useState<ImaginaiSpells | null>(null);
+  const [selected, setSelected] = useState<ImaginaiSpell | null>(null);
+  const [query, setQuery] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    api.get<ImaginaiSpells>(`/mini-apps/imaginai/campaigns/${campaignId}/spells`)
+      .then((value) => { if (!cancelled) setData(value); })
+      .catch((loadError: unknown) => { if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Não foi possível abrir as magias"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [campaignId]);
+  if (loading) return <ImaginaiFeatureStatus><Loader2 size={17} className="animate-spin" /></ImaginaiFeatureStatus>;
+  if (error || !data) return <ImaginaiFeatureStatus error>{error ?? "Magias indisponíveis"}</ImaginaiFeatureStatus>;
+  if (selected) return (
+    <div className="imaginai-feature-scroll">
+      <button type="button" onClick={() => setSelected(null)} className="imaginai-small-button"><ChevronLeft size={14} /> Grimório</button>
+      <div className="mt-3 flex items-start justify-between gap-2"><div className="min-w-0"><p className="text-[10px] uppercase tracking-wider text-violet-300">{selected.level === 0 ? "Truque" : `${selected.level}º nível`}{selected.school ? ` · ${selected.school}` : ""}</p><h3 className="mt-0.5 text-sm font-semibold text-ink">{selected.name}</h3></div><span className={`rounded-full px-2 py-1 text-[9px] ${selected.prepared ? "bg-emerald-400/10 text-emerald-300" : "bg-amber-400/10 text-amber-300"}`}>{selected.prepared ? "Preparada" : "Não preparada"}</span></div>
+      <div className="mt-3 grid grid-cols-2 gap-1.5 text-[10px]">{[["Conjuração", selected.casting_time], ["Alcance", selected.range], ["Duração", selected.duration], ["Componentes", spellComponents(selected.components)]].map(([label, value]) => <div key={label} className="rounded-lg border border-border bg-surface2/55 px-2 py-1.5"><span className="block text-[8px] uppercase tracking-wide text-muted">{label}</span><span className="mt-0.5 block truncate text-ink-soft" title={value}>{value || "—"}</span></div>)}</div>
+      <div className="mt-2 flex flex-wrap gap-1">{selected.concentration ? <span className="rounded-full bg-violet-500/15 px-2 py-1 text-[9px] text-violet-200">Concentração</span> : null}{selected.ritual ? <span className="rounded-full bg-sky-400/10 px-2 py-1 text-[9px] text-sky-200">Ritual</span> : null}</div>
+      <p className="mt-4 whitespace-pre-wrap break-words text-xs leading-5 text-ink-soft">{selected.description || "Os detalhes desta magia ainda não foram registrados na ficha."}</p>
+    </div>
+  );
+  const filtered = data.spells.filter((spell) => spell.name.toLocaleLowerCase("pt-BR").includes(query.trim().toLocaleLowerCase("pt-BR")));
+  const groups = new Map<number, ImaginaiSpell[]>();
+  for (const spell of filtered) groups.set(spell.level, [...(groups.get(spell.level) ?? []), spell]);
+  return (
+    <div className="imaginai-feature-scroll">
+      <div className="flex items-center justify-between gap-2"><div><h3 className="text-sm font-semibold text-ink">Magias</h3><p className="mt-0.5 text-[10px] text-muted">Apenas magias da ficha autoritativa.</p></div>{data.save_dc > 0 ? <span className="rounded-lg border border-border bg-surface2/55 px-2 py-1 text-[10px] text-ink-soft">CD {data.save_dc}</span> : null}</div>
+      {Object.keys(data.slots).length ? <div className="mt-2 grid grid-cols-4 gap-1">{Object.entries(data.slots).map(([level, slot]) => <div key={level} className="rounded-lg border border-border bg-surface2/55 px-1.5 py-1.5 text-center"><span className="block text-[8px] uppercase tracking-wide text-muted">{level}º nível</span><span className="mt-0.5 block font-mono text-[11px] text-ink">{slot.current}/{slot.max}</span></div>)}</div> : null}
+      <label className="relative mt-2 block"><Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" /><span className="sr-only">Buscar magia</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar magia" className="imaginai-field pl-8" /></label>
+      {filtered.length === 0 ? <ImaginaiFeatureStatus>O grimório está vazio. Ao definir ou aprender uma magia, ela aparecerá aqui.</ImaginaiFeatureStatus> : <div className="mt-2 space-y-3">{[...groups.entries()].map(([level, spells]) => <section key={level}><p className="mb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-violet-300">{level === 0 ? "Truques" : `${level}º nível`}</p><div className="space-y-1">{spells.map((spell) => <button key={spell.key} type="button" onClick={() => setSelected(spell)} className="flex w-full items-center gap-2 rounded-xl border border-border bg-surface2/55 p-2.5 text-left transition-colors hover:border-violet-400/30 hover:bg-hover"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300"><Sparkles size={14} /></span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-ink">{spell.name}</span><span className="block truncate text-[10px] text-muted">{spell.school || "Magia"}{spell.concentration ? " · concentração" : ""}</span></span>{!spell.prepared ? <span title="Não preparada" className="h-2 w-2 shrink-0 rounded-full bg-amber-300" /> : null}<ChevronRight size={14} className="shrink-0 text-muted" /></button>)}</div></section>)}</div>}
+    </div>
+  );
+}
+
+function ImaginaiMapPanel({ campaignId }: { campaignId: string }) {
+  const [data, setData] = useState<ImaginaiMap | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    api.get<ImaginaiMap>(`/mini-apps/imaginai/campaigns/${campaignId}/map`)
+      .then((value) => { if (!cancelled) { setData(value); setSelectedId(value.locations.find((location) => location.current)?.id ?? value.locations[0]?.id ?? null); } })
+      .catch((loadError: unknown) => { if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Não foi possível abrir o mapa"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [campaignId]);
+  if (loading) return <ImaginaiFeatureStatus><Loader2 size={17} className="animate-spin" /></ImaginaiFeatureStatus>;
+  if (error || !data) return <ImaginaiFeatureStatus error>{error ?? "Mapa indisponível"}</ImaginaiFeatureStatus>;
+  if (!data.locations.length) return <ImaginaiFeatureStatus>Nenhum local foi descoberto ainda.</ImaginaiFeatureStatus>;
+  const positions = data.locations.map((location, index) => ({ ...location, x: location.x ?? 14 + ((index * 37) % 72), y: location.y ?? 16 + ((index * 29) % 68) }));
+  const byId = new Map(positions.map((location) => [location.id, location]));
+  const selected = byId.get(selectedId ?? "") ?? positions[0];
+  return (
+    <div className="imaginai-feature-scroll"><div className="flex items-center justify-between gap-2"><div><h3 className="text-sm font-semibold text-ink">Mapa</h3><p className="mt-0.5 text-[10px] text-muted">Somente locais e caminhos já descobertos.</p></div><span className="text-[10px] text-muted">{positions.length} local{positions.length === 1 ? "" : "is"}</span></div>
+      <div className="relative mt-3 h-64 overflow-hidden rounded-xl border border-violet-400/20 bg-[radial-gradient(circle_at_50%_50%,rgba(139,92,246,0.14),transparent_65%),linear-gradient(135deg,rgba(20,20,28,0.9),rgba(12,12,17,0.96))]" aria-label="Mapa dos locais descobertos"><svg className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">{data.routes.map((route) => { const from = byId.get(route.from); const to = byId.get(route.to); return from && to ? <line key={`${route.from}-${route.to}`} x1={`${from.x}%`} y1={`${from.y}%`} x2={`${to.x}%`} y2={`${to.y}%`} stroke="rgba(167,139,250,.48)" strokeWidth="1.5" strokeDasharray="4 3" /> : null; })}</svg>{positions.map((location) => <button key={location.id} type="button" onClick={() => setSelectedId(location.id)} title={location.name} style={{ left: `${location.x}%`, top: `${location.y}%` }} className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border p-1.5 shadow-lg transition-transform hover:scale-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-violet-300 ${location.current ? "border-emerald-300 bg-emerald-400/20 text-emerald-200" : selected.id === location.id ? "border-violet-200 bg-violet-500/35 text-white" : "border-violet-400/40 bg-surface text-violet-200"}`}><MapIcon size={14} /><span className="sr-only">{location.name}</span></button>)}</div>
+      <div className="mt-2 rounded-xl border border-border bg-surface2/55 p-2.5"><div className="flex items-center gap-2"><MapIcon size={14} className={selected.current ? "text-emerald-300" : "text-violet-300"} /><h4 className="min-w-0 truncate text-xs font-medium text-ink">{selected.name}</h4>{selected.current ? <span className="ml-auto shrink-0 text-[9px] text-emerald-300">Você está aqui</span> : null}</div><p className="mt-1 line-clamp-3 text-[10px] leading-4 text-muted">{selected.description || "Local conhecido, sem descrição registrada."}</p></div>
     </div>
   );
 }

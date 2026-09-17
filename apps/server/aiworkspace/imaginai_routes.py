@@ -303,6 +303,32 @@ async def get_inventory(
         _raise_domain_error(exc)
 
 
+@router.get("/campaigns/{campaign_id}/spells")
+async def get_spells(
+    campaign_id: uuid.UUID,
+    user: ApprovedUser,
+    db: DbSession,
+):
+    try:
+        campaign = await service.owned_campaign(db, user.id, campaign_id)
+        return await service.spells_snapshot(db, campaign)
+    except Exception as exc:  # noqa: BLE001
+        _raise_domain_error(exc)
+
+
+@router.get("/campaigns/{campaign_id}/map")
+async def get_map(
+    campaign_id: uuid.UUID,
+    user: ApprovedUser,
+    db: DbSession,
+):
+    try:
+        campaign = await service.owned_campaign(db, user.id, campaign_id)
+        return await service.map_snapshot(db, campaign)
+    except Exception as exc:  # noqa: BLE001
+        _raise_domain_error(exc)
+
+
 @router.get("/campaigns/{campaign_id}/codex")
 async def search_codex(
     campaign_id: uuid.UUID,
