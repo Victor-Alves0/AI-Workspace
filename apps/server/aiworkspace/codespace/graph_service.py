@@ -1267,52 +1267,99 @@ def _rg_search(root: Path, scope: dict | None, query: str, glob: str, regex: boo
     return {"results": results, "truncated": truncated}
 
 
+def _is_probably_text(path: Path) -> bool:
+    """Texto ou binário? Decide pelo CONTEÚDO (byte NUL no começo), como o ripgrep.
+    A lista de extensões conhecidas continua valendo como atalho barato — mas ela
+    sozinha escondia arquivos sem extensão (Dockerfile, Makefile, LICENSE)."""
+    if path.suffix.lower() in _TEXT_EXTS:
+        return True
+    try:
+        with path.open("rb") as fh:
+            return b"\0" not in fh.read(8192)
+    except OSError:
+        return False
+
+
 def _py_search(root: Path, scope: dict | None, query: str, glob: str, regex: bool,
-               case_sensitive: bool, cap: int) -> dict:
-    """Fallback sem ripgrep: varredura em Python. Mais fraca de propósito — só
-    percorre extensões conhecidas (`_TEXT_EXTS`), sem contexto nem files_only —
-    existe para o serviço não quebrar num ambiente sem o binário."""
+               case_sensitive: bool, context: int, files_only: bool, cap: int) -> dict:
+    """Fallback sem ripgrep: varredura em Python, com o MESMO contrato do `rg`
+    (arquivos sem extensão, `context` e `files_only`). É mais lenta, não a metade
+    das funcionalidades: o app desktop roda por aqui, e uma busca que perde o
+    Dockerfile — ou devolve 3 linhas onde o contrato promete 1 arquivo — leva a IA
+    a concluir que o código não existe."""
     try:
         pattern = re.compile(query if regex else re.escape(query),
                              0 if case_sensitive else re.IGNORECASE)
     except re.error as exc:
         return {"error": f"expressão inválida: {exc}"}
     glob_spec = _spec([glob]) if glob else None
+    around = min(max(int(context or 0), 0), 5)
     results: list[dict] = []
+    files: list[str] = []
+    truncated = False
 
-    def _walk(d: Path) -> None:
+    def _scan(path: Path, rel: str) -> None:
+        """Varre um arquivo. Em `files_only` para no 1º acerto (o `--max-count 1`
+        do rg); com `context`, junta as linhas vizinhas sem repetir as que dois
+        acertos próximos compartilham."""
+        nonlocal truncated
         try:
-            children = sorted(d.iterdir())
+            if path.stat().st_size > _MAX_FILE_BYTES:
+                return
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
         except OSError:
             return
-        for p in children:
+        picked: dict[int, bool] = {}   # nº da linha -> é acerto (False = contexto)
+        for index, line in enumerate(lines):
+            if not pattern.search(line):
+                continue
+            if files_only:
+                if rel not in files:
+                    files.append(rel)
+                return
+            for near in range(max(0, index - around), min(len(lines), index + around + 1)):
+                if near == index:
+                    picked[near] = True
+                else:
+                    picked.setdefault(near, False)
+        for number in sorted(picked):
             if len(results) >= cap:
+                truncated = True
+                return
+            results.append({
+                "path": rel, "line": number + 1,
+                "text": lines[number].rstrip("\r\n")[:_MAX_LINE_CHARS],
+                **({} if picked[number] else {"context": True}),
+            })
+
+    def _walk(directory: Path) -> None:
+        nonlocal truncated
+        try:
+            children = sorted(directory.iterdir())
+        except OSError:
+            return
+        for child in children:
+            if len(results) >= cap or len(files) >= cap:
+                truncated = True
                 return
             # poda diretórios negados (.git, node_modules…) ANTES de descer —
             # evita vasculhar objetos git/binários à toa num repo grande.
-            if not is_allowed(root, p, scope):
+            if not is_allowed(root, child, scope):
                 continue
-            if p.is_dir():
-                _walk(p)
+            if child.is_dir():
+                _walk(child)
                 continue
-            if p.suffix.lower() not in _TEXT_EXTS:
-                continue
-            rel = _rel(root, p)
+            rel = _rel(root, child)
             if glob_spec and not glob_spec.match_file(rel):
                 continue
-            try:
-                if p.stat().st_size > _MAX_FILE_BYTES:
-                    continue
-                for i, line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
-                    if pattern.search(line):
-                        results.append({"path": rel, "line": i, "text": line.strip()[:_MAX_LINE_CHARS]})
-                        if len(results) >= cap:
-                            return
-            except OSError:
+            if not _is_probably_text(child):
                 continue
+            _scan(child, rel)
 
     _walk(root)
-    return {"results": results, "truncated": len(results) >= cap}
+    if files_only:
+        return {"files": files, "truncated": truncated or len(files) >= cap}
+    return {"results": results, "truncated": truncated or len(results) >= cap}
 
 
 def search_files(user_id: str, project_id: str, scope: dict | None, query: str,
@@ -1334,10 +1381,12 @@ def search_files(user_id: str, project_id: str, scope: dict | None, query: str,
         return _rg_search(root, scope, query, glob, regex, case_sensitive,
                           context, files_only, cap)
     except FileNotFoundError:
-        logger.warning("ripgrep ausente — busca do Codespace em modo degradado (Python)")
+        # sem o binário (app desktop, imagem enxuta) a busca cai no fallback em
+        # Python — mesmo contrato, só mais lenta.
+        logger.info("ripgrep ausente — busca do Codespace pelo fallback em Python")
     except subprocess.TimeoutExpired:
         return {"error": f"a busca passou de {_SEARCH_TIMEOUT_S}s — restrinja com `glob` ou um termo mais específico"}
-    return _py_search(root, scope, query, glob, regex, case_sensitive, cap)
+    return _py_search(root, scope, query, glob, regex, case_sensitive, context, files_only, cap)
 
 
 # --------------------------------------------------------------------------- #

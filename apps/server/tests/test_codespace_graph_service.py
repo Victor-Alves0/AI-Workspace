@@ -851,3 +851,35 @@ def test_unchanged_write_returns_no_symbol_changes(fake_git_project):
     gs.write_file(user_id, project_id, {}, "k.py", "def g():\n    return 1\n")
     out = gs.write_file(user_id, project_id, {}, "k.py", "def g():\n    return 2\n")
     assert "symbol_changes" not in out, out
+
+
+def test_python_fallback_matches_the_ripgrep_contract(fake_project, monkeypatch):
+    """Sem o binário (app desktop), a busca tem de manter o MESMO contrato: acha
+    arquivos sem extensão, devolve `files` em files_only e traz as linhas de
+    contexto. Força o fallback para o teste valer também onde o rg existe."""
+    user_id, project_id, root = fake_project
+    (root / "Makefile").write_text("build:\n\tpython -m build  # alvo-unico\n")
+    (root / "src" / "many.py").write_text("x\n" * 3 + "needle\nneedle\nneedle\n")
+    (root / "src" / "ctx.py").write_text("linha1\nlinha2\nALVO-fb\nlinha4\nlinha5\n")
+
+    def no_ripgrep(*_args, **_kwargs):
+        raise FileNotFoundError("rg")
+
+    monkeypatch.setattr(gs.subprocess, "run", no_ripgrep)
+
+    extensionless = gs.search_files(user_id, project_id, {}, "alvo-unico")
+    assert any(r["path"] == "Makefile" for r in extensionless["results"])
+
+    only = gs.search_files(user_id, project_id, {}, "needle", files_only=True)
+    assert only["files"] == ["src/many.py"]
+    assert "results" not in only
+
+    around = gs.search_files(user_id, project_id, {}, "ALVO-fb", context=1)
+    texts = [r["text"] for r in around["results"]]
+    assert "linha2" in texts and "ALVO-fb" in texts and "linha4" in texts
+    assert [r for r in around["results"] if r["text"] == "linha2"][0]["context"] is True
+
+    binary = root / "src" / "blob.bin"
+    binary.write_bytes(b"\x00\x01needle\x00")
+    assert not any(r["path"].endswith("blob.bin")
+                   for r in gs.search_files(user_id, project_id, {}, "needle")["results"])
