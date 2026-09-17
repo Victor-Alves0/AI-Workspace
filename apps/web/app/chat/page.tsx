@@ -1265,6 +1265,21 @@ export default function ChatPage() {
     }
   }
 
+  // Solta o composer do turno de OUTRO chat ao navegar. O turno segue no servidor
+  // (e o handler dele para de pintar); sem isto, o destino herdava o "gerando" e o
+  // botão Parar ainda apontava para o stopRef do chat anterior.
+  function releaseGeneration() {
+    stopRef.current = null;
+    setSending(false);
+    setStreamPhase("idle");
+    setGeneratingImage(false);
+    setConsultingKnowledge(false);
+    setTranscribingAudio(false);
+    setSubagents([]);
+    setGuardNote(null);
+    setQueued([]);
+  }
+
   function goHome() {
     selectChatRequestRef.current += 1; // invalida um selectChat ainda em voo
     activeIdRef.current = null;
@@ -1273,6 +1288,7 @@ export default function ChatPage() {
     setActiveMiniApp(null);
     setDraftRt(null);
     setMessages([]);
+    releaseGeneration();
     setStreaming("");
     setStreamingReasoning("");
     setToolEvents([]);
@@ -1368,10 +1384,7 @@ export default function ChatPage() {
     setToolEvents([]);
     // libera o composer: se o chat de destino tiver geração viva, o resumeStream
     // (abaixo) religa o "gerando"; senão, não fica preso pelo turno do chat anterior.
-    setSending(false);
-    setGeneratingImage(false);
-    setSubagents([]);
-    setGuardNote(null);
+    releaseGeneration();
     setArtifactOpen(null);
     setLiveArtifact(null);
     setChatArtifacts([]);
