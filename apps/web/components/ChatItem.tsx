@@ -109,6 +109,7 @@ export default function ChatItem({
       </button>
       <button
         ref={menuBtnRef}
+        data-touch="long-press"
         onClick={() => setMenuOpen((v) => !v)}
         className={`shrink-0 rounded-md p-0.5 text-muted transition-colors hover:bg-hover hover:text-ink ${
           menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"

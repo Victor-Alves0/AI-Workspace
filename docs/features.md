@@ -22,6 +22,22 @@ and/or **per user** in the interface.
 - **Temporary chat** (not saved) and **sharing** via public link (with optional
   password/expiry).
 
+## Mini Apps
+
+A Mini App takes over a conversation: it adds its own tools, its own rules and its own side
+panels, without changing anything for an ordinary chat. Pick one from the grid in the composer;
+the choice belongs to that chat.
+
+- **Imaginai** — an interactive RPG where the **world is authoritative**, not the narration. A
+  campaign (the "World Kernel") is materialized per chat: entities with their own visibility,
+  facts and knowledge the character has or hasn't discovered. The AI narrates, but attacks,
+  spells, ability checks, items, currency and rests are **resolved by the ruleset on the
+  server** (dice included), so the model cannot grant itself a hit or an item.
+  - Side panels: **Worldinfo** (journal + campaign history, codex, map) and **Character**
+    (inventory, spells, sheet), with a world/NPC builder and per-campaign settings.
+  - The system is declarative (`imaginai/systems.py`): **D&D 5e** ships today, and another
+    ruleset plugs in without touching the interface.
+
 ## Tools (SIFT)
 
 The AI discovers and executes tools on demand. Categories: **native**, **Codespace** and
@@ -36,11 +52,18 @@ The AI discovers and executes tools on demand. Categories: **native**, **Codespa
 - **Video/audio transcription**: pulls the spoken content of a link (YouTube + ~1800 sites) via
   captions or STT, with rotating anti-blocking cookies.
 - **Image generation**: native (a model with an image modality) or via a **router** that
-  delegates to an image model; also **video** (Higgsfield).
+  delegates to an image model; also **video** (Higgsfield) and **Civitai** (any checkpoint/LoRA
+  from the catalog, paid in Buzz).
+  - A slow generation does not hold the turn: it is queued and **delivered to the chat by
+    itself** when it is ready, as a tool result — no second model call. The queue survives a
+    restart (`media_jobs`), because the media is already paid for.
 - **Python code**: the AI writes and executes code in an **isolated sandbox** (a subprocess with
   CPU/memory/time limits).
 - **Messaging agency**: the AI acts on your WhatsApp/Telegram/Discord connections
   (list/read/send).
+- **Security research**: CVEs from the **NVD**, entries in the **Exploit-DB** catalog and public
+  code search on **GitHub**. Metadata and reference links only — it never downloads, displays or
+  runs exploit code.
 - **Remote Terminal**: a real shell on **your own machines** (a VPS, the home server) through
   an installed agent — run commands, launch long jobs, read logs. Outbound traffic can be
   sealed through a proxy on both legs (workspace→machine and the machine's own commands),
@@ -93,6 +116,9 @@ Tools live under **Workspace → Tools** and are attachable per model.
   files/snippets into the chat.
 - **Playground**: **benchmarks** (with judge + rubric), side-by-side **comparisons** and **tool
   debugging**.
+- **Investigation graph** ("Grafaria" in the interface): a graph for what has **no source of
+  truth** to query — recon, reverse engineering — where the AI records entities and relations as
+  it learns them.
 
 ## Voice and media
 
@@ -109,11 +135,22 @@ Tools live under **Workspace → Tools** and are attachable per model.
 - **GitHub**: read and write (with confirmation), via PAT or OAuth.
 - **Remote Terminal**: your own machines (VPS, home server) via the installed agent, with
   per-machine token, TLS pinning and egress policy.
+- **Notion**: read and write pages and databases (internal token or OAuth).
+- **Slack**: as a tool (read/post in channels) and as a **channel** (talk to your models from
+  Slack, via Socket Mode).
+- **ElevenLabs**: high-quality voices for text and sound effects (`el:` voices).
+- **Civitai**: model/LoRA catalog and image generation through the official Orchestration API.
+  With no preset configured, the AI picks a generatable checkpoint itself.
+- **Higgsfield**: images and video through the official API.
+- **Spotify**: catalog search (tracks, artists, albums) — playback is out of scope.
+- **Vercel**: read-only view of your projects and their recent deployments.
 - **Subscriptions**: use ChatGPT/Codex by login (OAuth), where applicable.
 
 ## Interface and experience
 
 - **PWA / mobile**: responsive layout, installable, with safe-areas and drill-down navigation.
+  Touch gets native manners: one tap acts (no "tap to hover" first), the sidebar drawer follows
+  your finger, long-press opens a chat's menu and the reading text/targets are phone-sized.
 - **Desktop app (Windows)**: native window, tray, "run in the background" and "start with
   Windows". See [desktop.md](desktop.md).
 - **Command palette** (Ctrl/⌘+K): a single launcher for actions, settings, models and chats,

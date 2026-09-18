@@ -81,6 +81,20 @@ Conventions:
   (`pip install --user pytest pytest-asyncio`) and copy the `tests/` folder, since the prod image
   doesn't include them.
 - Prefer tests that exercise **decision and shape** (parsing, routing, guards) over real I/O.
+- A test carries the **reason it exists** in its docstring — which real failure it prevents. A
+  test nobody can justify is a test nobody dares to delete.
+
+Three kinds of test share the suite:
+
+| Kind | Example | What it catches |
+|---|---|---|
+| Behavior | `test_run_turn_integration`, `test_civitai` | the turn/tool does what it promises |
+| Secrecy | `test_imaginai_visibility`, `test_integration_clients` | what must **not** leak: hidden entities, a token inside an error message |
+| Invariant | `test_repo_invariants`, `test_version_sync` | rules the repository must keep: one migration chain, every model exported, every env var in `.env.example`, every hover-only control still reachable by touch |
+
+The invariants are the cheapest way to keep a convention alive — they fail on the next commit
+that forgets it, instead of on a phone, months later. When you add a rule that lives in someone's
+head ("always do X when adding Y"), add it there.
 
 ## Migrations
 

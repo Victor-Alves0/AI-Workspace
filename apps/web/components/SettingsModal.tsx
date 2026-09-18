@@ -1667,7 +1667,7 @@ function AccountTab({ user, profile, set }: { user: User | null; profile: Record
                 {(name || user?.email || "?")[0]?.toUpperCase()}
               </span>
             )}
-            <span className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
+            <span data-touch="decorative" className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
               <CircleUserRound size={20} className="text-white" />
             </span>
           </button>

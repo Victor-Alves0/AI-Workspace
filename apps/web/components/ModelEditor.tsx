@@ -1339,7 +1339,7 @@ export default function ModelEditor({
                 ) : (
                   <span className="text-3xl font-bold text-muted">{(name || "M")[0]?.toUpperCase()}</span>
                 )}
-                <span className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
+                <span data-touch="decorative" className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
                   <Camera size={20} className="text-white" />
                 </span>
               </button>

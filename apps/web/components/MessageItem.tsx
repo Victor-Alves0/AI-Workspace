@@ -1604,7 +1604,7 @@ export default function MessageItem({
                   {message.content}
                 </div>
               )}
-              <div className={`mt-1 flex items-center justify-end gap-1.5 pr-1 transition-opacity duration-150 ${touchActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+              <div data-touch="long-press" className={`mt-1 flex items-center justify-end gap-1.5 pr-1 transition-opacity duration-150 ${touchActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
                 <span className="text-[11px] text-muted">{fmtTime(message.created_at)}</span>
                 <button
                   title="Copiar"
@@ -1672,7 +1672,7 @@ export default function MessageItem({
                 <TriangleAlert size={12} /> Uso alto
               </span>
             ) : null}
-            <span className="text-[11px] font-normal text-muted opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+            <span data-touch="decorative" className="text-[11px] font-normal text-muted opacity-0 transition-opacity duration-150 group-hover:opacity-100">
               {fmtTime(message.created_at)}
             </span>
           </p>

@@ -165,6 +165,7 @@ function useHResize(key: string, def: number, min: number, max: number, edge: "l
       {/* `subtle`: sem alça visível em repouso (não poluir a UI) — o pega ainda
           responde ao arrasto e a alça aparece (accent) só no hover. */}
       <span
+        data-touch="decorative"
         className={`my-auto h-10 w-1 rounded-full transition-all ${
           subtle ? "bg-accent opacity-0 group-hover:opacity-100" : "bg-border group-hover:bg-accent"
         }`}
@@ -2382,7 +2383,7 @@ export default function ChatPage() {
                       >
                         <span className="flex items-start justify-between gap-2">
                           <span className="text-sm font-medium text-ink">{s.title}</span>
-                          <ArrowUpRight size={15} className="mt-0.5 shrink-0 text-muted opacity-0 transition-opacity group-hover:opacity-100" />
+                          <ArrowUpRight size={15} data-touch="decorative" className="mt-0.5 shrink-0 text-muted opacity-0 transition-opacity group-hover:opacity-100" />
                         </span>
                         <span className="mt-1 block text-xs leading-5 text-muted">{s.sub}</span>
                       </button>
@@ -3060,7 +3061,7 @@ function MessageBubble({
             {content}
           </div>
           {(time || onDelete) && (
-            <div className="mt-1 flex items-center justify-end gap-1.5 pr-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+            <div className="touch-reveal mt-1 flex items-center justify-end gap-1.5 pr-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
               {time && <span className="text-[11px] text-muted">{fmtTime(time)}</span>}
               {onDelete && (
                 <button title="Excluir" onClick={onDelete} className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-red-300">

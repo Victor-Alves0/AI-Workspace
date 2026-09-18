@@ -55,13 +55,22 @@ Async FastAPI, served by Uvicorn. Responsibilities:
   same Postgres + pgvector as the vector store.
 - **Knowledge Base (RAG)** — documents indexed with FastEmbed (384 dim) in pgvector; automatic
   mode (injects snippets + cites) or tool mode (`search_knowledge`).
-- **Integrations** — Google (Gmail/Calendar), Tuya/Smart Life, GitHub, and the channels
-  (WhatsApp/Telegram/Discord).
+- **Integrations** — Google (Gmail/Calendar), Tuya/Smart Life, GitHub, Notion, Slack, Civitai,
+  Higgsfield, ElevenLabs, Spotify, Vercel, Remote Terminal and the channels
+  (WhatsApp/Telegram/Discord/Slack).
+- **Mini Apps** (`imaginai/`) — a domain that takes over a conversation with its own tools and
+  rules. The rules run on the server, so the model narrates but does not decide outcomes.
 - **Public API** (`/v1`) — OpenAI-compatible endpoints + key management.
 - **Observability** — every request becomes a trace; spans measure database, LLM and tool time.
 
-The route code is split into ~34 routers (`main.py` registers them). Central configuration
+The route code is split into 37 routers (`main.py` registers them). Central configuration
 comes from environment variables via `pydantic-settings` (see [configuration.md](configuration.md)).
+
+`main.py`'s lifespan also owns the **background workers**: the automation scheduler, the channel
+pollers/gateways (Telegram, Discord, Slack), the Codespace reapers (background commands, idle
+worktrees, live previews) and the media-delivery poller. Work that is *owed* to a chat has a DB
+shadow and a boot recovery, so a restart never swallows it silently — see
+[harness-coupling.md](harness-coupling.md).
 
 ### Frontend (`apps/web`)
 
@@ -79,7 +88,7 @@ icon, "run in the background" and "start with Windows". See [desktop.md](desktop
 
 A single **Postgres 16 + pgvector** holds everything: relational data (users, chats, messages,
 models, automations…), the **mem0 vectors** and the **RAG embeddings**. The schema evolves
-through **55 Alembic migrations**, applied automatically on server startup.
+through **74 Alembic migrations**, applied automatically on server startup.
 
 ## Lifecycle of a chat turn
 

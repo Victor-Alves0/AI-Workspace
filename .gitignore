@@ -14,6 +14,8 @@ node_modules/
 out/
 .turbo/
 dist/
+# cache incremental do tsc (regenerado a cada typecheck)
+tsconfig.tsbuildinfo
 
 # Env / secrets
 .env
@@ -31,6 +33,8 @@ secrets/
 
 # Tauri
 desktop/src-tauri/target/
+# schemas de permissões gerados pelo build do Tauri
+desktop/src-tauri/gen/
 # motor embarcado montado pelo CI (Postgres + backend + frontend); nunca versionar
 desktop/src-tauri/engine/
 # saidas dos builders do motor e do pacote de codigo (auto-update)
