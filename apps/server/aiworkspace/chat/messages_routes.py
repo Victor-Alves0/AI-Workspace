@@ -4,6 +4,7 @@ editar/excluir mensagem, regenerar e continuar. Montado sob o router /chats
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from typing import Any
@@ -337,12 +338,23 @@ async def send_message(
                 await s.commit()
         if arts_changed:
             await emit({"type": "artifacts", "ids": arts_changed})
-        # título por IA (1ª troca + opt-in): substitui o fallback de 60 chars.
+        # título por IA (1ª troca + opt-in): substitui o fallback de 60 chars. Roda sob
+        # o asyncio.shield do on_finish e ANTES de o stream fechar, então um provedor
+        # lento aqui prendia a UI ("gerando", com o texto já completo e o Parar sem
+        # efeito). O teto curto garante que o stream feche; o título perdido reaparece
+        # no próximo refresh da lista de chats.
+        new_title = ""
         if auto_title and collected["content"]:
-            new_title = await generate_title(
-                api_key, title_model or model, user_text, collected["content"], title_prompt,
-                base_url=base_url if not title_model else None,
-            )
+            try:
+                new_title = await asyncio.wait_for(
+                    generate_title(
+                        api_key, title_model or model, user_text, collected["content"],
+                        title_prompt, base_url=base_url if not title_model else None,
+                    ),
+                    timeout=8.0,
+                )
+            except (TimeoutError, asyncio.TimeoutError):
+                new_title = ""
             if new_title:
                 async with SessionLocal() as s:
                     c = await s.get(Chat, chat_id)

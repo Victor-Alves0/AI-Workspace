@@ -95,7 +95,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
   const resumeAbortRef = useRef<AbortController | null>(null);
   useEffect(() => () => resumeAbortRef.current?.abort(), []);
 
-  function makeStreamHandler(getOwnerId?: () => string | null) {
+  function makeStreamHandler(getOwnerId?: () => string | null, streamAbort?: AbortController) {
     const deps = getDeps();
     const state: StreamState = { acc: "", reason: "", tools: [], steps: [], imaginaiChanged: false };
     // dono deste stream ainda é o chat ativo? (checado ao vivo a cada evento).
@@ -113,6 +113,23 @@ export function useGeneration(getDeps: () => GenerationDeps) {
     // etapa e dava a impressão de que o stream havia travado.
     let lastFlush = 0;
     let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    // Rede de seguranca: o turno terminou (done/stopped/error), mas um proxy pode
+    // segurar o corpo SSE aberto sem enviar o EOF. Sem isto, readSSE nunca resolve, o
+    // finally do envio nao roda e a UI fica presa "gerando" com o texto ja completo e
+    // o Parar sem efeito. Ao ver o evento terminal, damos ao servidor uma folga para
+    // fechar sozinho; se nao fechar, abortamos o fetch localmente para destravar.
+    let endWatchdog: ReturnType<typeof setTimeout> | null = null;
+    const armEndWatchdog = () => {
+      if (!streamAbort || endWatchdog !== null) return;
+      // acima do teto do servidor para o trabalho pós-resposta (título por IA ~8s):
+      // no caso normal o servidor fecha o stream antes e este watchdog nem dispara;
+      // ele só age quando o corpo realmente não fecha (proxy/travamento). O Parar
+      // manual destrava na hora, sem esperar isto.
+      endWatchdog = setTimeout(() => {
+        endWatchdog = null;
+        if (!streamAbort.signal.aborted) streamAbort.abort();
+      }, 10000);
+    };
     // Enquanto o usuário seleciona texto, React não pode substituir a árvore do
     // Markdown sob o cursor: a seleção salta ou desaparece. O stream continua
     // acumulando em `state`; pausamos só a pintura e aplicamos o último estado
@@ -271,10 +288,12 @@ export function useGeneration(getDeps: () => GenerationDeps) {
           setTranscribingAudio(false);
         }
         flush();
+        armEndWatchdog();
       } else if (ev.type === "stopped") {
         // garante que o parcial que ainda estava no throttle apareça antes de o
         // chamador recarregar a mensagem persistida.
         flush();
+        armEndWatchdog();
       } else if (ev.type === "artifacts") {
         // resposta persistida criou/atualizou artefatos: abre o último no painel
         if (!paint()) return;
@@ -300,6 +319,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
           if (paint()) setToolEvents(evs);
         }
         flush();
+        armEndWatchdog();
       } else if (ev.type === "title") {
         // título gerado por IA na 1ª troca: atualiza o cabeçalho na hora
         if (paint()) deps.setActive((a) => (a && ev.title ? { ...a, title: ev.title } : a));
@@ -315,6 +335,10 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       if (flushTimer !== null) {
         clearTimeout(flushTimer);
         flushTimer = null;
+      }
+      if (endWatchdog !== null) {
+        clearTimeout(endWatchdog);
+        endWatchdog = null;
       }
     };
     return { handler, state, dispose };

@@ -249,3 +249,44 @@ def test_send_message_routes_active_gen_to_enqueue():
     assert "get_active(" in src, "send deve checar geração ativa"
     assert ".enqueue(" in src, "send deve enfileirar durante geração ativa"
     assert "queued" in src, "send deve retornar sinal de enfileirado"
+
+
+def test_done_reaches_subscriber_before_on_finish_completes():
+    """O `done` chega ao ASSINANTE antes de o on_finish (persistência + título por IA)
+    terminar. É a premissa da rede de segurança do cliente: ele recebe o texto final
+    e, se o corpo do SSE demorar a fechar porque o on_finish está lento, aborta o fetch
+    localmente em vez de ficar preso "gerando" com o Parar sem efeito.
+
+    Regressão real: a geração de título rodava no on_finish, sob asyncio.shield e ANTES
+    do fim do stream; um provedor lento no título prendia a UI por vários segundos."""
+    release_finish = asyncio.Event()
+    saw_done_before_finish: dict = {}
+
+    async def slow_on_finish(collected, emit):
+        # simula o título por IA lento dentro do on_finish
+        await release_finish.wait()
+
+    async def src():
+        yield {"type": "token", "text": "resposta"}
+        yield {"type": "done", "content": "resposta completa", "usage": None, "tool_events": None}
+
+    async def go():
+        g = gen_mod.start("cDone", src(), slow_on_finish)
+        received: list = []
+        # assina como o cliente faz; deve ver o `done` mesmo com o on_finish preso
+        async def consume():
+            async for ev in g.subscribe(0):
+                received.append(ev.get("type"))
+                if ev.get("type") == "done":
+                    saw_done_before_finish["done_seen"] = True
+                    saw_done_before_finish["finish_done"] = g.done
+                    # o cliente já tem o texto; libera o on_finish preso
+                    release_finish.set()
+
+        await asyncio.wait_for(consume(), timeout=2.0)
+        await g.task
+
+    asyncio.run(go())
+    assert saw_done_before_finish.get("done_seen") is True
+    # no instante em que o cliente vê o done, a geração ainda NÃO fechou (on_finish preso)
+    assert saw_done_before_finish.get("finish_done") is False

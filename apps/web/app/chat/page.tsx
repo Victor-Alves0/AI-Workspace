@@ -222,6 +222,9 @@ export default function ChatPage() {
   const isActiveChat = useCallback(
     (id: string | null) => (id ?? null) === activeIdRef.current, [],
   );
+  // "Parar" e a rede de seguranca do stream abortam o fetch local; esse aborto nao e
+  // um erro de envio (nao restaura rascunho nem notifica).
+  const isAbort = (e: unknown) => e instanceof DOMException && e.name === "AbortError";
   // Campanha do mini app Imaginai (estado + recarga) — ver components/imaginai.
   const {
     snapshot: imaginaiSnapshot, setSnapshot: setImaginaiSnapshot,
@@ -1467,7 +1470,10 @@ export default function ChatPage() {
     // se o usuário trocar de chat, o handler para de pintar (ver useGeneration).
     // Para rascunho, o id só existe após criar o chat abaixo — daí o getter.
     let ownerId: string | null = active?.id ?? null;
-    const { handler: onEvent, state, dispose: disposeStream } = makeStreamHandler(() => ownerId);
+    // Aborta o fetch do stream localmente: e o que garante que "Parar" (e a rede de
+    // seguranca pos-done) sempre destrave a UI, mesmo se o corpo SSE nao fechar.
+    const streamAbort = new AbortController();
+    const { handler: onEvent, state, dispose: disposeStream } = makeStreamHandler(() => ownerId, streamAbort);
 
     // controles definidos na home (rascunho) têm prioridade sobre o do modelo custom
     const initialSystemPrompt = draftSystemPrompt || curCustom?.system_prompt || null;
@@ -1478,18 +1484,18 @@ export default function ChatPage() {
       // estava em voo para o backend não ler o valor anterior por corrida de rede.
       if (reasoningSaveRef.current) await reasoningSaveRef.current;
       if (temporary) {
-        // temporário roda preso à request: "Parar" = abortar a conexão local
-        const ctrl = new AbortController();
-        stopRef.current = () => ctrl.abort();
+        // temporário roda preso à request: "Parar" = abortar a conexão local (mesmo
+        // AbortController da rede de segurança pós-done)
+        stopRef.current = () => streamAbort.abort();
         const history = messages.map((m) => ({ role: m.role, content: m.content }));
         try {
           await streamEphemeral(
             { model, content: text, history, system_prompt: initialSystemPrompt, params: initialParams, model_config_id: curCustomId, skill_ids: turnSkillIds, attachments: turnAttachments },
             onEvent,
-            ctrl.signal,
+            streamAbort.signal,
           );
         } catch (e) {
-          if (!(e instanceof DOMException && e.name === "AbortError")) throw e;
+          if (!isAbort(e)) throw e;
         }
         if ((state.acc || state.steps.length) && isActiveChat(ownerId)) {
           setMessages((m) => [...m, { id: `a-${Date.now()}`, role: "assistant", content: state.acc, reasoning: state.reason || state.steps.length ? { text: state.reason, steps: state.steps } : null, tool_events: state.tools.length ? state.tools : null, created_at: new Date().toISOString() }]);
@@ -1510,8 +1516,12 @@ export default function ChatPage() {
         }
         // persistente: o servidor cancela a geração e salva o parcial
         const cid = chat.id;
-        stopRef.current = () => { api.post(`/chats/${cid}/stop`).catch(() => {}); };
-        await streamMessage(chat.id, text, onEvent, undefined, turnSkillIds, turnAttachments, turnAgentId, turnRefDocIds, turnRefChatIds, turnMiniApp);
+        stopRef.current = () => { streamAbort.abort(); api.post(`/chats/${cid}/stop`).catch(() => {}); };
+        try {
+          await streamMessage(chat.id, text, onEvent, streamAbort.signal, turnSkillIds, turnAttachments, turnAgentId, turnRefDocIds, turnRefChatIds, turnMiniApp);
+        } catch (streamErr) {
+          if (!isAbort(streamErr)) throw streamErr;   // Parar/rede de seguranca: segue p/ recarregar o parcial salvo
+        }
         refreshChats();
         // só recarrega/limpa a tela se o usuário AINDA está neste chat — senão
         // sobrescreveria o chat para onde ele navegou (a resposta já ficou salva
@@ -1538,6 +1548,7 @@ export default function ChatPage() {
       }
       if (state.acc) notify("Resposta pronta", state.acc.replace(/\s+/g, " ").slice(0, 90));
     } catch (e) {
+      if (isAbort(e)) { refreshBudget(); return; }   // Parar: nao e falha de envio
       // orçamento pessoal estourado (modo "pausar") ou outra falha ao iniciar o turno
       const msg = e instanceof ApiError ? e.message : "Falha ao enviar a mensagem";
       // Desfaz somente o balão deste envio. Outras mensagens otimistas podem
@@ -1635,10 +1646,15 @@ export default function ChatPage() {
       return m.slice(0, m[i].role === "user" ? i + 1 : i);
     });
     const cid = active.id;
-    const { handler, state, dispose: disposeStream } = makeStreamHandler(() => cid);
-    stopRef.current = () => { api.post(`/chats/${cid}/stop`).catch(() => {}); };
+    const streamAbort = new AbortController();
+    const { handler, state, dispose: disposeStream } = makeStreamHandler(() => cid, streamAbort);
+    stopRef.current = () => { streamAbort.abort(); api.post(`/chats/${cid}/stop`).catch(() => {}); };
     try {
-      await streamRegenerate(active.id, id, handler);
+      try {
+        await streamRegenerate(active.id, id, handler, streamAbort.signal);
+      } catch (streamErr) {
+        if (!isAbort(streamErr)) throw streamErr;
+      }
       refreshChats();
       if (isActiveChat(cid)) {
         setStreaming("");
@@ -1669,10 +1685,15 @@ export default function ChatPage() {
     setStreamingReasoning("");
     setToolEvents([]);
     const cid = active.id;
-    const { handler, state, dispose: disposeStream } = makeStreamHandler(() => cid);
-    stopRef.current = () => { api.post(`/chats/${cid}/stop`).catch(() => {}); };
+    const streamAbort = new AbortController();
+    const { handler, state, dispose: disposeStream } = makeStreamHandler(() => cid, streamAbort);
+    stopRef.current = () => { streamAbort.abort(); api.post(`/chats/${cid}/stop`).catch(() => {}); };
     try {
-      await streamContinue(active.id, id, handler);
+      try {
+        await streamContinue(active.id, id, handler, streamAbort.signal);
+      } catch (streamErr) {
+        if (!isAbort(streamErr)) throw streamErr;
+      }
       if (isActiveChat(cid)) {
         setStreaming("");
         setStreamingReasoning("");
