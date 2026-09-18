@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, Download, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Loader2, Mail, MessageSquarePlus, Pencil, Play, RotateCcw, Send, ShieldAlert, Square, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench, X, ZoomIn } from "lucide-react";
+import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, Download, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Loader2, Mail, MessageSquarePlus, Pencil, Play, RotateCcw, Send, ShieldAlert, Square, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import type { ActivityStep, BrainNoteEvent, ChartSpec, ChatArtifact, DeepResearch, Message, SkillProposal, StockQuote, ToolEvent } from "@/lib/types";
 import { api, ApiError, API_URL } from "@/lib/api";
@@ -678,20 +678,51 @@ function AudioCard({ url, prompt }: { url: string; prompt?: string }) {
   );
 }
 
+const ZOOM_SCALE = 2.5;
+
 function ImageCard({ url, prompt }: { url: string; prompt?: string }) {
   const src = url.startsWith("http") ? url : `${API_URL}${url}`;
   const downloadSrc = `${src}${src.includes("?") ? "&" : "?"}download=true`;
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  // zoom do lightbox: clicar amplia NO PONTO clicado; com zoom, mover o ponteiro
+  // percorre a imagem (a origem da escala segue o cursor/dedo).
+  const [zoomed, setZoomed] = useState(false);
+  const [origin, setOrigin] = useState({ x: 50, y: 50 });
+
+  function pointOf(event: React.MouseEvent<HTMLImageElement> | React.PointerEvent<HTMLImageElement>) {
+    const box = event.currentTarget.getBoundingClientRect();
+    return {
+      x: Math.min(100, Math.max(0, ((event.clientX - box.left) / box.width) * 100)),
+      y: Math.min(100, Math.max(0, ((event.clientY - box.top) / box.height) * 100)),
+    };
+  }
+
+  function toggleZoom(event: React.MouseEvent<HTMLImageElement>) {
+    if (!zoomed) setOrigin(pointOf(event));
+    setZoomed((value) => !value);
+  }
+
+  function followPointer(event: React.PointerEvent<HTMLImageElement>) {
+    if (zoomed) setOrigin(pointOf(event));
+  }
+
+  function close() {
+    setOpen(false);
+    setZoomed(false);
+  }
 
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key !== "Escape") return;
+      // 1º Esc sai do zoom; o 2º fecha
+      if (zoomed) setZoomed(false);
+      else setOpen(false);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open]);
+  }, [open, zoomed]);
 
   async function copyPrompt() {
     if (!prompt || !(await copyText(prompt))) return;
@@ -724,9 +755,6 @@ function ImageCard({ url, prompt }: { url: string; prompt?: string }) {
               <Download size={16} />
             </a>
           </div>
-          <span className="pointer-events-none absolute bottom-2 right-2 flex items-center gap-1 rounded-md bg-black/55 px-2 py-1 text-[11px] text-white opacity-0 backdrop-blur-sm transition-opacity group-hover:opacity-100">
-            <ZoomIn size={13} /> Ampliar
-          </span>
         </div>
         {prompt && (
           <div className="flex items-center gap-1 border-t border-border px-2 py-1.5">
@@ -749,52 +777,60 @@ function ImageCard({ url, prompt }: { url: string; prompt?: string }) {
           role="dialog"
           aria-modal="true"
           aria-label="Imagem ampliada"
-          onMouseDown={() => setOpen(false)}
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
+          onMouseDown={close}
+          className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden bg-black/85 p-4 backdrop-blur-sm"
         >
-          <div
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={src}
+            alt={prompt || "imagem gerada"}
+            draggable={false}
             onMouseDown={(event) => event.stopPropagation()}
-            className="relative flex max-h-full w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#111217] shadow-2xl"
-          >
-            <div className="absolute right-3 top-3 z-10 flex gap-2">
-              <a
-                href={downloadSrc}
-                download
-                title="Baixar imagem"
-                aria-label="Baixar imagem"
-                className="rounded-lg border border-white/10 bg-black/60 p-2 text-white backdrop-blur-sm transition-colors hover:bg-black/85"
-              >
-                <Download size={18} />
-              </a>
+            onClick={toggleZoom}
+            onPointerMove={followPointer}
+            style={{
+              transform: zoomed ? `scale(${ZOOM_SCALE})` : "none",
+              transformOrigin: `${origin.x}% ${origin.y}%`,
+            }}
+            className={`block max-h-[92vh] max-w-full select-none object-contain transition-transform duration-200 ease-out motion-reduce:transition-none ${zoomed ? "cursor-zoom-out" : "cursor-zoom-in"}`}
+          />
+          <div className="absolute right-4 top-4 z-10 flex gap-2" onMouseDown={(event) => event.stopPropagation()}>
+            <a
+              href={downloadSrc}
+              download
+              title="Baixar imagem"
+              aria-label="Baixar imagem"
+              className="rounded-lg border border-white/10 bg-black/60 p-2 text-white backdrop-blur-sm transition-colors hover:bg-black/85"
+            >
+              <Download size={18} />
+            </a>
+            <button
+              type="button"
+              onClick={close}
+              title="Fechar"
+              aria-label="Fechar imagem ampliada"
+              className="rounded-lg border border-white/10 bg-black/60 p-2 text-white backdrop-blur-sm transition-colors hover:bg-black/85"
+            >
+              <X size={18} />
+            </button>
+          </div>
+          {prompt && !zoomed && (
+            <div
+              onMouseDown={(event) => event.stopPropagation()}
+              className="absolute bottom-4 left-1/2 z-10 flex w-[min(40rem,calc(100%-2rem))] -translate-x-1/2 items-center gap-2 rounded-xl border border-white/10 bg-black/60 px-3 py-1.5 backdrop-blur-sm"
+            >
+              <p className="min-w-0 flex-1 truncate text-xs text-white/70" title={prompt}>{prompt}</p>
               <button
                 type="button"
-                onClick={() => setOpen(false)}
-                title="Fechar"
-                aria-label="Fechar imagem ampliada"
-                className="rounded-lg border border-white/10 bg-black/60 p-2 text-white backdrop-blur-sm transition-colors hover:bg-black/85"
+                onClick={copyPrompt}
+                title={copied ? "Prompt copiado" : "Copiar prompt"}
+                aria-label={copied ? "Prompt copiado" : "Copiar prompt"}
+                className={`rounded-md p-1.5 transition-colors hover:bg-white/10 ${copied ? "text-green-400" : "text-white/70 hover:text-white"}`}
               >
-                <X size={18} />
+                {copied ? <Check size={16} /> : <Copy size={16} />}
               </button>
             </div>
-            <div className="min-h-0 flex-1 overflow-auto bg-black/30 p-2 sm:p-4">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={src} alt={prompt || "imagem gerada"} className="mx-auto block max-h-[78vh] max-w-full object-contain" />
-            </div>
-            {prompt && (
-              <div className="flex items-center gap-2 border-t border-white/10 px-3 py-2.5">
-                <p className="min-w-0 flex-1 truncate text-xs text-muted" title={prompt}>{prompt}</p>
-                <button
-                  type="button"
-                  onClick={copyPrompt}
-                  title={copied ? "Prompt copiado" : "Copiar prompt"}
-                  aria-label={copied ? "Prompt copiado" : "Copiar prompt"}
-                  className={`rounded-md p-1.5 transition-colors hover:bg-hover ${copied ? "text-green-400" : "text-muted hover:text-white"}`}
-                >
-                  {copied ? <Check size={16} /> : <Copy size={16} />}
-                </button>
-              </div>
-            )}
-          </div>
+          )}
         </div>,
         document.body,
       )}
