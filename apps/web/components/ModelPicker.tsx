@@ -127,7 +127,7 @@ export default function ModelPicker({
       {/* mobile: fixed na largura da tela (ancorado no botão ele estoura a borda
           direita — o gatilho não está no x=0); desktop: ancorado como antes */}
       {open && (
-        <div className="fixed inset-x-3 top-14 z-50 overflow-hidden rounded-2xl border border-border bg-surface shadow-menu animate-pop sm:absolute sm:inset-x-auto sm:left-0 sm:top-11 sm:w-[380px] sm:max-w-[calc(100vw-1.5rem)]">
+        <div className="fixed inset-x-3 top-20 z-50 overflow-hidden rounded-2xl border border-border bg-surface shadow-menu animate-pop sm:absolute sm:inset-x-auto sm:left-0 sm:top-11 sm:w-[380px] sm:max-w-[calc(100vw-1.5rem)]">
           <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
             <Search size={16} className="text-muted" />
             <input
@@ -162,9 +162,9 @@ export default function ModelPicker({
           </div>
           {/* max-h em dvh: no celular a lista não passa por baixo do teclado;
               onTouchMove fecha o teclado ao arrastar (senão o scroll trava no iOS) */}
-          <div onTouchMove={dismissKeyboard} className="max-h-[min(20rem,55dvh)] overflow-y-auto overscroll-contain p-1.5 max-md:max-h-[60dvh]">
+          <div onTouchMove={dismissKeyboard} className="max-h-[min(20rem,55dvh)] overflow-y-auto overscroll-contain p-1.5 max-md:max-h-[21rem]">
             {rows.map((r) => (
-              <div key={r.key} className="group relative flex items-center gap-2 rounded-lg px-2 py-2 transition-colors hover:bg-hover max-md:min-h-12 max-md:px-2.5">
+              <div key={r.key} className="group relative flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-hover max-md:min-h-14 max-md:px-3">
                 <button
                   onClick={() => {
                     if (r.external) onSelectExternal(r.modelId);
@@ -175,13 +175,13 @@ export default function ModelPicker({
                 >
                   {r.avatar ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={r.avatar} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover max-md:h-7 max-md:w-7" />
+                    <img src={r.avatar} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover max-md:h-9 max-md:w-9" />
                   ) : (
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface2 text-[10px] text-ink max-md:h-7 max-md:w-7 max-md:text-xs">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface2 text-[10px] text-ink max-md:h-9 max-md:w-9 max-md:text-sm">
                       {r.name[0]?.toUpperCase()}
                     </span>
                   )}
-                  <span title={r.name} className="truncate text-sm text-ink max-md:text-[16px]">{r.name}</span>
+                  <span title={r.name} className="truncate text-sm text-ink max-md:text-[17px]">{r.name}</span>
                   {r.provider && (
                     <span className="shrink-0 rounded bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">{r.provider}</span>
                   )}

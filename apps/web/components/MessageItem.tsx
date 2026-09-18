@@ -1617,7 +1617,7 @@ export default function MessageItem({
                   title="Tentar novamente — a IA responde de novo a partir desta mensagem"
                   onClick={() => onRegenerate(message.id)}
                   disabled={busy}
-                  className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                  className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 max-md:p-2 max-md:[&_svg]:size-[20px]"
                 >
                   <RotateCcw size={13} />
                 </button>
@@ -1631,7 +1631,7 @@ export default function MessageItem({
                 <button
                   title="Excluir"
                   onClick={() => onDelete(message.id)}
-                  className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-red-300"
+                  className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-red-300 max-md:p-2 max-md:[&_svg]:size-[20px]"
                 >
                   <Trash2 size={13} />
                 </button>

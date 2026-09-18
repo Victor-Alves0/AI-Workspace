@@ -50,7 +50,7 @@ function flattenRefs(refs: KnowledgeRef[]): RefDoc[] {
   return out;
 }
 import { fileToBase64, fileToImageDataUrl, fileToText } from "@/lib/image";
-import { MenuItem, useClickOutside } from "./ui";
+import { MenuItem, finePointer, useClickOutside } from "./ui";
 import { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME } from "./CodespaceFileBrowser";
 import { toolCategoryIcon, toolCategoryTitle } from "./toolCategory";
 
@@ -92,12 +92,12 @@ function ContextMeter({
         onClick={() => setOpen((v) => !v)}
         disabled={busy}
         title={`Contexto: ${fmt(tokens)}${limit ? ` / ${fmt(limit)}` : ""} tokens`}
-        className="relative flex h-8 w-8 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-hover disabled:opacity-60"
+        className="relative flex h-8 w-8 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-hover disabled:opacity-60 max-md:h-10 max-md:w-10"
       >
         {busy ? (
-          <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-accent" />
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted border-t-accent max-md:h-5 max-md:w-5" />
         ) : (
-          <svg viewBox="0 0 20 20" className="h-5 w-5 -rotate-90">
+          <svg viewBox="0 0 20 20" className="h-5 w-5 -rotate-90 max-md:h-6 max-md:w-6">
             <circle cx="10" cy="10" r={r} fill="none" stroke="currentColor" strokeWidth="2.5" className="text-surface2" />
             <circle
               cx="10" cy="10" r={r} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round"
@@ -108,7 +108,7 @@ function ContextMeter({
         )}
       </button>
       {open && (
-        <div className="animate-pop absolute bottom-11 right-0 z-50 min-w-[230px] rounded-xl border border-border bg-surface p-1.5 shadow-menu">
+        <div className="animate-pop absolute bottom-11 left-1/2 z-50 min-w-[230px] -translate-x-1/2 rounded-xl border border-border bg-surface p-1.5 shadow-menu">
           <p className="px-2.5 pb-1 pt-1 text-[11px] text-muted">
             Contexto: <span className="font-medium text-ink-soft">{fmt(tokens)}{limit ? ` / ${fmt(limit)}` : ""}</span> tokens
           </p>
@@ -216,7 +216,7 @@ function ToolsMenu({ tools }: { tools: { name: string; description?: string; cat
             <div className="flex items-center gap-2 border-b border-border px-3 py-2">
               <Search size={14} className="text-muted" />
               <input
-                autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar ferramentas…"
+                autoFocus={finePointer()} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar ferramentas…"
                 className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
               />
             </div>
@@ -308,7 +308,7 @@ function MiniAppsMenu({
           <div className="flex items-center gap-1.5 border-b border-border px-2.5 py-2">
             <Search size={14} className="shrink-0 text-muted" />
             <input
-              autoFocus
+              autoFocus={finePointer()}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Buscar…"
@@ -1139,7 +1139,7 @@ export default function PromptBox({
                   <div className="flex items-center gap-2 border-b border-border px-3 py-2">
                     <Search size={14} className="text-muted" />
                     <input
-                      autoFocus
+                      autoFocus={finePointer()}
                       value={chatQuery}
                       onChange={(e) => setChatQuery(e.target.value)}
                       placeholder="Buscar chat…"
