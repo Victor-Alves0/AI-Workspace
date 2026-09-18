@@ -53,6 +53,8 @@ class CharacterUpdate(BaseModel):
     armor_class: int | None = Field(default=None, ge=0, le=99)
     speed: int | None = Field(default=None, ge=0, le=999)
     attributes: AbilityScoresUpdate | None = None
+    # história do personagem: o narrador usa na abertura para inserir o jogador no mundo
+    backstory: str | None = Field(default=None, max_length=8_000)
 
 
 class EntityCreate(BaseModel):

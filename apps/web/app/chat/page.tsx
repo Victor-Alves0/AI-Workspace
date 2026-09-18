@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, ChevronDown, ChevronUp, Code2, Copy, FlaskConical, GitBranch, Image as ImageIcon, Link2, Loader2, Menu, MessageSquareDashed, Mic, Pause, Play, RotateCcw, RotateCw, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
+import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, ChevronDown, ChevronUp, Code2, Copy, Dices, FlaskConical, GitBranch, Image as ImageIcon, Link2, Loader2, Menu, MessageSquareDashed, Mic, Pause, Play, RotateCcw, RotateCw, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamRoundtable } from "@/lib/sse";
@@ -206,20 +206,18 @@ export default function ChatPage() {
   // anexos (imagens/arquivos) do próximo envio
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [active, setActive] = useState<Chat | null>(null);
-  // Mini Apps pertencem ao chat, não à página inteira. A seleção por id impede
-  // o Imaginai de aparecer ou materializar campanha ao navegar para outro chat.
-  const [miniAppByChat, setMiniAppByChat] = useState<Record<string, MiniAppId | undefined>>({});
-  const activeMiniApp = active?.id ? miniAppByChat[active.id] ?? null : null;
-  const setActiveMiniApp = useCallback((app: MiniAppId | null) => {
-    const chatId = active?.id;
-    if (!chatId) return;
-    setMiniAppByChat((current) => {
-      if (app) return { ...current, [chatId]: app };
-      const next = { ...current };
-      delete next[chatId];
-      return next;
-    });
-  }, [active?.id]);
+  // O Mini App é o CHAT (chat.mini_app, gravado no servidor): uma mesa de RPG nasce
+  // assim e continua assim ao recarregar a página. No rascunho de "novo chat", o
+  // `draftMiniApp` segura a escolha até o chat ser criado no primeiro envio.
+  const [draftMiniApp, setDraftMiniApp] = useState<MiniAppId | null>(null);
+  const activeMiniApp: MiniAppId | null = active
+    ? (active.mini_app === "imaginai" ? "imaginai" : null)
+    : draftMiniApp;
+  // num chat Imaginai, o botão do Mini App só mostra/oculta os painéis laterais
+  const [imaginaiDocksHidden, setImaginaiDocksHidden] = useState(false);
+  // campanha nova: o primeiro turno (a IA cumprimentando) é disparado assim que o
+  // rascunho estiver pronto — o efeito abaixo roda com o estado já limpo
+  const [pendingKickoff, setPendingKickoff] = useState<string | null>(null);
   // espelho do id do chat ativo: os handlers de stream (assíncronos) consultam
   // este ref para saber, a QUALQUER instante, se ainda estão pintando o chat que
   // o usuário está vendo — sem isso, o parcial de um chat vaza para outro ao trocar.
@@ -1168,7 +1166,7 @@ export default function ChatPage() {
     activeIdRef.current = null;
     leaveViewOnce();
     setActive(null);
-    setActiveMiniApp(null);
+    setDraftMiniApp(null);
     setDraftRt(null);
     setMessages([]);
     releaseGeneration();
@@ -1237,7 +1235,8 @@ export default function ChatPage() {
     const renderedActiveId = active?.id ?? null;
     // Bloqueia imediatamente handlers do chat anterior enquanto o destino carrega.
     activeIdRef.current = id;
-    if (active?.id !== id) setActiveMiniApp(null);
+    setDraftMiniApp(null);
+    if (active?.id !== id) setImaginaiDocksHidden(false);
     setTemporary(false);
     setWorkspaceOpen(false);
     leaveViewOnce(id);
@@ -1438,6 +1437,35 @@ export default function ChatPage() {
     await refreshChats();
   };
 
+  /** Botão do Mini App no composer. Num chat Imaginai ele só mostra/oculta os
+   *  painéis; em qualquer outro lugar ele começa uma CAMPANHA NOVA num chat novo —
+   *  a mesa de RPG não se mistura com uma conversa comum. */
+  function handleMiniApp(app: MiniAppId | null) {
+    if (activeMiniApp === "imaginai" && active) {
+      setImaginaiDocksHidden((hidden) => !hidden);
+      return;
+    }
+    if (app !== "imaginai") return;
+    // o que já estava digitado vira a ideia da campanha; sem nada, a IA pergunta
+    const ideia = input.trim();
+    goHome();
+    setInput("");
+    setDraftMiniApp("imaginai");
+    setImaginaiDocksHidden(false);
+    setPendingKickoff(ideia || "Começar uma nova campanha");
+  }
+
+  // Dispara o 1º turno da campanha nova quando o rascunho já está limpo: aqui o `send`
+  // é o desta renderização (sem estado velho do chat anterior) e cria o chat já como
+  // Imaginai. A IA responde cumprimentando e abrindo a sessão zero.
+  useEffect(() => {
+    if (!pendingKickoff || active || sending || draftMiniApp !== "imaginai") return;
+    const texto = pendingKickoff;
+    setPendingKickoff(null);
+    void send(texto);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingKickoff, active, sending, draftMiniApp]);
+
   async function send(textArg?: string) {
     // textArg vem dos seletores de opção (kind:"ask"); senão usa o campo de texto
     const override = typeof textArg === "string";
@@ -1524,12 +1552,15 @@ export default function ChatPage() {
         let chat = active;
         if (!chat) {
           chat = await api.post<Chat>("/chats", {
-            title: "Novo Chat",
+            title: turnMiniApp === "imaginai" ? "Nova campanha" : "Novo Chat",
             model,
             system_prompt: initialSystemPrompt,
             params: initialParams,
             model_config_id: curCustomId,
+            // a campanha nasce com o chat — o 1º turno já encontra o mundo pronto
+            ...(turnMiniApp ? { mini_app: turnMiniApp } : {}),
           });
+          if (turnMiniApp) setDraftMiniApp(null);
           setActive(chat);
           activeIdRef.current = chat.id;
           ownerId = chat.id; // rascunho virou chat real: o stream agora tem dono
@@ -2296,6 +2327,14 @@ export default function ChatPage() {
                   : "Definir como padrão"}
               </button>
             )}
+            {active?.mini_app === "imaginai" && (
+              <span
+                title={imaginaiDocksHidden ? "Mesa de RPG — painéis ocultos" : "Mesa de RPG (Imaginai)"}
+                className="flex cursor-default items-center gap-1 pl-2 text-xs text-violet-300"
+              >
+                <Dices size={11} /> Imaginai
+              </span>
+            )}
             {active?.project_id && (
               <span className="flex items-center gap-2.5 pl-2 text-xs">
                 <span
@@ -2407,7 +2446,7 @@ export default function ChatPage() {
                   onDragLeave={() => setCsDropOver(false)}
                   onDrop={handleComposerFileDrop}
                 >
-                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} activeMiniApp={activeMiniApp} onActiveMiniAppChange={setActiveMiniApp} temporary={temporary} />
+                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} />
                 </div>
                 {/* menu do "+" abre para baixo aqui (há espaço); na conversa abre para cima */}
                 {temporary && <p className="mt-2 text-xs text-muted">Chat temporário — esta conversa não será salva.</p>}
@@ -2598,7 +2637,7 @@ export default function ChatPage() {
                     sending && <Thinking />
                   ))}
                   </div>
-                  {activeMiniApp === "imaginai" ? (
+                  {activeMiniApp === "imaginai" && active && !imaginaiDocksHidden ? (
                     <ImaginaiDocks
                       snapshot={imaginaiSnapshot}
                       loading={imaginaiLoading}
@@ -2640,7 +2679,7 @@ export default function ChatPage() {
                           {showAsk && askSpec && (
                             <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                           )}
-                          <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={setActiveMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
+                          <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
                         </div>
                       </div>
                       {speakingMessageId && (

@@ -95,6 +95,8 @@ export function ImaginaiCharacterEditor({
   const [ancestry, setAncestry] = useState(typeof dnd.ancestry === "string" ? dnd.ancestry : "");
   const [background, setBackground] = useState(typeof dnd.background === "string" ? dnd.background : "");
   const [alignment, setAlignment] = useState(typeof dnd.alignment === "string" ? dnd.alignment : "");
+  // a história é o que o narrador usa para inserir o personagem no mundo
+  const [backstory, setBackstory] = useState(typeof dnd.backstory === "string" ? dnd.backstory : "");
   const [hpCurrent, setHpCurrent] = useState(String(numericState(hp.current, 10)));
   const [hpMax, setHpMax] = useState(String(numericState(hp.max, 10)));
   const [armorClass, setArmorClass] = useState(String(numericState(dnd.armor_class, 10)));
@@ -122,6 +124,7 @@ export function ImaginaiCharacterEditor({
         ancestry: ancestry.trim(),
         background: background.trim(),
         alignment: alignment.trim(),
+        backstory: backstory.trim(),
         hp_current: numeric(hpCurrent, 10),
         hp_max: numeric(hpMax, 10),
         armor_class: numeric(armorClass, 10),
@@ -148,6 +151,7 @@ export function ImaginaiCharacterEditor({
           <label className="text-xs font-medium text-ink-soft">Ancestralidade<input maxLength={120} value={ancestry} onChange={(event) => setAncestry(event.target.value)} placeholder="Ex.: Elfo" className="imaginai-field" /></label>
           <label className="text-xs font-medium text-ink-soft">Antecedente<input maxLength={120} value={background} onChange={(event) => setBackground(event.target.value)} placeholder="Ex.: Acólito" className="imaginai-field" /></label>
           <label className="text-xs font-medium text-ink-soft sm:col-span-2">Tendência<input maxLength={80} value={alignment} onChange={(event) => setAlignment(event.target.value)} placeholder="Ex.: Neutro e Bom" className="imaginai-field" /></label>
+          <label className="text-xs font-medium text-ink-soft sm:col-span-2">História<textarea maxLength={8000} rows={5} value={backstory} onChange={(event) => setBackstory(event.target.value)} placeholder="De onde vem, o que perdeu, o que procura, quem deixou para trás…" className="imaginai-field resize-y leading-5" /></label>
         </div>
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"><label className="text-[10px] font-medium text-ink-soft">HP atual<input type="number" min="0" max="9999" value={hpCurrent} onChange={(event) => setHpCurrent(event.target.value)} className="imaginai-field" /></label><label className="text-[10px] font-medium text-ink-soft">HP máximo<input type="number" min="1" max="9999" value={hpMax} onChange={(event) => setHpMax(event.target.value)} className="imaginai-field" /></label><label className="text-[10px] font-medium text-ink-soft">CA<input type="number" min="0" max="99" value={armorClass} onChange={(event) => setArmorClass(event.target.value)} className="imaginai-field" /></label><label className="text-[10px] font-medium text-ink-soft">Deslocamento<input type="number" min="0" max="999" value={speed} onChange={(event) => setSpeed(event.target.value)} className="imaginai-field" /></label></div>
         <fieldset className="mt-4"><legend className="text-xs font-medium text-ink-soft">Atributos</legend><div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-6">{DND5E_ABILITY_FIELDS.map(([key, label]) => <label key={key} className="rounded-xl border border-border bg-surface2/55 px-2 py-1.5 text-center text-[9px] font-semibold text-muted">{label}<input aria-label={label} type="number" min="1" max="30" value={attributes[key] ?? "10"} onChange={(event) => setAttributes((current) => ({ ...current, [key]: event.target.value }))} className="mt-1 block w-full bg-transparent text-center font-mono text-sm text-ink outline-none" /></label>)}</div></fieldset>

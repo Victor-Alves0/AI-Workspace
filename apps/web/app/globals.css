@@ -450,7 +450,7 @@ select:focus-visible {
 /* Mesma moldura da promptbox: borda neutra, cantos 3xl e sombra "prompt". */
 .imaginai-dock-card {
   width: 100%;
-  max-width: 18rem;
+  max-width: 21rem;
   flex-shrink: 0;
   border: 1px solid rgb(var(--c-border));
   border-radius: 1.5rem;
@@ -687,6 +687,10 @@ select:focus-visible {
   .imaginai-docks {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 50rem) minmax(0, 1fr);
+    /* Linha com a altura EXATA da área de mensagens. Sem isto a linha era `auto` e
+     * crescia com o conteúdo: abrir a Ficha esticava a linha além da área, e a pilha
+     * (alinhada ao fim) descia por cima da faixa do compositor. */
+    grid-template-rows: minmax(0, 1fr);
     align-items: end;
   }
   .imaginai-mobile-scrim,
@@ -711,11 +715,12 @@ select:focus-visible {
   .imaginai-world-dock[data-mobile-open],
   .imaginai-character-dock[data-mobile-open] {
     max-height: 100%;
+    min-height: 0;
     flex-direction: column;
     align-items: center;
     justify-content: flex-end;
     gap: 0.5rem;
-    padding-inline: 1rem;
+    padding-inline: 0.75rem;
     padding-top: 1rem;
   }
   .imaginai-world-dock,

@@ -79,6 +79,7 @@ def _campaign_out(campaign: ImaginaiCampaign) -> dict[str, Any]:
         "system_version": campaign.system_version,
         "status": campaign.status,
         "world_tick": campaign.world_tick,
+        "setup_stage": campaign.setup_stage,
         "settings": campaign.settings or {},
         "created_at": campaign.created_at,
         "updated_at": campaign.updated_at,
@@ -159,6 +160,7 @@ async def create_campaign(
 
     # Falha antes de gravar se o plugin não existe.
     ruleset_for(body.system_key)
+    chat.mini_app = "imaginai"
     campaign = ImaginaiCampaign(
         user_id=user_id,
         chat_id=body.chat_id,
@@ -335,7 +337,7 @@ def _merge_character_setup(state: dict[str, Any], body: CharacterUpdate) -> dict
 
     if body.character_class is not None:
         dnd["class"] = body.character_class.strip()
-    for key in ("ancestry", "background", "alignment"):
+    for key in ("ancestry", "background", "alignment", "backstory"):
         value = getattr(body, key)
         if value is not None:
             dnd[key] = value.strip()

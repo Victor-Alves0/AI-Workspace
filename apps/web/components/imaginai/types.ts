@@ -21,6 +21,8 @@ export type ImaginaiSnapshot = {
     system_version: string;
     status: string;
     world_tick: number;
+    /** sessão zero: conceito → personagem → jogo */
+    setup_stage?: "concept" | "character" | "play";
     settings?: {
       narration_style?: "balanced" | "cinematic" | "gritty";
       difficulty?: "story" | "balanced" | "challenging";

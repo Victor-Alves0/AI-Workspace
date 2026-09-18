@@ -151,6 +151,15 @@ async def create_chat(
     db.add(chat)
     await db.commit()
     await db.refresh(chat)
+    if body.mini_app == "imaginai":
+        # O mundo precisa existir antes do primeiro turno — é ele que dá ao narrador
+        # as ferramentas e a instrução da sessão zero. Criar aqui (e não no 1º envio)
+        # tira a corrida entre "abrir a campanha" e "a IA cumprimentar".
+        from ..imaginai import service as imaginai_service
+        from ..schemas.imaginai import CampaignCreate
+
+        await imaginai_service.create_campaign(db, user.id, CampaignCreate(chat_id=chat.id))
+        await db.refresh(chat)
     return chat
 
 

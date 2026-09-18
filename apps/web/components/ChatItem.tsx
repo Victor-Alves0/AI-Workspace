@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Code2,
   Copy,
+  Dices,
   Download,
   FileJson,
   FileText,
@@ -101,6 +102,12 @@ export default function ChatItem({
           className="shrink-0 cursor-default text-accent-hover"
         >
           <Code2 size={12} />
+        </span>
+      )}
+      {/* mesa de RPG: selo no INÍCIO do item, como o do Codespace */}
+      {chat.mini_app === "imaginai" && (
+        <span title="Mesa de RPG (Imaginai)" className="shrink-0 cursor-default text-violet-300">
+          <Dices size={12} />
         </span>
       )}
       {chat.pinned && <Pin size={12} className="shrink-0 text-accent" />}

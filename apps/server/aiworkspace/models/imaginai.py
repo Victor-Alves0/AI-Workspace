@@ -41,6 +41,9 @@ class ImaginaiCampaign(Base):
     # imaginai/combat.py. None fora de combate. Fica separado de `settings` porque é
     # ESTADO DO MUNDO, não configuração da mesa.
     encounter: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Sessão zero (ver imaginai/setup.py): concept → character → play. Campanha nova
+    # começa em "concept" e o narrador conduz a criação; as antigas já estão em jogo.
+    setup_stage: Mapped[str] = mapped_column(String(16), default="concept", server_default="play")
 
 
 class ImaginaiEntity(Base):

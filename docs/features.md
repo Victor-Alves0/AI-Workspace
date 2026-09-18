@@ -33,6 +33,15 @@ the choice belongs to that chat.
   facts and knowledge the character has or hasn't discovered. The AI narrates, but attacks,
   spells, ability checks, items, currency and rests are **resolved by the ruleset on the
   server** (dice included), so the model cannot grant itself a hit or an item.
+  - **Session zero**: starting Imaginai (from "New chat", or from any ordinary chat) opens a new
+    campaign chat — marked with a dice badge in the sidebar — and the narrator greets the player
+    and runs the creation: campaign concept (name, genre, theme, tone, premise — asked or
+    proposed), then the whole starting world at once (lore, factions, locations, NPCs with private
+    personas, hostile creatures with stats, opening scene), the world intro, the character
+    (sheet + backstory, on screen or by telling the narrator) and finally the opening that places
+    the character in the world. The stage lives on the server, so each turn gets only that
+    stage's instructions and tool — no skipped steps, no world built twice. Inside a campaign
+    chat, the Imaginai button just shows or hides the side panels.
   - **Turn-based combat**: the player's first attack (or an ambush) rolls initiative on the
     server; after every turn-consuming action, hostile creatures act in order — attack rolls
     against the character's AC, crits, damage to the character's HP — and the narrator is handed

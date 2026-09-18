@@ -54,7 +54,16 @@ export default function ImaginaiDocks({
   const armorClass = typeof dnd.armor_class === "number" ? dnd.armor_class : null;
   const campaignName = snapshot?.campaign.name ?? "Nome da Campanha";
   const characterName = snapshot?.character?.name ?? "Nome do personagem";
-  const status = loading ? "Abrindo mundo…" : error ? "Mundo indisponível" : snapshot?.location?.name;
+  const stage = snapshot?.campaign.setup_stage;
+  const status = loading
+    ? "Abrindo mundo…"
+    : error
+      ? "Mundo indisponível"
+      : stage === "concept"
+        ? "Sessão zero · criando a campanha"
+        : stage === "character"
+          ? "Sessão zero · criando o personagem"
+          : snapshot?.location?.name;
 
   useEffect(() => {
     const systemKey = snapshot?.campaign.system_key;

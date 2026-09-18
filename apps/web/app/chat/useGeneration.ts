@@ -239,7 +239,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         }
       } else if (ev.type === "tool_result") {
         const t: ToolEvent = { kind: "result", name: ev.name, data: ev.result };
-        if (ev.name === "imaginai_world") state.imaginaiChanged = true;
+        if (ev.name === "imaginai_world" || ev.name === "imaginai_setup") state.imaginaiChanged = true;
         state.tools.push(t);
         state.steps.push({ kind: "tool", event: t });
         flush();
@@ -315,7 +315,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         if (Array.isArray(ev.tool_events)) {
           const evs = ev.tool_events as ToolEvent[];
           state.tools = evs;
-          if (evs.some((tool) => tool.name === "imaginai_world")) state.imaginaiChanged = true;
+          if (evs.some((tool) => tool.name === "imaginai_world" || tool.name === "imaginai_setup")) state.imaginaiChanged = true;
           if (paint()) setToolEvents(evs);
         }
         flush();

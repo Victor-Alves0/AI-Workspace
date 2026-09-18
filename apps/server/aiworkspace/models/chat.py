@@ -43,6 +43,9 @@ class Chat(Base):
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("codespace_projects.id", ondelete="SET NULL"), nullable=True
     )
+    # Mini App que É o chat (ex.: "imaginai" — uma mesa de RPG). Define o chat, não um
+    # turno: a interface mostra o selo na barra lateral e os painéis sempre que ele abre.
+    mini_app: Mapped[str | None] = mapped_column(String(32), nullable=True)
     title: Mapped[str] = mapped_column(String(255), default="Novo Chat")
     system_prompt: Mapped[str | None] = mapped_column(EncryptedText, nullable=True)
     model: Mapped[str] = mapped_column(String(255), default="")

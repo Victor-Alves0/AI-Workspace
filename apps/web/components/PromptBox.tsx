@@ -341,9 +341,9 @@ function MiniAppsMenu({
                           onActiveAppChange?.(selected ? null : app.id);
                           setOpen(false);
                         }}
-                        aria-label={`${app.name}: ${app.description}`}
+                        aria-label={selected ? `${app.name}: mostrar ou ocultar os painéis` : `${app.name}: começar uma nova campanha`}
                         aria-pressed={selected}
-                        title={`${app.name} — ${selected ? "Ativo" : app.description}`}
+                        title={selected ? `${app.name} — mostrar ou ocultar os painéis` : `${app.name} — começar uma nova campanha`}
                         className={`flex aspect-square w-full items-center justify-center rounded-lg border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/80 ${
                           selected
                             ? "border-violet-400/80 bg-violet-500/30 text-violet-100 shadow-[0_0_0_1px_rgb(139_92_246_/_0.22)]"

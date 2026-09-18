@@ -25,7 +25,7 @@ from ..models import (
     ImaginaiKnowledge,
 )
 from ..schemas.imaginai import ActionRequest
-from . import encounters, service
+from . import encounters, service, setup
 
 _WORLD_TOOL = {
     "type": "function",
@@ -109,6 +109,116 @@ _WORLD_TOOL = {
     },
 }
 
+_SETUP_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "imaginai_setup",
+        "description": (
+            "Creates a new Imaginai campaign together with the player (session zero). "
+            "status: current stage, concept and character. set_concept: record campaign "
+            "name/genre/theme/tone/premise as they are agreed (partial updates are fine). "
+            "build_world: create the whole starting world ONCE, after the concept is closed. "
+            "set_character: record the player's character (name, class, backstory...). "
+            "begin_adventure: end session zero and start play, once the character has a "
+            "name and a class."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["status", "set_concept", "build_world", "set_character", "begin_adventure"],
+                },
+                "concept": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "genre": {"type": "string", "description": "e.g. dark fantasy, cosmic horror, space opera"},
+                        "theme": {"type": "string"},
+                        "tone": {"type": "string"},
+                        "premise": {"type": "string"},
+                    },
+                },
+                "world": {
+                    "type": "object",
+                    "properties": {
+                        "lore": {"type": "array", "items": {"type": "string"},
+                                 "description": "World truths the player may know."},
+                        "factions": {"type": "array", "items": {"type": "object", "properties": {
+                            "name": {"type": "string"}, "description": {"type": "string"},
+                            "secret": {"type": "string"},
+                            "visibility": {"type": "string", "enum": ["known", "aware", "hidden"]},
+                        }}},
+                        "locations": {"type": "array", "items": {"type": "object", "properties": {
+                            "name": {"type": "string"}, "description": {"type": "string"},
+                            "secret": {"type": "string"},
+                            "visibility": {"type": "string", "enum": ["known", "aware", "hidden"]},
+                        }}},
+                        "npcs": {"type": "array", "items": {"type": "object", "properties": {
+                            "name": {"type": "string"},
+                            "kind": {"type": "string", "enum": ["npc", "creature"]},
+                            "description": {"type": "string", "description": "What the player sees."},
+                            "persona": {"type": "string", "description": "GM-only: motives, secrets, voice."},
+                            "location": {"type": "string", "description": "Name of one of the locations."},
+                            "hostile": {"type": "boolean"},
+                            "hp": {"type": "integer"}, "ac": {"type": "integer"},
+                            "attack_bonus": {"type": "integer"},
+                            "damage": {"type": "string", "description": "Dice, e.g. 1d6+2"},
+                            "visibility": {"type": "string", "enum": ["known", "aware", "hidden"]},
+                        }}},
+                        "starting_location": {"type": "string", "description": "Name of the location where play starts."},
+                        "opening_scene": {"type": "string"},
+                    },
+                },
+                "character": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"}, "class": {"type": "string"},
+                        "level": {"type": "integer"}, "ancestry": {"type": "string"},
+                        "background": {"type": "string"}, "alignment": {"type": "string"},
+                        "backstory": {"type": "string"},
+                    },
+                },
+            },
+            "required": ["action"],
+        },
+    },
+}
+
+_SETUP_CONCEPT_PROTOCOL = """## Imaginai — sessão zero: o conceito da campanha
+Esta é uma campanha NOVA e você é o mestre. Antes da aventura, vocês a criam juntos.
+1. Se a conversa está começando, abra cumprimentando o jogador com calor e personalidade, diga que
+   vão começar uma campanha nova e pergunte se ele já tem uma ideia — gênero, tema, clima, um
+   personagem ou uma cena em mente. Deixe claro que, se não tiver, você cria tudo.
+2. O conceito precisa de nome da campanha, gênero (fantasia sombria, horror cósmico, space opera,
+   faroeste...), tema, tom e premissa. O que o jogador não disser, pergunte OU proponha você mesmo —
+   no máximo duas perguntas por vez, e nunca trave a conversa por um detalhe. Se ele pedir que você
+   decida, decida tudo e apresente.
+3. Registre com `imaginai_setup` action=`set_concept` conforme os campos forem definidos.
+4. Com o conceito fechado e aceito, chame action=`build_world` UMA vez, criando o mundo inicial:
+   lore (verdades que o jogador pode saber), 2–3 facções, 3–6 locais (um deles o local inicial),
+   4–8 NPCs — aliados, neutros e ameaças, cada um com `persona` (motivações, segredos, voz) — e
+   criaturas hostis com hp/ac/attack_bonus/damage, além da cena de abertura. Personas e segredos
+   são só seus: nunca os revele na narração.
+5. Depois do build_world, na MESMA resposta, narre a introdução do mundo (cenário, situação, clima —
+   sem colocar o personagem em cena ainda) e convide o jogador a criar o personagem: ele pode
+   preencher a ficha no painel Personagem → Ficha → Editar, ou contar para você nome, classe, raça,
+   antecedente e a história dele.
+"""
+
+_SETUP_CHARACTER_PROTOCOL = """## Imaginai — sessão zero: a criação do personagem
+O mundo já existe (veja o estado abaixo). Agora o jogador cria o personagem.
+1. Registre o que ele contar com `imaginai_setup` action=`set_character` (nome, classe,
+   ancestralidade, antecedente, tendência, história). Não invente o que ele não pediu; se ele
+   pedir que você crie, crie algo que combine com a campanha e registre.
+2. A ficha também pode ter sido preenchida na tela: confira o estado abaixo antes de perguntar de
+   novo o que já está lá.
+3. Com ao menos nome e classe, e o jogador pronto, chame action=`begin_adventure` e, na MESMA
+   resposta, narre a abertura: apresente o personagem no local inicial usando a história dele
+   (laços, motivações, passado), ligue-o ao mundo e termine numa situação que convide à ação.
+"""
+
+
 _TURN_PROTOCOL = """## Imaginai — protocolo autoritativo do turno
 Este chat contém uma campanha RPG persistente. A mensagem do jogador expressa uma
 INTENÇÃO, nunca altera a realidade por si só.
@@ -141,6 +251,32 @@ Regras obrigatórias:
    caídos), `escaped` (o jogador saiu do alcance) ou `defeat` (o personagem caiu — narre-o
    inconsciente, não morto, e não o faça agir). Não é possível descansar durante o combate.
 """
+
+
+async def _setup_turn_tools(
+    db: AsyncSession, campaign: ImaginaiCampaign, user_id: uuid.UUID,
+    bridge: "ImaginaiTurnBridge",
+) -> NativeToolOpts:
+    """Turno da sessão zero: só a ferramenta e a instrução da ETAPA atual. O modelo não
+    precisa lembrar em que ponto está — nem consegue pular etapas."""
+    estado: dict[str, Any] = {"setup": await setup.status(db, campaign)}
+    if campaign.setup_stage == "character":
+        # o mundo já existe: a abertura precisa dos nomes reais do local e de quem está lá
+        estado["scene"] = await scene_context(db, campaign)
+        protocolo = _SETUP_CHARACTER_PROTOCOL
+    else:
+        protocolo = _SETUP_CONCEPT_PROTOCOL
+    from .. import sound_effects
+
+    sons = await sound_effects.instruction_if_available(db, user_id)
+    if sons:
+        protocolo = f"{protocolo}\n{sons}"
+    estado_json = json.dumps(estado, ensure_ascii=False, default=str)
+    return NativeToolOpts(
+        specs=[_SETUP_TOOL],
+        prompt=f"{protocolo}\n\n## Estado da sessão zero\n```json\n{estado_json}\n```",
+        run=bridge.run,
+    )
 
 
 def _trim(value: Any, limit: int = 500) -> Any:
@@ -240,8 +376,15 @@ def _player_sheet(player: ImaginaiEntity) -> dict[str, Any]:
         "equipment",
         "currencies",
         "conditions",
+        "ancestry",
+        "background",
+        "alignment",
     )
-    return {"dnd5e": _trim({key: dnd[key] for key in allowed if key in dnd}, 240)}
+    sheet: dict[str, Any] = {"dnd5e": _trim({key: dnd[key] for key in allowed if key in dnd}, 240)}
+    if dnd.get("backstory"):
+        # a história é longa de propósito: é dela que o narrador tira ganchos e laços
+        sheet["backstory"] = _trim(str(dnd["backstory"]), 3000)
+    return sheet
 
 
 async def scene_context(db: AsyncSession, campaign: ImaginaiCampaign) -> dict[str, Any]:
@@ -430,6 +573,8 @@ class ImaginaiTurnBridge:
     turn_key: str
 
     async def run(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        if name == "imaginai_setup":
+            return await _setup_action(self, args)
         if name != "imaginai_world":
             return {"error": "Ferramenta de mundo desconhecida"}
         action = str(args.get("action") or "").strip()
@@ -495,6 +640,30 @@ class ImaginaiTurnBridge:
         return {"error": "Ação de mundo inválida"}
 
 
+async def _setup_action(bridge: "ImaginaiTurnBridge", args: dict[str, Any]) -> dict[str, Any]:
+    action = str(args.get("action") or "").strip()
+    async with SessionLocal() as db:
+        campaign = await service.owned_campaign(db, bridge.user_id, bridge.campaign_id, lock=True)
+        try:
+            if action == "status":
+                result = await setup.status(db, campaign)
+            elif action == "set_concept":
+                result = await setup.set_concept(db, campaign, args.get("concept") or {})
+            elif action == "build_world":
+                result = await setup.build_world(db, campaign, bridge.user_id, args.get("world") or {})
+            elif action == "set_character":
+                result = await setup.set_character(db, campaign, args.get("character") or {})
+            elif action == "begin_adventure":
+                result = await setup.begin_adventure(db, campaign)
+                result["scene"] = await scene_context(db, campaign)
+            else:
+                return {"kind": "imaginai_setup", "error": "Ação de sessão zero inválida"}
+        except setup.SetupError as exc:
+            # erro de etapa volta ao narrador como orientação, não como falha do turno
+            return {"kind": "imaginai_setup", "error": str(exc)}
+        return {"kind": "imaginai_setup", **result}
+
+
 async def prepare_turn_tools(
     db: AsyncSession,
     user_id: uuid.UUID,
@@ -510,9 +679,11 @@ async def prepare_turn_tools(
     )
     if campaign is None:
         return None
+    bridge = ImaginaiTurnBridge(user_id=user_id, campaign_id=campaign.id, turn_key=turn_key)
+    if campaign.setup_stage in ("concept", "character"):
+        return await _setup_turn_tools(db, campaign, user_id, bridge)
     context = await scene_context(db, campaign)
     context_json = json.dumps(context, ensure_ascii=False, default=str)
-    bridge = ImaginaiTurnBridge(user_id=user_id, campaign_id=campaign.id, turn_key=turn_key)
     # a narração de RPG é o caso de uso dos efeitos sonoros: no Imaginai eles valem
     # sem precisar ligar a capacidade no modelo (desde que haja ElevenLabs para tocar)
     from .. import sound_effects

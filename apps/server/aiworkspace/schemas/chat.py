@@ -18,6 +18,8 @@ class ChatCreate(BaseModel):
     model_config_id: uuid.UUID | None = None
     # Codespace: projeto vinculado (habilita code.graph.query/code.files.browse)
     project_id: uuid.UUID | None = None
+    # Mini App que o chat É desde o nascimento ("imaginai" = nova campanha)
+    mini_app: str | None = Field(default=None, pattern=r"^(imaginai)$")
 
 
 class ChatUpdate(BaseModel):
@@ -94,6 +96,7 @@ class ChatOut(BaseModel):
     folder_id: uuid.UUID | None
     model_config_id: uuid.UUID | None
     project_id: uuid.UUID | None = None
+    mini_app: str | None = None
     memory_config: dict[str, Any] | None = None
     knowledge_config: dict[str, Any] | None = None
     brain_config: dict[str, Any] | None = None
