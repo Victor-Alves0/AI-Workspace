@@ -3342,9 +3342,11 @@ def _register_builtins(
             "A generation preset is configured for this chat. For ordinary generate calls, "
             "use it directly and do not search the catalog first."
             if civitai_generation.get("model")
-            else "No generation preset is configured. Do not let Civitai choose a hidden default: "
-            "ask the user to select a checkpoint in Settings → Integrations → Civitai, or use an "
-            "explicit model URL/ID/AIR they provided."
+            else "No generation preset is configured, so YOU pick the model — never ask the user "
+            "to configure one, never web search for it. Call generate without a model: the result "
+            "lists generatable checkpoints; choose the one whose name/base model fits the prompt "
+            "style and call generate again with its version_id. Never let Civitai choose a hidden "
+            "default. An explicit model URL/ID/AIR from the user always wins."
         )
 
         def _civitai_summary(workflow: dict[str, Any]) -> dict[str, Any]:
@@ -3436,7 +3438,7 @@ def _register_builtins(
             ),
             params={
                 "action": "string:n::search_models | model | version | search_images | estimate | generate | status",
-                "query": "string:o::search_models: name or keywords",
+                "query": "string:o::search_models: name or keywords; generate without a model: 1-3 word style to pick candidates",
                 "model_id": "number:o::model/search_images: Civitai model id",
                 "version_id": "number:o::version/search_images: Civitai model version id",
                 "model_type": "string:o::search_models: Checkpoint, LORA, TextualInversion, etc.",
@@ -3561,11 +3563,47 @@ def _register_builtins(
                 effective_model_id = _int(model_id, 0) or _int(civitai_generation.get("model_id"), 0) or None
                 effective_version_id = _int(version_id, 0) or _int(civitai_generation.get("version_id"), 0) or None
                 if act == "generate" and not (effective_model or effective_model_id or effective_version_id):
-                    return _civitai_error(
-                        "No Civitai generation preset is selected. Ask the user to choose a checkpoint in "
-                        "Settings → Integrations → Civitai, or use the explicit model they provided.",
-                        code="missing_generation_preset", stop_tool_loop=True,
+                    # Sem preset: a IA ESCOLHE o modelo, com os candidatos já na mão — uma
+                    # busca só, feita aqui. Antes o turno parava pedindo ao usuário que
+                    # configurasse um preset (ou a IA gastava web search + tentativas por
+                    # nome). O Civitai continua sem escolher um default escondido: a geração
+                    # só sai com um version_id explícito vindo desta lista.
+                    found = cv.search_models(
+                        civitai_token, query.strip(), model_type="Checkpoint",
+                        supports_generation=True, limit=4, nsfw=mature_ok,
                     )
+                    if found.get("error"):
+                        return _civitai_normalize_error(found)
+                    candidates = [
+                        {
+                            "name": item.get("name"),
+                            "versions": [
+                                {"id": v.get("id"), "base_model": v.get("base_model")}
+                                for v in (item.get("versions") or [])
+                                if v.get("can_generate") is not False
+                            ][:1],
+                        }
+                        for item in found.get("items") or []
+                    ]
+                    candidates = [c for c in candidates if c["versions"]]
+                    if not candidates:
+                        return _civitai_error(
+                            "No generatable checkpoint matched. Retry generate once with a 1-3 word "
+                            "style `query` (e.g. 'fantasy', 'photorealistic', 'anime').",
+                            code="choose_model",
+                        )
+                    return {
+                        "error": "choose a model first — nothing was generated or charged yet",
+                        "error_code": "choose_model",
+                        "retryable": True,
+                        "items": candidates,
+                        "hint": (
+                            "Pick the candidate that best fits the prompt style and call generate "
+                            "again with the SAME prompt and that version_id. Do not ask the user and "
+                            "do not web search. If none fits, call generate once more with a 1-3 word "
+                            "style `query` (e.g. 'fantasy', 'photorealistic', 'anime') to get others."
+                        ),
+                    }
                 if act == "generate" and civitai_cfg and civitai_cfg.require_confirm and not confirmed and not toolctx.background.get():
                     from .interaction import ask_options
                     return ask_options(

@@ -355,13 +355,42 @@ def test_generation_requires_connection():
     assert "not connected" in result["error"]
 
 
-def test_generation_without_explicit_model_or_preset_never_uses_provider_default(monkeypatch):
+def test_generation_without_model_or_preset_offers_candidates_instead_of_stopping(monkeypatch):
+    """Sem preset, a IA escolhe o modelo — com os candidatos já na resposta.
+
+    Antes o turno parava pedindo ao usuário que configurasse um preset. O invariante
+    que continua valendo: o Civitai nunca escolhe um default escondido (nada é
+    submetido sem um modelo explícito)."""
     calls = []
+    seen = {}
     monkeypatch.setattr(cv, "submit_image", lambda *_args, **_kwargs: calls.append(1) or {})
-    result = _dispatch(_make_sift("token", generation={}), {"action": "generate", "prompt": "a castle"})
-    assert result["error_code"] == "missing_generation_preset"
-    assert result["stop_tool_loop"] is True
-    assert calls == []
+
+    def fake_search(_token, query="", model_type="", **kwargs):
+        seen.update(query=query, model_type=model_type, **kwargs)
+        return {"items": [
+            {"name": "RPG Mix", "versions": [{"id": 21343, "base_model": "SD 1.5", "can_generate": True}]},
+            {"name": "Not generatable", "versions": [{"id": 1, "base_model": "SDXL", "can_generate": False}]},
+        ]}
+
+    monkeypatch.setattr(cv, "search_models", fake_search)
+    result = _dispatch(_make_sift("token", generation={}),
+                       {"action": "generate", "prompt": "a castle", "query": "fantasy"})
+
+    assert calls == []                                   # nada gerado nem cobrado ainda
+    assert result["error_code"] == "choose_model"
+    assert "stop_tool_loop" not in result                # o turno segue: a IA escolhe
+    assert result["items"] == [{"name": "RPG Mix", "versions": [{"id": 21343, "base_model": "SD 1.5"}]}]
+    assert "version_id" in result["hint"] and "Do not ask the user" in result["hint"]
+    assert seen["query"] == "fantasy" and seen["model_type"] == "Checkpoint"
+    assert seen["supports_generation"] is True
+
+
+def test_no_preset_description_tells_the_model_to_choose_not_to_ask():
+    sift = _make_sift("token", generation={})
+    raw = sift.dispatch("search_tools", {"query": "generate image", "domain": "civitai"})
+    text = raw if isinstance(raw, str) else json.dumps(raw)
+    assert "YOU pick the model" in text
+    assert "ask the user to select a checkpoint" not in text
 
 
 def test_connected_civitai_discovery_tells_model_to_call_not_request_a_token():
