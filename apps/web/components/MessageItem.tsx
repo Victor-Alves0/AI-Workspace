@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, Download, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Loader2, Mail, MessageSquarePlus, Pencil, Play, RotateCcw, Send, ShieldAlert, Square, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import type { ActivityStep, BrainNoteEvent, ChartSpec, ChatArtifact, DeepResearch, Message, SkillProposal, StockQuote, ToolEvent } from "@/lib/types";
@@ -1448,7 +1448,7 @@ function UsagePanel({ u }: { u: NonNullable<Message["usage"]> }) {
   );
 }
 
-export default function MessageItem({
+function MessageItem({
   message,
   onSpeak,
   speaking = false,
@@ -1468,7 +1468,7 @@ export default function MessageItem({
   clampContent = true,
 }: {
   message: Message;
-  onSpeak?: () => void;
+  onSpeak?: (message: Message) => void;
   speaking?: boolean;
   onEdit: (id: string, content: string) => Promise<void>;
   onRegenerate: (id: string) => void;
@@ -1707,7 +1707,7 @@ export default function MessageItem({
                 {copied ? <Check size={15} className="text-green-400" /> : <Copy size={15} />}
               </IconButton>
               {onSpeak && (
-                <IconButton title={speaking ? "Parar leitura" : "Ler em voz alta"} onClick={onSpeak} active={speaking}>
+                <IconButton title={speaking ? "Parar leitura" : "Ler em voz alta"} onClick={() => onSpeak(message)} active={speaking}>
                   {speaking ? <Square size={14} fill="currentColor" /> : <Volume2 size={15} />}
                 </IconButton>
               )}
@@ -1773,3 +1773,5 @@ export default function MessageItem({
     </div>
   );
 }
+
+export default memo(MessageItem);

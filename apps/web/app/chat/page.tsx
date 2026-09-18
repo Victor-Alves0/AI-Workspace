@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, ChevronDown, ChevronUp, Code2, Copy, FlaskConical, GitBranch, Image as ImageIcon, Link2, Loader2, Menu, MessageSquareDashed, Mic, Pause, Play, RotateCcw, RotateCw, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
@@ -14,7 +15,6 @@ import { browserNotify, playChime, requestNotifPermission } from "@/lib/notify";
 import { downloadJSON, downloadPDF, downloadTXT } from "@/lib/download";
 import { pickSuggestions, type Suggestion } from "@/lib/suggestions";
 import type { AskSpec, Attachment, Chat, ChatArtifact, CodespaceProject, Folder, KnowledgeRef, ListenConfig, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User, VoiceSession } from "@/lib/types";
-import ArtifactPanel from "@/components/ArtifactPanel";
 import CodespaceFileBrowser, { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME, extLang, stripLineNumbers } from "@/components/CodespaceFileBrowser";
 import type { CodespaceDragPayload, CodespaceSnippetPayload } from "@/components/CodespaceFileBrowser";
 import Roundtable, { nextColor, RT_COLORS } from "@/components/Roundtable";
@@ -26,22 +26,29 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import Sidebar from "@/components/Sidebar";
 import Controls from "@/components/Controls";
 import ModelPicker from "@/components/ModelPicker";
-import SettingsModal from "@/components/SettingsModal";
-import OnboardingModal from "@/components/OnboardingModal";
-import CommandPalette, { type PaletteItem } from "@/components/CommandPalette";
-import ArchivedModal from "@/components/ArchivedModal";
-import ChatManager from "@/components/ChatManager";
-import ChatInfoModal from "@/components/ChatInfo";
-import CompactionHistory from "@/components/CompactionHistory";
+import type { PaletteItem } from "@/components/CommandPalette";
 import PromptBox, { type MiniAppId, type ReasoningEffort, type RefDoc } from "@/components/PromptBox";
 import MessageItem from "@/components/MessageItem";
-import WorkspaceView, { type Section as WorkspaceSection } from "@/components/WorkspaceView";
+import type { Section as WorkspaceSection } from "@/components/WorkspaceView";
 import type { ChatActions } from "@/components/ChatItem";
 import { SHORTCUTS, eventToCombo, resolveBinding, comboHasModifier, type ShortcutMap } from "@/lib/shortcuts";
 import ImaginaiDocks from "@/components/imaginai/ImaginaiDocks";
 import { useImaginaiCampaign } from "@/components/imaginai/useImaginaiCampaign";
 import { useGeneration } from "./useGeneration";
 import { useDrawerSwipe } from "./useDrawerSwipe";
+
+// Painéis usados apenas sob demanda não devem pesar no primeiro carregamento do
+// chat. O chat principal (mensagens/composer/model picker) continua imediato;
+// estes módulos só são baixados quando a respectiva UI é aberta.
+const ArtifactPanel = dynamic(() => import("@/components/ArtifactPanel"), { ssr: false });
+const SettingsModal = dynamic(() => import("@/components/SettingsModal"), { ssr: false });
+const OnboardingModal = dynamic(() => import("@/components/OnboardingModal"), { ssr: false });
+const CommandPalette = dynamic(() => import("@/components/CommandPalette"), { ssr: false });
+const ArchivedModal = dynamic(() => import("@/components/ArchivedModal"), { ssr: false });
+const ChatManager = dynamic(() => import("@/components/ChatManager"), { ssr: false });
+const ChatInfoModal = dynamic(() => import("@/components/ChatInfo"), { ssr: false });
+const CompactionHistory = dynamic(() => import("@/components/CompactionHistory"), { ssr: false });
+const WorkspaceView = dynamic(() => import("@/components/WorkspaceView"), { ssr: false });
 
 type RoundtableStream = { speaker: Speaker; content: string; reasoning: string };
 
@@ -902,6 +909,16 @@ export default function ChatPage() {
       setSpeakingMessageId(null);
     });
   }, [voiceSettingsFor, stopMessageSpeech]);
+  const rememberMessage = useCallback(async (text: string, scope: "global" | "model" | "chat") => {
+    if (!active) return;
+    const agentId = active.model_config_id ?? `base:${active.model}`;
+    await api.post("/memory", {
+      text,
+      scope,
+      model_id: scope === "model" ? agentId : undefined,
+      chat_id: scope === "chat" ? active.id : undefined,
+    });
+  }, [active]);
   useEffect(() => subscribeSpeechProgress(setSpeechProgress), []);
   useEffect(() => () => {
     messageSpeechRef.current.run += 1;
@@ -1600,13 +1617,13 @@ export default function ChatPage() {
     }
   }
 
-  async function editMessage(id: string, content: string) {
+  const editMessage = useCallback(async (id: string, content: string) => {
     if (!active) return;
     await api.patch(`/chats/${active.id}/messages/${id}`, { content });
     setMessages((m) => m.map((x) => (x.id === id ? { ...x, content } : x)));
-  }
+  }, [active]);
 
-  async function deleteMessage(id: string) {
+  const deleteMessage = useCallback(async (id: string) => {
     // mensagens locais (temporário / otimista ainda não persistidas): só remove da UI
     const local = !active || id.startsWith("tmp-") || id.startsWith("a-");
     if (local) {
@@ -1623,14 +1640,14 @@ export default function ChatPage() {
       setMessages(prev); // reverte em caso de falha
       alert(e instanceof ApiError ? e.message : "Falha ao excluir a mensagem");
     }
-  }
+  }, [active, confirm, messages, refreshChats]);
 
   // rola até uma mensagem específica (usado pelo navegador de mensagens)
   function jumpToMessage(id: string) {
     document.getElementById(`msg-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
-  async function regenerateMessage(id: string) {
+  const regenerateMessage = useCallback(async (id: string) => {
     if (!active || sending) return;
     setSending(true);
     setStreamPhase("preparing");
@@ -1675,9 +1692,9 @@ export default function ChatPage() {
         setSending(false);
       }
     }
-  }
+  }, [active, sending, makeStreamHandler, refreshChats, isActiveChat, reloadMessages, reloadArtifacts, refreshImaginaiCampaign, notify]);
 
-  async function continueMessage(id: string) {
+  const continueMessage = useCallback(async (id: string) => {
     if (!active || sending) return;
     setSending(true);
     setStreamPhase("preparing");
@@ -1713,7 +1730,7 @@ export default function ChatPage() {
         setSending(false);
       }
     }
-  }
+  }, [active, sending, makeStreamHandler, isActiveChat, reloadMessages, reloadArtifacts, refreshImaginaiCampaign, notify]);
 
   async function toggleMic() {
     if (recording) {
@@ -2460,22 +2477,15 @@ export default function ChatPage() {
                         toolsEnabled={iface.chat_tools !== false}
                         modelAvatar={isRt ? null : (showAv ? (curCustom?.avatar_url ?? null) : null)}
                         chatArtifacts={chatArtifacts}
-                        onOpenArtifact={(ident) => setArtifactOpen(ident)}
-                        onSpeak={m.role === "assistant" && voiceSettingsFor(m).enabled ? () => toggleMessageSpeech(m) : undefined}
+                        onOpenArtifact={setArtifactOpen}
+                        onSpeak={m.role === "assistant" && voiceSettingsFor(m).enabled ? toggleMessageSpeech : undefined}
                         speaking={speakingMessageId === m.id}
                         clampContent={!recentFullMessageIds.has(m.id)}
                         onEdit={editMessage}
                         onRegenerate={regenerateMessage}
                         onContinue={continueMessage}
                         onDelete={deleteMessage}
-                        onRemember={active ? async (text, scope) => {
-                          const agentId = active.model_config_id ?? `base:${active.model}`;
-                          await api.post("/memory", {
-                            text, scope,
-                            model_id: scope === "model" ? agentId : undefined,
-                            chat_id: scope === "chat" ? active.id : undefined,
-                          });
-                        } : undefined}
+                        onRemember={active ? rememberMessage : undefined}
                       />
                     ) : null;
                     return (

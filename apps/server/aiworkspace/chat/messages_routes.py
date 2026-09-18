@@ -243,12 +243,18 @@ async def send_message(
 
     # histórico atual (antes da nova mensagem) no formato OpenAI
     rows = await db.scalars(
-        select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at)
+        select(Message)
+        .where(
+            Message.chat_id == chat_id,
+            Message.role.in_(("user", "assistant")),
+            Message.compacted.is_(False),
+        )
+        .order_by(Message.created_at)
     )
     history = [
         {"role": m.role, "content": m.content}
         for m in rows
-        if m.role in ("user", "assistant") and m.content and not m.compacted
+        if m.content
     ]
 
     # "@" no promptbox: roteia ESTE turno a outro agente (ModelConfig) sem alterar o

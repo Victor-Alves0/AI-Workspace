@@ -202,7 +202,10 @@ function isStreamingTable(md: string): boolean {
 
 function MarkdownRenderer({ content, fast, plain = false }: { content: string; fast: boolean; plain?: boolean }) {
   if (plain) {
-    return <pre className="my-3 overflow-x-auto whitespace-pre-wrap font-mono text-[13px] leading-6 text-ink-soft">{content}</pre>;
+    // Em uma cerca de código ainda aberta, tratar o conteúdo como texto simples
+    // evita que o parser GFM reavalie milhares de linhas a cada delta. A cerca
+    // provisória é retirada para não vazar para a mensagem visualmente.
+    return <pre className="my-3 overflow-x-auto whitespace-pre-wrap font-mono text-[13px] leading-6 text-ink-soft">{fast ? stabilizeStream(content) : content}</pre>;
   }
   const shown = fast ? stabilizeStream(content) : content;
   return (
@@ -273,10 +276,11 @@ function Markdown({
     [clamped, fast],
   );
   const renderTableAsText = fast && isStreamingTable(streamingParts.tail);
+  const renderOpenCodeAsText = fast && clamped.length > STREAMING_TAIL_LIMIT && !!findOpenFence(streamingParts.tail);
   return (
     <div className={`md ${className}`}>
       {streamingParts.stable && <StableMarkdownRenderer content={streamingParts.stable} fast />}
-      <MarkdownRenderer content={streamingParts.tail} fast={fast} plain={renderTableAsText} />
+      <MarkdownRenderer content={streamingParts.tail} fast={fast} plain={renderTableAsText || renderOpenCodeAsText} />
       {isLong && (
         <button
           onClick={() => setExpanded(true)}
