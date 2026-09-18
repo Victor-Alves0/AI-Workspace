@@ -318,12 +318,13 @@ def test_workflow_outputs_accept_images_and_blobs():
     ]
 
 
-def _make_sift(token: str = "", *, require_confirm: bool = False, generation: dict | None = None):
+def _make_sift(token: str = "", *, require_confirm: bool = False, generation: dict | None = None,
+               user_id: str | None = None):
     from sift import Sift
 
     sift = Sift()
     sift_service._register_builtins(
-        sift, sift_service.SearchConfig(), {"civitai.media.use"},
+        sift, sift_service.SearchConfig(), {"civitai.media.use"}, user_id=user_id,
         civitai_cfg=sift_service.CivitaiConfig(
             conn={"token": token},
             require_confirm=require_confirm,
@@ -474,8 +475,8 @@ def test_discovery_tells_model_to_generate_directly_from_a_selected_lora_url():
     assert "request_id" not in result
 
 
-def test_pending_generation_registers_a_wake_instead_of_promising_the_image(monkeypatch):
-    """Geração lenta: a tool precisa AGENDAR o wake e mandar a IA encerrar o turno.
+def test_pending_generation_queues_delivery_instead_of_promising_the_image(monkeypatch):
+    """Geração lenta: a tool agenda a ENTREGA e manda a IA encerrar o turno.
 
     Antes, o resultado só dizia "ainda rodando" e o turno acabava com a IA prometendo
     uma imagem que nunca chegava (ninguém voltava a consultar o workflow)."""
@@ -487,19 +488,21 @@ def test_pending_generation_registers_a_wake_instead_of_promising_the_image(monk
     cv._pending_watch.clear()
     token = toolctx.current_chat_id.set("chat-42")
     try:
-        result = _dispatch(_make_sift("token"), {"action": "generate", "prompt": "a moon city"})
+        result = _dispatch(_make_sift("token", user_id=str(uuid.uuid4())),
+                           {"action": "generate", "prompt": "a moon city"})
     finally:
         toolctx.current_chat_id.reset(token)
 
     assert result["workflow_id"] == "wf_pending"
-    assert "WOKEN" in result["note"] and "end your turn" in result["note"]
+    assert "queued for delivery" in result["note"] and "END your turn" in result["note"]
+    assert "do not call status" in result["note"]
     watch = cv._pending_watch["wf_pending"]
-    assert watch["chat_id"] == "chat-42" and watch["token"] == "token"
+    assert watch["chat_id"] == "chat-42" and watch["token"] == "token" and watch["user_id"]
     cv._pending_watch.clear()
 
 
 def test_generation_without_a_chat_keeps_the_manual_status_note(monkeypatch):
-    """API pública/canal sem chat: não há quem acordar — mantém a instrução antiga."""
+    """API pública/canal sem chat: não há onde entregar — mantém a instrução antiga."""
     monkeypatch.setattr(cv, "submit_image", lambda *_args, **_kwargs: {
         "id": "wf_headless", "status": "processing", "cost": {}, "steps": [],
     })
@@ -509,38 +512,139 @@ def test_generation_without_a_chat_keeps_the_manual_status_note(monkeypatch):
     assert cv.pending_count() == 0
 
 
-def test_watch_poller_wakes_the_chat_when_the_workflow_finishes(monkeypatch):
-    """O poller: workflow terminou + chat ocioso → um turno novo continua sozinho."""
+class _FakeDb:
+    """Sessão de banco falsa: guarda o que foi gravado, sem tocar no Postgres."""
+
+    added: list = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    def add(self, row):
+        _FakeDb.added.append(row)
+
+    async def flush(self):
+        for row in _FakeDb.added:
+            if getattr(row, "id", None) is None:
+                row.id = uuid.uuid4()
+
+    async def commit(self):
+        return None
+
+
+def _delivery_setup(monkeypatch, *, status: str = "succeeded"):
+    from aiworkspace import bg, db as db_module, push_service
+
+    _FakeDb.added = []
+    cv._pending_watch.clear()
+    monkeypatch.setattr(cv, "_WATCH_POLL_S", 0.01)
+    monkeypatch.setattr(cv, "get_workflow", lambda _token, wid: {"id": wid, "status": status})
+    monkeypatch.setattr(db_module, "SessionLocal", _FakeDb)
+    monkeypatch.setattr(bg, "spawn", lambda coro: coro.close())
+    monkeypatch.setattr(push_service, "send_to_user", lambda *_a, **_k: None)
+
+
+def test_finished_generation_is_delivered_as_a_tool_result_without_a_model_turn(monkeypatch):
+    """A imagem pronta entra no chat como USO DE FERRAMENTA numa mensagem sem texto.
+
+    Um turno novo custaria uma chamada inteira do modelo (com todo o contexto) só para
+    repassar mídia já pronta, e a nota de conclusão apareceria como fala do usuário."""
     import asyncio
 
-    woken: list[tuple[str, str]] = []
+    _delivery_setup(monkeypatch)
 
-    async def fake_resume(chat_id, note, **_kwargs):
-        woken.append((chat_id, note))
+    async def fake_stored(_watch, _workflow):
+        return [{"kind": "image", "url": "/images/abc?t=sig"}]
 
-    # Substitui o ATRIBUTO nos módulos reais: trocar a entrada em sys.modules só
-    # surtiria efeito enquanto `aiworkspace.chat.resume` não tivesse sido importado
-    # por outro teste — na bateria inteira ele já está, e o poller chamaria o resume
-    # de verdade (banco).
-    from aiworkspace.chat import generation as real_generation
-    from aiworkspace.chat import resume as real_resume
-
-    monkeypatch.setattr(cv, "_WATCH_POLL_S", 0.01)
-    monkeypatch.setattr(cv, "get_workflow", lambda _token, wid: {"id": wid, "status": "succeeded"})
-    monkeypatch.setattr(real_resume, "resume_chat_turn", fake_resume)
-    monkeypatch.setattr(real_generation, "get_active", lambda _chat_id: None)
+    monkeypatch.setattr(cv, "_stored_media", fake_stored)
 
     async def run() -> None:
-        cv._pending_watch.clear()
-        assert cv.watch_workflow("token", "wf_done", chat_id="chat-42", prompt="a moon city")
+        assert cv.watch_workflow("token", "wf_done", chat_id=str(uuid.uuid4()),
+                                 user_id=str(uuid.uuid4()), prompt="a moon city")
         task = asyncio.ensure_future(cv._watch_poller())
         for _ in range(200):
             await asyncio.sleep(0.01)
-            if woken:
+            if _FakeDb.added:
                 break
         task.cancel()
 
     asyncio.run(run())
-    assert woken and woken[0][0] == "chat-42"
-    assert "wf_done" in woken[0][1] and "action='status'" in woken[0][1]
+
+    message = _FakeDb.added[0]
+    assert message.role == "assistant"
+    assert message.content == ""          # fora do contexto do modelo
+    call, result = message.tool_events
+    assert call["kind"] == "call" and call["name"] == "civitai.media.use"
+    assert result["data"]["kind"] == "image"
+    assert result["data"]["url"] == "/images/abc?t=sig"
+    assert result["data"]["background"] is True
+    assert any(getattr(row, "title", "") == "Imagem pronta" for row in _FakeDb.added)
     assert cv.pending_count() == 0
+
+
+def test_failed_generation_is_delivered_as_an_error_card(monkeypatch):
+    """Falha também precisa aparecer: silêncio é indistinguível de 'ainda rodando'."""
+    import asyncio
+
+    _delivery_setup(monkeypatch, status="failed")
+
+    async def run() -> None:
+        assert cv.watch_workflow("token", "wf_bad", chat_id=str(uuid.uuid4()),
+                                 user_id=str(uuid.uuid4()), prompt="a moon city")
+        task = asyncio.ensure_future(cv._watch_poller())
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if _FakeDb.added:
+                break
+        task.cancel()
+
+    asyncio.run(run())
+
+    result = _FakeDb.added[0].tool_events[1]["data"]
+    assert "failed" in result["error"]
+    assert result["workflow_id"] == "wf_bad"
+
+
+def test_pending_delivery_is_recovered_after_a_restart(monkeypatch):
+    """A mídia já foi PAGA: um restart no meio da geração não pode sumir com ela.
+
+    A fila em memória some junto com o processo, então a sombra no banco (media_jobs)
+    volta para a fila no boot — mesma regra dos jobs de exec."""
+    import asyncio
+    from datetime import datetime, timezone
+
+    from aiworkspace import db as db_module
+
+    chat_id, user_id = uuid.uuid4(), uuid.uuid4()
+    fresh = SimpleNamespace(
+        external_id="wf_restart", chat_id=chat_id, user_id=user_id,
+        prompt="a moon city", model="civitai",
+        created_at=datetime.now(timezone.utc), settled=False,
+    )
+    stale = SimpleNamespace(
+        external_id="wf_old", chat_id=chat_id, user_id=user_id, prompt="", model="",
+        created_at=datetime(2020, 1, 1, tzinfo=timezone.utc), settled=False,
+    )
+
+    class _Db(_FakeDb):
+        async def scalars(self, _stmt):
+            return [fresh, stale]
+
+    cv._pending_watch.clear()
+    monkeypatch.setattr(db_module, "SessionLocal", _Db)
+
+    async def fake_token(_db, _user_id):
+        return "token"
+
+    monkeypatch.setattr(cv, "get_token", fake_token)
+    assert asyncio.run(cv.recover_pending()) == 1
+
+    watch = cv._pending_watch["wf_restart"]
+    assert watch["chat_id"] == str(chat_id) and watch["user_id"] == str(user_id)
+    assert watch["token"] == "token"
+    assert stale.settled is True          # velha demais: encerrada, não esperada pra sempre
+    assert "wf_old" not in cv._pending_watch
+    cv._pending_watch.clear()

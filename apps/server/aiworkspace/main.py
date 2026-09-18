@@ -163,6 +163,9 @@ async def lifespan(app: FastAPI):
     try:
         from .integrations import civitai_service
         civitai_service.start_watch_poller()
+        # durabilidade: gerações cortadas por um restart voltam para a fila de entrega
+        # (a mídia já foi paga em Buzz — perdê-la em silêncio não é opção).
+        bg.spawn(civitai_service.recover_pending())
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível iniciar o poller do Civitai (%s)", exc)
     try:

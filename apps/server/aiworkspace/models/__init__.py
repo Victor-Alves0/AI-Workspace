@@ -31,6 +31,7 @@ from .codespace_task import CodespaceTask
 from .investigation import InvestigationGraph, InvestigationNode, InvestigationEdge
 from .health_event import HealthEvent
 from .exec_job import ExecJob
+from .media_job import MediaJob
 from .task_ledger import TaskLedger
 from .api_key import ApiKey, ApiRequest
 from .trace import ObsTrace, ObsSpan
@@ -95,6 +96,7 @@ __all__ = [
     "InvestigationEdge",
     "HealthEvent",
     "ExecJob",
+    "MediaJob",
     "TaskLedger",
     "ApiKey",
     "ApiRequest",

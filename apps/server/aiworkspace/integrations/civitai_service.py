@@ -661,72 +661,241 @@ def download(url: str, max_bytes: int = 100 * 1024 * 1024) -> tuple[bytes, str] 
 
 
 # --------------------------------------------------------------------------- #
-# Geração longa -> WAKE: a espera inline cabe no watchdog da tool (~2 min), mas um
-# workflow do Civitai pode levar bem mais. Sem isto, a tool devolvia "ainda rodando"
-# e o turno acabava com a IA PROMETENDO a imagem — que nunca aparecia, porque
-# ninguém voltava para buscar o resultado. Aqui a geração pendente é registrada e um
-# poller no MAIN loop acorda o chat quando o workflow termina. Mesmo desenho do
-# preview_service.watch_ready (readiness -> wake).
+# Geração longa -> ENTREGA: a espera inline cabe no watchdog da tool (~2 min), mas um
+# workflow do Civitai pode levar bem mais. Sem isto, a tool devolvia "ainda rodando" e
+# o turno acabava com a IA PROMETENDO a imagem — que nunca chegava, porque ninguém
+# voltava para buscar o resultado.
+#
+# A entrega NÃO acorda o modelo: um turno novo custaria uma chamada inteira (com todo
+# o contexto do chat) só para repassar uma imagem que já está pronta, e a nota de
+# conclusão apareceria como se fosse fala do usuário. Em vez disso, o poller baixa a
+# mídia e grava uma mensagem do assistente SEM texto, carregando o resultado da
+# ferramenta — a UI mostra o card "civitai.media.use" com a imagem, e o histórico do
+# modelo ignora a mensagem (o contexto só inclui mensagens com conteúdo).
 # --------------------------------------------------------------------------- #
-_pending_watch: dict[str, dict[str, Any]] = {}   # workflow_id -> dados do wake
+_pending_watch: dict[str, dict[str, Any]] = {}   # workflow_id -> dados da entrega
 _WATCH_MAX_WAIT = 1800                            # 30 min: teto de uma fila cheia
 _WATCH_POLL_S = 10
 
 
 def watch_workflow(
-    token: str, workflow_id: str, *, chat_id: str | None,
+    token: str, workflow_id: str, *, chat_id: str | None, user_id: str | None,
     prompt: str = "", model: str = "",
 ) -> bool:
-    """Registra "me acorde quando este workflow terminar". Devolve False quando não há
-    chat para acordar (API pública, canal sem chat) — aí o chamador mantém o texto
-    antigo, pedindo que a própria IA consulte o status."""
+    """Registra "entregue este workflow no chat quando terminar". Devolve False quando
+    não há chat/usuário para entregar (API pública, canal sem chat) — aí o chamador
+    mantém o texto antigo, pedindo que a própria IA consulte o status."""
     workflow_id = (workflow_id or "").strip()
     chat_id = (chat_id or "").strip()
-    if not workflow_id or not chat_id or not token:
+    user_id = (user_id or "").strip()
+    if not workflow_id or not chat_id or not user_id or not token:
         return False
     _pending_watch[workflow_id] = {
-        "token": token, "chat_id": chat_id, "prompt": prompt, "model": model,
+        "token": token, "chat_id": chat_id, "user_id": user_id,
+        "prompt": prompt, "model": model,
         "deadline": time.monotonic() + _WATCH_MAX_WAIT, "dispatched": False,
     }
+    # sombra no banco: a mídia já foi PAGA, então um restart no meio da geração não
+    # pode sumir com ela em silêncio (ver recover_pending, chamado no boot). A tool roda
+    # numa thread SEM loop, então aqui não dá para usar `bg.spawn` direto — e uma falha
+    # ao gravar não pode derrubar a geração, que já está em curso.
+    import asyncio
+    import logging
+
+    shadow = _remember(workflow_id, chat_id, user_id, prompt, model)
+    try:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            asyncio.run(shadow)             # thread da tool: grava aqui mesmo
+        else:
+            from .. import bg
+            bg.spawn(shadow)                # main loop: não bloqueia
+    except Exception:  # noqa: BLE001
+        shadow.close()
+        logging.getLogger(__name__).warning(
+            "geração %s ficou sem sombra no banco (sem recuperação por restart)",
+            workflow_id, exc_info=True)
     return True
 
 
+async def _remember(workflow_id: str, chat_id: str, user_id: str,
+                    prompt: str, model: str) -> None:
+    import logging
+    import uuid as _uuid
+
+    from ..db import SessionLocal
+    from ..models import MediaJob
+    try:
+        async with SessionLocal() as db:
+            db.add(MediaJob(
+                provider="civitai", external_id=workflow_id,
+                user_id=_uuid.UUID(user_id), chat_id=_uuid.UUID(chat_id),
+                prompt=(prompt or "")[:5000], model=(model or "")[:255],
+            ))
+            await db.commit()
+    except Exception:  # noqa: BLE001 - a espera em memória segue valendo
+        logging.getLogger(__name__).warning(
+            "não foi possível registrar a geração %s p/ recuperação", workflow_id, exc_info=True)
+
+
+async def _settle(workflow_id: str) -> None:
+    """Marca a entrega como concluída para a recuperação do boot não repeti-la."""
+    import logging
+
+    from sqlalchemy import update
+
+    from ..db import SessionLocal
+    from ..models import MediaJob
+    try:
+        async with SessionLocal() as db:
+            await db.execute(
+                update(MediaJob)
+                .where(MediaJob.external_id == workflow_id, MediaJob.provider == "civitai")
+                .values(settled=True)
+            )
+            await db.commit()
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).warning(
+            "não foi possível marcar a geração %s como entregue", workflow_id, exc_info=True)
+
+
+async def recover_pending() -> int:
+    """No boot: volta a esperar pelas gerações que ficaram devendo entrega. O token vem
+    dos SEGREDOS do usuário (não do banco de jobs), então nada de credencial guardada
+    duas vezes. Gerações velhas demais são encerradas para não esperar para sempre."""
+    import logging
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import select
+
+    from ..db import SessionLocal
+    from ..models import MediaJob
+    logger = logging.getLogger(__name__)
+    resumed = 0
+    try:
+        async with SessionLocal() as db:
+            rows = list(await db.scalars(
+                select(MediaJob).where(
+                    MediaJob.settled.is_(False), MediaJob.provider == "civitai",
+                ).order_by(MediaJob.created_at)
+            ))
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=_WATCH_MAX_WAIT)
+            for row in rows:
+                if row.chat_id is None or (row.created_at and row.created_at < cutoff):
+                    row.settled = True      # velha demais: encerra em vez de esperar sempre
+                    continue
+                token = await get_token(db, str(row.user_id))
+                if not token:               # conexão removida: nada a consultar
+                    row.settled = True
+                    continue
+                _pending_watch[row.external_id] = {
+                    "token": token, "chat_id": str(row.chat_id), "user_id": str(row.user_id),
+                    "prompt": row.prompt or "", "model": row.model or "",
+                    "deadline": time.monotonic() + _WATCH_MAX_WAIT, "dispatched": False,
+                }
+                resumed += 1
+            await db.commit()
+    except Exception:  # noqa: BLE001 - recuperação é best-effort; o app sobe mesmo assim
+        logger.warning("recuperação das gerações pendentes falhou", exc_info=True)
+        return 0
+    if resumed:
+        logger.info("retomando %d geração(ões) do Civitai pendente(s)", resumed)
+    return resumed
+
+
 def pending_count() -> int:
-    """Quantos workflows aguardam wake (usado pelo /debug/primitives e pelos testes)."""
+    """Quantos workflows aguardam entrega (usado pelo /debug/primitives e pelos testes)."""
     return len(_pending_watch)
 
 
-def _wake_note(workflow_id: str, status: str, prompt: str) -> tuple[str, str]:
-    """Texto do turno de continuação. O resultado NÃO viaja na nota: a IA chama
-    `action=status`, que baixa, guarda e EXIBE a mídia pelo caminho normal da tool."""
-    short = (prompt or "").strip().replace("\n", " ")[:120]
-    if status == "succeeded":
-        return (
-            "Imagem pronta no Civitai",
-            f"[Geração do Civitai concluída] O workflow `{workflow_id}` terminou com sucesso"
-            f"{f' (prompt: {short})' if short else ''}. Chame civitai.media.use com "
-            f"action='status' e workflow_id='{workflow_id}' AGORA para exibir a mídia ao "
-            "usuário e siga de onde parou. Não gere de novo.",
+async def _stored_media(watch: dict[str, Any], workflow: dict[str, Any]) -> list[dict[str, Any]]:
+    """Baixa os resultados e os persiste como GeneratedImage (URLs assinadas nossas).
+    As URLs do orquestrador expiram, então a mídia precisa virar bytes aqui."""
+    from starlette.concurrency import run_in_threadpool
+
+    from ..providers import image_gen
+    from ..tools.sift_service import _store_media
+
+    stored: list[dict[str, Any]] = []
+    for output in workflow_outputs(workflow)[:4]:
+        got = await run_in_threadpool(download, str(output["url"]))
+        if isinstance(got, dict):      # erro de download: entrega o que já veio
+            break
+        data, mime = got
+        image_id = await _store_media(
+            watch["user_id"], watch["chat_id"], data, mime=mime,
+            prompt=watch.get("prompt", ""), model=watch.get("model") or "civitai",
         )
+        if image_id:
+            stored.append({
+                "kind": "video" if mime.startswith("video/") else output.get("kind", "image"),
+                "url": image_gen.sign_image_url(image_id),
+            })
+    return stored
+
+
+def _delivery_event(workflow_id: str, status: str, watch: dict[str, Any],
+                    stored: list[dict[str, Any]]) -> dict[str, Any]:
+    """Resultado da ferramenta como a UI o espera (mesmo formato do caminho inline)."""
+    if stored:
+        first = stored[0]
+        return {
+            "kind": first["kind"], "url": first["url"], "media": stored,
+            "prompt": watch.get("prompt", ""), "model": watch.get("model") or "civitai",
+            "workflow_id": workflow_id, "status": "succeeded", "background": True,
+        }
     if status == "timeout":
-        return (
-            "Geração do Civitai demorando",
-            f"[Geração do Civitai demorando] O workflow `{workflow_id}` passou de "
-            f"{_WATCH_MAX_WAIT // 60} minutos sem terminar. Cheque com action='status' e "
-            "avise o usuário — não submeta outra geração automaticamente.",
+        return {"error": f"a geração passou de {_WATCH_MAX_WAIT // 60} min sem terminar",
+                "workflow_id": workflow_id, "status": "running", "background": True}
+    return {"error": f"a geração terminou como '{status}' e não produziu mídia",
+            "workflow_id": workflow_id, "status": status, "background": True}
+
+
+async def _deliver(workflow_id: str, status: str, watch: dict[str, Any],
+                   workflow: dict[str, Any]) -> None:
+    """Grava a mídia no chat como uso de ferramenta e notifica o usuário."""
+    import uuid as _uuid
+
+    from .. import bg
+    from ..db import SessionLocal
+    from ..models import Message, Notification
+    from ..push_service import send_to_user
+
+    stored = await _stored_media(watch, workflow) if status == "succeeded" else []
+    event = _delivery_event(workflow_id, status, watch, stored)
+    ok = not event.get("error")
+    title = "Imagem pronta" if ok else "A geração de imagem falhou"
+    async with SessionLocal() as db:
+        message = Message(
+            chat_id=_uuid.UUID(watch["chat_id"]),
+            role="assistant",
+            # sem texto de propósito: o histórico do modelo só inclui mensagens com
+            # conteúdo, então esta entrega não gasta contexto nem vira "fala" de ninguém
+            content="",
+            tool_events=[
+                {"kind": "call", "name": "civitai.media.use",
+                 "data": {"action": "status", "workflow_id": workflow_id,
+                          "note": "geração em background concluída"}},
+                {"kind": "result", "name": "civitai.media.use", "data": event},
+            ],
         )
-    return (
-        "Geração do Civitai falhou",
-        f"[Geração do Civitai {status}] O workflow `{workflow_id}` terminou como '{status}'. "
-        "Avise o usuário com o motivo (action='status' traz os passos) e NÃO tente de novo "
-        "sem que ele peça.",
-    )
+        db.add(message)
+        await db.flush()
+        db.add(Notification(
+            user_id=_uuid.UUID(watch["user_id"]), title=title,
+            body=(watch.get("prompt") or "")[:500],
+            chat_id=_uuid.UUID(watch["chat_id"]), message_id=message.id,
+        ))
+        await db.commit()
+    await _settle(workflow_id)
+    bg.spawn(send_to_user(_uuid.UUID(watch["user_id"]), title,
+                          (watch.get("prompt") or "")[:90], "/"))
 
 
 async def _watch_poller() -> None:
-    """No MAIN loop: observa os workflows pendentes e acorda o chat quando terminam.
-    Espera a geração corrente ficar ociosa antes (evita dois turnos concorrentes, como
-    o exec_jobs). Nunca levanta."""
+    """No MAIN loop: observa os workflows pendentes e ENTREGA a mídia quando terminam.
+    Nunca levanta — uma falha de rede tenta de novo no ciclo seguinte."""
     import asyncio
     import logging
 
@@ -738,35 +907,26 @@ async def _watch_poller() -> None:
             await asyncio.sleep(_WATCH_POLL_S)
             if not _pending_watch:
                 continue
-            # import DENTRO do try: um ciclo de import não pode matar o poller
-            from ..chat import generation, resume
             for wid, watch in list(_pending_watch.items()):
                 if watch["dispatched"]:
                     continue
                 expired = time.monotonic() >= watch["deadline"]
                 status = "timeout"
+                workflow: dict[str, Any] = {}
                 if not expired:
                     # HTTP síncrono: sai do loop p/ não segurar o event loop
                     workflow = await run_in_threadpool(get_workflow, watch["token"], wid)
                     if workflow.get("error"):
-                        # falha transitória de rede: tenta de novo no próximo ciclo
-                        continue
+                        continue          # falha transitória: tenta no próximo ciclo
                     status = str(workflow.get("status") or "").lower()
                     if status not in _TERMINAL:
                         continue
-                gen = generation.get_active(watch["chat_id"])
-                if gen is not None and not gen.done:
-                    continue                       # chat ocupado: tenta no próximo ciclo
                 watch["dispatched"] = True
                 _pending_watch.pop(wid, None)
-                title, note = _wake_note(wid, status, watch.get("prompt", ""))
                 try:
-                    await resume.resume_chat_turn(
-                        watch["chat_id"], note, notify_title=title,
-                        notify_body=(watch.get("prompt") or "")[:90],
-                    )
-                except Exception:  # noqa: BLE001 - wake é best-effort
-                    logger.exception("wake do Civitai falhou (workflow %s)", wid)
+                    await _deliver(wid, status, watch, workflow)
+                except Exception:  # noqa: BLE001 - entrega é best-effort
+                    logger.exception("entrega da geração do Civitai falhou (workflow %s)", wid)
         except asyncio.CancelledError:  # pragma: no cover
             raise
         except Exception:  # noqa: BLE001
