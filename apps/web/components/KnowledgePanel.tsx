@@ -565,7 +565,7 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
                         <Folder size={18} className="shrink-0 text-accent-hover" />
                         <span className="truncate text-sm text-ink">{f.name}</span>
                       </button>
-                      <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                      <div className="flex items-center gap-1 touch-reveal opacity-0 transition-opacity group-hover:opacity-100">
                         <button ref={moveFor?.id === f.id ? moveAnchor : undefined} onClick={() => setMoveFor({ kind: "folder", id: f.id })} title="Mover" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><FolderInput size={15} /></button>
                         <button onClick={() => { setRenaming(f.id); setRenameVal(f.name); }} title="Renomear" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Pencil size={15} /></button>
                         <button onClick={() => deleteFolder(f)} title="Excluir" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-rose-500"><Trash2 size={15} /></button>
@@ -590,7 +590,7 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
                       ))}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  <div className="flex items-center gap-1 touch-reveal opacity-0 transition-opacity group-hover:opacity-100">
                     {!(isBrain && isTextDoc(d)) && (
                       <button onClick={() => setViewDoc(d)} title="Visualizar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Eye size={15} /></button>
                     )}
@@ -747,10 +747,10 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
               )}
               {renamingBase !== b.id && (
                 <>
-                  <button onClick={() => { setRenamingBase(b.id); setBaseRenameVal(b.name); }} title="Renomear" className="rounded-lg p-1.5 text-muted opacity-0 transition-all hover:bg-hover hover:text-ink group-hover:opacity-100">
+                  <button onClick={() => { setRenamingBase(b.id); setBaseRenameVal(b.name); }} title="Renomear" className="rounded-lg p-1.5 text-muted touch-reveal opacity-0 transition-all hover:bg-hover hover:text-ink group-hover:opacity-100">
                     <Pencil size={15} />
                   </button>
-                  <button onClick={() => deleteBase(b)} title="Excluir base" className="rounded-lg p-1.5 text-muted opacity-0 transition-all hover:bg-hover hover:text-rose-500 group-hover:opacity-100">
+                  <button onClick={() => deleteBase(b)} title="Excluir base" className="rounded-lg p-1.5 text-muted touch-reveal opacity-0 transition-all hover:bg-hover hover:text-rose-500 group-hover:opacity-100">
                     <Trash2 size={15} />
                   </button>
                 </>

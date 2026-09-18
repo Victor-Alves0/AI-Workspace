@@ -135,10 +135,10 @@ export default function ModelPicker({
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Pesquisar um modelo"
-              className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
+              className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted max-md:text-[16px]"
             />
           </div>
-          <div className="flex items-center gap-1 border-b border-border px-2 py-1.5 text-sm">
+          <div className="flex items-center gap-1 border-b border-border px-2 py-1.5 text-sm max-md:py-2 max-md:text-[15px]">
             <button
               onClick={() => setTab("favorites")}
               title="Favoritos"
@@ -162,9 +162,9 @@ export default function ModelPicker({
           </div>
           {/* max-h em dvh: no celular a lista não passa por baixo do teclado;
               onTouchMove fecha o teclado ao arrastar (senão o scroll trava no iOS) */}
-          <div onTouchMove={dismissKeyboard} className="max-h-[min(20rem,55dvh)] overflow-y-auto overscroll-contain p-1.5">
+          <div onTouchMove={dismissKeyboard} className="max-h-[min(20rem,55dvh)] overflow-y-auto overscroll-contain p-1.5 max-md:max-h-[60dvh]">
             {rows.map((r) => (
-              <div key={r.key} className="group relative flex items-center gap-2 rounded-lg px-2 py-2 transition-colors hover:bg-hover">
+              <div key={r.key} className="group relative flex items-center gap-2 rounded-lg px-2 py-2 transition-colors hover:bg-hover max-md:min-h-12 max-md:px-2.5">
                 <button
                   onClick={() => {
                     if (r.external) onSelectExternal(r.modelId);
@@ -175,13 +175,13 @@ export default function ModelPicker({
                 >
                   {r.avatar ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={r.avatar} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
+                    <img src={r.avatar} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover max-md:h-7 max-md:w-7" />
                   ) : (
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface2 text-[10px] text-ink">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface2 text-[10px] text-ink max-md:h-7 max-md:w-7 max-md:text-xs">
                       {r.name[0]?.toUpperCase()}
                     </span>
                   )}
-                  <span title={r.name} className="truncate text-sm text-ink">{r.name}</span>
+                  <span title={r.name} className="truncate text-sm text-ink max-md:text-[16px]">{r.name}</span>
                   {r.provider && (
                     <span className="shrink-0 rounded bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">{r.provider}</span>
                   )}
@@ -200,7 +200,7 @@ export default function ModelPicker({
                   ref={itemMenu === r.key ? itemBtnRef : undefined}
                   onClick={() => setItemMenu(itemMenu === r.key ? null : r.key)}
                   className={`shrink-0 rounded p-0.5 text-muted hover:bg-surface2 hover:text-ink ${
-                    itemMenu === r.key ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                    itemMenu === r.key ? "opacity-100" : "touch-reveal opacity-0 group-hover:opacity-100"
                   }`}
                 >
                   <MoreHorizontal size={16} />

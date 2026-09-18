@@ -219,6 +219,13 @@ select:focus-visible {
   @apply text-[15px] leading-7 text-ink;
   word-break: break-word;
 }
+/* mobile: corpo de leitura no tamanho dos apps nativos (ChatGPT/iOS usam ~17px) */
+@media (max-width: 767px) {
+  .md {
+    font-size: 17px;
+    line-height: 1.65;
+  }
+}
 .md > :first-child {
   margin-top: 0;
 }
@@ -828,4 +835,30 @@ select:focus-visible {
 }
 .hljs-strong {
   font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ */
+/* Toque (celular/tablet)                                              */
+/* ------------------------------------------------------------------ */
+/* Botões da barra do compositor no celular: alvo e ícone do tamanho dos apps
+ * nativos. Só os botões DIRETOS da barra (e os embrulhados em um wrapper, como o
+ * "+" e o seletor de raciocínio) — os itens dos menus que abrem dali ficam de fora. */
+@media (max-width: 767px) {
+  .composer-toolbar > div > button,
+  .composer-toolbar > div > div > button {
+    padding: 0.55rem;
+  }
+  .composer-toolbar > div > button > svg,
+  .composer-toolbar > div > div > button > svg {
+    width: 22px;
+    height: 22px;
+  }
+}
+/* Controles de AÇÃO que o desktop revela no hover (menus "…", renomear, excluir,
+ * barra de ações da resposta). Sem hover, eles ficariam inalcançáveis — então no
+ * toque ficam sempre visíveis. Tooltips, horários e enfeites NÃO usam esta classe. */
+@media (hover: none) {
+  .touch-reveal {
+    opacity: 1 !important;
+  }
 }

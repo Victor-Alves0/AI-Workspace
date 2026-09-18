@@ -83,7 +83,7 @@ export default function InvestigationPanel() {
                   onClick={(e) => { e.stopPropagation(); remove(g.graph_id); }}
                   onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); remove(g.graph_id); } }}
                   title="Apagar"
-                  className="shrink-0 rounded p-1 text-muted opacity-0 hover:text-red-500 group-hover:opacity-100"
+                  className="shrink-0 rounded p-1 text-muted touch-reveal opacity-0 hover:text-red-500 group-hover:opacity-100"
                 >
                   <Trash2 size={13} />
                 </span>

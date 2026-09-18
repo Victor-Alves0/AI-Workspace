@@ -18,6 +18,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { Chat } from "@/lib/types";
+import { useLongPress } from "@/lib/useLongPress";
 import { AnchoredMenu, MenuDivider, MenuItem } from "./ui";
 
 /** id do projeto do Codespace -> nome, para o hover do ícone no item de chat.
@@ -51,6 +52,8 @@ export default function ChatItem({
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(chat.title);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
+  // celular: segurar o chat abre o menu (o "…" só aparece com mouse)
+  const longPress = useLongPress(() => setMenuOpen(true));
   const projectNames = useContext(ProjectNamesContext);
   const projectName = chat.project_id ? projectNames[chat.project_id] : undefined;
 
@@ -81,12 +84,13 @@ export default function ChatItem({
 
   return (
     <div
+      {...longPress.handlers}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData("text/chat-id", chat.id);
         e.dataTransfer.effectAllowed = "move";
       }}
-      className={`group relative flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm transition-colors ${
+      className={`group relative flex select-none items-center gap-1 rounded-lg px-2 py-1.5 text-sm transition-colors [-webkit-touch-callout:none] max-md:min-h-11 max-md:px-3 max-md:text-[16px] ${
         active ? "bg-surface2 text-ink" : "text-ink-soft hover:bg-hover hover:text-ink"
       }`}
     >
@@ -100,7 +104,7 @@ export default function ChatItem({
         </span>
       )}
       {chat.pinned && <Pin size={12} className="shrink-0 text-accent" />}
-      <button onClick={() => actions.onSelect(chat.id)} className="flex-1 truncate text-left">
+      <button onClick={() => { if (!longPress.consumeClick()) actions.onSelect(chat.id); }} className="flex-1 truncate text-left">
         {chat.title}
       </button>
       <button

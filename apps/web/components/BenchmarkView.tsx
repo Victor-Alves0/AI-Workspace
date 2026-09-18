@@ -380,9 +380,9 @@ export default function BenchmarkView() {
                 <p className="truncate text-sm font-medium text-ink">{b.name}</p>
                 <p className="truncate text-xs text-muted">{b.case_count} caso(s){b.judge_model ? " · com juiz" : ""}</p>
               </button>
-              <button onClick={() => { setRunBench(b); setView("run"); }} title="Rodar" className="rounded-lg p-1.5 text-muted opacity-0 hover:bg-surface2 hover:text-accent-hover group-hover:opacity-100"><Zap size={16} /></button>
-              <button onClick={() => { setEditId(b.id); setView("edit"); }} title="Editar" className="rounded-lg p-1.5 text-muted opacity-0 hover:bg-surface2 hover:text-ink group-hover:opacity-100"><Pencil size={15} /></button>
-              <button onClick={() => del(b)} title="Excluir" className="rounded-lg p-1.5 text-muted opacity-0 hover:bg-surface2 hover:text-red-400 group-hover:opacity-100"><Trash2 size={15} /></button>
+              <button onClick={() => { setRunBench(b); setView("run"); }} title="Rodar" className="rounded-lg p-1.5 text-muted touch-reveal opacity-0 hover:bg-surface2 hover:text-accent-hover group-hover:opacity-100"><Zap size={16} /></button>
+              <button onClick={() => { setEditId(b.id); setView("edit"); }} title="Editar" className="rounded-lg p-1.5 text-muted touch-reveal opacity-0 hover:bg-surface2 hover:text-ink group-hover:opacity-100"><Pencil size={15} /></button>
+              <button onClick={() => del(b)} title="Excluir" className="rounded-lg p-1.5 text-muted touch-reveal opacity-0 hover:bg-surface2 hover:text-red-400 group-hover:opacity-100"><Trash2 size={15} /></button>
             </div>
           ))}
         </div>

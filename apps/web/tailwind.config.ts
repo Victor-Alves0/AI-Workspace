@@ -8,6 +8,11 @@ const token = (name: string) => `rgb(var(--${name}) / <alpha-value>)`;
 
 const config: Config = {
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
+  // `hover:` só onde existe hover de verdade (mouse). No toque, o iOS aplicava o
+  // :hover no 1º toque — revelando botões escondidos — e só o 2º toque executava:
+  // o "precisa apertar duas vezes" do mobile. Controles revelados por hover que
+  // precisam existir no toque usam `.touch-reveal` (globals.css).
+  future: { hoverOnlyWhenSupported: true },
   theme: {
     extend: {
       colors: {

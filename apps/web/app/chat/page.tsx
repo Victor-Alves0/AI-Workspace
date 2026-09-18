@@ -41,6 +41,7 @@ import { SHORTCUTS, eventToCombo, resolveBinding, comboHasModifier, type Shortcu
 import ImaginaiDocks from "@/components/imaginai/ImaginaiDocks";
 import { useImaginaiCampaign } from "@/components/imaginai/useImaginaiCampaign";
 import { useGeneration } from "./useGeneration";
+import { useDrawerSwipe } from "./useDrawerSwipe";
 
 type RoundtableStream = { speaker: Speaker; content: string; reasoning: string };
 
@@ -744,6 +745,17 @@ export default function ChatPage() {
   useEffect(() => {
     if (!isMobile) setMobileNav(false);
   }, [isMobile]);
+  // celular: a gaveta lateral segue o dedo (arrastar p/ a direita abre, p/ a esquerda fecha)
+  const screenRef = useRef<HTMLDivElement>(null);
+  const drawerBackdropRef = useRef<HTMLDivElement>(null);
+  const drawerSwipe = useDrawerSwipe({
+    enabled: isMobile,
+    open: mobileNav,
+    setOpen: setMobileNav,
+    rootRef: screenRef,
+    drawerRef: sbResize.ref,
+    backdropRef: drawerBackdropRef,
+  });
 
   // deep-link: /chat?c=<id> abre o chat direto (ex.: vindo de uma notificação);
   // ?v=automations abre a tela de Automações (rota antiga /automations redireciona)
@@ -2148,11 +2160,13 @@ export default function ChatPage() {
   );
 
   return (
-    <div className="flex h-full bg-bg">
-      {/* backdrop do drawer (mobile) */}
-      {mobileNav && (
-        <div className="fixed inset-0 z-40 bg-black/50 md:hidden" onClick={() => setMobileNav(false)} />
-      )}
+    <div ref={screenRef} className="flex h-full bg-bg" {...drawerSwipe}>
+      {/* backdrop do drawer (mobile): sempre montado, para acompanhar o arraste */}
+      <div
+        ref={drawerBackdropRef}
+        onClick={() => setMobileNav(false)}
+        className={`fixed inset-0 z-40 bg-black/50 transition-opacity duration-300 md:hidden ${mobileNav ? "opacity-100" : "pointer-events-none opacity-0"}`}
+      />
       {/* barra lateral: coluna no desktop; drawer deslizante no mobile.
           `flex` faz o <aside> interno esticar até o fim da tela (altura total). */}
       <div
@@ -2219,7 +2233,7 @@ export default function ChatPage() {
         <div className="sticky top-0 z-30 flex shrink-0 items-start justify-between gap-2 bg-bg px-2 py-2.5 sm:px-4">
           <div className="flex min-w-0 flex-col">
             <div className="flex items-center gap-1">
-              <button onClick={() => setMobileNav(true)} title="Menu" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink md:hidden">
+              <button onClick={() => setMobileNav(true)} title="Menu" aria-label="Abrir menu" className="rounded-lg p-1.5 text-ink transition-colors hover:bg-hover md:hidden max-md:p-2.5 max-md:[&_svg]:size-6">
                 <Menu size={20} />
               </button>
               {picker}
@@ -2228,7 +2242,7 @@ export default function ChatPage() {
               <button
                 onClick={() => { if (isRoundtable) setRtBarOpen((v) => !v); else { enterRoundtable(); setRtBarOpen(true); } }}
                 title={isRoundtable ? (rtBarOpen ? "Ocultar a mesa" : "Mostrar a mesa") : temporary ? "Mesa-redonda temporária (não será salva)" : "Mesa-redonda: fazer os modelos conversarem entre si"}
-                className={`rounded-lg p-1.5 transition-colors ${isRoundtable && rtBarOpen ? "bg-accent/15 text-accent-hover" : isRoundtable ? "text-accent-hover hover:bg-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
+                className={`rounded-lg p-1.5 transition-colors max-md:p-2.5 max-md:[&_svg]:size-[22px] ${isRoundtable && rtBarOpen ? "bg-accent/15 text-accent-hover" : isRoundtable ? "text-accent-hover hover:bg-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
               >
                 <Users size={18} />
               </button>
@@ -2263,7 +2277,7 @@ export default function ChatPage() {
               <button
                 onClick={() => setShowShare(true)}
                 title="Compartilhar conversa (link público)"
-                className={`rounded-lg p-2 transition-colors ${active.public_id ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
+                className={`rounded-lg p-2 transition-colors max-md:p-2.5 max-md:[&_svg]:size-[22px] ${active.public_id ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
               >
                 <Share2 size={18} />
               </button>
@@ -2271,7 +2285,7 @@ export default function ChatPage() {
             <button
               onClick={toggleTemporary}
               title="Chat temporário"
-              className={`rounded-lg p-2 transition-colors ${temporary ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
+              className={`rounded-lg p-2 transition-colors max-md:p-2.5 max-md:[&_svg]:size-[22px] ${temporary ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
             >
               <MessageSquareDashed size={18} />
             </button>
@@ -2279,7 +2293,7 @@ export default function ChatPage() {
               <button
                 onClick={() => setCsFilesOpen((v) => !v)}
                 title="Arquivos do projeto"
-                className={`rounded-lg p-2 transition-colors ${csFilesOpen ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
+                className={`rounded-lg p-2 transition-colors max-md:p-2.5 max-md:[&_svg]:size-[22px] ${csFilesOpen ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
               >
                 <Code2 size={18} />
               </button>
@@ -2287,7 +2301,7 @@ export default function ChatPage() {
             <button
               onClick={() => setShowControls((v) => !v)}
               title="Controles"
-              className={`rounded-lg p-2 transition-colors ${showControls ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
+              className={`rounded-lg p-2 transition-colors max-md:p-2.5 max-md:[&_svg]:size-[22px] ${showControls ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
             >
               <SlidersHorizontal size={18} />
             </button>
@@ -3042,7 +3056,7 @@ function MessageBubble({
     return (
       <div className="mx-auto flex max-w-3xl justify-end">
         <div className="group relative max-w-[85%]">
-          <div className="whitespace-pre-wrap rounded-2xl rounded-br-md bg-surface2 px-4 py-2.5 text-[15px] leading-7 text-ink [overflow-wrap:anywhere]">
+          <div className="whitespace-pre-wrap rounded-2xl rounded-br-md bg-surface2 px-4 py-2.5 text-[15px] leading-7 text-ink [overflow-wrap:anywhere] max-md:text-[17px] max-md:leading-relaxed">
             {content}
           </div>
           {(time || onDelete) && (
@@ -3085,7 +3099,7 @@ function MessageBubble({
             onClick={() => onSpeak()}
             title={speaking ? "Parar leitura" : "Ler em voz alta"}
             aria-pressed={speaking || undefined}
-            className={`mt-1 flex items-center gap-1 text-xs transition-opacity hover:text-ink ${speaking ? "text-accent-hover opacity-100" : "text-muted opacity-0 group-hover:opacity-100"}`}
+            className={`mt-1 flex items-center gap-1 text-xs transition-opacity hover:text-ink ${speaking ? "text-accent-hover opacity-100" : "text-muted touch-reveal opacity-0 group-hover:opacity-100"}`}
           >
             {speaking ? <Square size={12} fill="currentColor" /> : <Volume2 size={13} />}
             {speaking ? "Parar" : "Ler"}

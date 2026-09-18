@@ -81,13 +81,13 @@ function SectionHeader({
     <div className="group relative mt-1">
       <button
         onClick={onToggle}
-        className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-semibold tracking-wide text-muted transition-colors hover:bg-hover hover:text-ink-soft"
+        className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-semibold tracking-wide text-muted transition-colors hover:bg-hover hover:text-ink-soft max-md:mt-2 max-md:px-3 max-md:text-[16px] max-md:text-ink"
       >
         {icon && <span className="shrink-0 text-muted">{icon}</span>}
         {label}
       </button>
       {action && (
-        <div className="absolute right-1.5 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100">
+        <div className="absolute right-1.5 top-1/2 -translate-y-1/2 touch-reveal opacity-0 group-hover:opacity-100">
           {action}
         </div>
       )}
@@ -116,7 +116,7 @@ function NavButton({
       onClick={onClick}
       title={collapsed ? label : undefined}
       aria-current={active ? "page" : undefined}
-      className={`group/nav flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-medium transition-colors ${
+      className={`group/nav flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-medium transition-colors max-md:min-h-12 max-md:gap-3.5 max-md:rounded-xl max-md:px-3 max-md:text-[17px] max-md:[&_svg]:size-[22px] ${
         collapsed ? "justify-center" : ""
       } ${active ? "bg-surface2 text-ink" : "text-ink hover:bg-hover"}`}
     >
@@ -444,20 +444,20 @@ export default function Sidebar({
    <ProjectNamesContext.Provider value={projectNames}>
     <aside
       style={width ? { width, transition: "none" } : undefined}
-      className="pt-safe pb-safe group/side flex w-64 shrink-0 flex-col overflow-hidden border-r border-transparent bg-sidebar transition-[width] duration-300 ease-in-out hover:border-border"
+      className="pt-safe pb-safe group/side flex w-64 shrink-0 flex-col overflow-hidden border-r border-transparent bg-sidebar transition-[width] duration-300 ease-in-out hover:border-border max-md:w-[85vw] max-md:max-w-[340px]"
     >
       {/* header */}
-      <div className="flex items-center justify-between px-3 py-3">
-        <span className="flex items-center gap-2.5 font-semibold tracking-tight text-ink">
+      <div className="flex items-center justify-between px-3 py-3 max-md:px-4 max-md:py-2.5">
+        <span className="flex items-center gap-2.5 font-semibold tracking-tight text-ink max-md:text-[19px]">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo.png" alt="AI Workspace" className="h-6 w-6 shrink-0 rounded-md" />
           AI Workspace
         </span>
         <div className="flex items-center gap-0.5">
-          <button onClick={onSearch} title="Pesquisar" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
+          <button onClick={onSearch} title="Pesquisar" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink max-md:rounded-full max-md:p-2.5 max-md:text-ink max-md:[&_svg]:size-[22px]">
             <Search size={18} />
           </button>
-          <button onClick={onToggleCollapse} title="Colapsar" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
+          <button onClick={onToggleCollapse} title="Colapsar" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink max-md:rounded-full max-md:p-2.5 max-md:text-ink max-md:[&_svg]:size-[22px]">
             <PanelLeftClose size={18} />
           </button>
         </div>
@@ -523,7 +523,7 @@ function FolderRow({
             setOpen(true);
           }
         }}
-        className={`group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm transition-colors ${
+        className={`group flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm transition-colors max-md:min-h-11 max-md:px-3 max-md:text-[16px] ${
           over ? "bg-accent/20 ring-1 ring-accent" : "hover:bg-hover"
         }`}
       >
@@ -550,10 +550,10 @@ function FolderRow({
             <span className="truncate text-ink">{folder.name}</span>
           )}
         </button>
-        <button onClick={() => setRenaming(true)} className="shrink-0 text-muted opacity-0 transition-colors hover:text-ink-soft group-hover:opacity-100">
+        <button onClick={() => setRenaming(true)} className="shrink-0 text-muted touch-reveal opacity-0 transition-colors hover:text-ink-soft group-hover:opacity-100">
           <Pencil size={13} />
         </button>
-        <button onClick={() => onDelete(folder.id)} className="shrink-0 text-muted opacity-0 transition-colors hover:text-red-400 group-hover:opacity-100">
+        <button onClick={() => onDelete(folder.id)} className="shrink-0 text-muted touch-reveal opacity-0 transition-colors hover:text-red-400 group-hover:opacity-100">
           <Trash2 size={13} />
         </button>
       </div>

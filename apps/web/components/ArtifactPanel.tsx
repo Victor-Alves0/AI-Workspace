@@ -441,7 +441,7 @@ export default function ArtifactPanel({
                 {external && (
                   <span className="shrink-0 rounded-full bg-surface2 px-1.5 py-0.5 text-[10px] text-muted">outro chat</span>
                 )}
-                <Pencil size={11} className="shrink-0 text-muted opacity-0 transition-opacity group-hover:opacity-100" />
+                <Pencil size={11} className="shrink-0 text-muted touch-reveal opacity-0 transition-opacity group-hover:opacity-100" />
               </>
             )}
           </button>

@@ -518,7 +518,7 @@ export default function MemoryView() {
                       )}
                     </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                  <div className="flex shrink-0 items-center gap-1 touch-reveal opacity-0 transition-opacity group-hover:opacity-100">
                     <button onClick={() => apply(m.disabled ? "enable" : "disable", [m.id])} title={m.disabled ? "Ativar" : "Desativar"} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
                       {m.disabled ? <RotateCcw size={14} /> : <Ban size={14} />}
                     </button>

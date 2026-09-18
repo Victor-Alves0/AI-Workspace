@@ -143,7 +143,7 @@ function EntryRow({
       </button>
       <button
         ref={btnRef} onClick={() => setMenuOpen(true)}
-        className={`shrink-0 rounded p-0.5 text-muted hover:bg-hover hover:text-ink ${menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+        className={`shrink-0 rounded p-0.5 text-muted hover:bg-hover hover:text-ink ${menuOpen ? "opacity-100" : "touch-reveal opacity-0 group-hover:opacity-100"}`}
       >
         <MoreVertical size={12} />
       </button>

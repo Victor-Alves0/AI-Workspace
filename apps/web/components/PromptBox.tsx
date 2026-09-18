@@ -1014,7 +1014,7 @@ export default function PromptBox({
           <div
             ref={backdropRef}
             aria-hidden
-            className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-2 py-1.5 text-[15px] leading-6 text-transparent"
+            className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-2 py-1.5 text-[15px] leading-6 text-transparent max-md:text-[17px] max-md:leading-7"
             style={{ maxHeight: MAX_HEIGHT }}
           >
             {highlightNodes}
@@ -1072,11 +1072,11 @@ export default function PromptBox({
             }
           }}
           placeholder={placeholder}
-          className="relative z-[1] w-full resize-none overflow-y-auto bg-transparent px-2 py-1.5 text-[15px] leading-6 text-ink outline-none placeholder:text-muted"
+          className="relative z-[1] w-full resize-none overflow-y-auto bg-transparent px-2 py-1.5 text-[15px] leading-6 text-ink outline-none placeholder:text-muted max-md:text-[17px] max-md:leading-7"
           style={{ maxHeight: MAX_HEIGHT }}
           />
         </div>
-        <div className="flex items-center justify-between px-1 pt-1">
+        <div className="composer-toolbar flex items-center justify-between px-1 pt-1">
           <div className="flex items-center gap-1">
             <div className="relative" ref={plusRef}>
               <button

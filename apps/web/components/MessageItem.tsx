@@ -8,6 +8,7 @@ import { api, ApiError, API_URL } from "@/lib/api";
 import { fmtHM, fmtDayShort } from "@/lib/format";
 import { copyText } from "@/lib/clipboard";
 import Markdown from "./Markdown";
+import { useLongPress } from "@/lib/useLongPress";
 import ExcalidrawCanvas from "./ExcalidrawCanvas";
 import StockCard from "./StockCard";
 import ChartView from "./ChartView";
@@ -743,7 +744,7 @@ function ImageCard({ url, prompt }: { url: string; prompt?: string }) {
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={src} alt={prompt || "imagem gerada"} loading="lazy" className="block h-auto w-full" />
           </button>
-          <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+          <div className="absolute right-2 top-2 flex gap-1 touch-reveal opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
             <a
               href={downloadSrc}
               download
@@ -1045,7 +1046,7 @@ function MemoriesUsedPanel({ items }: { items: { id: string; text: string; scope
           {gone[m.id] ? (
             <span className="shrink-0 text-[10px] uppercase text-muted">{gone[m.id] === "deleted" ? "excluída" : "desativada"}</span>
           ) : (
-            <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover/mem:opacity-100">
+            <div className="flex shrink-0 items-center gap-1 touch-reveal opacity-0 transition-opacity group-hover/mem:opacity-100">
               <button onClick={() => act(m.id, "disabled")} title="Desativar" className="rounded p-1 text-muted hover:text-ink"><Ban size={12} /></button>
               <button onClick={() => act(m.id, "deleted")} title="Excluir" className="rounded p-1 text-muted hover:text-red-400"><Trash2 size={12} /></button>
             </div>
@@ -1497,6 +1498,10 @@ export default function MessageItem({
   const [remSaved, setRemSaved] = useState(false);
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
+  // celular: segurar a mensagem do usuário mostra as ações dela (copiar/editar/…),
+  // que no desktop aparecem no hover
+  const [touchActions, setTouchActions] = useState(false);
+  const userLongPress = useLongPress(() => setTouchActions((value) => !value));
   const toolEvents = message.tool_events ?? EMPTY_TOOL_EVENTS;
   const usedTools = toolEvents.length > 0;
   // guardas de saída que agiram nesta resposta (fluxo no painel de ferramentas)
@@ -1592,11 +1597,14 @@ export default function MessageItem({
                 </div>
               )}
               {message.content && (
-                <div className="whitespace-pre-wrap rounded-2xl rounded-br-md bg-surface2 px-4 py-2.5 text-[15px] leading-7 text-ink [overflow-wrap:anywhere]">
+                <div
+                  {...userLongPress.handlers}
+                  className="whitespace-pre-wrap rounded-2xl rounded-br-md bg-surface2 px-4 py-2.5 text-[15px] leading-7 text-ink [overflow-wrap:anywhere] max-md:text-[17px] max-md:leading-relaxed"
+                >
                   {message.content}
                 </div>
               )}
-              <div className="mt-1 flex items-center justify-end gap-1.5 pr-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+              <div className={`mt-1 flex items-center justify-end gap-1.5 pr-1 transition-opacity duration-150 ${touchActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
                 <span className="text-[11px] text-muted">{fmtTime(message.created_at)}</span>
                 <button
                   title="Copiar"
@@ -1678,7 +1686,7 @@ export default function MessageItem({
         {/* barra de ações — abaixo de toda mensagem da IA */}
         {!editing && (
           <>
-            <div className={`mt-1.5 flex items-center gap-0.5 transition-opacity duration-150 ${speaking ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+            <div className={`mt-1.5 flex items-center gap-0.5 transition-opacity duration-150 ${speaking ? "opacity-100" : "touch-reveal opacity-0 group-hover:opacity-100"}`}>
               <IconButton title="Editar" onClick={() => { setDraft(message.content); setEditing(true); }} disabled={busy}>
                 <Pencil size={15} />
               </IconButton>

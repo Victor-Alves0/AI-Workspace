@@ -224,7 +224,7 @@ export default function SkillEditor({
                   </button>
                   <button
                     onClick={() => removeFile(i)}
-                    className="shrink-0 text-muted opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
+                    className="shrink-0 text-muted touch-reveal opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
                     title="Remover arquivo"
                   >
                     <Trash2 size={12} />

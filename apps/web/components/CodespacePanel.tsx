@@ -96,7 +96,7 @@ function EditableTitle({ value, onSave, className = "" }: { value: string; onSav
     <span className={`group flex min-w-0 items-center gap-1.5 ${className}`}>
       <span className="truncate">{value}</span>
       {saving ? <Loader2 size={12} className="shrink-0 animate-spin text-muted" /> : (
-        <button onClick={() => setEditing(true)} title="Renomear" className="shrink-0 rounded p-0.5 text-muted opacity-0 transition-opacity hover:text-ink group-hover:opacity-100">
+        <button onClick={() => setEditing(true)} title="Renomear" className="shrink-0 rounded p-0.5 text-muted touch-reveal opacity-0 transition-opacity hover:text-ink group-hover:opacity-100">
           <Pencil size={12} />
         </button>
       )}
@@ -1312,7 +1312,7 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
                   role="button"
                   onClick={(e) => { e.stopPropagation(); del(p); }}
                   title="Excluir"
-                  className="shrink-0 rounded-lg p-1.5 text-muted opacity-0 transition-opacity hover:bg-hover hover:text-red-400 group-hover:opacity-100"
+                  className="shrink-0 rounded-lg p-1.5 text-muted touch-reveal opacity-0 transition-opacity hover:bg-hover hover:text-red-400 group-hover:opacity-100"
                 >
                   {busyId === p.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                 </span>

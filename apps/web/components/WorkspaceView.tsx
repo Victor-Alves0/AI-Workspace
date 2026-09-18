@@ -831,7 +831,7 @@ export default function WorkspaceView({
                   <p className="truncate text-xs text-muted">{m.description || m.base_model}</p>
                 </button>
                 <div className="relative">
-                  <button ref={menu === m.id ? menuBtnRef : undefined} onClick={() => setMenu(menu === m.id ? null : m.id)} className={`rounded p-1 text-muted hover:text-ink ${menu === m.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+                  <button ref={menu === m.id ? menuBtnRef : undefined} onClick={() => setMenu(menu === m.id ? null : m.id)} className={`rounded p-1 text-muted hover:text-ink ${menu === m.id ? "opacity-100" : "touch-reveal opacity-0 group-hover:opacity-100"}`}>
                     <MoreHorizontal size={18} />
                   </button>
                   {menu === m.id && (
@@ -908,11 +908,11 @@ export default function WorkspaceView({
                   </p>
                   <p className="truncate font-mono text-xs text-muted">Por {author} • {t.path}</p>
                 </button>
-                <button onClick={() => setValvesTool(t)} title="Configurações" className="rounded p-1 text-muted opacity-0 hover:text-ink group-hover:opacity-100">
+                <button onClick={() => setValvesTool(t)} title="Configurações" className="rounded p-1 text-muted touch-reveal opacity-0 hover:text-ink group-hover:opacity-100">
                   <Settings size={17} />
                 </button>
                 <div className="relative">
-                  <button ref={menu === t.id ? menuBtnRef : undefined} onClick={() => setMenu(menu === t.id ? null : t.id)} className={`rounded p-1 text-muted hover:text-ink ${menu === t.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+                  <button ref={menu === t.id ? menuBtnRef : undefined} onClick={() => setMenu(menu === t.id ? null : t.id)} className={`rounded p-1 text-muted hover:text-ink ${menu === t.id ? "opacity-100" : "touch-reveal opacity-0 group-hover:opacity-100"}`}>
                     <MoreHorizontal size={18} />
                   </button>
                   {menu === t.id && (
@@ -961,12 +961,12 @@ export default function WorkspaceView({
                 <button
                   onClick={() => void copyText(p.content)}
                   title="Copiar conteúdo"
-                  className="rounded p-1 text-muted opacity-0 hover:text-ink group-hover:opacity-100"
+                  className="rounded p-1 text-muted touch-reveal opacity-0 hover:text-ink group-hover:opacity-100"
                 >
                   <Copy size={16} />
                 </button>
                 <div className="relative">
-                  <button ref={menu === p.id ? menuBtnRef : undefined} onClick={() => setMenu(menu === p.id ? null : p.id)} className={`rounded p-1 text-muted hover:text-ink ${menu === p.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+                  <button ref={menu === p.id ? menuBtnRef : undefined} onClick={() => setMenu(menu === p.id ? null : p.id)} className={`rounded p-1 text-muted hover:text-ink ${menu === p.id ? "opacity-100" : "touch-reveal opacity-0 group-hover:opacity-100"}`}>
                     <MoreHorizontal size={18} />
                   </button>
                   {menu === p.id && (
@@ -1031,7 +1031,7 @@ export default function WorkspaceView({
                   <p className="truncate text-xs text-muted">{s.description || "Sem descrição"}</p>
                 </button>
                 <div className="relative">
-                  <button ref={menu === s.id ? menuBtnRef : undefined} onClick={() => setMenu(menu === s.id ? null : s.id)} className={`rounded p-1 text-muted hover:text-ink ${menu === s.id ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+                  <button ref={menu === s.id ? menuBtnRef : undefined} onClick={() => setMenu(menu === s.id ? null : s.id)} className={`rounded p-1 text-muted hover:text-ink ${menu === s.id ? "opacity-100" : "touch-reveal opacity-0 group-hover:opacity-100"}`}>
                     <MoreHorizontal size={18} />
                   </button>
                   {menu === s.id && (
