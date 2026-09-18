@@ -31,6 +31,25 @@ export type ImaginaiSnapshot = {
   };
   character: ImaginaiEntity | null;
   location: ImaginaiEntity | null;
+  /** combate em andamento (ou o último, encerrado); null fora de combate */
+  encounter?: ImaginaiEncounter | null;
+};
+
+/** Combate como o JOGADOR o vê: a própria vida em números, a do inimigo como estado. */
+export type ImaginaiEncounter = {
+  active: boolean;
+  round: number;
+  outcome: "victory" | "escaped" | "defeat" | "stalled" | null;
+  order: {
+    id: string;
+    name: string;
+    side: "player" | "hostile";
+    initiative: number;
+    current: boolean;
+    health?: "ileso" | "ferido" | "gravemente ferido" | "caído" | "desconhecido";
+    hp?: number;
+    hp_max?: number;
+  }[];
 };
 
 export type ImaginaiSystemDefinition = {

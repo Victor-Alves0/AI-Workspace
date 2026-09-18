@@ -33,8 +33,14 @@ the choice belongs to that chat.
   facts and knowledge the character has or hasn't discovered. The AI narrates, but attacks,
   spells, ability checks, items, currency and rests are **resolved by the ruleset on the
   server** (dice included), so the model cannot grant itself a hit or an item.
+  - **Turn-based combat**: the player's first attack (or an ambush) rolls initiative on the
+    server; after every turn-consuming action, hostile creatures act in order — attack rolls
+    against the character's AC, crits, damage to the character's HP — and the narrator is handed
+    those turns to narrate, never to decide. Enemy health shows as a state ("ferido"), not a
+    number; the fight ends in victory, escape (leaving the location) or the character going down.
   - Side panels: **Worldinfo** (journal + campaign history, codex, map) and **Character**
-    (inventory, spells, sheet), with a world/NPC builder and per-campaign settings.
+    (inventory, spells, sheet, combat tracker), with a world/NPC builder — including hostility,
+    attack bonus and damage per creature — and per-campaign settings.
   - The system is declarative (`imaginai/systems.py`): **D&D 5e** ships today, and another
     ruleset plugs in without touching the interface.
 

@@ -188,6 +188,7 @@ class Dnd5eRuleset:
             "attack": self._attack,
             "rest": self._rest,
             "wait": self._wait,
+            "start_encounter": self._start_encounter,
         }
         handler = handlers.get(intent.action_type)
         if handler is None:
@@ -681,6 +682,18 @@ class Dnd5eRuleset:
             mutations=mutations,
             event_type="rest_completed",
             public_payload={"kind": kind, "minutes": tick_cost},
+        )
+
+    def _start_encounter(self, intent: ActionIntent) -> ActionDecision:
+        """Inimigos atacam sem que o jogador tenha começado (emboscada, guarda que saca a
+        espada). Quem entra e quem age primeiro é decidido pelo servidor, na iniciativa."""
+        return ActionDecision(
+            status="allowed",
+            reason_code="ok",
+            reason="O confronto começa; a iniciativa define a ordem dos turnos.",
+            consumes_turn=False,
+            event_type="encounter_requested",
+            public_payload={},
         )
 
     def _wait(self, intent: ActionIntent) -> ActionDecision:

@@ -35,7 +35,8 @@ from ..schemas.imaginai import (
     JournalUpdate,
     KnowledgeCreate,
 )
-from .rules import ActionDecision, ActionIntent, EntitySnapshot, ruleset_for
+from . import encounters
+from .rules import ActionDecision, ActionIntent, EntitySnapshot, _blocked, ruleset_for
 from .systems import system_definition
 
 
@@ -264,6 +265,10 @@ async def public_snapshot(db: AsyncSession, campaign: ImaginaiCampaign) -> dict[
         "campaign": _campaign_out(campaign),
         "character": _entity_out(character) if character else None,
         "location": _entity_out(location) if location else None,
+        # combate como o jogador o vê (vida do inimigo como estado, não número)
+        "encounter": (
+            await encounters.summary(db, campaign, character) if character else None
+        ),
     }
 
 
@@ -1274,6 +1279,8 @@ async def resolve_action(
                 "replayed": True,
             }
     decision, actor, target = await evaluate_action(db, campaign, body, lock=True)
+    if encounters.active(campaign) and body.action_type == "rest":
+        decision = _blocked("in_combat", "Não é possível descansar com inimigos lutando.")
     attempt_input = copy.deepcopy(body.parameters)
     if turn_key:
         attempt_input["_turn_key"] = turn_key
@@ -1294,6 +1301,7 @@ async def resolve_action(
     db.add(attempt)
 
     event = None
+    combate = None
     if decision.status == "allowed":
         entities = await _mutation_entities(db, campaign, actor, target, decision.mutations)
         if body.action_type == "equip_item" and target is not None:
@@ -1321,16 +1329,30 @@ async def resolve_action(
         await db.flush()
         attempt.event_id = event.id
         attempt.status = "resolved"
+        if encounters.is_player(actor):
+            if body.action_type == "start_encounter" and not encounters.active(campaign):
+                # emboscada: a iniciativa decide quem age primeiro — pode não ser o jogador
+                combate = await encounters.start(
+                    db, campaign, user_id, actor, target=target, player_already_acted=False,
+                )
+            elif decision.consumes_turn:
+                combate = await encounters.after_player_turn(db, campaign, user_id, actor)
 
     await db.commit()
     await db.refresh(attempt)
-    return {
+    out = {
         "attempt_id": str(attempt.id),
         "event_id": str(event.id) if event else None,
         **decision.as_dict(),
         "status": attempt.status,
         "replayed": False,
     }
+    if combate is not None:
+        out["encounter"] = combate
+    elif body.action_type == "start_encounter" and decision.status == "allowed":
+        out["encounter"] = None
+        out["note"] = "Não há inimigos hostis de pé neste local: não houve combate."
+    return out
 
 
 async def _owned_attempt(
@@ -1473,6 +1495,7 @@ async def resolve_check(
         "result": "success" if success else "failure",
     }
     event_type = decision.get("event_type") or "ability_check_resolved"
+    combate = None
     target = None
     if attempt.target_id:
         target = await _owned_entity(db, campaign, attempt.target_id, lock=True)
@@ -1539,8 +1562,16 @@ async def resolve_check(
     await db.flush()
     attempt.event_id = event.id
     attempt.status = "resolved"
+    if encounters.is_player(actor) and decision.get("consumes_turn", True):
+        if encounters.active(campaign):
+            combate = await encounters.after_player_turn(db, campaign, user_id, actor)
+        elif is_attack and target is not None:
+            # o primeiro golpe abre o combate: esse ataque já foi o turno do jogador
+            combate = await encounters.start(
+                db, campaign, user_id, actor, target=target, player_already_acted=True,
+            )
     await db.commit()
-    return {
+    out = {
         "attempt_id": str(attempt.id),
         "event_id": str(event.id),
         "status": "resolved",
@@ -1548,6 +1579,9 @@ async def resolve_check(
         "outcome": payload,
         "replayed": False,
     }
+    if combate is not None:
+        out["encounter"] = combate
+    return out
 
 
 async def adjudicate_attempt(
@@ -1615,8 +1649,11 @@ async def adjudicate_attempt(
     await db.flush()
     attempt.event_id = event.id
     attempt.status = "resolved"
+    combate = None
+    if encounters.is_player(actor) and decision.get("consumes_turn") and encounters.active(campaign):
+        combate = await encounters.after_player_turn(db, campaign, user_id, actor)
     await db.commit()
-    return {
+    out = {
         "attempt_id": str(attempt.id),
         "event_id": str(event.id),
         "status": "resolved",
@@ -1624,3 +1661,6 @@ async def adjudicate_attempt(
         "outcome": payload,
         "replayed": False,
     }
+    if combate is not None:
+        out["encounter"] = combate
+    return out

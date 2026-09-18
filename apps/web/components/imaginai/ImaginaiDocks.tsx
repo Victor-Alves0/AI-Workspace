@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import type { ImaginaiSnapshot, ImaginaiSystemDefinition } from "./types";
 import { DND_CHARACTER_SECTIONS, DND_WORLD_SECTIONS, ImaginaiSheetHead, type CharacterSection, type WorldSection } from "./shared";
 import { ImaginaiWorldBuilder } from "./WorldBuilder";
+import CombatTracker from "./CombatTracker";
 import { ImaginaiJournalPanel } from "./panels/JournalPanel";
 import { ImaginaiCodexPanel } from "./panels/CodexPanel";
 import { ImaginaiMapPanel } from "./panels/MapPanel";
@@ -239,6 +240,7 @@ export default function ImaginaiDocks({
               </div>
             </section>
           ) : null}
+          {snapshot?.encounter?.active ? <CombatTracker encounter={snapshot.encounter} /> : null}
           <section className="imaginai-dock-card">
             <div className="flex min-h-7 items-center">
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">Personagem</p>

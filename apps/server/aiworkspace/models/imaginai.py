@@ -37,6 +37,10 @@ class ImaginaiCampaign(Base):
     world_tick: Mapped[int] = mapped_column(Integer, default=0)
     next_event_sequence: Mapped[int] = mapped_column(Integer, default=1)
     settings: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # Combate em andamento (ordem de iniciativa, rodada, de quem é a vez) — ver
+    # imaginai/combat.py. None fora de combate. Fica separado de `settings` porque é
+    # ESTADO DO MUNDO, não configuração da mesa.
+    encounter: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 
 class ImaginaiEntity(Base):

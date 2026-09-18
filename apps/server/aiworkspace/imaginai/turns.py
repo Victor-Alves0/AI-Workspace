@@ -25,7 +25,7 @@ from ..models import (
     ImaginaiKnowledge,
 )
 from ..schemas.imaginai import ActionRequest
-from . import service
+from . import encounters, service
 
 _WORLD_TOOL = {
     "type": "function",
@@ -55,7 +55,8 @@ _WORLD_TOOL = {
                     "description": (
                         "Intenção normalizada. Mecânicas nativas: take_item, drop_item, "
                         "equip_item, unequip_item, use_item, pay_currency, interact, "
-                        "cast_spell, examine, move, travel, attack, rest e wait. Para "
+                        "cast_spell, examine, move, travel, attack, rest, wait e "
+                        "start_encounter (emboscada: inimigos atacam primeiro). Para "
                         "ações livres use um verbo descritivo curto, como persuade ou hide."
                     ),
                 },
@@ -131,6 +132,14 @@ Regras obrigatórias:
 9. Prefira os verbos mecânicos nativos quando correspondam à intenção. Ataques, dano, CA, recursos,
    inventário, moedas, descanso e passagem de tempo são calculados pelo servidor; nunca improvise
    seus valores. Continue usando a mesma ferramenta: não fragmente uma ação em tools artificiais.
+10. Combate é por turnos e os INIMIGOS AGEM NO SERVIDOR. O primeiro ataque do jogador abre o
+   combate; numa emboscada (inimigos atacam primeiro), use `resolve` com action_type
+   `start_encounter`. Toda ação do jogador que gasta o turno devolve `encounter.enemy_turns`:
+   narre CADA um exatamente como veio (acerto, erro, crítico, dano) e nunca invente golpes, dano
+   ou reações de inimigo fora dessa lista. `encounter.order` diz de quem é a vez. Vida de inimigo
+   se descreve pelo estado (`health`), nunca por número. `encounter.outcome`: `victory` (inimigos
+   caídos), `escaped` (o jogador saiu do alcance) ou `defeat` (o personagem caiu — narre-o
+   inconsciente, não morto, e não o faça agir). Não é possível descansar durante o combate.
 """
 
 
@@ -310,6 +319,9 @@ async def scene_context(db: AsyncSession, campaign: ImaginaiCampaign) -> dict[st
             }
             for fact, knowledge in known_rows
         ],
+        # combate em andamento: de quem é a vez e como cada um está. O narrador lê
+        # daqui a rodada e a ordem, em vez de adivinhar pela conversa.
+        "encounter": await encounters.summary(db, campaign, player),
         "recent_events": [
             {
                 "sequence": event.sequence,
