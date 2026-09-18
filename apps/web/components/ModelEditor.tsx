@@ -604,6 +604,8 @@ const CAPS: { key: string; label: string; native?: boolean }[] = [
   { key: "skill_learning", label: "Aprender Skills" },
   { key: "realtime_datetime", label: "Data e Hora em Tempo Real" },
   { key: "artifacts", label: "Artefatos" },
+  // marcadores [[som: ...]] na resposta — precisa da ElevenLabs ligada para tocar
+  { key: "sound_effects", label: "Efeitos Sonoros" },
 ];
 const CAPS_NATIVE = new Set(CAPS.filter((c) => c.native).map((c) => c.key));
 

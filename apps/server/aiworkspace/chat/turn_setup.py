@@ -407,14 +407,27 @@ async def _artifacts_kwargs(
     db: AsyncSession, chat_id: uuid.UUID, user: User, arts_on: bool,
     model_config: ModelConfig | None,
 ) -> dict:
-    """kwargs de artefatos p/ o run_turn: o bloco de instruções (extra_system) + o
-    rótulo "artifacts" no detalhamento de uso (painel Extenso)."""
-    if not arts_on:
+    """Blocos de sistema do chat p/ o run_turn (`extra_system`) + o rótulo de cada um
+    no detalhamento de uso (painel Extenso): Artefatos e Efeitos sonoros. Cada bloco só
+    entra quando a capacidade está ligada — economia de tokens por turno."""
+    blocks: list[str] = []
+    breakdown: dict[str, int] = {}
+    if arts_on:
+        txt = await _artifacts_extra(db, chat_id, user, model_config)
+        if txt:
+            blocks.append(txt)
+            breakdown["artifacts"] = len(txt)
+    if _has_capability(model_config, "sound_effects", default=False):
+        from .. import sound_effects
+
+        # sem ElevenLabs ligada o botão não tocaria: nem pede o marcador ao modelo
+        snd = await sound_effects.instruction_if_available(db, user.id)
+        if snd:
+            blocks.append(snd)
+            breakdown["sound_effects"] = len(snd)
+    if not blocks:
         return {}
-    txt = await _artifacts_extra(db, chat_id, user, model_config)
-    if not txt:
-        return {}
-    return {"extra_system": txt, "extra_breakdown": {"artifacts": len(txt)}}
+    return {"extra_system": "\n\n".join(blocks), "extra_breakdown": breakdown}
 
 
 # --------------------------------------------------------------------------- #

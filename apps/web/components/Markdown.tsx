@@ -1,12 +1,13 @@
 "use client";
 
 import { isValidElement, memo, useMemo, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { Check, Copy, File, ImageOff } from "lucide-react";
 import { API_URL, previewHref } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
+import SoundChip, { SFX_PROTOCOL, soundPromptFromHref, withSoundLinks } from "./SoundChip";
 
 interface ElProps {
   className?: string;
@@ -207,10 +208,13 @@ function MarkdownRenderer({ content, fast, plain = false }: { content: string; f
     // provisória é retirada para não vazar para a mensagem visualmente.
     return <pre className="my-3 overflow-x-auto whitespace-pre-wrap font-mono text-[13px] leading-6 text-ink-soft">{fast ? stabilizeStream(content) : content}</pre>;
   }
-  const shown = fast ? stabilizeStream(content) : content;
+  // efeitos sonoros: `[[som: ...]]` vira um link `sfx:` que o `a` abaixo troca pelo botão
+  const shown = withSoundLinks(fast ? stabilizeStream(content) : content, fast);
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
+      // o saneamento padrão apagaria o protocolo `sfx:` (e o botão perderia o som)
+      urlTransform={(url) => (url.startsWith(SFX_PROTOCOL) ? url : defaultUrlTransform(url))}
       // O autodetect percorre várias gramáticas por bloco e congelava respostas
       // grandes ao encerrar o stream. Blocos com linguagem declarada continuam
       // realçados; os sem linguagem ficam em texto monoespaçado previsível.
@@ -223,6 +227,8 @@ function MarkdownRenderer({ content, fast, plain = false }: { content: string; f
           </div>
         ),
         a: ({ children, href }) => {
+          const som = soundPromptFromHref(href);
+          if (som) return <SoundChip prompt={som} label={textOf(children) || som} />;
           const h = previewHref(href);
           return <a href={h} target="_blank" rel="noreferrer noopener">{children}</a>;
         },

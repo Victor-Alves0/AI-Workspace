@@ -910,9 +910,16 @@ function ChatSettings({ profile, set, onBack }: { profile: Record<string, any>; 
   const chatTools = iface.chat_tools !== false;          // chave inglesa + lista de tools
   const chatShare = iface.chat_share !== false;          // botão compartilhar (topo direito)
   const chatModelImg = iface.chat_model_image !== false; // avatar ao lado do nome na mensagem
+  const sfxAutoplay = iface.sfx_autoplay === true;       // padrão: som só no clique
   return (
     <DetailView title="Chat" onBack={onBack}>
       <div className="space-y-2.5">
+        <ToggleCard
+          label="Tocar efeitos sonoros automaticamente"
+          info="Os sons que a IA coloca na narração tocam sozinhos enquanto ela escreve. Desligado, eles viram botões para tocar"
+          on={sfxAutoplay}
+          onToggle={() => setIface("sfx_autoplay", !sfxAutoplay)}
+        />
         <ToggleCard
           label="Mostrar ferramentas do modelo"
           info="A chave inglesa com a lista de ferramentas equipadas, no topo do chat"

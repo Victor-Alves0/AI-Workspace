@@ -52,6 +52,7 @@ from .prompts_routes import router as prompts_router
 from .remote_routes import router as remote_router
 from .settings_routes import router as settings_router
 from .skills_routes import router as skills_router
+from .sound_effects_routes import router as sound_effects_router
 from .tools_routes import router as tools_router
 from .uploads_routes import router as uploads_router
 from .voice_routes import router as voice_router
@@ -471,6 +472,7 @@ def create_app() -> FastAPI:
     app.include_router(folders_router)
     app.include_router(tools_router)
     app.include_router(uploads_router)
+    app.include_router(sound_effects_router)
     app.include_router(models_router)
     app.include_router(prompts_router)
     app.include_router(skills_router)

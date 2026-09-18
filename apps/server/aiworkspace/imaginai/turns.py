@@ -513,8 +513,14 @@ async def prepare_turn_tools(
     context = await scene_context(db, campaign)
     context_json = json.dumps(context, ensure_ascii=False, default=str)
     bridge = ImaginaiTurnBridge(user_id=user_id, campaign_id=campaign.id, turn_key=turn_key)
+    # a narração de RPG é o caso de uso dos efeitos sonoros: no Imaginai eles valem
+    # sem precisar ligar a capacidade no modelo (desde que haja ElevenLabs para tocar)
+    from .. import sound_effects
+
+    sons = await sound_effects.instruction_if_available(db, user_id)
+    protocolo = f"{_TURN_PROTOCOL}\n\n{sons}" if sons else _TURN_PROTOCOL
     return NativeToolOpts(
         specs=[_WORLD_TOOL],
-        prompt=f"{_TURN_PROTOCOL}\n\n## Estado conhecido no início do turno\n```json\n{context_json}\n```",
+        prompt=f"{protocolo}\n\n## Estado conhecido no início do turno\n```json\n{context_json}\n```",
         run=bridge.run,
     )

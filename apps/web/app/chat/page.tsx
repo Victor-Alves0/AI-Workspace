@@ -36,6 +36,7 @@ import ImaginaiDocks from "@/components/imaginai/ImaginaiDocks";
 import { useImaginaiCampaign } from "@/components/imaginai/useImaginaiCampaign";
 import { useGeneration } from "./useGeneration";
 import { useDrawerSwipe } from "./useDrawerSwipe";
+import { SoundAutoplayContext } from "@/components/SoundChip";
 
 // Painéis usados apenas sob demanda não devem pesar no primeiro carregamento do
 // chat. O chat principal (mensagens/composer/model picker) continua imediato;
@@ -1225,6 +1226,8 @@ export default function ChatPage() {
   // toggle "Artefatos" (Configurações → Interface → Chat). Padrão: ligado.
   const iface = ((user?.profile as Record<string, any> | undefined)?.interface as Record<string, any> | undefined) ?? {};
   const artifactsEnabled = iface.artifacts !== false;
+  // efeitos sonoros tocam sozinhos na resposta que está sendo gerada (padrão: só no clique)
+  const sfxAutoplay = iface.sfx_autoplay === true;
   const showShareBtn = iface.chat_share !== false;   // botão compartilhar (topo direito)
 
   async function selectChat(id: string) {
@@ -2577,6 +2580,7 @@ export default function ChatPage() {
                   )}
                   {isRoundtable && rtRunning && !rtStreaming && <Thinking />}
                   {!isRoundtable && (streaming || streamingReasoning || generatingImage || consultingKnowledge || transcribingAudio || (sending && toolEvents.length > 0) ? (
+                    <SoundAutoplayContext.Provider value={sfxAutoplay}>
                     <MessageBubble
                       role="assistant"
                       content={streaming}
@@ -2589,6 +2593,7 @@ export default function ChatPage() {
                       status={statusFor({ sending, phase: streamPhase, streaming, streamingReasoning, generatingImage, consultingKnowledge, transcribingAudio, toolEvents })}
                       footer={generatingImage ? <GeneratingImage /> : consultingKnowledge ? <ConsultingKnowledge /> : transcribingAudio ? <TranscribingAudio /> : undefined}
                     />
+                    </SoundAutoplayContext.Provider>
                   ) : (
                     sending && <Thinking />
                   ))}
