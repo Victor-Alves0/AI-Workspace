@@ -43,6 +43,7 @@ _SCOPE_EVIDENCE = (
 _ALLOWLIST: dict[str, str] = {
     "image_routes.py::get_image": "URL-capacidade: autoriza por token assinado (verify_image_token)",
     "knowledge_routes.py::get_doc_raw": "URL-capacidade: autoriza por token assinado (verify_doc_token)",
+    "uploads_routes.py::serve_upload": "URL-capacidade: autoriza por token assinado (uploads_service.verify_token) — mesma decisão do doc da Base de Conhecimento, para o anexo carregar em <img>/<audio> sem cookie. Apagar e listar CONTINUAM exigindo o dono.",
     "share_routes.py::get_shared_chat": "link público é a funcionalidade (compartilhamento explícito)",
 }
 

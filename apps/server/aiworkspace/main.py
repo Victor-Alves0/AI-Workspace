@@ -53,6 +53,7 @@ from .remote_routes import router as remote_router
 from .settings_routes import router as settings_router
 from .skills_routes import router as skills_router
 from .tools_routes import router as tools_router
+from .uploads_routes import router as uploads_router
 from .voice_routes import router as voice_router
 from .whatsapp_routes import router as whatsapp_router
 
@@ -158,6 +159,14 @@ async def lifespan(app: FastAPI):
         preview_service.start_ready_poller()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível iniciar o reaper/poller de previews (%s)", exc)
+    # anexos do chat: a pasta precisa existir antes do primeiro envio, e o que foi
+    # enviado sem nunca virar mensagem é apagado (lixo de envio abandonado).
+    try:
+        from . import uploads_service
+        uploads_service.ensure_root()
+        bg.spawn(_purge_upload_orphans())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Não foi possível preparar a pasta de anexos (%s)", exc)
     # poller das gerações do Civitai: um workflow pode passar do watchdog da tool, então
     # o chat é ACORDADO quando ele termina (senão a IA promete a imagem e ela não vem).
     try:
@@ -239,6 +248,21 @@ async def _worktree_reaper() -> None:
             raise
         except Exception:  # noqa: BLE001
             logger.warning("reaper de worktrees do Codespace falhou", exc_info=True)
+
+
+async def _purge_upload_orphans() -> None:
+    """Faxina dos anexos abandonados, no boot e depois a cada 6h."""
+    import asyncio
+
+    from . import uploads_service
+    from .db import SessionLocal
+    while True:
+        try:
+            async with SessionLocal() as db:
+                await uploads_service.purge_orphans(db)
+        except Exception:  # noqa: BLE001 - faxina é best-effort
+            logger.warning("faxina de anexos órfãos falhou", exc_info=True)
+        await asyncio.sleep(6 * 3600)
 
 
 async def _prewarm_memory() -> None:
@@ -384,6 +408,23 @@ def create_app() -> FastAPI:
         if request.method == "OPTIONS" and request.url.path.startswith("/v1"):
             return JSONResponse(status_code=204, content=None, headers=_API_CORS)
 
+        # Teto do CORPO: um JSON gigante é lido inteiro na memória antes de qualquer
+        # validação — era assim que um anexo enorme derrubava o processo em vez de
+        # receber um "não". Arquivo grande tem rota própria (/uploads, streaming p/ o
+        # disco), então nenhum outro endpoint precisa aceitar dezenas de MB.
+        if not request.url.path.startswith("/uploads"):
+            declarado = request.headers.get("content-length")
+            if declarado and declarado.isdigit() and int(declarado) > settings.max_json_body_bytes:
+                metrics.record(request.method, request.url.path, 413, 0.0)
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": (
+                        f"Corpo da requisição acima de "
+                        f"{settings.max_json_body_bytes // (1024 * 1024)} MB. "
+                        "Envie arquivos como anexo (eles sobem por /uploads)."
+                    )},
+                )
+
         # cada requisição vira um TRACE raiz. /health e a própria API de leitura de
         # traces ficam de fora (ruído / recursão). O trace envolve o call_next
         # inteiro, então todo span aberto nas rotas/serviços aninha por baixo dele.
@@ -429,6 +470,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_router)
     app.include_router(folders_router)
     app.include_router(tools_router)
+    app.include_router(uploads_router)
     app.include_router(models_router)
     app.include_router(prompts_router)
     app.include_router(skills_router)

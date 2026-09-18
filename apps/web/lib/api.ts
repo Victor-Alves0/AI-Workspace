@@ -112,6 +112,36 @@ export async function refreshSession(): Promise<boolean> {
   return tryRefresh();
 }
 
+/** Envio de UM arquivo (multipart). Não passa pelo `request` porque o corpo não é
+ *  JSON e o navegador precisa definir o boundary sozinho. */
+export async function uploadFile(file: File, signal?: AbortSignal): Promise<UploadRef> {
+  const form = new FormData();
+  form.append("file", file);
+  const send = () => fetch(`${API_URL}/uploads`, {
+    method: "POST", body: form, credentials: "include", signal,
+  });
+  let res = await send();
+  if (res.status === 401 && await tryRefresh()) res = await send();
+  if (!res.ok) {
+    let detail = res.statusText;
+    try {
+      const body = await res.json();
+      if (typeof body?.detail === "string") detail = body.detail;
+    } catch { /* ignore */ }
+    throw new ApiError(res.status, detail);
+  }
+  return res.json() as Promise<UploadRef>;
+}
+
+export interface UploadRef {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  kind: "image" | "audio" | "file";
+  url: string;
+}
+
 export const api = {
   get: <T>(p: string) => request<T>(p),
   post: <T>(p: string, body?: unknown) =>

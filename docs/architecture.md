@@ -84,6 +84,15 @@ VPS without a rebuild. It's also a **PWA** with a responsive mobile layout.
 A Tauri (Rust) shell that loads the **same web interface** in a native window, adding a tray
 icon, "run in the background" and "start with Windows". See [desktop.md](desktop.md).
 
+### Attachments
+
+A file the user attaches is **not** stored in the message. It uploads through `/uploads`
+(multipart, written to disk in chunks under `uploads_dir`) and the message keeps a reference;
+the interface fetches it back through a signed URL. Documents are extracted to text once, at
+upload time, so a regenerated turn never reprocesses the file. This is what makes a 500 MB
+attachment possible at all: inline base64 put the whole file through the server's memory on
+every send.
+
 ### Database
 
 A single **Postgres 16 + pgvector** holds everything: relational data (users, chats, messages,

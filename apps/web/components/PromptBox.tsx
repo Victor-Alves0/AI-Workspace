@@ -15,6 +15,7 @@ import {
   Hash,
   History,
   LayoutGrid,
+  Loader2,
   Mic,
   MessagesSquare,
   Minimize2,
@@ -49,7 +50,7 @@ function flattenRefs(refs: KnowledgeRef[]): RefDoc[] {
   }
   return out;
 }
-import { fileToBase64, fileToImageDataUrl, fileToText } from "@/lib/image";
+import { API_URL, uploadFile } from "@/lib/api";
 import { MenuItem, finePointer, useClickOutside } from "./ui";
 import { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME } from "./CodespaceFileBrowser";
 import { toolCategoryIcon, toolCategoryTitle } from "./toolCategory";
@@ -59,7 +60,10 @@ const DOC_RE = /\.(pdf|docx|xlsx|xlsm|pptx|csv)$/i;
 // arquivos de texto lidos direto no cliente
 const TEXT_RE = /\.(txt|md|markdown|json|ya?ml|log|tsv|xml|html?|py|js|ts|tsx|jsx|css|sh)$/i;
 // teto generoso de anexos por mensagem (evita payloads absurdos, mas não atrapalha o uso)
-const MAX_ATTACHMENTS = 50;
+// 20 anexos por mensagem — o mesmo teto do Claude. O tamanho de cada arquivo é
+// decidido pelo servidor (500MB; imagem 20MB, áudio 25MB), que recusa com a mensagem
+// pronta: duplicar os números aqui só criaria duas verdades.
+const MAX_ATTACHMENTS = 20;
 
 // Indicador circular do uso de contexto: verde → âmbar → vermelho conforme enche.
 // Clicar abre um menu: Compactar (direto) ou Histórico (timeline + fixar).
@@ -488,33 +492,57 @@ export default function PromptBox({
   const canAudio = !!capabilities["filter:audio_router"];
   const canAttach = canVision || canFiles || canAudio;
 
+  /** Sobe o arquivo e devolve o anexo por REFERÊNCIA. O binário não entra no JSON do
+   *  envio — é isso que permite anexar um documento de centenas de MB. */
   async function addFiles(files: File[]) {
     setAttachErr(null);
     if (!files.length) return;
-    const next: Attachment[] = [...attachments];
+    const aceitos: { file: File; type: Attachment["type"] }[] = [];
+    let livres = MAX_ATTACHMENTS - attachments.length;
     for (const f of files) {
-      if (next.length >= MAX_ATTACHMENTS) { setAttachErr(`Máximo de ${MAX_ATTACHMENTS} anexos.`); break; }
-      try {
-        if (f.type.startsWith("image/")) {
-          if (!canVision) { setAttachErr("Este modelo não tem Visão nem Vision Router — habilite em Capacidades/Filtros."); continue; }
-          next.push({ type: "image", name: f.name || "imagem.png", url: await fileToImageDataUrl(f) });
-        } else if (f.type.startsWith("audio/")) {
-          if (!canAudio) { setAttachErr("Este modelo não tem Audio Router — habilite em Filtros p/ transcrever áudios."); continue; }
-          if (f.size > 15 * 1024 * 1024) { setAttachErr(`Áudio muito grande: ${f.name} (máx. 15MB).`); continue; }
-          next.push({ type: "audio", name: f.name || "audio", mime: f.type || undefined, url: `data:${f.type || "audio/mpeg"};base64,${await fileToBase64(f)}` });
-        } else if (canFiles && DOC_RE.test(f.name)) {
-          // doc binário → o servidor extrai o texto (config em Integrações › Extração de Texto)
-          next.push({ type: "file", name: f.name, mime: f.type || undefined, data: await fileToBase64(f) });
-        } else if (canFiles && (f.type.startsWith("text/") || TEXT_RE.test(f.name))) {
-          next.push({ type: "file", name: f.name, text: await fileToText(f) });
-        } else {
-          setAttachErr(canFiles ? `Tipo não suportado: ${f.name} (imagens, PDF/Word/Excel/PPT/CSV ou texto).` : "Este modelo não aceita arquivos — habilite “Upload de Arquivos” em Capacidades.");
-        }
-      } catch (err) {
-        setAttachErr(err instanceof Error ? err.message : "Falha ao ler o anexo");
+      if (livres <= 0) { setAttachErr(`Máximo de ${MAX_ATTACHMENTS} anexos por mensagem.`); break; }
+      if (f.type.startsWith("image/")) {
+        if (!canVision) { setAttachErr("Este modelo não tem Visão nem Vision Router — habilite em Capacidades/Filtros."); continue; }
+        aceitos.push({ file: f, type: "image" });
+      } else if (f.type.startsWith("audio/")) {
+        if (!canAudio) { setAttachErr("Este modelo não tem Audio Router — habilite em Filtros p/ transcrever áudios."); continue; }
+        aceitos.push({ file: f, type: "audio" });
+      } else if (canFiles && (DOC_RE.test(f.name) || f.type.startsWith("text/") || TEXT_RE.test(f.name))) {
+        aceitos.push({ file: f, type: "file" });
+      } else {
+        setAttachErr(canFiles ? `Tipo não suportado: ${f.name} (imagens, PDF/Word/Excel/PPT/CSV ou texto).` : "Este modelo não aceita arquivos — habilite “Upload de Arquivos” em Capacidades.");
+        continue;
       }
+      livres -= 1;
     }
-    onAttachmentsChange?.(next.slice(0, MAX_ATTACHMENTS));
+    if (!aceitos.length) return;
+
+    // placeholders: o anexo aparece na hora (com "enviando…") e é substituído pela
+    // referência quando o upload termina. Sem isso, arquivo grande = tela parada.
+    const marcas = aceitos.map(({ file, type }) => ({
+      marca: `up-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      file, type,
+    }));
+    let atuais: Attachment[] = [
+      ...attachments,
+      ...marcas.map(({ marca, file, type }) => ({
+        type, name: file.name || "arquivo", size: file.size, uploading: true, upload_id: marca,
+      } as Attachment)),
+    ];
+    onAttachmentsChange?.(atuais);
+
+    for (const { marca, file } of marcas) {
+      try {
+        const ref = await uploadFile(file);
+        atuais = atuais.map((a) => a.upload_id === marca
+          ? { type: ref.kind, name: ref.name, upload_id: ref.id, url: API_URL + ref.url, mime: ref.mime, size: ref.size }
+          : a);
+      } catch (err) {
+        atuais = atuais.filter((a) => a.upload_id !== marca);
+        setAttachErr(err instanceof Error ? err.message : `Falha ao enviar ${file.name}`);
+      }
+      onAttachmentsChange?.(atuais);
+    }
   }
   async function pickFiles(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -963,7 +991,13 @@ export default function PromptBox({
                  pode empurrar o textarea e os botões p/ fora da tela */
               <div className="flex max-h-[7.5rem] flex-wrap gap-1.5 overflow-y-auto pr-0.5">
                 {attachments.map((a, i) =>
-                  a.type === "image" ? (
+                  a.uploading ? (
+                    <span key={i} className="flex max-w-[200px] items-center gap-1.5 rounded-lg border border-border bg-surface2 px-2.5 py-1 text-xs text-muted">
+                      <Loader2 size={13} className="shrink-0 animate-spin text-accent-hover" />
+                      <span className="truncate">{a.name}</span>
+                      <span className="shrink-0 text-[10px]">enviando…</span>
+                    </span>
+                  ) : a.type === "image" ? (
                     <span key={i} className="group/att relative">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={a.url} alt={a.name} className="h-14 w-14 rounded-lg border border-border object-cover" />

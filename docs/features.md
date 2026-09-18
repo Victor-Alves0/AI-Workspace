@@ -158,6 +158,11 @@ Tools live under **Workspace → Tools** and are attachable per model.
 - **Customizable keyboard shortcuts**; first-run **onboarding**; a **Status** panel; opt-in
   **personal budget** (warn/pause).
 - **Composer**: paste/drag images, attach documents (`#`), skills (`$`), agents (`@`).
+- **Attachments**: up to **20 files per message** and **500 MB per file** (20 MB for an image,
+  25 MB for audio — those travel whole to the model). The file uploads on its own, straight to
+  disk, and the message keeps only a reference, so a big document never rides inside the
+  conversation. Documents are turned into text once, on upload. A per-user quota (25 GB) and a
+  sweep of abandoned uploads keep the disk honest.
 - **User security**: 2FA (TOTP), audit logs, ask for confirmation before sensitive actions
   (opt-in).
 </content>

@@ -681,6 +681,12 @@ function AudioCard({ url, prompt }: { url: string; prompt?: string }) {
 
 const ZOOM_SCALE = 2.5;
 
+/** URL de um anexo: as mensagens novas guardam o caminho do servidor (`/uploads/...`),
+ *  as antigas guardam o próprio arquivo embutido (`data:`). */
+function attachmentSrc(url: string): string {
+  return url.startsWith("http") || url.startsWith("data:") ? url : API_URL + url;
+}
+
 function ImageCard({ url, prompt }: { url: string; prompt?: string }) {
   const src = url.startsWith("http") ? url : `${API_URL}${url}`;
   const downloadSrc = `${src}${src.includes("?") ? "&" : "?"}download=true`;
@@ -1580,18 +1586,25 @@ export default function MessageItem({
                   {atts.map((a, i) =>
                     a.type === "image" && a.url ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <a key={i} href={a.url} target="_blank" rel="noreferrer" title={a.name}>
-                        <img src={a.url} alt={a.name} className="max-h-52 max-w-[85%] rounded-xl border border-border object-cover" />
+                      <a key={i} href={attachmentSrc(a.url)} target="_blank" rel="noreferrer" title={a.name}>
+                        <img src={attachmentSrc(a.url)} alt={a.name} className="max-h-52 max-w-[85%] rounded-xl border border-border object-cover" />
                       </a>
                     ) : a.type === "audio" && a.url ? (
                       // nota de voz/áudio anexado → player nativo compacto
                       // eslint-disable-next-line jsx-a11y/media-has-caption
-                      <audio key={i} src={a.url} controls preload="none" className="h-9 max-w-[240px]" />
+                      <audio key={i} src={attachmentSrc(a.url)} controls preload="none" className="h-9 max-w-[240px]" />
                     ) : (
-                      <span key={i} className="flex items-center gap-1.5 rounded-lg border border-border bg-surface2 px-2.5 py-1 text-xs text-ink-soft">
+                      <a
+                        key={i}
+                        href={a.url ? attachmentSrc(a.url) : undefined}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={a.name}
+                        className="flex items-center gap-1.5 rounded-lg border border-border bg-surface2 px-2.5 py-1 text-xs text-ink-soft transition-colors hover:border-accent/40 hover:text-ink"
+                      >
                         <FileText size={13} className="shrink-0 text-muted" />
                         <span className="max-w-[220px] truncate">{a.name || "arquivo"}</span>
-                      </span>
+                      </a>
                     ),
                   )}
                 </div>

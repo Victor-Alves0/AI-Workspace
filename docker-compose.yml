@@ -95,6 +95,9 @@ services:
       # Codespace: working copies dos projetos + índices do GraphCodeMap
       # (.codegraph/graph.db por projeto) — precisa sobreviver a rebuilds
       - codespace_data:/data/codespace
+      # Anexos do chat: o arquivo fica no disco e a mensagem guarda só a referência
+      # (models/upload.py). Sem este volume, todo anexo some a cada recriação.
+      - uploads_data:/data/uploads
       # Cookies do yt-dlp (anti-bloqueio da transcrição). Descomente e ajuste o
       # caminho do host; depois no .env: TRANSCRIBE_COOKIES_DIR=/data/yt-cookies
       # - ./secrets/yt-cookies:/data/yt-cookies:ro
@@ -214,3 +217,4 @@ volumes:
   mlcache:
   evolution_instances:
   codespace_data:
+  uploads_data:

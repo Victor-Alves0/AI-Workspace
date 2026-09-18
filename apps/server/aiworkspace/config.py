@@ -161,6 +161,28 @@ class Settings(BaseSettings):
     # Hardcodar "/data/codespace" quebrava o Codespace fora do Linux/Docker.
     codespace_data_dir: str = "/data/codespace"
 
+    # Anexos do chat: o arquivo sobe direto para o disco e a mensagem guarda só a
+    # referência (ver models/upload.py). Os tetos seguem os apps de referência —
+    # Claude aceita 500MB por arquivo e 20 por conversa; o ChatGPT limita imagem a
+    # 20MB. Imagem e áudio têm teto PRÓPRIO, menor, porque precisam caber inteiros
+    # na requisição ao provedor (a imagem vai embutida; o áudio vai ao STT).
+    uploads_dir: str = "/data/uploads"
+    upload_max_bytes: int = 500 * 1024 * 1024
+    upload_max_per_message: int = 20
+    upload_image_max_bytes: int = 20 * 1024 * 1024
+    upload_audio_max_bytes: int = 25 * 1024 * 1024
+    # teto por usuário: sem isto o disco do servidor é o único limite
+    upload_quota_bytes: int = 25 * 1024 * 1024 * 1024
+    # arquivo enviado e nunca usado numa mensagem (o usuário desistiu): vira lixo
+    upload_orphan_ttl_hours: int = 24
+    # teto do texto extraído de UM documento. O ChatGPT corta em ~2M tokens por
+    # arquivo; aqui o corte é em chars e o que segura de verdade é a janela do modelo.
+    upload_text_max_chars: int = 2_000_000
+    # teto do CORPO de uma requisição JSON. O upload tem rota própria (streaming),
+    # então nenhum outro endpoint precisa receber dezenas de MB — e sem teto um POST
+    # gigante era lido inteiro na memória até derrubar o processo.
+    max_json_body_bytes: int = 32 * 1024 * 1024
+
     # Sandbox de execução do Codespace (tool "code.exec.run"): roda testes/build do
     # projeto. Baseline UNIVERSAL = subprocesso no host (funciona em Win/Linux/desktop,
     # sem Docker). `code_runner_url` (opt-in) encaminha para um container `runner`

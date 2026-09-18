@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import budget_service
 from ..auth.deps import require_approved
+from .. import uploads_service
 from ..config import get_settings
 from ..db import SessionLocal, get_db
 from ..models import Chat, Message, User
@@ -259,13 +260,15 @@ async def send_message(
         else:
             agent_override = None
 
-    # persiste a mensagem do usuário (extraindo texto de docs; sem guardar o binário)
+    # persiste a mensagem do usuário. O que vai ao MODELO traz a imagem embutida; o que
+    # fica GRAVADO traz só a referência do arquivo (ver uploads_service.persistable).
     attachments = await _prepare_attachments([a.model_dump() for a in body.attachments], model_config)
+    await uploads_service.bind(db, user.id, chat.id, attachments)
     user_msg = Message(
         chat_id=chat.id,
         role="user",
         content=body.content,
-        attachments=attachments or None,
+        attachments=uploads_service.persistable(attachments) or None,
         mini_app=body.mini_app,
     )
     db.add(user_msg)

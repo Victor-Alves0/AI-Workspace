@@ -341,10 +341,15 @@ export interface ToolEvent {
 export interface Attachment {
   type: "image" | "file" | "audio";
   name: string;
-  url?: string; // imagem/áudio: data URL
+  /** referência do arquivo no servidor (caminho novo — o binário não viaja no JSON) */
+  upload_id?: string;
+  url?: string; // imagem/áudio: URL do arquivo (ou data URL, nas mensagens antigas)
   text?: string; // arquivo: conteúdo textual (já extraído/lido)
-  data?: string; // doc binário (base64) p/ extração server-side
+  data?: string; // legado: doc binário (base64) p/ extração server-side
   mime?: string;
+  size?: number;
+  /** só no compositor, enquanto o arquivo sobe */
+  uploading?: boolean;
 }
 
 // cotação de ação (tool finance.quote.get + rota /finance/quote) → StockCard

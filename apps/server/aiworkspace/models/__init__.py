@@ -32,6 +32,7 @@ from .investigation import InvestigationGraph, InvestigationNode, InvestigationE
 from .health_event import HealthEvent
 from .exec_job import ExecJob
 from .media_job import MediaJob
+from .upload import Upload
 from .task_ledger import TaskLedger
 from .api_key import ApiKey, ApiRequest
 from .trace import ObsTrace, ObsSpan
@@ -97,6 +98,7 @@ __all__ = [
     "HealthEvent",
     "ExecJob",
     "MediaJob",
+    "Upload",
     "TaskLedger",
     "ApiKey",
     "ApiRequest",

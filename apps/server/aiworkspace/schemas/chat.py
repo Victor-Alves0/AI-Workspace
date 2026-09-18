@@ -111,6 +111,9 @@ class ChatDetail(ChatOut):
 class Attachment(BaseModel):
     type: str = Field(pattern=r"^(image|file|audio)$")
     name: str = Field(default="", max_length=255)
+    # CAMINHO NOVO: o arquivo já subiu por /uploads e a mensagem guarda só a referência.
+    # É o que permite um anexo de centenas de MB — o binário nunca entra neste JSON.
+    upload_id: uuid.UUID | None = None
     # data URL (imagem/áudio) — áudio (voz) fica maior que imagem redimensionada
     url: str | None = Field(default=None, max_length=25_000_000)
     text: str | None = Field(default=None, max_length=200_000)  # conteúdo (arquivo texto)
@@ -124,8 +127,9 @@ class SendMessageIn(BaseModel):
     content: str = Field(default="", max_length=100_000)
     # skills invocadas ad-hoc via "$" no promptbox (além das equipadas no modelo)
     skill_ids: list[uuid.UUID] = Field(default_factory=list)
-    # anexos (imagens/arquivos) — máx. 50 (bate com MAX_ATTACHMENTS no PromptBox),
-    # processados conforme as capacidades do modelo
+    # anexos (imagens/arquivos) — o teto de QUANTIDADE por mensagem é `upload_max_per_message`
+    # (config); este max_length é o limite duro do schema. Processados conforme as
+    # capacidades do modelo.
     attachments: list[Attachment] = Field(default_factory=list, max_length=50)
     # "@" no promptbox: roteia SÓ ESTE turno a outro agente (ModelConfig), sem mudar
     # o modelo padrão do chat. None = usa o modelo do chat.

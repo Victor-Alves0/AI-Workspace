@@ -1082,9 +1082,11 @@ def _make_subagent_runner(
 
 
 # teto de tamanho total dos anexos por turno (defesa; o schema já limita por item)
+# Teto do que vai EMBUTIDO na requisição ao provedor (imagens em base64) — não é o
+# teto do arquivo: um documento de 500MB vira texto e nunca passa por aqui.
 _MAX_ATTACH_TOTAL = 20 * 1024 * 1024
 # teto de QUANTIDADE de anexos por turno — bate com o schema SendMessageIn (max_length)
-# e com MAX_ATTACHMENTS no PromptBox (front). O _MAX_ATTACH_TOTAL ainda limita o total.
+# e com `upload_max_per_message` (config/front).
 _MAX_ATTACH_COUNT = 50
 
 
@@ -1100,6 +1102,13 @@ def _clean_attachments(raw: Any) -> list[dict]:
         if not isinstance(a, dict):
             continue
         t = a.get("type")
+        if a.get("upload_id"):          # referência: o binário está no disco
+            out.append({
+                "type": t if t in ("image", "audio", "file") else "file",
+                "name": str(a.get("name") or "")[:255],
+                "upload_id": str(a["upload_id"]),
+            })
+            continue
         if t in ("image", "audio") and isinstance(a.get("url"), str) and a["url"].startswith("data:"):
             total += len(a["url"])
             if total > _MAX_ATTACH_TOTAL:
@@ -1114,11 +1123,62 @@ def _clean_attachments(raw: Any) -> list[dict]:
     return out
 
 
+async def _resolve_upload(a: dict, ex_cfg: dict) -> dict | None:
+    """Anexo por REFERÊNCIA: lê o arquivo do disco só no que o modelo precisa.
+
+    Imagem/áudio viajam inteiros na requisição ao provedor, então respeitam o teto
+    DELES (uma imagem de 300MB não existe para o modelo). Documento já chegou aqui
+    com o texto extraído no upload — o binário nunca entra no contexto."""
+    import uuid as _uuid
+
+    from .. import uploads_service
+    from ..db import SessionLocal
+    from ..extraction import extract, is_extractable
+    from ..models import Upload
+
+    try:
+        upload_id = _uuid.UUID(str(a.get("upload_id")))
+    except (ValueError, TypeError):
+        return None
+    async with SessionLocal() as db:
+        row = await db.get(Upload, upload_id)
+        if row is None:
+            return {"type": "file", "name": str(a.get("name") or "")[:255],
+                    "text": "[anexo não está mais disponível no servidor]"}
+        name = row.filename or str(a.get("name") or "")
+        if row.kind in ("image", "audio"):
+            limite = uploads_service.max_bytes_for(row.kind)
+            data = await run_in_threadpool(uploads_service.read_bytes, row, limite)
+            if data is None:
+                return {"type": "file", "name": name,
+                        "text": f"[{name}: grande demais para ser enviado ao modelo]"}
+            mime = row.mime or ("image/png" if row.kind == "image" else "audio/mpeg")
+            return {
+                "type": row.kind, "name": name, "upload_id": str(row.id),
+                "url": f"data:{mime};base64,{base64.b64encode(data).decode()}",
+            }
+        text = row.text
+        if not text and is_extractable(name, row.mime):
+            # o upload pode ter sido feito antes de a extração existir/funcionar
+            data = await run_in_threadpool(uploads_service.read_bytes, row)
+            if data is not None:
+                try:
+                    text = await run_in_threadpool(extract, name, row.mime, data, ex_cfg)
+                except extraction.ExtractionError as exc:
+                    text = f"[não foi possível extrair '{name}': {exc}]"
+        return {
+            "type": "file", "name": name, "upload_id": str(row.id),
+            "text": (text or f"[{name}: anexo sem texto extraível]")[:200_000],
+        }
+
+
 async def _prepare_attachments(raw: Any, model_config: ModelConfig | None) -> list[dict]:
-    """Prepara anexos p/ o turno: mantém imagens, texto direto, e EXTRAI o texto de
-    docs binários (PDF/DOCX/XLSX/PPTX) via a integração de extração — descartando o
-    base64 depois (não guarda o binário: economia de tokens e de armazenamento).
-    A config de extração é POR-MODELO (filter_config.tools.text_extraction)."""
+    """Prepara anexos p/ o turno.
+
+    Dois formatos convivem: o NOVO (`upload_id` — o arquivo está no disco e a mensagem
+    guarda só a referência) e o antigo (base64 embutido), que segue valendo para as
+    mensagens já gravadas e para a API pública. A config de extração é POR-MODELO
+    (filter_config.tools.text_extraction)."""
     if not isinstance(raw, list):
         return []
     ex_cfg = tool_config(model_config).get("text_extraction") or {}
@@ -1126,6 +1186,15 @@ async def _prepare_attachments(raw: Any, model_config: ModelConfig | None) -> li
     total = 0
     for a in raw[:_MAX_ATTACH_COUNT]:
         if not isinstance(a, dict):
+            continue
+        if a.get("upload_id"):
+            resolved = await _resolve_upload(a, ex_cfg)
+            if resolved is None:
+                continue
+            total += len(resolved.get("url") or resolved.get("text") or "")
+            if total > _MAX_ATTACH_TOTAL and resolved["type"] != "file":
+                break
+            out.append(resolved)
             continue
         t = a.get("type")
         if t in ("image", "audio") and isinstance(a.get("url"), str) and a["url"].startswith("data:"):
