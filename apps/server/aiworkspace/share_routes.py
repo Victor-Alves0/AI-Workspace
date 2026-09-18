@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -16,9 +17,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth.security import verify_password
 from .db import get_db
+from .knowledge.links import sign_shared_doc_url
 from .models import Chat
+from .providers.image_gen import sign_shared_image_url
+from .uploads_service import sign_shared_url
 
 router = APIRouter(tags=["share"])
+
+# Links emitidos pelo app são relativos; o front também pode tê-los persistido com
+# a origem da API. Ambos recebem um token NOVO, vinculado ao public_id atual.
+_IMAGE_URL = re.compile(r"(?:https?://[^\s)]+)?/images/([0-9a-fA-F-]{36})(?:\?[^\s)]*)?")
+_UPLOAD_URL = re.compile(r"(?:https?://[^\s)]+)?/uploads/([0-9a-fA-F-]{36})(?:\?[^\s)]*)?")
+_DOC_URL = re.compile(
+    r"(?:https?://[^\s)]+)?/knowledge/docs/([0-9a-fA-F-]{36})/raw(?:\?[^\s)]*)?"
+)
+
+
+def _shared_media_urls(content: str, public_id: str) -> str:
+    """Troca credenciais privadas por links revogáveis do compartilhamento."""
+    content = _IMAGE_URL.sub(lambda m: sign_shared_image_url(m.group(1), public_id), content)
+    content = _UPLOAD_URL.sub(lambda m: sign_shared_url(m.group(1), public_id), content)
+    return _DOC_URL.sub(lambda m: sign_shared_doc_url(m.group(1), public_id), content)
 
 
 class SharedMessage(BaseModel):
@@ -51,7 +70,11 @@ async def get_shared_chat(public_id: str, pw: str = "", db: AsyncSession = Depen
             )
     await db.refresh(chat, attribute_names=["messages"])
     msgs = [
-        SharedMessage(role=m.role, content=m.content, created_at=m.created_at)
+        SharedMessage(
+            role=m.role,
+            content=_shared_media_urls(m.content or "", chat.public_id or ""),
+            created_at=m.created_at,
+        )
         for m in chat.messages
         if m.role in ("user", "assistant") and (m.content or "").strip() and not m.compacted
     ]

@@ -16,10 +16,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import uploads_service as svc
-from .auth.deps import require_approved
+from .auth.deps import optional_approved_user, require_approved
 from .db import get_db
 from .extraction import is_extractable
 from .models import Upload, User
+from .shared_media import shared_chat_allows
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])
 
@@ -90,15 +91,23 @@ async def _extract_into(db: AsyncSession, row: Upload) -> None:
 
 @router.get("/{upload_id}")
 async def serve_upload(
-    upload_id: uuid.UUID, request: Request, t: str = "", download: bool = False,
+    upload_id: uuid.UUID, request: Request, t: str = "", s: str = "", download: bool = False,
+    user: User | None = Depends(optional_approved_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Serve o arquivo por URL assinada. `FileResponse` cuida de Range/streaming, então
-    um vídeo grande não passa pela memória do processo."""
-    if not svc.verify_token(str(upload_id), t):
+    """Serve anexo do dono ou de um compartilhamento ainda válido."""
+    private_token = svc.verify_token(str(upload_id), t)
+    shared_public_id = svc.verify_shared_token(str(upload_id), s)
+    if not private_token and not shared_public_id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Token inválido")
     row = await db.get(Upload, upload_id)
     if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Arquivo não encontrado")
+    owner_access = bool(private_token and user is not None and row.user_id == user.id)
+    share_access = await shared_chat_allows(
+        db, chat_id=row.chat_id, owner_id=row.user_id, public_id=shared_public_id
+    )
+    if not owner_access and not share_access:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Arquivo não encontrado")
     path = svc.file_path(row)
     if not path.exists():

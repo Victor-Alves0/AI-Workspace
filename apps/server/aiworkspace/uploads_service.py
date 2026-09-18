@@ -82,6 +82,26 @@ def verify_token(upload_id: str, token: str) -> bool:
     return data.get("upl") == upload_id
 
 
+def sign_shared_url(upload_id: str, public_id: str, ttl_days: int = 3650) -> str:
+    """URL de anexo válida apenas para o link público atual do chat."""
+    now = int(time.time())
+    token = jwt.encode(
+        {"upl": upload_id, "share": public_id, "iat": now, "exp": now + ttl_days * 86400},
+        get_settings().app_secret,
+        algorithm="HS256",
+    )
+    return f"/uploads/{upload_id}?s={token}"
+
+
+def verify_shared_token(upload_id: str, token: str) -> str | None:
+    try:
+        data = jwt.decode(token, get_settings().app_secret, algorithms=["HS256"])
+    except jwt.PyJWTError:
+        return None
+    share = data.get("share")
+    return str(share) if data.get("upl") == upload_id and isinstance(share, str) and share else None
+
+
 def out(row: Upload) -> dict[str, Any]:
     """Contrato devolvido ao compositor e guardado no anexo da mensagem."""
     return {
@@ -271,4 +291,3 @@ def ensure_root() -> None:
         root().mkdir(parents=True, exist_ok=True)
     except OSError as exc:  # noqa: BLE001
         logger.warning("não foi possível criar %s (%s)", root(), exc)
-

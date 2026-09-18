@@ -37,13 +37,7 @@ _SCOPE_EVIDENCE = (
 
 # Exceções LEGÍTIMAS: "arquivo::handler" -> motivo. Toda entrada aqui é uma promessa de
 # que o recurso não é por-usuário. Manter curta — se crescer, a regra virou decoração.
-# As duas primeiras são URL-capacidade: a autorização é o TOKEN ASSINADO no query, não a
-# sessão (é o que faz o link funcionar em <img>/<video> sem cookie cross-origin). Quem
-# tiver o link vê o recurso — decisão consciente, igual a "qualquer um com o link".
 _ALLOWLIST: dict[str, str] = {
-    "image_routes.py::get_image": "URL-capacidade: autoriza por token assinado (verify_image_token)",
-    "knowledge_routes.py::get_doc_raw": "URL-capacidade: autoriza por token assinado (verify_doc_token)",
-    "uploads_routes.py::serve_upload": "URL-capacidade: autoriza por token assinado (uploads_service.verify_token) — mesma decisão do doc da Base de Conhecimento, para o anexo carregar em <img>/<audio> sem cookie. Apagar e listar CONTINUAM exigindo o dono.",
     "share_routes.py::get_shared_chat": "link público é a funcionalidade (compartilhamento explícito)",
 }
 

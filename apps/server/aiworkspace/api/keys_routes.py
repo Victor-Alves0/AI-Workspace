@@ -116,9 +116,9 @@ def _clean_webhook(raw: dict[str, Any] | None) -> dict[str, Any]:
     url = str(raw.get("url") or "").strip()
     if not url:
         return {}
-    if not url.startswith(("http://", "https://")):
+    if not webhooks.is_public_webhook_url(url):
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "URL do webhook precisa começar com http:// ou https://")
+                            "URL do webhook deve apontar para um host público HTTP(S)")
     events = [e for e in (raw.get("events") or []) if e in webhooks.EVENTS]
     return {"url": url[:500], "secret": str(raw.get("secret") or "")[:200],
             "events": events}

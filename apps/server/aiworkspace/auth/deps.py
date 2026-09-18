@@ -43,6 +43,28 @@ async def current_user(
     return user
 
 
+async def optional_current_user(
+    aw_access: str | None = Cookie(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """Versão não-explosiva de ``current_user`` para mídia com acesso público opcional.
+
+    Uma URL privada não ganha acesso só por ter sido assinada: ela ainda precisa da
+    sessão do dono. Já uma URL emitida por um chat compartilhado usa um token de
+    compartilhamento separado, validado pela própria rota de mídia.
+    """
+    if not aw_access:
+        return None
+    try:
+        user_id, token_version = decode_token(aw_access, "access")
+        user = await db.get(User, uuid.UUID(user_id))
+    except (jwt.PyJWTError, ValueError):
+        return None
+    if user is None or not user.is_active or token_version != user.token_version:
+        return None
+    return user
+
+
 async def require_approved(user: User = Depends(current_user)) -> User:
     """Bloqueia usuários ainda não aprovados pelo admin."""
     if user.status != "active":
@@ -50,6 +72,11 @@ async def require_approved(user: User = Depends(current_user)) -> User:
             status.HTTP_403_FORBIDDEN, "Conta pendente de aprovação pelo admin"
         )
     return user
+
+
+async def optional_approved_user(user: User | None = Depends(optional_current_user)) -> User | None:
+    """Usuário ativo quando há sessão; ``None`` para visitante/anônimo."""
+    return user if user is not None and user.status == "active" else None
 
 
 async def require_admin(user: User = Depends(require_approved)) -> User:

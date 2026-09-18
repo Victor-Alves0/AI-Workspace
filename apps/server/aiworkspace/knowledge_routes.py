@@ -16,10 +16,10 @@ from pydantic import BaseModel
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .auth.deps import require_approved
+from .auth.deps import optional_approved_user, require_approved
 from .db import get_db
 from .knowledge import enrich, ingest
-from .knowledge.links import sign_doc_url, verify_doc_token
+from .knowledge.links import sign_doc_url, verify_doc_token, verify_shared_doc_token
 from .models import (
     Chat,
     KnowledgeBase,
@@ -30,6 +30,7 @@ from .models import (
     ModelConfig,
     User,
 )
+from .shared_media import public_chat_allows_owner
 
 logger = logging.getLogger(__name__)
 # refs dos jobs de enriquecimento em background (o create_task só guarda ref fraca)
@@ -610,15 +611,22 @@ def _content_disposition(filename: str) -> str:
 
 @router.get("/docs/{doc_id}/raw")
 async def get_doc_raw(
-    doc_id: uuid.UUID, request: Request, t: str = "", db: AsyncSession = Depends(get_db)
+    doc_id: uuid.UUID, request: Request, t: str = "", s: str = "",
+    user: User | None = Depends(optional_approved_user), db: AsyncSession = Depends(get_db),
 ):
-    """Baixa o arquivo original de uma fonte citada. Autoriza pelo token assinado
-    `t` (URL-capacidade), então funciona num link direto sem cookie. Honra o header
-    `Range` (206) para que <video>/<audio> possam buscar (seek) no player."""
-    if not verify_doc_token(str(doc_id), t):
+    """Baixa documento do dono ou publicado por um compartilhamento ainda ativo."""
+    private_token = verify_doc_token(str(doc_id), t)
+    shared_public_id = verify_shared_doc_token(str(doc_id), s)
+    if not private_token and not shared_public_id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Token inválido")
     d = await db.get(KnowledgeDoc, doc_id)
     if d is None or not d.data:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Documento não encontrado")
+    owner_access = bool(private_token and user is not None and d.user_id == user.id)
+    share_access = await public_chat_allows_owner(
+        db, owner_id=d.user_id, public_id=shared_public_id
+    )
+    if not owner_access and not share_access:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Documento não encontrado")
     blob = bytes(d.data)
     mime = d.mime or "application/octet-stream"
