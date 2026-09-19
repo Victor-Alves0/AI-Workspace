@@ -147,8 +147,6 @@ async def _run(
 ) -> dict[str, Any]:
     """Resolve os turnos das criaturas (hostis e aliados) e grava: HP e condições de
     todo mundo que mudou, um evento por turno e o estado do encontro."""
-    from .service import _apply_mutation   # tardio: service importa este módulo
-
     pid = str(player.id)
     fighters: dict[str, combat.Fighter] = {}
     for eid, entity in entities.items():
@@ -157,17 +155,7 @@ async def _run(
             fighters[eid] = lutador
 
     report = combat.run_enemy_turns(encounter, fighters, pid, combat.secure_roller)
-
-    for eid, depois in report.fighters.items():
-        antes = fighters.get(eid)
-        entity = entities.get(eid)
-        if antes is None or entity is None:
-            continue
-        if depois.hp != antes.hp:
-            _apply_mutation({"op": "adjust_hp", "entity_id": eid, "amount": depois.hp - antes.hp},
-                            {eid: entity})
-        if depois.conditions != antes.conditions:
-            write_conditions(entity, depois.conditions)
+    _persist(fighters, report.fighters, entities)
     for turno in report.enemy_turns:
         tipo = ("turn_skipped" if turno.get("kind") == "skipped"
                 else "ally_attack" if turno.get("attacker_side") == "ally" else "enemy_attack")
@@ -186,6 +174,49 @@ async def _run(
         **(combat.public_view(report.encounter, report.fighters, pid) or {}),
         "enemy_turns": report.enemy_turns,
     }
+
+
+def _persist(antes_todos: dict[str, combat.Fighter], depois_todos: dict[str, combat.Fighter],
+             entities: dict[str, ImaginaiEntity]) -> None:
+    """Grava HP e condições de quem mudou."""
+    from .service import _apply_mutation   # tardio: service importa este módulo
+
+    for eid, depois in depois_todos.items():
+        antes = antes_todos.get(eid)
+        entity = entities.get(eid)
+        if antes is None or entity is None:
+            continue
+        if depois.hp != antes.hp:
+            _apply_mutation({"op": "adjust_hp", "entity_id": eid, "amount": depois.hp - antes.hp},
+                            {eid: entity})
+        if depois.conditions != antes.conditions:
+            write_conditions(entity, depois.conditions)
+
+
+async def opportunity(
+    db: AsyncSession, campaign: ImaginaiCampaign, user_id: uuid.UUID, player: ImaginaiEntity,
+) -> dict[str, Any] | None:
+    """O jogador vai sair do lugar no meio do combate: os hostis dali têm a reação."""
+    if not active(campaign):
+        return None
+    ids = [entry.get("id") for entry in campaign.encounter.get("order") or []]
+    entities = await _entities_by_id(db, campaign, ids)
+    pid = str(player.id)
+    entities[pid] = player
+    fighters = {
+        eid: f for eid, e in entities.items() if (f := _fighter(e, side_of(e, pid))) is not None
+    }
+    if pid not in fighters:
+        return None
+    local = str(player.location_id) if player.location_id else None
+    turns, pool = combat.opportunity_attacks(fighters, pid, local, combat.secure_roller)
+    if not turns:
+        return None
+    _persist(fighters, pool, entities)
+    for turno in turns:
+        db.add(_event(campaign, user_id, "opportunity_attack", uuid.UUID(turno["attacker_id"]),
+                      player.id, player.location_id, turno))
+    return {"opportunity_attacks": turns, "player_down": pool[pid].down}
 
 
 async def start(

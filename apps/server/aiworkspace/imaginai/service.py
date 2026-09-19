@@ -8,6 +8,7 @@ import math
 import re
 import secrets
 import uuid
+from dataclasses import replace
 from typing import Any
 
 from sqlalchemy import select
@@ -923,6 +924,41 @@ def _map_coordinate(value: Any) -> float | None:
     return max(0.0, min(100.0, number)) if math.isfinite(number) else None
 
 
+async def save_map_positions(
+    db: AsyncSession, campaign: ImaginaiCampaign, positions: dict[str, Any],
+) -> dict[str, Any]:
+    """Grava onde o jogador arrumou os locais no mapa (0–100 em x/y). `None` apaga a
+    posição (o local volta ao layout automático). Só locais desta campanha."""
+    ids = []
+    for raw in list(positions)[:200]:
+        try:
+            ids.append(uuid.UUID(str(raw)))
+        except ValueError:
+            continue
+    rows = await db.scalars(
+        select(ImaginaiEntity).where(
+            ImaginaiEntity.campaign_id == campaign.id,
+            ImaginaiEntity.kind == "location",
+            ImaginaiEntity.id.in_(ids),
+        ).with_for_update()
+    )
+    for location in rows:
+        pos = positions.get(str(location.id))
+        state = copy.deepcopy(location.state or {})
+        mapa = state.get("map") if isinstance(state.get("map"), dict) else {}
+        if isinstance(pos, dict):
+            x, y = _map_coordinate(pos.get("x")), _map_coordinate(pos.get("y"))
+            if x is None or y is None:
+                continue
+            mapa = {**mapa, "x": round(x, 2), "y": round(y, 2)}
+        else:
+            mapa = {k: v for k, v in mapa.items() if k not in {"x", "y"}}
+        state["map"] = mapa
+        location.state = state
+    await db.commit()
+    return await map_snapshot(db, campaign)
+
+
 async def map_snapshot(db: AsyncSession, campaign: ImaginaiCampaign) -> dict[str, Any]:
     """Mapa do jogador: nunca retorna local/rota antes de serem descobertos."""
     player = await db.scalar(
@@ -1111,13 +1147,39 @@ async def evaluate_action(
         except WorldNotFoundError:
             # Não revela se o UUID pertence a outro mundo/usuário.
             target = None
+    target_snapshot = _snapshot(target) if target else None
+    if target_snapshot is not None and target.kind == "location" and actor.location_id:
+        # caminho do MAPA conta como rota conhecida: sem isto a viagem por uma ligação
+        # que aparece no mapa caía em "a rota depende da ficção" (a regra só lia
+        # accessible_from). Vale para campanhas antigas (ligações gravadas por nome).
+        origem = await db.get(ImaginaiEntity, actor.location_id)
+        if origem is not None and origem.campaign_id == campaign.id and _map_linked(origem, target):
+            state = copy.deepcopy(target_snapshot.state)
+            acessos = list(state.get("accessible_from") or [])
+            if str(origem.id) not in acessos:
+                acessos.append(str(origem.id))
+            state["accessible_from"] = acessos
+            target_snapshot = replace(target_snapshot, state=state)
     intent = ActionIntent(
         action_type=body.action_type,
         actor=_snapshot(actor),
-        target=_snapshot(target) if target else None,
+        target=target_snapshot,
         parameters=body.parameters,
     )
     return ruleset_for(campaign.system_key).validate(intent), actor, target
+
+
+def _map_linked(a: ImaginaiEntity, b: ImaginaiEntity) -> bool:
+    """Há um caminho no mapa entre os dois locais (por nome, id ou chave)?"""
+    def refs(entity: ImaginaiEntity) -> set[str]:
+        state = entity.state if isinstance(entity.state, dict) else {}
+        mapa = state.get("map") if isinstance(state.get("map"), dict) else {}
+        return {str(c).casefold() for c in (mapa.get("connections") or []) if c}
+
+    def names(entity: ImaginaiEntity) -> set[str]:
+        return {entity.name.casefold(), str(entity.id).casefold(), entity.key.casefold()}
+
+    return bool(refs(a) & names(b) or refs(b) & names(a))
 
 
 def _set_dnd_state(entity: ImaginaiEntity, dnd_state: dict[str, Any]) -> None:
@@ -1397,6 +1459,23 @@ async def resolve_action(
 
     event = None
     combate = None
+    oportunidade = None
+    if (
+        decision.status == "allowed" and encounters.is_player(actor) and encounters.active(campaign)
+        and body.action_type in {"move", "travel"} and not body.parameters.get("disengage")
+    ):
+        # sair do alcance no meio da luta provoca ataque de oportunidade (reação do 5e);
+        # `disengage` (a ação Desengajar) evita
+        oportunidade = await encounters.opportunity(db, campaign, user_id, actor)
+        if oportunidade and oportunidade["player_down"]:
+            decision = _blocked(
+                "fell_while_fleeing",
+                "O personagem caiu tentando fugir (ataques de oportunidade). Decida o destino com `fate`.",
+            )
+            attempt.status = decision.status
+            attempt.reason_code = decision.reason_code
+            attempt.reason = decision.reason
+            attempt.decision = decision.as_dict()
     if decision.status == "allowed":
         entities = await _mutation_entities(db, campaign, actor, target, decision.mutations)
         if body.action_type == "equip_item" and target is not None:
@@ -1442,6 +1521,8 @@ async def resolve_action(
         "status": attempt.status,
         "replayed": False,
     }
+    if oportunidade:
+        out["opportunity_attacks"] = oportunidade["opportunity_attacks"]
     if combate is not None:
         out["encounter"] = combate
     elif body.action_type == "start_encounter" and decision.status == "allowed":
@@ -1639,6 +1720,10 @@ async def resolve_check(
             )
             if target is None:
                 raise WorldConflictError("O alvo do ataque não está mais disponível")
+            damage, damage_note = combat.apply_damage_traits(
+                damage, public.get("damage_type"), combat.damage_traits(target.state))
+            if damage_note:
+                payload["damage_note"] = damage_note
             _apply_mutation(
                 {"op": "adjust_hp", "entity_id": str(target.id), "amount": -damage},
                 {str(target.id): target},

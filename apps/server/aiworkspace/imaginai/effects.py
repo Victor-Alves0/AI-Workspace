@@ -115,7 +115,10 @@ async def apply_effect(
             valor = max(0, rolagem.total)
             if half:
                 valor //= 2
+            valor, nota = combat.apply_damage_traits(valor, damage_type, combat.damage_traits(entity.state))
             out["damage"] = {"roll": rolagem.as_dict(), "amount": valor, "type": damage_type[:40], "half": half}
+            if nota:
+                out["damage"]["note"] = nota
             delta -= valor
         if healing:
             rolagem = dice.roll(str(healing), roller)

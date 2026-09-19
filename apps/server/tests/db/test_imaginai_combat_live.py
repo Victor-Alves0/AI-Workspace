@@ -147,3 +147,75 @@ def test_reviver_so_quem_morreu_e_mesma_ficha_volta(banco, engine):
     assert "erro" in r["reviver_vivo"]
     assert r["reviver"]["outcome"] == "revived" and r["status"] == "alive"
     assert 3 <= r["dado"]["total"] <= 13
+
+
+async def _fuga(url: str, desengajar: bool) -> dict:
+    from sqlalchemy import select as _select
+
+    from aiworkspace.imaginai import effects, encounters, service, setup
+    from aiworkspace.models import Chat, ImaginaiCampaign, ImaginaiEntity, User
+    from aiworkspace.schemas.imaginai import ActionRequest, CampaignCreate
+
+    eng = create_async_engine(_async(url))
+    out: dict = {}
+    try:
+        async with AsyncSession(eng, expire_on_commit=False) as db:
+            user = User(email=f"{uuid.uuid4().hex[:8]}@t.local", hashed_password="x")
+            db.add(user)
+            await db.flush()
+            chat = Chat(user_id=user.id, title="t", mini_app="imaginai")
+            db.add(chat)
+            await db.commit()
+            snap = await service.create_campaign(db, user.id, CampaignCreate(chat_id=chat.id))
+            campaign = await db.get(ImaginaiCampaign, uuid.UUID(snap["campaign"]["id"]))
+            await setup.set_concept(db, campaign, {"name": "C", "genre": "g", "premise": "p"})
+            await setup.build_world(db, campaign, user.id, {
+                "locations": [{"name": "Praça", "visibility": "known", "connections": ["Portão"]},
+                              {"name": "Portão", "visibility": "known"}],
+                "starting_location": "Praça",
+                "npcs": [{"name": "Goblin", "kind": "creature", "hostile": True, "hp": 7,
+                          "location": "Praça", "visibility": "known",
+                          "actions": [{"name": "Adaga", "attack_bonus": 3, "damage": "1d4"}]}],
+            })
+            campaign.setup_stage = "play"
+            player = await effects._player(db, campaign)
+            state = dict(player.state)
+            state["dnd5e"] = {**state["dnd5e"], "hp": {"current": 30, "max": 30}}
+            player.state = state
+            await db.commit()
+            await encounters.start(db, campaign, user.id, player, player_already_acted=False)
+            await db.commit()
+            portao = await db.scalar(_select(ImaginaiEntity).where(
+                ImaginaiEntity.campaign_id == campaign.id, ImaginaiEntity.name == "Portão"))
+            player = await effects._player(db, campaign)
+            out["fuga"] = await service.resolve_action(db, user.id, campaign.id, ActionRequest(
+                actor_id=player.id, action_type="move", target_id=portao.id,
+                parameters={"disengage": True} if desengajar else {}))
+            player = await effects._player(db, campaign)
+            out["chegou"] = player.location_id == portao.id
+
+            mapa = await service.map_snapshot(db, campaign)
+            ids = [loc["id"] for loc in mapa["locations"]]
+            gravado = await service.save_map_positions(db, campaign, {ids[0]: {"x": 12.5, "y": 80}})
+            out["pos"] = next(loc for loc in gravado["locations"] if loc["id"] == ids[0])
+            limpo = await service.save_map_positions(db, campaign, {ids[0]: None})
+            out["pos_limpa"] = next(loc for loc in limpo["locations"] if loc["id"] == ids[0])
+    finally:
+        await eng.dispose()
+    return out
+
+
+def test_fugir_pelo_caminho_do_mapa_provoca_ataque_de_oportunidade(banco, engine):
+    migrar(engine, "head")
+    r = asyncio.run(_fuga(banco, desengajar=False))
+    assert r["fuga"]["status"] == "resolved"                 # caminho do mapa = rota conhecida
+    assert len(r["fuga"]["opportunity_attacks"]) == 1
+    assert r["chegou"] is True
+    assert r["pos"]["x"] == 12.5 and r["pos"]["y"] == 80
+    assert r["pos_limpa"]["x"] is None
+
+
+def test_desengajar_evita_o_ataque_de_oportunidade(banco, engine):
+    migrar(engine, "head")
+    r = asyncio.run(_fuga(banco, desengajar=True))
+    assert "opportunity_attacks" not in r["fuga"] and r["chegou"] is True

@@ -86,6 +86,21 @@ _CONDITION_ALIASES = {
 }
 
 
+# Tipos de dano (PHB) — o nome que a IA/ficha escrever (pt ou en) vira a chave inglesa
+DAMAGE_TYPES = {
+    "acid": "ácido", "bludgeoning": "concussão", "cold": "frio", "fire": "fogo", "force": "força",
+    "lightning": "elétrico", "necrotic": "necrótico", "piercing": "perfurante", "poison": "veneno",
+    "psychic": "psíquico", "radiant": "radiante", "slashing": "cortante", "thunder": "trovão",
+}
+_DAMAGE_ALIASES = {
+    "acido": "acid", "concussao": "bludgeoning", "contundente": "bludgeoning", "impacto": "bludgeoning",
+    "frio": "cold", "gelo": "cold", "fogo": "fire", "forca": "force", "eletrico": "lightning",
+    "relampago": "lightning", "raio": "lightning", "necrotico": "necrotic", "perfurante": "piercing",
+    "veneno": "poison", "venenoso": "poison", "psiquico": "psychic", "radiante": "radiant",
+    "cortante": "slashing", "trovao": "thunder",
+}
+
+
 def _norm(value: Any) -> str:
     text = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode()
     return text.strip().casefold()
@@ -96,6 +111,42 @@ def condition_key(value: Any) -> str | None:
     if key in CONDITIONS:
         return key
     return _CONDITION_ALIASES.get(_norm(value))
+
+
+def damage_key(value: Any) -> str | None:
+    key = _norm(value)
+    if key in DAMAGE_TYPES:
+        return key
+    return _DAMAGE_ALIASES.get(key)
+
+
+def _damage_set(raw: Any) -> frozenset[str]:
+    return frozenset(k for k in (damage_key(v) for v in (raw if isinstance(raw, list) else [])) if k)
+
+
+def damage_traits(state: Any) -> dict[str, frozenset[str]]:
+    """Resistências (metade), imunidades (zero) e vulnerabilidades (dobro) da ficha."""
+    dnd = dnd_state(state)
+    return {
+        "resistances": _damage_set(dnd.get("resistances")),
+        "immunities": _damage_set(dnd.get("immunities")),
+        "vulnerabilities": _damage_set(dnd.get("vulnerabilities")),
+    }
+
+
+def apply_damage_traits(amount: int, damage_type: Any, traits: dict[str, frozenset[str]]) -> tuple[int, str | None]:
+    """Dano depois das resistências do alvo (regra do 5e: imunidade zera, resistência
+    corta pela metade arredondando pra baixo, vulnerabilidade dobra)."""
+    tipo = damage_key(damage_type)
+    if not tipo or amount <= 0:
+        return amount, None
+    if tipo in traits.get("immunities", ()):
+        return 0, "imune"
+    if tipo in traits.get("resistances", ()):
+        return amount // 2, "resistente"
+    if tipo in traits.get("vulnerabilities", ()):
+        return amount * 2, "vulnerável"
+    return amount, None
 
 
 def ability_key(value: Any) -> str | None:
@@ -209,6 +260,9 @@ def _normalize_action(raw: dict[str, Any]) -> dict[str, Any] | None:
     if condicao:
         base["condition"] = condicao
         base["condition_rounds"] = max(1, min(_int(raw.get("condition_rounds") or raw.get("rounds"), 1), 10))
+    recarga = _int(raw.get("recharge"), 0)
+    if 2 <= recarga <= 6:
+        base["recharge"] = recarga          # volta com d6 ≥ recarga (5 = "recarga 5–6")
     save = ability_key(raw.get("save"))
     if save:
         return {**base, "type": "save", "save": save, "dc": max(5, min(_int(raw.get("dc"), 12), 30)),
@@ -282,6 +336,7 @@ class Fighter:
     actions: tuple[dict[str, Any], ...] = ()
     conditions: tuple[dict[str, Any], ...] = ()
     saves: dict[str, int] = field(default_factory=dict)
+    traits: dict[str, frozenset[str]] = field(default_factory=dict)
 
     @property
     def down(self) -> bool:
@@ -315,6 +370,7 @@ def fighter_from(entity_id: str, name: str, state: Any, location_id: str | None,
         ac=armor_class(state), location_id=str(location_id) if location_id else None,
         initiative_bonus=initiative_bonus(state), attack=attack_profile(state),
         actions=actions_of(state), conditions=conditions_of(state), saves=save_modifiers(state),
+        traits=damage_traits(state),
     )
 
 
@@ -506,6 +562,12 @@ def _resolve_action(actor: Fighter, target: Fighter, action: dict[str, Any],
         if acertou and action.get("condition"):
             record["condition_applied"] = action["condition"]
     if record["damage"]:
+        final, nota = apply_damage_traits(record["damage"], action.get("damage_type"), target.traits)
+        if nota:
+            record["damage_before_traits"] = record["damage"]
+            record["damage"] = final
+            record["damage_note"] = nota
+    if record["damage"]:
         novo = replace(novo, hp=max(0, novo.hp - record["damage"]))
     if record["condition_applied"]:
         novo = replace(novo, conditions=add_condition(
@@ -520,6 +582,51 @@ def _resolve_action(actor: Fighter, target: Fighter, action: dict[str, Any],
     else:
         record["target_health"] = health_label(novo.hp, novo.hp_max)
     return record, novo
+
+
+def _choose_action(actor: Fighter, enc: dict[str, Any], roller: Roller) -> tuple[dict[str, Any], list[str]]:
+    """Habilidade com recarga disponível é usada primeiro (é a mais forte — baforada);
+    gasta, ela só volta com d6 ≥ recarga no início dos turnos seguintes. Sem nenhuma
+    disponível, as ações comuns alternam por rodada."""
+    gastas: dict[str, list[str]] = enc.setdefault("recharge_spent", {})
+    minhas = list(gastas.get(actor.id, []))
+    recarregou = []
+    acoes = actor.all_actions()
+    for acao in acoes:
+        nome = acao.get("name")
+        if acao.get("recharge") and nome in minhas and roller(6) >= int(acao["recharge"]):
+            minhas.remove(nome)
+            recarregou.append(nome)
+    for acao in acoes:
+        if acao.get("recharge") and acao.get("name") not in minhas:
+            minhas.append(acao["name"])
+            gastas[actor.id] = minhas
+            return acao, recarregou
+    gastas[actor.id] = minhas
+    comuns = [a for a in acoes if not a.get("recharge")] or [{**DEFAULT_ATTACK, "type": "attack"}]
+    return comuns[(int(enc.get("round") or 1) - 1) % len(comuns)], recarregou
+
+
+def opportunity_attacks(fighters: dict[str, Fighter], mover_id: str, location_id: str | None,
+                        roller: Roller) -> tuple[list[dict[str, Any]], dict[str, Fighter]]:
+    """O jogador sai do alcance no meio do combate: cada hostil de pé, capaz de reagir e
+    no mesmo lugar faz UM ataque (a reação do 5e), com a primeira ação de ataque."""
+    pool = dict(fighters)
+    turns = []
+    for f in list(pool.values()):
+        mover = pool.get(mover_id)
+        if mover is None or mover.down:
+            break
+        if f.side != "hostile" or f.down or f.incapacitated or f.location_id != location_id:
+            continue
+        ataque = next((a for a in f.all_actions() if a["type"] == "attack"), None)
+        if ataque is None:
+            continue
+        registro, novo = _resolve_action(f, mover, ataque, roller)
+        registro["kind"] = "opportunity"
+        pool[mover_id] = novo
+        turns.append(registro)
+    return turns, pool
 
 
 def run_enemy_turns(encounter: dict[str, Any], fighters: dict[str, Fighter],
@@ -558,9 +665,10 @@ def run_enemy_turns(encounter: dict[str, Any], fighters: dict[str, Fighter],
             alvos = _opponents(ator, pool)
             if alvos:
                 alvo = _pick(alvos, roller)
-                acoes = ator.all_actions()
-                acao = acoes[(int(enc.get("round") or 1) - 1) % len(acoes)]
+                acao, recarregou = _choose_action(ator, enc, roller)
                 registro, novo = _resolve_action(ator, alvo, acao, roller)
+                if recarregou:
+                    registro["recharged"] = recarregou
                 pool[alvo.id] = novo
                 turns.append(registro)
         pool[ator.id] = replace(pool[ator.id], conditions=tick_conditions(pool[ator.id].conditions))

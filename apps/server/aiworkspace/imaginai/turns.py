@@ -224,11 +224,15 @@ _SETUP_TOOL = {
                             "attack_bonus": {"type": "integer"},
                             "damage": {"type": "string", "description": "Dice, e.g. 1d6+2"},
                             "actions": {"type": "array", "description":
-                                        "Several actions: attacks {name, attack_bonus, damage, condition?} "
-                                        "or save abilities {name, save, dc, damage, half, condition, rounds} "
-                                        "(breath, venom, spells).",
+                                        "Several actions: attacks {name, attack_bonus, damage, damage_type, condition?} "
+                                        "or save abilities {name, save, dc, damage, damage_type, half, condition, rounds} "
+                                        "(breath, venom, spells). `recharge: 5` = recharges on d6 5-6.",
                                         "items": {"type": "object"}},
                             "saves": {"type": "object", "description": "Saving-throw bonuses, e.g. {\"DES\": 3}"},
+                            "resistances": {"type": "array", "items": {"type": "string"},
+                                            "description": "Damage types taken at half (fire, cold, slashing...)."},
+                            "immunities": {"type": "array", "items": {"type": "string"}},
+                            "vulnerabilities": {"type": "array", "items": {"type": "string"}},
                             "ally": {"type": "boolean", "description": "Fights on the player's side."},
                             "visibility": {"type": "string", "enum": ["known", "aware", "hidden"]},
                         }}},
@@ -398,7 +402,11 @@ Regras obrigatórias:
    dead, stabilized, captured, rescued (e revived para trazer um morto de volta, se a ficção
    permitir). A morte é real. Depois dela, pergunte ao jogador se quer continuar com a mesma ficha
    (fate=revived) ou com um personagem novo (`new_character`: o antigo fica no mundo como falecido).
-18. `dice` para rolagens livres (tabela aleatória, sorte). Rolagens que o JOGADOR fizer no chat
+18. Fugir no meio do combate (move/travel) provoca ATAQUE DE OPORTUNIDADE dos hostis do local
+   (vem em `opportunity_attacks` — narre-os); com a ação Desengajar, passe parameters.disengage=true.
+   Habilidades com recarga (baforada) o servidor usa e recarrega sozinho. Resistência, imunidade e
+   vulnerabilidade a tipos de dano já vêm aplicadas (`damage_note`) — informe `damage_type` sempre.
+19. `dice` para rolagens livres (tabela aleatória, sorte). Rolagens que o JOGADOR fizer no chat
    aparecem como mensagens "🎲 ..." — use o resultado quando ele rolar por conta própria.
 """
 

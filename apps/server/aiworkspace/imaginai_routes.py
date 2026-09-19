@@ -102,6 +102,27 @@ async def update_campaign(
         _raise_domain_error(exc)
 
 
+class MapPositions(BaseModel):
+    # {id do local: {"x": 0–100, "y": 0–100} | null}
+    positions: dict[str, dict[str, float] | None] = Field(default_factory=dict)
+
+
+@router.patch("/campaigns/{campaign_id}/map/positions")
+async def save_map_positions(
+    campaign_id: uuid.UUID,
+    body: MapPositions,
+    user: ApprovedUser,
+    db: DbSession,
+):
+    """Posições que o jogador arrumou arrastando os locais no mapa."""
+    try:
+        campaign = await service.owned_campaign(db, user.id, campaign_id, lock=True)
+        return await service.save_map_positions(db, campaign, body.positions)
+    except Exception as exc:  # noqa: BLE001
+        await db.rollback()
+        _raise_domain_error(exc)
+
+
 class SpellsUpdate(BaseModel):
     spells: list[dict[str, Any]] = Field(default_factory=list, max_length=60)
 

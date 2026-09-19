@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Loader2, MapPin, Maximize2, Minus, Plus, X } from "lucide-react";
+import { LayoutGrid, Loader2, MapPin, Maximize2, Minus, Plus, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ImaginaiMap } from "../types";
 import { EntityImage, ImaginaiFeatureStatus, ImaginaiToolbar } from "../shared";
@@ -152,7 +152,33 @@ export function ImaginaiMapPanel({ campaignId }: { campaignId: string }) {
   }
   function onPointerUp(event: React.PointerEvent) {
     try { (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId); } catch { /* noop */ }
+    const soltouLocal = gesture.current?.type === "node" && moved.current;
     gesture.current = null;
+    if (soltouLocal) void persistLayout();
+  }
+
+  /** Grava o mapa INTEIRO como está na tela (não só o local arrastado): com uma posição
+   * fixa nova o layout automático recalcularia os outros e eles "pulariam". */
+  async function persistLayout() {
+    const positions = Object.fromEntries(nodes.map((node) => {
+      const p = at(node);
+      return [node.id, { x: clamp((p.x / WORLD) * 100, 0, 100), y: clamp((p.y / WORLD) * 100, 0, 100) }];
+    }));
+    try {
+      const atualizado = await api.patch<ImaginaiMap>(`/mini-apps/imaginai/campaigns/${campaignId}/map/positions`, { positions });
+      setData(atualizado);
+      setOffsets({});
+    } catch { /* posição só não fica gravada; o arraste continua valendo na tela */ }
+  }
+
+  async function resetLayout() {
+    const positions = Object.fromEntries(nodes.map((node) => [node.id, null]));
+    try {
+      const atualizado = await api.patch<ImaginaiMap>(`/mini-apps/imaginai/campaigns/${campaignId}/map/positions`, { positions });
+      didFit.current = false;
+      setOffsets({});
+      setData(atualizado);
+    } catch { /* noop */ }
   }
   useEffect(() => {
     const vp = viewportRef.current;
@@ -245,7 +271,8 @@ export function ImaginaiMapPanel({ campaignId }: { campaignId: string }) {
         <div className="absolute bottom-2 right-2 flex flex-col gap-0.5 rounded-xl border border-border bg-surface/90 p-0.5">
           <button type="button" onClick={() => zoom(1)} title="Aproximar" aria-label="Aproximar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Plus size={14} /></button>
           <button type="button" onClick={() => zoom(-1)} title="Afastar" aria-label="Afastar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Minus size={14} /></button>
-          <button type="button" onClick={() => { setOffsets({}); window.setTimeout(fit, 0); }} title="Ajustar à tela" aria-label="Ajustar à tela" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Maximize2 size={14} /></button>
+          <button type="button" onClick={() => fit()} title="Ajustar à tela" aria-label="Ajustar à tela" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Maximize2 size={14} /></button>
+          <button type="button" onClick={() => void resetLayout()} title="Voltar ao layout automático" aria-label="Voltar ao layout automático" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><LayoutGrid size={14} /></button>
         </div>
       </div>
       {open ? <LocationDialog node={open} paths={neighbours(open.id)} onGo={(id) => setOpenId(id)} onClose={() => setOpenId(null)} /> : null}

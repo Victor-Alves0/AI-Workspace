@@ -128,6 +128,13 @@ def _actions(raw: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _damage_list(raw: Any) -> list[str]:
+    """Tipos de dano (pt ou en) normalizados para a chave do combate."""
+    from . import combat
+
+    return sorted({k for k in (combat.damage_key(v) for v in (raw if isinstance(raw, list) else [])[:13]) if k})
+
+
 def _saves(raw: Any) -> dict[str, int]:
     from . import combat
 
@@ -151,6 +158,9 @@ def _npc_state(npc: dict[str, Any]) -> dict[str, Any]:
         dnd["attacks"] = acoes
     if npc.get("saves"):
         dnd["saves"] = npc["saves"]
+    for campo in ("resistances", "immunities", "vulnerabilities"):
+        if npc.get(campo):
+            dnd[campo] = npc[campo]
     state = {**_visibility_state(npc["visibility"]), "dnd5e": dnd}
     if npc["hostile"]:
         state["hostile"] = True
@@ -227,6 +237,8 @@ def validate_world(spec: Any, existing: dict[str, str] | None = None) -> dict[st
             "damage": dano if _DAMAGE_RE.fullmatch(dano) else "",
             "actions": _actions(raw.get("actions")),
             "saves": _saves(raw.get("saves")),
+            **{campo: _damage_list(raw.get(campo))
+               for campo in ("resistances", "immunities", "vulnerabilities")},
             "ally": bool(raw.get("ally")) and not bool(raw.get("hostile")),
             # quem está no local inicial é visto de cara; o resto se descobre jogando
             "visibility": _visibility(raw.get("visibility"), "known" if no_inicio else "hidden"),
