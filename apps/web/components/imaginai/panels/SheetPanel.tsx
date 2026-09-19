@@ -33,7 +33,7 @@ export function ImaginaiSheetPanel({
       <div className="flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           {character.image_url ? <EntityImage url={character.image_url} alt={character.name} className="h-9 w-9 shrink-0 rounded-full" /> : null}
-          <h3 className="text-sm font-semibold text-ink">Ficha</h3>
+          <span className="truncate text-xs text-ink-soft">{character.name}</span>
         </div>
         <button type="button" onClick={() => setEditing(true)} className="flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-[10px] font-medium text-violet-200 transition-colors hover:bg-violet-500/15 hover:text-white"><Pencil size={13} />Editar</button>
       </div>

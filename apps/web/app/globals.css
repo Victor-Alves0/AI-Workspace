@@ -368,9 +368,11 @@ select:focus-visible {
   }
 }
 
-/* Imaginai ocupa as laterais da ÁREA DAS MENSAGENS, nunca o compositor. No
+/* Imaginai ocupa as laterais da coluna INTEIRA (mensagens + compositor): os cards
+ * descem até a linha da promptbox e a aba aberta usa a altura toda da página. O
+ * centro (50rem) fica livre, então conversa e compositor seguem clicáveis. No
  * mobile ficam apenas duas linguetas nas bordas; cada uma abre seu drawer. */
-.chat-game-stage {
+.chat-game-frame {
   container: chat-game / inline-size;
 }
 .imaginai-docks {
@@ -431,6 +433,11 @@ select:focus-visible {
 .imaginai-character-dock[data-mobile-open="true"] {
   position: absolute;
   bottom: 0.75rem;
+  /* gaveta sobre a conversa (celular): aqui o fundo é necessário p/ ler */
+  border: 1px solid rgb(var(--c-border));
+  border-radius: 1.25rem;
+  background: rgb(var(--c-surface));
+  padding: 0.5rem 0.75rem;
   z-index: 2;
   display: flex;
   flex-direction: column;
@@ -447,26 +454,14 @@ select:focus-visible {
 .imaginai-character-dock[data-mobile-open="true"] {
   right: 0.75rem;
 }
-/* Cards chapados: sem sombra, fundo e borda a 60% em repouso — ficam no plano da
- * conversa em vez de flutuar sobre ela — e 100% quando o cursor/foco chega. */
+/* Sem moldura: nem fundo, nem borda, nem sombra — o conteúdo fica no plano da
+ * página. Só as linhas divisórias internas separam as partes. (Sem backdrop-filter
+ * também: ele prendia os modais `fixed` dentro do card.) */
 .imaginai-dock-card {
   width: 100%;
   max-width: 21rem;
   flex-shrink: 0;
-  border: 1px solid rgb(var(--c-border) / 0.6);
-  border-radius: 1.5rem;
-  background: rgb(var(--c-surface) / 0.6);
-  padding: 0.875rem 1rem 0.75rem;
-  box-shadow: none;
-  /* com fundo translúcido, o texto da conversa por trás (gaveta no celular) não briga */
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-  transition: border-color 200ms ease, background-color 200ms ease;
-}
-.imaginai-dock-card:hover,
-.imaginai-dock-card:focus-within {
-  border-color: rgb(var(--c-border));
-  background: rgb(var(--c-surface));
+  padding: 0.25rem 0.25rem 0;
 }
 /* Aba que abre ACIMA do card: fica no fluxo da coluna, então cresce para cima
  * sem cobrir o card nem mudar a posição dele. */
@@ -476,6 +471,8 @@ select:focus-visible {
   display: flex;
   height: clamp(16rem, 52vh, 27rem);
   min-height: 0;
+  border-bottom: 1px solid rgb(var(--c-border));
+  padding-bottom: 0.75rem;
   flex-direction: column;
   gap: 0.5rem;
   overflow: hidden;
@@ -600,6 +597,70 @@ select:focus-visible {
   outline: 2px solid rgb(167 139 250 / 0.8);
   outline-offset: 1px;
 }
+/* busca discreta: lupa, uma linha embaixo e o placeholder — sem caixa */
+.imaginai-search {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 0.45rem;
+  border-bottom: 1px solid rgb(var(--c-border));
+  color: rgb(var(--c-muted));
+  transition: border-color 160ms ease, color 160ms ease;
+}
+.imaginai-search:focus-within {
+  border-color: rgb(167 139 250 / 0.7);
+  color: rgb(var(--c-ink-soft));
+}
+.imaginai-search input {
+  min-width: 0;
+  flex: 1 1 auto;
+  background: transparent;
+  padding: 0.4rem 0;
+  color: rgb(var(--c-ink));
+  font-size: 0.75rem;
+  outline: none;
+}
+.imaginai-search input::placeholder {
+  color: rgb(var(--c-muted));
+}
+.imaginai-add-button {
+  display: inline-flex;
+  width: 1.875rem;
+  height: 1.875rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.6rem;
+  color: rgb(var(--c-muted));
+  cursor: pointer;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+.imaginai-add-button:hover {
+  background: rgb(var(--c-hover));
+  color: rgb(var(--c-ink));
+}
+.imaginai-add-button:focus-visible {
+  outline: 2px solid rgb(167 139 250 / 0.8);
+  outline-offset: 1px;
+}
+/* linha de lista: sem fundo em repouso, realce só no hover (como a lista de chats) */
+.imaginai-list-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.6rem;
+  border-radius: 0.75rem;
+  padding: 0.4rem 0.45rem;
+  text-align: left;
+  transition: background-color 160ms ease;
+}
+.imaginai-list-row:hover,
+.imaginai-list-row:focus-visible {
+  background: rgb(var(--c-hover));
+  outline: none;
+}
+
 /* filtros: chips pequenos e redondos (não blocos competindo por espaço) */
 .imaginai-chips {
   display: flex;
@@ -793,6 +854,21 @@ select:focus-visible {
     gap: 0.5rem;
     padding-inline: 0.75rem;
     padding-top: 1rem;
+    padding-bottom: 0.75rem;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+  /* aba aberta usa toda a altura que sobra da coluna (fixa pela página, não
+   * pelo conteúdo) */
+  .imaginai-feature-sheet {
+    height: auto;
+    flex: 1 1 0;
+    min-height: 14rem;
+  }
+  /* o player de leitura mora no canto superior direito no modo Imaginai */
+  .imaginai-docks[data-speaking="true"] .imaginai-character-dock {
+    padding-top: 7rem;
   }
   .imaginai-world-dock,
   .imaginai-world-dock[data-mobile-open] {

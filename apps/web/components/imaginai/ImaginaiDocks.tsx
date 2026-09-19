@@ -27,6 +27,7 @@ export default function ImaginaiDocks({
   onSnapshotChange,
   onSendMessage,
   busy = false,
+  speaking = false,
 }: {
   snapshot: ImaginaiSnapshot | null;
   loading: boolean;
@@ -35,6 +36,8 @@ export default function ImaginaiDocks({
   /** manda uma mensagem no chat da campanha (a IA age sobre ela) */
   onSendMessage?: (text: string) => void;
   busy?: boolean;
+  /** player de leitura no canto superior direito: a coluna da direita desce */
+  speaking?: boolean;
 }) {
   const [characterSection, setCharacterSection] = useState<CharacterSection | null>(null);
   const [worldSection, setWorldSection] = useState<WorldSection | null>(null);
@@ -168,7 +171,7 @@ export default function ImaginaiDocks({
 
   return (
     <>
-      <div className="imaginai-docks" aria-label="Painéis do Imaginai">
+      <div className="imaginai-docks" data-speaking={speaking} aria-label="Painéis do Imaginai">
         {mobilePanel ? (
           <button
             type="button"
@@ -202,7 +205,7 @@ export default function ImaginaiDocks({
         <aside className="imaginai-world-dock" data-mobile-open={mobilePanel === "world"} aria-label="Worldinfo">
           {worldSection && snapshot ? (
             <section className="imaginai-dock-card imaginai-feature-sheet animate-pop" aria-label={DND_WORLD_SECTIONS.find((section) => section.id === worldSection)?.label}>
-              <ImaginaiSheetHead label="Worldinfo" onClose={() => setWorldSection(null)} />
+              <ImaginaiSheetHead label={DND_WORLD_SECTIONS.find((section) => section.id === worldSection)?.label ?? ""} onClose={() => setWorldSection(null)} />
               <div className="imaginai-feature">
                 {worldSection === "journal" ? <ImaginaiJournalPanel campaignId={snapshot.campaign.id} /> : null}
                 {worldSection === "codex" ? <ImaginaiCodexPanel campaignId={snapshot.campaign.id} /> : null}
@@ -253,7 +256,7 @@ export default function ImaginaiDocks({
         <aside className="imaginai-character-dock" data-mobile-open={mobilePanel === "character"} aria-label="Personagem">
           {characterSection && (snapshot || characterSection === "sheet") ? (
             <section className="imaginai-dock-card imaginai-feature-sheet animate-pop" aria-label={DND_CHARACTER_SECTIONS.find((section) => section.id === characterSection)?.label}>
-              <ImaginaiSheetHead label="Personagem" onClose={() => setCharacterSection(null)} />
+              <ImaginaiSheetHead label={DND_CHARACTER_SECTIONS.find((section) => section.id === characterSection)?.label ?? ""} onClose={() => setCharacterSection(null)} />
               <div className="imaginai-feature">
                 {characterSection === "inventory" && snapshot ? (
                   <ImaginaiInventoryPanel campaignId={snapshot.campaign.id} system={system} />

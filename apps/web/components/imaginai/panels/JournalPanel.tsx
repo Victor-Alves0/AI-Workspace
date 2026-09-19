@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, ChevronLeft, Loader2, Pencil, Pin, Plus, RotateCw, Search, Trash2 } from "lucide-react";
+import { Check, ChevronLeft, Loader2, Pencil, Pin, RotateCw, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ImaginaiEvent, ImaginaiJournalEntry } from "../types";
-import { ImaginaiFeatureStatus } from "../shared";
+import { ImaginaiFeatureStatus, ImaginaiToolbar } from "../shared";
 
 export function ImaginaiJournalPanel({ campaignId }: { campaignId: string }) {
   const [section, setSection] = useState<"notes" | "history">("notes");
@@ -164,21 +164,17 @@ export function ImaginaiJournalPanel({ campaignId }: { campaignId: string }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center justify-between gap-2">
-        <JournalTabs active="notes" onChange={setSection} />
-        <button type="button" onClick={beginNew} className="imaginai-compact-button"><Plus size={13} /> Nova</button>
-      </div>
-      <label className="relative mt-2 block shrink-0">
-        <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
-        <input aria-label="Buscar anotações" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar anotações" className="imaginai-field imaginai-field-icon" />
-      </label>
+      <div className="shrink-0"><JournalTabs active="notes" onChange={setSection} /></div>
+      <div className="mt-2"><ImaginaiToolbar value={search} onChange={setSearch} placeholder="Buscar anotações" onAdd={beginNew} addLabel="Nova anotação" /></div>
       <div className="imaginai-feature-scroll mt-2">
         {loading && !entries.length ? <ImaginaiFeatureStatus><Loader2 size={17} className="animate-spin" /></ImaginaiFeatureStatus> : error ? <ImaginaiFeatureStatus error>{error}</ImaginaiFeatureStatus> : entries.length === 0 ? <ImaginaiFeatureStatus>{search ? "Nada encontrado." : "Nenhuma anotação ainda."}</ImaginaiFeatureStatus> : (
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {entries.map((entry) => (
-              <button key={entry.id} type="button" onClick={() => setSelectedId(entry.id)} className="w-full rounded-xl border border-border bg-surface2/55 px-2.5 py-2 text-left transition-colors hover:border-violet-400/30 hover:bg-hover">
-                <span className="flex items-center gap-1.5 text-xs font-medium text-ink">{entry.pinned ? <Pin size={12} className="shrink-0 text-violet-300" /> : null}<span className="truncate">{entry.title}</span></span>
-                <span className="mt-0.5 block truncate text-[10px] text-muted">{entry.content || "Sem conteúdo"}</span>
+              <button key={entry.id} type="button" onClick={() => setSelectedId(entry.id)} className="imaginai-list-row">
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5 text-xs font-medium text-ink">{entry.pinned ? <Pin size={12} className="shrink-0 text-violet-300" /> : null}<span className="truncate">{entry.title}</span></span>
+                  <span className="mt-0.5 block truncate text-[10px] text-muted">{entry.content || "Sem conteúdo"}</span>
+                </span>
               </button>
             ))}
           </div>

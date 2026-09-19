@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronLeft, ChevronRight, Loader2, Pencil, Plus, Search, Sparkles, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Loader2, Pencil, Sparkles, Trash2, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ImaginaiSpell, ImaginaiSpells } from "../types";
-import { ImaginaiFeatureStatus } from "../shared";
+import { ImaginaiFeatureStatus, ImaginaiToolbar } from "../shared";
 
 export function spellComponents(value: unknown): string {
   if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean).join(", ");
@@ -87,17 +87,16 @@ export function ImaginaiSpellsPanel({ campaignId }: { campaignId: string }) {
   for (const spell of filtered) groups.set(spell.level, [...(groups.get(spell.level) ?? []), spell]);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5">
-          {data.save_dc > 0 ? <span className="rounded-lg border border-border bg-surface2/55 px-2 py-1 text-[10px] text-ink-soft">CD {data.save_dc}</span> : null}
-          {data.attack_modifier ? <span className="rounded-lg border border-border bg-surface2/55 px-2 py-1 text-[10px] text-ink-soft">Ataque +{data.attack_modifier}</span> : null}
+      <ImaginaiToolbar value={query} onChange={setQuery} placeholder="Buscar magia" onAdd={() => setEditing("new")} addLabel="Nova magia" />
+      {data.save_dc > 0 || data.attack_modifier ? (
+        <div className="mt-2 flex shrink-0 items-center gap-1.5">
+          {data.save_dc > 0 ? <span className="rounded-lg border border-border px-2 py-1 text-[10px] text-ink-soft">CD {data.save_dc}</span> : null}
+          {data.attack_modifier ? <span className="rounded-lg border border-border px-2 py-1 text-[10px] text-ink-soft">Ataque +{data.attack_modifier}</span> : null}
         </div>
-        <button type="button" onClick={() => setEditing("new")} className="imaginai-compact-button"><Plus size={13} /> Nova</button>
-      </div>
-      {Object.keys(data.slots).length ? <div className="mt-2 grid shrink-0 grid-cols-4 gap-1">{Object.entries(data.slots).map(([level, slot]) => <div key={level} className="rounded-lg border border-border bg-surface2/55 px-1.5 py-1.5 text-center"><span className="block text-[8px] uppercase tracking-wide text-muted">{level}º nível</span><span className="mt-0.5 block font-mono text-[11px] text-ink">{slot.current}/{slot.max}</span></div>)}</div> : null}
-      <label className="relative mt-2 block shrink-0"><Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" /><input aria-label="Buscar magia" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar magia" className="imaginai-field imaginai-field-icon" /></label>
+      ) : null}
+      {Object.keys(data.slots).length ? <div className="mt-2 grid shrink-0 grid-cols-4 gap-1">{Object.entries(data.slots).map(([level, slot]) => <div key={level} className="min-w-0 rounded-lg border border-border px-1.5 py-1.5 text-center"><span className="block text-[8px] uppercase tracking-wide text-muted">{level}º nível</span><span className="mt-0.5 block font-mono text-[11px] text-ink">{slot.current}/{slot.max}</span></div>)}</div> : null}
       <div className="imaginai-feature-scroll mt-2">
-        {filtered.length === 0 ? <ImaginaiFeatureStatus>Nenhuma magia.</ImaginaiFeatureStatus> : <div className="space-y-3">{[...groups.entries()].map(([level, spells]) => <section key={level}><p className="mb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-violet-300">{level === 0 ? "Truques" : `${level}º nível`}</p><div className="space-y-1">{spells.map((spell) => <button key={spell.key} type="button" onClick={() => setSelectedKey(spell.key)} className="flex w-full items-center gap-2.5 rounded-xl border border-border bg-surface2/55 px-2.5 py-2 text-left transition-colors hover:border-violet-400/30 hover:bg-hover"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300"><Sparkles size={13} /></span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-ink">{spell.name}</span><span className="block truncate text-[10px] text-muted">{[spell.school, spell.damage, spell.concentration ? "concentração" : ""].filter(Boolean).join(" · ") || "Magia"}</span></span>{!spell.prepared ? <span title="Não preparada" className="h-2 w-2 shrink-0 rounded-full bg-amber-300" /> : null}<ChevronRight size={14} className="shrink-0 text-muted" /></button>)}</div></section>)}</div>}
+        {filtered.length === 0 ? <ImaginaiFeatureStatus>Nenhuma magia.</ImaginaiFeatureStatus> : <div className="space-y-3">{[...groups.entries()].map(([level, spells]) => <section key={level}><p className="mb-0.5 px-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-violet-300">{level === 0 ? "Truques" : `${level}º nível`}</p><div className="space-y-0.5">{spells.map((spell) => <button key={spell.key} type="button" onClick={() => setSelectedKey(spell.key)} className="imaginai-list-row"><span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300"><Sparkles size={13} /></span><span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-ink">{spell.name}</span><span className="block truncate text-[10px] text-muted">{[spell.school, spell.damage, spell.concentration ? "concentração" : ""].filter(Boolean).join(" · ") || "Magia"}</span></span>{!spell.prepared ? <span title="Não preparada" className="h-2 w-2 shrink-0 rounded-full bg-amber-300" /> : null}<ChevronRight size={14} className="shrink-0 text-muted" /></button>)}</div></section>)}</div>}
       </div>
       {editor}
     </div>

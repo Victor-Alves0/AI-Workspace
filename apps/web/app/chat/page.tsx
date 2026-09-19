@@ -215,6 +215,7 @@ export default function ChatPage() {
     : draftMiniApp;
   // num chat Imaginai, o botão do Mini App só mostra/oculta os painéis laterais
   const [imaginaiDocksHidden, setImaginaiDocksHidden] = useState(false);
+  const imaginaiDocksShown = activeMiniApp === "imaginai" && Boolean(active) && !imaginaiDocksHidden;
   // campanha nova: o primeiro turno (a IA cumprimentando) é disparado assim que o
   // rascunho estiver pronto — o efeito abaixo roda com o estado já limpo
   const [pendingKickoff, setPendingKickoff] = useState<string | null>(null);
@@ -2480,6 +2481,7 @@ export default function ChatPage() {
                     da medição escondia o fim do conteúdo ("o scroll morre").
                     O pb-14 só afasta a última linha do gradiente; é constante e não
                     depende de medição nenhuma. */}
+                <div className="chat-game-frame relative flex min-h-0 flex-1 flex-col">
                 <div className="chat-game-stage relative flex min-h-0 flex-1">
                   <div
                     ref={scrollRef}
@@ -2637,16 +2639,6 @@ export default function ChatPage() {
                     sending && <Thinking />
                   ))}
                   </div>
-                  {activeMiniApp === "imaginai" && active && !imaginaiDocksHidden ? (
-                    <ImaginaiDocks
-                      snapshot={imaginaiSnapshot}
-                      loading={imaginaiLoading}
-                      error={imaginaiError}
-                      onSnapshotChange={setImaginaiSnapshot}
-                      onSendMessage={(text) => { void send(text); }}
-                      busy={sending}
-                    />
-                  ) : null}
                 </div>
                 {/* Composer NO FLUXO (shrink-0): ocupa espaço de verdade, então a área
                     de rolagem acima nunca fica maior que o disponível. Cresce (anexos,
@@ -2658,7 +2650,7 @@ export default function ChatPage() {
                   <div className="chat-composer-shell bg-bg px-4 pb-3">
                     <div className="chat-composer-grid">
                       <div className="chat-composer-center relative min-w-0">
-                        {speakingMessageId && (
+                        {speakingMessageId && !imaginaiDocksShown && (
                           <SpeechController variant="mobile" progress={speechProgress} onClose={stopMessageSpeech} />
                         )}
                         <div
@@ -2684,11 +2676,30 @@ export default function ChatPage() {
                           <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
                         </div>
                       </div>
-                      {speakingMessageId && (
+                      {speakingMessageId && !imaginaiDocksShown && (
                         <SpeechController variant="desktop" progress={speechProgress} onClose={stopMessageSpeech} />
                       )}
                     </div>
                   </div>
+                </div>
+                {/* Imaginai: docks sobre a coluna INTEIRA (mensagens + compositor) — os cards
+                    descem até a linha da promptbox; o centro fica livre p/ clicar */}
+                {imaginaiDocksShown ? (
+                  <ImaginaiDocks
+                    snapshot={imaginaiSnapshot}
+                    loading={imaginaiLoading}
+                    error={imaginaiError}
+                    onSnapshotChange={setImaginaiSnapshot}
+                    onSendMessage={(text) => { void send(text); }}
+                    busy={sending}
+                    speaking={Boolean(speakingMessageId)}
+                  />
+                ) : null}
+                {/* no Imaginai o player de leitura sai da faixa do compositor (ocupada pelos
+                    cards) e vai para o canto superior direito */}
+                {speakingMessageId && imaginaiDocksShown ? (
+                  <SpeechController variant="floating" progress={speechProgress} onClose={stopMessageSpeech} />
+                ) : null}
                 </div>
                 <MessageNavigator messages={messages} onJump={jumpToMessage} />
               </>
@@ -2951,7 +2962,7 @@ function SpeechController({
   progress,
   onClose,
 }: {
-  variant: "desktop" | "mobile";
+  variant: "desktop" | "mobile" | "floating";
   progress: SpeechProgress;
   onClose: () => void;
 }) {
@@ -3045,9 +3056,11 @@ function SpeechController({
 
   const status = loading ? "Preparando áudio…" : paused ? "Leitura pausada" : "Lendo resposta";
 
-  if (variant === "desktop") {
+  if (variant === "desktop" || variant === "floating") {
     return (
-      <div className="speech-desktop-player min-w-0 items-center justify-start pl-3 pr-4">
+      <div className={variant === "floating"
+        ? "absolute right-3 top-3 z-30 flex w-[min(22rem,calc(100%-1.5rem))]"
+        : "speech-desktop-player min-w-0 items-center justify-start pl-3 pr-4"}>
         <div role="region" aria-label="Leitura em voz alta" className="animate-pop min-w-0 w-full max-w-[22rem] rounded-2xl border border-border bg-surface p-2 shadow-prompt">
           <div className="flex min-w-0 items-center gap-1">
             {playButton}

@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { BookOpen, ChevronLeft, ChevronRight, Flag, Loader2, LockKeyhole, Map as MapIcon, Package, PawPrint, Search, User } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, Flag, Loader2, LockKeyhole, Map as MapIcon, Package, PawPrint, User } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ImaginaiCodexResult } from "../types";
-import { EntityImage, ImaginaiFeatureStatus, mediaSrc } from "../shared";
+import { EntityImage, ImaginaiFeatureStatus, ImaginaiToolbar, mediaSrc } from "../shared";
 
 export function codexDescription(value: ImaginaiCodexResult["description"]): string {
   if (value == null) return "";
@@ -92,20 +92,17 @@ export function ImaginaiCodexPanel({ campaignId }: { campaignId: string }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <label className="relative block shrink-0">
-        <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
-        <input aria-label="Buscar no Codex" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar no mundo" className="imaginai-field imaginai-field-icon" />
-      </label>
+      <ImaginaiToolbar value={query} onChange={setQuery} placeholder="Buscar no mundo" />
       <div className="imaginai-chips mt-2 shrink-0" role="group" aria-label="Categorias do Codex">
         {CATEGORIES.map((category) => <button key={category.key} type="button" aria-pressed={kind === category.key} onClick={() => setKind(category.key)} className="imaginai-chip">{category.label}</button>)}
       </div>
       <div className="imaginai-feature-scroll mt-2">
         {loading && !results.length ? <ImaginaiFeatureStatus><Loader2 size={17} className="animate-spin" /></ImaginaiFeatureStatus> : error ? <ImaginaiFeatureStatus error>{error}</ImaginaiFeatureStatus> : results.length === 0 ? <ImaginaiFeatureStatus>Nada encontrado.</ImaginaiFeatureStatus> : (
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {results.map((result) => {
               const locked = result.knowledge === "aware";
               const Icon = locked ? LockKeyhole : KINDS[result.kind]?.icon ?? BookOpen;
-              return <button key={`${result.result_type}-${result.id}`} type="button" onClick={() => setSelected(result)} className="flex w-full items-center gap-2.5 rounded-xl border border-border bg-surface2/55 px-2.5 py-2 text-left transition-colors hover:border-violet-400/30 hover:bg-hover">
+              return <button key={`${result.result_type}-${result.id}`} type="button" onClick={() => setSelected(result)} className="imaginai-list-row">
                 {result.image_url && !locked
                   // eslint-disable-next-line @next/next/no-img-element
                   ? <img src={mediaSrc(result.image_url)} alt="" loading="lazy" className="h-7 w-7 shrink-0 rounded-lg object-cover" />

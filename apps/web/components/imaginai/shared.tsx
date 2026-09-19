@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, Map as MapIcon, Package, ScrollText, Sparkles, X } from "lucide-react";
+import { BookOpen, Map as MapIcon, Package, Plus, ScrollText, Search, Sparkles, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { API_URL } from "@/lib/api";
 
@@ -60,6 +60,31 @@ export function ImaginaiSheetHead({ label, onClose }: { label: string; onClose: 
       <button type="button" onClick={onClose} title="Fechar" aria-label="Fechar aba" className="-mr-1.5 flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-ink">
         <X size={15} />
       </button>
+    </div>
+  );
+}
+
+/** Busca discreta (lupa + linha + placeholder) com o "+" opcional ao lado. */
+export function ImaginaiToolbar({
+  value,
+  onChange,
+  placeholder,
+  onAdd,
+  addLabel = "Adicionar",
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  onAdd?: () => void;
+  addLabel?: string;
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-1.5">
+      <label className="imaginai-search">
+        <Search size={13} className="shrink-0" />
+        <input aria-label={placeholder} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
+      </label>
+      {onAdd ? <button type="button" onClick={onAdd} title={addLabel} aria-label={addLabel} className="imaginai-add-button"><Plus size={16} /></button> : null}
     </div>
   );
 }
