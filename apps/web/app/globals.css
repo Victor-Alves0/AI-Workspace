@@ -465,8 +465,11 @@ select:focus-visible {
 }
 /* Aba que abre ACIMA do card: fica no fluxo da coluna, então cresce para cima
  * sem cobrir o card nem mudar a posição dele. */
+/* Altura FIXA e igual para toda aba: o card não estica com o conteúdo (Codex longo,
+ * Ficha inteira) nem encolhe quando está vazio — quem rola é o miolo. */
 .imaginai-feature-sheet {
   display: flex;
+  height: clamp(16rem, 52vh, 27rem);
   min-height: 0;
   flex-direction: column;
   gap: 0.5rem;
@@ -474,11 +477,14 @@ select:focus-visible {
 }
 .imaginai-feature-sheet .imaginai-feature {
   display: flex;
+  flex: 1 1 auto;
   min-height: 0;
   flex-direction: column;
 }
 .imaginai-feature-sheet .imaginai-feature-scroll {
+  flex: 1 1 auto;
   min-height: 0;
+  max-height: none;
 }
 .imaginai-feature-head {
   display: flex;
@@ -515,6 +521,10 @@ select:focus-visible {
   min-width: 0;
   overflow-x: hidden;
   overflow-y: auto;
+  /* espaço reservado p/ a barra: os itens não encostam nela */
+  scrollbar-gutter: stable;
+  margin-right: -0.4rem;
+  padding-right: 0.4rem;
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: rgb(var(--c-border)) transparent;
@@ -582,6 +592,62 @@ select:focus-visible {
 .imaginai-feature-back:focus-visible,
 .imaginai-small-button:focus-visible,
 .imaginai-field:focus-visible {
+  outline: 2px solid rgb(167 139 250 / 0.8);
+  outline-offset: 1px;
+}
+/* filtros: chips pequenos e redondos (não blocos competindo por espaço) */
+.imaginai-chips {
+  display: flex;
+  gap: 0.3rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.imaginai-chips::-webkit-scrollbar {
+  display: none;
+}
+.imaginai-chip {
+  display: inline-flex;
+  min-height: 1.75rem;
+  flex-shrink: 0;
+  align-items: center;
+  border: 1px solid rgb(var(--c-border));
+  border-radius: 999px;
+  padding: 0 0.65rem;
+  color: rgb(var(--c-muted));
+  font-size: 0.6875rem;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease;
+}
+.imaginai-chip:hover {
+  color: rgb(var(--c-ink));
+  border-color: rgb(167 139 250 / 0.35);
+}
+.imaginai-chip[aria-pressed="true"],
+.imaginai-chip[aria-selected="true"] {
+  border-color: rgb(167 139 250 / 0.55);
+  background: rgb(139 92 246 / 0.2);
+  color: rgb(237 233 254);
+}
+.imaginai-compact-button {
+  display: inline-flex;
+  min-height: 1.875rem;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: 0.6rem;
+  background: rgb(124 58 237 / 0.82);
+  padding: 0 0.6rem;
+  color: white;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 160ms ease;
+}
+.imaginai-compact-button:hover {
+  background: rgb(139 92 246);
+}
+.imaginai-chip:focus-visible,
+.imaginai-compact-button:focus-visible {
   outline: 2px solid rgb(167 139 250 / 0.8);
   outline-offset: 1px;
 }

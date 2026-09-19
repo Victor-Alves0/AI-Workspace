@@ -135,11 +135,24 @@ def test_chaves_de_entidade_sao_unicas_mesmo_com_nomes_repetidos():
 # Personagem e etapas                                                          #
 # --------------------------------------------------------------------------- #
 def test_personagem_com_placeholders_nao_pode_comecar():
-    assert setup.missing_character(_jogador()) == ["name", "class"]
+    faltando = setup.missing_character(_jogador())
+    assert faltando[0] == "name"
+    assert any(f.startswith("class") for f in faltando)
 
 
-def test_personagem_com_nome_e_classe_esta_pronto():
-    assert setup.missing_character(_jogador("Kael", "Ladino")) == []
+def test_nome_e_classe_so_no_texto_nao_bastam_na_criacao_guiada():
+    """O caso real: a IA escreveu "Ficha registrada" com classe e atributos, mas a ficha
+    ficou toda 10 e sem proficiências. Pronto = atributos, raça, antecedente e perícias
+    calculados pelo servidor, não só nome e classe."""
+    faltando = setup.missing_character(_jogador("Kael", "Ladino"))
+    assert any(f.startswith("abilities") for f in faltando)
+    assert any(f.startswith("race") for f in faltando)
+
+
+def test_ficha_montada_a_mao_no_painel_so_precisa_de_nome_e_classe():
+    jogador = _jogador("Kael", "Ladino")
+    jogador.state["dnd5e"]["sheet_source"] = "manual"
+    assert setup.missing_character(jogador) == []
 
 
 def test_acao_fora_da_etapa_e_recusada_com_orientacao():

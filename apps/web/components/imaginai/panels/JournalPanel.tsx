@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronLeft, Loader2, Pencil, Pin, Plus, RotateCw, Search, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ImaginaiEvent, ImaginaiJournalEntry } from "../types";
@@ -39,7 +39,13 @@ export function ImaginaiJournalPanel({ campaignId }: { campaignId: string }) {
     }
   }, [campaignId]);
 
-  useEffect(() => { void loadEntries(); }, [loadEntries]);
+  // busca ao digitar (com respiro), sem botão de buscar
+  const firstLoad = useRef(true);
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void loadEntries(search); }, firstLoad.current ? 0 : 250);
+    firstLoad.current = false;
+    return () => window.clearTimeout(timer);
+  }, [loadEntries, search]);
 
   function beginNew() {
     setSelectedId(null);
@@ -157,36 +163,36 @@ export function ImaginaiJournalPanel({ campaignId }: { campaignId: string }) {
   }
 
   return (
-    <div className="imaginai-feature-scroll">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold text-ink">Diário</h3>
-          <p className="mt-0.5 text-[10px] text-muted">Suas anotações, separadas do que aconteceu no mundo.</p>
-        </div>
-        <button type="button" onClick={beginNew} className="imaginai-primary-button"><Plus size={14} /> Nova</button>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center justify-between gap-2">
+        <JournalTabs active="notes" onChange={setSection} />
+        <button type="button" onClick={beginNew} className="imaginai-compact-button"><Plus size={13} /> Nova</button>
       </div>
-      <div className="mt-2 grid grid-cols-2 gap-1 rounded-xl border border-border bg-surface2/45 p-1" role="tablist" aria-label="Conteúdo do diário">
-        <button type="button" role="tab" aria-selected className="min-h-9 rounded-lg bg-violet-500/20 px-2 text-[10px] font-medium text-violet-100">Anotações</button>
-        <button type="button" role="tab" aria-selected={false} onClick={() => setSection("history")} className="min-h-9 rounded-lg px-2 text-[10px] text-muted transition-colors hover:bg-hover hover:text-ink">Histórico</button>
+      <label className="relative mt-2 block shrink-0">
+        <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+        <input aria-label="Buscar anotações" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar anotações" className="imaginai-field imaginai-field-icon" />
+      </label>
+      <div className="imaginai-feature-scroll mt-2">
+        {loading && !entries.length ? <ImaginaiFeatureStatus><Loader2 size={17} className="animate-spin" /></ImaginaiFeatureStatus> : error ? <ImaginaiFeatureStatus error>{error}</ImaginaiFeatureStatus> : entries.length === 0 ? <ImaginaiFeatureStatus>{search ? "Nada encontrado." : "Nenhuma anotação ainda."}</ImaginaiFeatureStatus> : (
+          <div className="space-y-1">
+            {entries.map((entry) => (
+              <button key={entry.id} type="button" onClick={() => setSelectedId(entry.id)} className="w-full rounded-xl border border-border bg-surface2/55 px-2.5 py-2 text-left transition-colors hover:border-violet-400/30 hover:bg-hover">
+                <span className="flex items-center gap-1.5 text-xs font-medium text-ink">{entry.pinned ? <Pin size={12} className="shrink-0 text-violet-300" /> : null}<span className="truncate">{entry.title}</span></span>
+                <span className="mt-0.5 block truncate text-[10px] text-muted">{entry.content || "Sem conteúdo"}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
-      <form onSubmit={(event) => { event.preventDefault(); void loadEntries(search); }} className="mt-2 flex gap-1.5">
-        <label className="relative min-w-0 flex-1">
-          <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
-          <span className="sr-only">Buscar anotações</span>
-          <input aria-label="Buscar anotações" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar anotações" className="imaginai-field imaginai-field-icon" />
-        </label>
-        <button type="submit" className="imaginai-icon-button" aria-label="Buscar"><Search size={14} /></button>
-      </form>
-      {loading ? <ImaginaiFeatureStatus><Loader2 size={17} className="animate-spin" /></ImaginaiFeatureStatus> : error ? <ImaginaiFeatureStatus error>{error}</ImaginaiFeatureStatus> : entries.length === 0 ? <ImaginaiFeatureStatus>Seu diário está vazio. Crie uma anotação para registrar pistas, planos ou acontecimentos.</ImaginaiFeatureStatus> : (
-        <div className="mt-2 space-y-1">
-          {entries.map((entry) => (
-            <button key={entry.id} type="button" onClick={() => setSelectedId(entry.id)} className="w-full rounded-xl border border-border bg-surface2/55 p-2.5 text-left transition-colors hover:border-violet-400/30 hover:bg-hover">
-              <span className="flex items-center gap-1.5 text-xs font-medium text-ink">{entry.pinned ? <Pin size={12} className="shrink-0 text-violet-300" /> : null}<span className="truncate">{entry.title}</span></span>
-              <span className="mt-1 block truncate text-[10px] text-muted">{entry.content || "Sem conteúdo"}</span>
-            </button>
-          ))}
-        </div>
-      )}
+    </div>
+  );
+}
+
+function JournalTabs({ active, onChange }: { active: "notes" | "history"; onChange: (section: "notes" | "history") => void }) {
+  return (
+    <div className="imaginai-chips" role="tablist" aria-label="Diário">
+      <button type="button" role="tab" aria-selected={active === "notes"} onClick={() => onChange("notes")} className="imaginai-chip">Anotações</button>
+      <button type="button" role="tab" aria-selected={active === "history"} onClick={() => onChange("history")} className="imaginai-chip">Histórico</button>
     </div>
   );
 }
@@ -253,20 +259,14 @@ export function ImaginaiCampaignHistory({ campaignId, onShowNotes }: { campaignI
   useEffect(() => { void loadEvents(); }, [loadEvents]);
 
   return (
-    <div className="imaginai-feature-scroll">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold text-ink">Histórico</h3>
-          <p className="mt-0.5 text-[10px] text-muted">Ações confirmadas pelo mundo, em ordem cronológica.</p>
-        </div>
-        <button type="button" onClick={() => void loadEvents()} disabled={loading} className="imaginai-icon-button" title="Atualizar histórico" aria-label="Atualizar histórico"><RotateCw size={14} className={loading ? "animate-spin" : ""} /></button>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center justify-between gap-2">
+        <JournalTabs active="history" onChange={(section) => { if (section === "notes") onShowNotes(); }} />
+        <button type="button" onClick={() => void loadEvents()} disabled={loading} className="flex h-7 w-7 items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-ink" title="Atualizar histórico" aria-label="Atualizar histórico"><RotateCw size={13} className={loading ? "animate-spin" : ""} /></button>
       </div>
-      <div className="mt-2 grid grid-cols-2 gap-1 rounded-xl border border-border bg-surface2/45 p-1" role="tablist" aria-label="Conteúdo do diário">
-        <button type="button" role="tab" aria-selected={false} onClick={onShowNotes} className="min-h-9 rounded-lg px-2 text-[10px] text-muted transition-colors hover:bg-hover hover:text-ink">Anotações</button>
-        <button type="button" role="tab" aria-selected className="min-h-9 rounded-lg bg-violet-500/20 px-2 text-[10px] font-medium text-violet-100">Histórico</button>
-      </div>
-      {loading ? <ImaginaiFeatureStatus><Loader2 size={17} className="animate-spin" /></ImaginaiFeatureStatus> : error ? <ImaginaiFeatureStatus error>{error}</ImaginaiFeatureStatus> : events.length === 0 ? <ImaginaiFeatureStatus>Ainda não há ações confirmadas. Quando a aventura avançar, os acontecimentos aparecerão aqui.</ImaginaiFeatureStatus> : (
-        <ol className="mt-3 space-y-2 border-l border-violet-400/25 pl-3">
+      <div className="imaginai-feature-scroll mt-2">
+      {loading && !events.length ? <ImaginaiFeatureStatus><Loader2 size={17} className="animate-spin" /></ImaginaiFeatureStatus> : error ? <ImaginaiFeatureStatus error>{error}</ImaginaiFeatureStatus> : events.length === 0 ? <ImaginaiFeatureStatus>Nenhum acontecimento ainda.</ImaginaiFeatureStatus> : (
+        <ol className="ml-1 space-y-2 border-l border-violet-400/25 pl-3">
           {[...events].reverse().map((event) => {
             const copy = campaignEventCopy(event);
             const at = new Date(event.created_at);
@@ -275,6 +275,7 @@ export function ImaginaiCampaignHistory({ campaignId, onShowNotes }: { campaignI
           })}
         </ol>
       )}
+      </div>
     </div>
   );
 }

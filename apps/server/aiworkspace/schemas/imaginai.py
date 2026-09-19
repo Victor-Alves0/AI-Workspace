@@ -55,6 +55,10 @@ class CharacterUpdate(BaseModel):
     attributes: AbilityScoresUpdate | None = None
     # história do personagem: o narrador usa na abertura para inserir o jogador no mundo
     backstory: str | None = Field(default=None, max_length=8_000)
+    # proficiências marcadas à mão no editor (chaves do sistema: "stealth", "dexterity"...)
+    skill_proficiencies: list[str] | None = Field(default=None, max_length=18)
+    skill_expertise: list[str] | None = Field(default=None, max_length=18)
+    save_proficiencies: list[str] | None = Field(default=None, max_length=6)
 
 
 class EntityCreate(BaseModel):

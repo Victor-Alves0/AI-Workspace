@@ -30,6 +30,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Chat, ImaginaiCampaign, ImaginaiEntity
+from . import dnd5e_build
+from .combat import Roller, secure_roller
 
 STAGES = ("concept", "character", "play")
 
@@ -123,11 +125,25 @@ def validate_world(spec: Any) -> dict[str, Any]:
                 "description": _text(raw.get("description"), 3000),
                 "secret": _text(raw.get("secret"), 5000),
                 "visibility": _visibility(raw.get("visibility"), "aware"),
+                "connections": [
+                    _text(c, 255) for c in (raw.get("connections") or [])[:MAX_LOCATIONS]
+                    if isinstance(c, str) and _text(c, 255)
+                ],
             })
     if not locations:
         raise SetupError("O mundo precisa de ao menos um local (inclua o local inicial).")
 
     nomes = {loc["name"].casefold(): loc["name"] for loc in locations}
+    # rotas: só entre locais que existem, sem laço, e nos DOIS sentidos (estrada é de mão dupla)
+    ligacoes: dict[str, set[str]] = {loc["name"]: set() for loc in locations}
+    for loc in locations:
+        for alvo in loc["connections"]:
+            real = nomes.get(alvo.casefold())
+            if real and real != loc["name"]:
+                ligacoes[loc["name"]].add(real)
+                ligacoes[real].add(loc["name"])
+    for loc in locations:
+        loc["connections"] = sorted(ligacoes[loc["name"]])
     inicial = _text(spec.get("starting_location"), 255)
     if inicial.casefold() not in nomes:
         inicial = locations[0]["name"]          # sem indicação válida: o primeiro local
@@ -186,17 +202,33 @@ def _visibility_state(visibility: str) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 # Personagem                                                                   #
 # --------------------------------------------------------------------------- #
+def _dnd(player: ImaginaiEntity | None) -> dict[str, Any]:
+    if player is None:
+        return {}
+    dnd = (player.state or {}).get("dnd5e", player.state or {})
+    return dnd if isinstance(dnd, dict) else {}
+
+
 def missing_character(player: ImaginaiEntity | None) -> list[str]:
-    """Para começar a aventura o personagem precisa de nome e classe de verdade."""
+    """O que falta para a ficha estar pronta: nome + tudo o que a criação D&D 5e exige
+    (classe, raça, antecedente, atributos distribuídos, perícias). Ficha preenchida à mão
+    no painel (`sheet_source: manual`) só precisa de nome e classe."""
     if player is None:
         return ["name", "class"]
-    dnd = (player.state or {}).get("dnd5e", player.state or {})
+    dnd = _dnd(player)
     faltando = []
     if _blank(player.name):
         faltando.append("name")
-    if _blank(dnd.get("class") if isinstance(dnd, dict) else ""):
-        faltando.append("class")
-    return faltando
+    if dnd.get("sheet_source") == "manual":
+        if _blank(dnd.get("class")):
+            faltando.append("class")
+        return faltando
+    build = dnd.get("build") if isinstance(dnd.get("build"), dict) else {}
+    try:
+        _, falta_build, _ = dnd5e_build.derive(build, roller=lambda sides: 1)
+    except dnd5e_build.BuildError as exc:
+        falta_build = [str(exc)]
+    return faltando + falta_build
 
 
 # --------------------------------------------------------------------------- #
@@ -276,14 +308,15 @@ async def build_world(
             inicial.name = loc["name"]
             inicial.description = loc["description"]
             inicial.private_notes = loc["secret"] or None
-            inicial.state = {**(inicial.state or {}), "discovered": True}
+            inicial.state = {**(inicial.state or {}), "discovered": True,
+                             "map": {"connections": loc["connections"]}}
             locais[loc["name"].casefold()] = inicial
             continue
         entity = ImaginaiEntity(
             campaign_id=campaign.id, user_id=user_id, kind="location",
             key=slug(loc["name"], taken), name=loc["name"], description=loc["description"],
             private_notes=loc["secret"] or None,
-            state={**_visibility_state(loc["visibility"]), "map": {}},
+            state={**_visibility_state(loc["visibility"]), "map": {"connections": loc["connections"]}},
         )
         db.add(entity)
         locais[loc["name"].casefold()] = entity
@@ -338,31 +371,175 @@ async def build_world(
     }
 
 
-async def set_character(db: AsyncSession, campaign: ImaginaiCampaign, fields: dict[str, Any]) -> dict[str, Any]:
-    """Registra o que o jogador contou do personagem (ou o que ele pediu para criar)."""
-    from ..schemas.imaginai import CharacterUpdate
-    from .service import _merge_character_setup
+# campos da criação que se acumulam em dnd5e.build (o jogador decide aos poucos)
+_BUILD_TEXT = {"class": 80, "race": 120, "background": 120}
+_BUILD_LISTS = ("class_skills", "background_skills", "expertise", "spells")
 
+
+def _merge_build(build: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
+    build = copy.deepcopy(build)
+    aliases = {"class": ("class", "character_class"), "race": ("race", "ancestry"),
+               "background": ("background",)}
+    for key, names in aliases.items():
+        for name in names:
+            valor = _text(fields.get(name), _BUILD_TEXT[key])
+            if valor:
+                build[key] = valor
+                break
+    if fields.get("level"):
+        build["level"] = _int(fields.get("level"), 1, 1, 20)
+    metodo = str(fields.get("ability_method") or "").strip()
+    if metodo:
+        if metodo not in dnd5e_build.METHODS:
+            raise SetupError(f"ability_method inválido. Use: {', '.join(dnd5e_build.METHODS)}.")
+        if build.get("pool") and metodo != "roll":
+            raise SetupError("Os atributos já foram rolados — a rolagem vale; distribua os valores.")
+        build["method"] = metodo
+    for key in _BUILD_LISTS:
+        if isinstance(fields.get(key), list):
+            build[key] = fields[key][:40]
+    if isinstance(fields.get("skills"), list) and "class_skills" not in fields:
+        build["class_skills"] = fields["skills"][:10]
+    if isinstance(fields.get("race_bonuses"), dict):
+        build["race_bonuses"] = fields["race_bonuses"]
+    if str(fields.get("hp_method") or "") in ("average", "roll"):
+        build["hp_method"] = fields["hp_method"]
+    if isinstance(fields.get("abilities"), dict):
+        metodo = build.get("method")
+        if not metodo:
+            raise SetupError(
+                "Antes de distribuir, defina ability_method (roll, standard_array, point_buy ou manual)."
+            )
+        try:
+            atribuicao = dnd5e_build.parse_scores(fields["abilities"])
+            pool = [p["total"] for p in build.get("pool") or []]
+            build["base_abilities"] = dnd5e_build.validate_abilities(metodo, atribuicao, pool)
+        except dnd5e_build.BuildError as exc:
+            raise SetupError(str(exc)) from exc
+    return build
+
+
+def _apply_sheet(dnd: dict[str, Any], sheet: dict[str, Any]) -> dict[str, Any]:
+    """Grava a ficha calculada sem apagar o que o jogo já mudou (moedas, descobertas)."""
+    dnd = copy.deepcopy(dnd)
+    dnd.update(sheet)
+    dnd.pop("sheet_source", None)
+    return dnd
+
+
+async def roll_abilities(
+    db: AsyncSession, campaign: ImaginaiCampaign, roller: Roller = secure_roller,
+) -> dict[str, Any]:
+    """4d6 (descarta o menor) seis vezes, no servidor. Rola UMA vez por personagem:
+    repetir devolve a mesma rolagem — senão bastaria pedir de novo até sair 18."""
+    _require(campaign, "character")
+    player = await _player(db, campaign)
+    if player is None:
+        raise SetupError("Personagem da campanha não encontrado.")
+    dnd = _dnd(player)
+    build = copy.deepcopy(dnd.get("build") or {})
+    novo = not build.get("pool")
+    if novo:
+        build["pool"] = dnd5e_build.roll_pool(roller)
+        build["method"] = "roll"
+        player.state = {**(player.state or {}), "dnd5e": {**dnd, "build": build}}
+        await db.commit()
+    return {
+        "stage": campaign.setup_stage, "method": "roll", "already_rolled": not novo,
+        "rolls": [{"total": p["total"], "dice": p["dice"]} for p in build["pool"]],
+        "values": sorted((p["total"] for p in build["pool"]), reverse=True),
+    }
+
+
+async def set_character(
+    db: AsyncSession, campaign: ImaginaiCampaign, fields: dict[str, Any],
+    roller: Roller = secure_roller,
+) -> dict[str, Any]:
+    """Acumula as escolhas do jogador e recalcula a ficha pelas regras (dnd5e_build).
+    Nada aqui é "anotado": o que volta é o que ficou gravado."""
     _require(campaign, "character")
     fields = fields if isinstance(fields, dict) else {}
     player = await _player(db, campaign)
     if player is None:
         raise SetupError("Personagem da campanha não encontrado.")
-    body = CharacterUpdate(
-        name=_text(fields.get("name"), 255) or None,
-        character_class=_text(fields.get("class") or fields.get("character_class"), 80) or None,
-        level=_int(fields.get("level"), 1, 1, 20) if fields.get("level") else None,
-        ancestry=_text(fields.get("ancestry"), 120) or None,
-        background=_text(fields.get("background"), 120) or None,
-        alignment=_text(fields.get("alignment"), 80) or None,
-        backstory=str(fields.get("backstory") or "").strip()[:8000] or None,
-    )
-    if body.name:
-        player.name = body.name
-    player.state = _merge_character_setup(player.state or {}, body)
+    dnd = _dnd(player)
+    build = _merge_build(dnd.get("build") if isinstance(dnd.get("build"), dict) else {}, fields)
+    try:
+        sheet, _, build = dnd5e_build.derive(build, roller)
+    except dnd5e_build.BuildError as exc:
+        raise SetupError(str(exc)) from exc
+
+    nome = _text(fields.get("name"), 255)
+    if nome:
+        player.name = nome
+    for key, limit in (("alignment", 80), ("backstory", 8000)):
+        if fields.get(key):
+            sheet[key] = str(fields[key]).strip()[:limit]
+    dnd = _apply_sheet(dnd, sheet)
+    dnd["build"] = build
+    player.state = {**(player.state or {}), "dnd5e": dnd}
     await db.commit()
-    return {"stage": campaign.setup_stage, "character": character_summary(player),
-            "missing": missing_character(player)}
+    return {
+        "stage": campaign.setup_stage,
+        "saved": True,
+        "character": character_summary(player),
+        "sheet": sheet_view(dnd),
+        "missing": missing_character(player),
+    }
+
+
+def sheet_view(dnd: dict[str, Any]) -> dict[str, Any]:
+    """O que o narrador mostra ao jogador depois de cada passo (números do servidor)."""
+    keys = ("attributes", "racial_bonuses", "hp", "hit_dice", "armor_class", "armor_source",
+            "speed", "initiative", "proficiency_bonus", "passive_perception", "attacks",
+            "spellcasting", "spell_slots", "spells")
+    view = {k: dnd[k] for k in keys if k in dnd}
+    saves = dnd.get("saving_throws") or {}
+    view["saving_throw_proficiencies"] = [
+        a for a, v in saves.items() if isinstance(v, dict) and v.get("proficient")
+    ]
+    skills = dnd.get("skills") or {}
+    view["skill_proficiencies"] = {
+        k: v.get("source", "") for k, v in skills.items() if isinstance(v, dict)
+    }
+    build = dnd.get("build") if isinstance(dnd.get("build"), dict) else {}
+    if build.get("pool"):
+        view["ability_rolls"] = [p["total"] for p in build["pool"]]
+    if build.get("hp_rolls"):
+        view["hp_rolls"] = build["hp_rolls"]
+    return view
+
+
+async def _grant_equipment(db: AsyncSession, campaign: ImaginaiCampaign, player: ImaginaiEntity) -> list[str]:
+    """Equipamento inicial da classe + ouro do antecedente, uma única vez."""
+    dnd = _dnd(player)
+    build = dnd.get("build") if isinstance(dnd.get("build"), dict) else {}
+    if not build or build.get("equipment_granted"):
+        return []
+    itens, ouro = dnd5e_build.starting_equipment(build)
+    taken = set(await db.scalars(
+        select(ImaginaiEntity.key).where(ImaginaiEntity.campaign_id == campaign.id)
+    ))
+    nomes = []
+    for item in itens:
+        inventory = {"quantity": item.get("quantity", 1), "weight": item.get("weight", 0),
+                     "equipped": bool(item.get("equipped")), "slot": item.get("slot")}
+        state: dict[str, Any] = {"inventory": inventory, "discovered": True}
+        if item.get("kind") == "weapon":
+            state["dnd5e"] = {"damage": item["damage"], "damage_type": item["damage_type"],
+                              "properties": item.get("properties", [])}
+        db.add(ImaginaiEntity(
+            campaign_id=campaign.id, user_id=player.user_id, kind="item",
+            key=slug(f"item-{item['name']}", taken), name=item["name"], description="",
+            owner_entity_id=player.id, state=state,
+        ))
+        qtd = item.get("quantity", 1)
+        nomes.append(item["name"] if qtd == 1 else f"{item['name']} x{qtd}")
+    moedas = dict(dnd.get("currencies") or {})
+    moedas["gp"] = int(moedas.get("gp", 0) or 0) + ouro
+    dnd = {**dnd, "currencies": moedas, "build": {**build, "equipment_granted": True}}
+    player.state = {**(player.state or {}), "dnd5e": dnd}
+    return nomes + ([f"{ouro} PO"] if ouro else [])
 
 
 def character_summary(player: ImaginaiEntity | None) -> dict[str, Any]:
@@ -389,12 +566,14 @@ async def begin_adventure(db: AsyncSession, campaign: ImaginaiCampaign) -> dict[
     faltando = missing_character(player)
     if faltando:
         raise SetupError(
-            f"O personagem ainda não está pronto (falta: {', '.join(faltando)}). Peça ao "
+            f"O personagem ainda não está pronto (falta: {'; '.join(faltando)}). Peça ao "
             "jogador ou registre com set_character."
         )
+    equipamento = await _grant_equipment(db, campaign, player)
     campaign.setup_stage = "play"
     await db.commit()
-    return {"stage": "play", "character": character_summary(player)}
+    return {"stage": "play", "character": character_summary(player),
+            "starting_equipment": equipamento, "sheet": sheet_view(_dnd(player))}
 
 
 async def status(db: AsyncSession, campaign: ImaginaiCampaign) -> dict[str, Any]:
@@ -411,5 +590,7 @@ async def status(db: AsyncSession, campaign: ImaginaiCampaign) -> dict[str, Any]
         "concept": concept,
         "concept_missing": missing_concept(concept),
         "character": character_summary(player),
+        "character_sheet": sheet_view(_dnd(player)) if campaign.setup_stage == "character" else None,
         "character_missing": missing_character(player),
+        "ability_method": (_dnd(player).get("build") or {}).get("method"),
     }

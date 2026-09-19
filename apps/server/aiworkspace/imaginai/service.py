@@ -351,6 +351,18 @@ def _merge_character_setup(state: dict[str, Any], body: CharacterUpdate) -> dict
     if body.attributes is not None:
         for key, value in body.attributes.model_dump(exclude_none=True).items():
             attributes[key] = value
+        # ficha montada à mão: a sessão zero não cobra os passos da criação guiada
+        dnd["sheet_source"] = "manual"
+    if body.save_proficiencies is not None:
+        marcadas = set(body.save_proficiencies)
+        dnd["saving_throws"] = {key: {"proficient": key in marcadas} for key in _ABILITY_KEYS}
+    if body.skill_proficiencies is not None:
+        pericias = system_definition("dnd5e")["sheet"]["skills"]
+        especialista = set(body.skill_expertise or [])
+        dnd["skills"] = {
+            key: {"proficient": True, **({"proficiency": 2} if key in especialista else {})}
+            for key in body.skill_proficiencies if key in pericias
+        }
     for key in _ABILITY_KEYS:
         attributes[key] = max(1, min(30, _score(attributes.get(key), 10)))
     dnd["attributes"] = attributes
@@ -978,7 +990,11 @@ async def codex_search(
         if not known and not aware:
             continue
         visible_entity_names[entity.id] = entity.name
-        if kind_filter and kind_filter != "all" and entity.kind != kind_filter:
+        if entity.id == player.id:
+            continue                      # o próprio personagem vive na Ficha, não no Codex
+        # "npc" no filtro inclui criaturas: para o jogador, os dois são "gente do mundo"
+        kinds = {"npc", "creature"} if kind_filter == "npc" else {kind_filter}
+        if kind_filter and kind_filter != "all" and entity.kind not in kinds:
             continue
         if wanted and wanted not in entity.name.casefold():
             continue

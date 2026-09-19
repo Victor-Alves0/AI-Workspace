@@ -62,8 +62,7 @@ export function ImaginaiSheetPanel({
           </section>;
         })}
       </div>
-      <p className="mt-2 text-[9px] leading-4 text-muted">Ponto cheio: proficiente · aro: especialização. Os valores vêm do estado autoritativo da campanha.</p>
-      {editing && campaignId ? <ImaginaiCharacterEditor campaignId={campaignId} character={character} onSnapshotChange={onSnapshotChange} onClose={() => setEditing(false)} /> : null}
+      {editing && campaignId ? <ImaginaiCharacterEditor campaignId={campaignId} character={character} system={system} onSnapshotChange={onSnapshotChange} onClose={() => setEditing(false)} /> : null}
     </div>
   );
 }
@@ -75,14 +74,26 @@ export const DND5E_ABILITY_FIELDS = [
   ["intelligence", "INT"], ["wisdom", "SAB"], ["charisma", "CAR"],
 ] as const;
 
+/** 0 = sem proficiência · 1 = proficiente · 2 = especialização (bônus dobrado). */
+export function skillRank(state: unknown): number {
+  if (state === true) return 1;
+  if (state && typeof state === "object") {
+    const record = state as Record<string, unknown>;
+    return numericState(record.proficiency, record.proficient ? 1 : 0);
+  }
+  return 0;
+}
+
 export function ImaginaiCharacterEditor({
   campaignId,
   character,
+  system,
   onSnapshotChange,
   onClose,
 }: {
   campaignId: string;
   character: ImaginaiEntity;
+  system: ImaginaiSystemDefinition | null;
   onSnapshotChange: (snapshot: ImaginaiSnapshot) => void;
   onClose: () => void;
 }) {
@@ -103,6 +114,14 @@ export function ImaginaiCharacterEditor({
   const [speed, setSpeed] = useState(String(numericState(dnd.speed, 30)));
   const [attributes, setAttributes] = useState<Record<string, string>>(() => Object.fromEntries(
     DND5E_ABILITY_FIELDS.map(([key]) => [key, String(abilityScore(sourceAttributes[key]))]),
+  ));
+  const sourceSkills = (dnd.skills ?? {}) as Record<string, unknown>;
+  const sourceSaves = (dnd.saving_throws ?? {}) as Record<string, unknown>;
+  const [skillRanks, setSkillRanks] = useState<Record<string, number>>(() => Object.fromEntries(
+    Object.entries(sourceSkills).map(([key, value]) => [key, skillRank(value)]),
+  ));
+  const [saveProfs, setSaveProfs] = useState<Record<string, boolean>>(() => Object.fromEntries(
+    DND5E_ABILITY_FIELDS.map(([key]) => [key, skillRank(sourceSaves[key]) > 0]),
   ));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -130,6 +149,9 @@ export function ImaginaiCharacterEditor({
         armor_class: numeric(armorClass, 10),
         speed: numeric(speed, 30),
         attributes: Object.fromEntries(DND5E_ABILITY_FIELDS.map(([key]) => [key, numeric(attributes[key] ?? "10", 10)])),
+        save_proficiencies: Object.entries(saveProfs).filter(([, on]) => on).map(([key]) => key),
+        skill_proficiencies: Object.entries(skillRanks).filter(([, rank]) => rank > 0).map(([key]) => key),
+        skill_expertise: Object.entries(skillRanks).filter(([, rank]) => rank >= 2).map(([key]) => key),
       });
       onSnapshotChange(snapshot);
       onClose();
@@ -155,7 +177,23 @@ export function ImaginaiCharacterEditor({
         </div>
         <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"><label className="text-[10px] font-medium text-ink-soft">HP atual<input type="number" min="0" max="9999" value={hpCurrent} onChange={(event) => setHpCurrent(event.target.value)} className="imaginai-field" /></label><label className="text-[10px] font-medium text-ink-soft">HP máximo<input type="number" min="1" max="9999" value={hpMax} onChange={(event) => setHpMax(event.target.value)} className="imaginai-field" /></label><label className="text-[10px] font-medium text-ink-soft">CA<input type="number" min="0" max="99" value={armorClass} onChange={(event) => setArmorClass(event.target.value)} className="imaginai-field" /></label><label className="text-[10px] font-medium text-ink-soft">Deslocamento<input type="number" min="0" max="999" value={speed} onChange={(event) => setSpeed(event.target.value)} className="imaginai-field" /></label></div>
         <fieldset className="mt-4"><legend className="text-xs font-medium text-ink-soft">Atributos</legend><div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-6">{DND5E_ABILITY_FIELDS.map(([key, label]) => <label key={key} className="rounded-xl border border-border bg-surface2/55 px-2 py-1.5 text-center text-[9px] font-semibold text-muted">{label}<input aria-label={label} type="number" min="1" max="30" value={attributes[key] ?? "10"} onChange={(event) => setAttributes((current) => ({ ...current, [key]: event.target.value }))} className="mt-1 block w-full bg-transparent text-center font-mono text-sm text-ink outline-none" /></label>)}</div></fieldset>
-        <p className="mt-3 text-[10px] leading-4 text-muted">Proficiência, iniciativa e percepção passiva são calculadas pela ficha. Itens, moedas, vida durante a aventura e espaços de magia continuam sob validação do mundo.</p>
+        <fieldset className="mt-4">
+          <legend className="text-xs font-medium text-ink-soft">Salvaguardas proficientes</legend>
+          <div className="imaginai-chips mt-2 flex-wrap">
+            {DND5E_ABILITY_FIELDS.map(([key, label]) => <button key={key} type="button" aria-pressed={Boolean(saveProfs[key])} onClick={() => setSaveProfs((current) => ({ ...current, [key]: !current[key] }))} className="imaginai-chip">{label}</button>)}
+          </div>
+        </fieldset>
+        {system ? (
+          <fieldset className="mt-4">
+            <legend className="text-xs font-medium text-ink-soft">Perícias <span className="font-normal text-muted">· toque de novo para especialização</span></legend>
+            <div className="imaginai-chips mt-2 flex-wrap">
+              {Object.entries(system.sheet.skills).map(([key, label]) => {
+                const rank = skillRanks[key] ?? 0;
+                return <button key={key} type="button" aria-pressed={rank > 0} onClick={() => setSkillRanks((current) => ({ ...current, [key]: ((current[key] ?? 0) + 1) % 3 }))} className="imaginai-chip">{label}{rank >= 2 ? " ★" : ""}</button>;
+              })}
+            </div>
+          </fieldset>
+        ) : null}
         {error ? <p className="mt-3 text-xs text-rose-400">{error}</p> : null}
         <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={onClose} className="min-h-11 rounded-xl px-3 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">Cancelar</button><button type="submit" disabled={saving || !name.trim() || !characterClass} className="flex min-h-11 items-center gap-2 rounded-xl bg-violet-500 px-4 text-sm font-medium text-white transition-colors hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50">{saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}Salvar ficha</button></div>
       </form>

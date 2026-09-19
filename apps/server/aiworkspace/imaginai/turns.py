@@ -25,7 +25,7 @@ from ..models import (
     ImaginaiKnowledge,
 )
 from ..schemas.imaginai import ActionRequest
-from . import encounters, service, setup
+from . import dnd5e_build, encounters, service, setup
 
 _WORLD_TOOL = {
     "type": "function",
@@ -118,16 +118,20 @@ _SETUP_TOOL = {
             "status: current stage, concept and character. set_concept: record campaign "
             "name/genre/theme/tone/premise as they are agreed (partial updates are fine). "
             "build_world: create the whole starting world ONCE, after the concept is closed. "
-            "set_character: record the player's character (name, class, backstory...). "
-            "begin_adventure: end session zero and start play, once the character has a "
-            "name and a class."
+            "character_options: D&D 5e classes, races, backgrounds and ability methods. "
+            "roll_abilities: roll 4d6-drop-lowest six times on the server (once per character). "
+            "set_character: save the player's choices — the server computes the sheet (HP, AC, "
+            "proficiencies, attacks, spellcasting) and returns what is still missing. "
+            "begin_adventure: end session zero, hand out starting equipment and start play, "
+            "once nothing is missing."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["status", "set_concept", "build_world", "set_character", "begin_adventure"],
+                    "enum": ["status", "set_concept", "build_world", "character_options",
+                             "roll_abilities", "set_character", "begin_adventure"],
                 },
                 "concept": {
                     "type": "object",
@@ -153,6 +157,8 @@ _SETUP_TOOL = {
                             "name": {"type": "string"}, "description": {"type": "string"},
                             "secret": {"type": "string"},
                             "visibility": {"type": "string", "enum": ["known", "aware", "hidden"]},
+                            "connections": {"type": "array", "items": {"type": "string"},
+                                            "description": "Names of the locations reachable from here (roads, paths, tunnels)."},
                         }}},
                         "npcs": {"type": "array", "items": {"type": "object", "properties": {
                             "name": {"type": "string"},
@@ -172,10 +178,33 @@ _SETUP_TOOL = {
                 },
                 "character": {
                     "type": "object",
+                    "description": "Partial updates accumulate: send only what the player decided now.",
                     "properties": {
-                        "name": {"type": "string"}, "class": {"type": "string"},
-                        "level": {"type": "integer"}, "ancestry": {"type": "string"},
-                        "background": {"type": "string"}, "alignment": {"type": "string"},
+                        "name": {"type": "string"},
+                        "class": {"type": "string", "description": "A D&D 5e class, e.g. Feiticeiro / Sorcerer."},
+                        "level": {"type": "integer"},
+                        "race": {"type": "string", "description": "PHB race, or a campaign-specific ancestry."},
+                        "race_bonuses": {"type": "object", "description":
+                                         "Only for a campaign-specific ancestry (or Half-Elf's +1s): "
+                                         "e.g. {\"CAR\": 2, \"CON\": 1}."},
+                        "background": {"type": "string", "description": "PHB background, or a custom one."},
+                        "background_skills": {"type": "array", "items": {"type": "string"},
+                                              "description": "2 skills — only for a custom background."},
+                        "ability_method": {"type": "string",
+                                           "enum": ["roll", "standard_array", "point_buy", "manual"]},
+                        "abilities": {"type": "object", "description":
+                                      "Base scores BEFORE racial bonus, e.g. {\"FOR\": 8, \"DES\": 14, "
+                                      "\"CON\": 13, \"INT\": 10, \"SAB\": 12, \"CAR\": 15}. Must match the method."},
+                        "class_skills": {"type": "array", "items": {"type": "string"},
+                                         "description": "Skill proficiencies picked from the class list."},
+                        "expertise": {"type": "array", "items": {"type": "string"}, "description": "Rogue only."},
+                        "hp_method": {"type": "string", "enum": ["average", "roll"],
+                                      "description": "Levels above 1 only (level 1 is always max die + CON)."},
+                        "spells": {"type": "array", "items": {"type": "object", "properties": {
+                            "name": {"type": "string"}, "level": {"type": "integer"},
+                            "damage": {"type": "string", "description": "Dice, if it deals damage."},
+                        }}},
+                        "alignment": {"type": "string"},
                         "backstory": {"type": "string"},
                     },
                 },
@@ -196,7 +225,8 @@ Esta é uma campanha NOVA e você é o mestre. Antes da aventura, vocês a criam
    decida, decida tudo e apresente.
 3. Registre com `imaginai_setup` action=`set_concept` conforme os campos forem definidos.
 4. Com o conceito fechado e aceito, chame action=`build_world` UMA vez, criando o mundo inicial:
-   lore (verdades que o jogador pode saber), 2–3 facções, 3–6 locais (um deles o local inicial),
+   lore (verdades que o jogador pode saber), 2–3 facções, 3–6 locais (um deles o local inicial,
+   cada um com `connections`: para onde se chega dali — é o grafo do mapa),
    4–8 NPCs — aliados, neutros e ameaças, cada um com `persona` (motivações, segredos, voz) — e
    criaturas hostis com hp/ac/attack_bonus/damage, além da cena de abertura. Personas e segredos
    são só seus: nunca os revele na narração.
@@ -206,16 +236,33 @@ Esta é uma campanha NOVA e você é o mestre. Antes da aventura, vocês a criam
    antecedente e a história dele.
 """
 
-_SETUP_CHARACTER_PROTOCOL = """## Imaginai — sessão zero: a criação do personagem
-O mundo já existe (veja o estado abaixo). Agora o jogador cria o personagem.
-1. Registre o que ele contar com `imaginai_setup` action=`set_character` (nome, classe,
-   ancestralidade, antecedente, tendência, história). Não invente o que ele não pediu; se ele
-   pedir que você crie, crie algo que combine com a campanha e registre.
-2. A ficha também pode ter sido preenchida na tela: confira o estado abaixo antes de perguntar de
-   novo o que já está lá.
-3. Com ao menos nome e classe, e o jogador pronto, chame action=`begin_adventure` e, na MESMA
-   resposta, narre a abertura: apresente o personagem no local inicial usando a história dele
-   (laços, motivações, passado), ligue-o ao mundo e termine numa situação que convide à ação.
+_SETUP_CHARACTER_PROTOCOL = """## Imaginai — sessão zero: a criação do personagem (D&D 5e)
+O mundo já existe (veja o estado abaixo). Agora o jogador cria o personagem, pelas regras do
+D&D 5e. Você conduz; o SERVIDOR calcula e rola — você nunca inventa número de ficha.
+1. NADA fica salvo sem `imaginai_setup` action=`set_character`. Chame-a no MESMO turno em que o
+   jogador decidir algo (nome, classe, raça, antecedente, história...) — só as partes decididas; as
+   chamadas se acumulam. Nunca escreva "ficha registrada/registrei" sem o retorno `saved: true`.
+2. Conduza nesta ordem, no máximo duas perguntas por vez (se o jogador pedir que você decida,
+   decida e registre):
+   a) conceito: nome, classe, raça/ancestralidade, antecedente (use `character_options` para as
+      listas). Classe/raça/antecedente inventados pela campanha valem — ancestralidade própria
+      pede `race_bonuses` (+2/+1) e antecedente próprio pede 2 `background_skills`;
+   b) atributos: PERGUNTE se ele quer rolar (4d6, descarta o menor) ou definir por conjunto padrão
+      (15,14,13,12,10,8), compra de pontos (27) ou manual. Para rolar, chame `roll_abilities` e
+      mostre os seis resultados com os dados. Deixe ELE distribuir (sugira pela classe se pedir) e
+      grave com `ability_method` + `abilities` (valores base, antes do bônus racial);
+   c) perícias: mostre a lista da classe e deixe ele escolher (`class_skills`); Ladino escolhe
+      também `expertise`. Conjuradores: truques e magias de 1º nível dentro do limite retornado;
+   d) história e tendência.
+3. Depois de cada `set_character`, mostre ao jogador o que o servidor calculou (`sheet`: PV pelo
+   dado de vida, CA pela armadura, salvaguardas e perícias proficientes, ataques, conjuração) e
+   diga o que ainda falta (`missing`).
+4. Com `missing` vazio e o jogador pronto, chame action=`begin_adventure` (ele entrega o
+   equipamento inicial e o ouro — mostre a lista) e, na MESMA resposta, narre a abertura: o
+   personagem no local inicial, ligado ao mundo pela história dele, terminando numa situação que
+   convide à ação. Não comece a cena antes disso.
+5. A ficha também pode ser preenchida no painel Personagem → Ficha: confira o estado abaixo antes de
+   perguntar de novo o que já está lá.
 """
 
 
@@ -651,6 +698,10 @@ async def _setup_action(bridge: "ImaginaiTurnBridge", args: dict[str, Any]) -> d
                 result = await setup.set_concept(db, campaign, args.get("concept") or {})
             elif action == "build_world":
                 result = await setup.build_world(db, campaign, bridge.user_id, args.get("world") or {})
+            elif action == "character_options":
+                result = {"stage": campaign.setup_stage, **dnd5e_build.options()}
+            elif action == "roll_abilities":
+                result = await setup.roll_abilities(db, campaign)
             elif action == "set_character":
                 result = await setup.set_character(db, campaign, args.get("character") or {})
             elif action == "begin_adventure":
