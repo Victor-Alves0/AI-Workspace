@@ -20,6 +20,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # Prefixo exclusivo usado pelo alarme antigo de health_service._maybe_alarm.
+    # destrutivo-aprovado: só cópias geradas pelo sistema; o dado canônico fica em health_events
     op.execute("DELETE FROM notifications WHERE title LIKE 'Saúde:%'")
 
 

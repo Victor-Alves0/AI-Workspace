@@ -31,6 +31,15 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    # conexão injetada (bateria de testes de banco): migra o banco descartável do
+    # teste, não o do DATABASE_URL — e dentro da transação que o teste controla
+    injected = config.attributes.get("connection")
+    if injected is not None:
+        context.configure(connection=injected, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
+        return
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

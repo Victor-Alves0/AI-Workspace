@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import __version__, audit_service, network_config
+from . import __version__, audit_service, db_restore, network_config
 from .app_config import ALLOW_SIGNUPS, get_setting, set_setting
 from .auth.deps import require_admin
 from .config import get_settings
@@ -286,11 +286,12 @@ def _pg_url() -> str:
     return get_settings().sync_database_url
 
 
+
 def _require_pg_tools() -> None:
-    if not shutil.which("pg_dump") or not shutil.which("pg_restore"):
+    if not all(shutil.which(b) for b in ("pg_dump", "pg_restore", "psql")):
         raise HTTPException(
             status.HTTP_501_NOT_IMPLEMENTED,
-            "pg_dump/pg_restore indisponíveis — reconstrua a imagem do server "
+            "pg_dump/pg_restore/psql indisponíveis — reconstrua a imagem do server "
             "(docker compose build server) para habilitar o backup.",
         )
 
@@ -413,8 +414,7 @@ async def export_backup(admin: User = Depends(require_admin)):
     try:
         # pg_dump direto para arquivo (erros viram HTTP ANTES de começar o stream)
         proc = await asyncio.create_subprocess_exec(
-            "pg_dump", "--format=custom", "--no-owner", "--no-privileges",
-            f"--file={dump_path}", f"--dbname={_pg_url()}",
+            *db_restore.dump_argv(_pg_url(), dump_path),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
         _, err = await proc.communicate()
@@ -463,14 +463,16 @@ async def import_backup(
 ):
     """Restaura um backup completo (SUBSTITUI todos os dados atuais).
 
-    Fluxo: salva o upload em arquivo temporário → derruba as outras conexões do
-    banco (o --clean precisa de exclusividade) → pg_restore. Depois, as sessões
-    podem exigir novo login (os usuários passam a ser os do backup)."""
+    Fluxo: salva o upload em arquivo temporário → converte o dump em script SQL →
+    derruba as outras conexões → aplica o script numa transação só (ver
+    db_restore.py: falhou = nada muda). Depois, as sessões podem exigir novo login
+    (os usuários passam a ser os do backup)."""
     _require_pg_tools()
     tmp = tempfile.NamedTemporaryFile(suffix=".backup", delete=False)
     dec_path: str | None = None    # payload decifrado (pg_dump OU tar do bundle)
     dump_path: str | None = None   # database.dump extraído do bundle (V2)
     bundle_path: str | None = None  # tar do bundle, p/ restaurar o Codespace depois
+    work_dir = tempfile.mkdtemp(prefix="aiw-restore-")  # script SQL + prelúdio
     try:
         while chunk := await file.read(1024 * 1024):
             tmp.write(chunk)
@@ -542,6 +544,20 @@ async def import_backup(
                 "(git pull + docker compose build) antes de restaurar.",
             )
 
+        # passo 1 (sem tocar no banco): dump → script SQL. Dump corrompido para aqui.
+        script_path = os.path.join(work_dir, "restore.sql")
+        proc = await asyncio.create_subprocess_exec(
+            *db_restore.script_argv(src_path, script_path),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            logger.error("pg_restore (script) falhou: %s", stderr.decode(errors="replace")[-4000:])
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Backup ilegível (dump corrompido ou incompleto) — nada foi alterado.",
+            )
+
         # encerra as demais conexões (pools do app) p/ liberar locks do restore
         await db.execute(text(
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
@@ -549,18 +565,19 @@ async def import_backup(
         ))
         await db.commit()
 
+        # passo 2: esvazia o `public` + aplica o script, numa transação só
         proc = await asyncio.create_subprocess_exec(
-            "pg_restore", "--clean", "--if-exists", "--no-owner", "--no-privileges",
-            f"--dbname={_pg_url()}", src_path,
+            *db_restore.apply_argv(_pg_url(), db_restore.write_prelude(work_dir), script_path),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
         _, stderr = await proc.communicate()
         err = stderr.decode(errors="replace")
         if proc.returncode != 0:
-            logger.error("pg_restore falhou: %s", err[-4000:])
+            logger.error("restore falhou: %s", err[-4000:])
             raise HTTPException(
                 status.HTTP_502_BAD_GATEWAY,
-                f"pg_restore falhou (código {proc.returncode}): {err[-500:]}",
+                f"restore falhou (código {proc.returncode}) — nada foi alterado, o "
+                f"banco continua como estava: {err[-500:]}",
             )
 
         # backup de versão ANTIGA → traz o esquema ao presente já aqui (antes o app
@@ -630,3 +647,4 @@ async def import_backup(
                     os.unlink(p)
                 except OSError:
                     pass
+        shutil.rmtree(work_dir, ignore_errors=True)
