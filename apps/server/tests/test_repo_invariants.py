@@ -62,6 +62,15 @@ def test_migracoes_formam_uma_corrente_unica():
     assert andadas == len(revs), f"{len(revs) - andadas} migração(ões) fora da corrente"
 
 
+def test_id_da_migracao_cabe_na_tabela_do_alembic():
+    """`alembic_version.version_num` é VARCHAR(32). Um id maior passa em todo teste
+    local (nenhum grava a versão) e só explode no deploy, no UPDATE final do upgrade:
+    o servidor entra em loop de reinício. Aconteceu com `0078_chat_mini_app_and_setup_stage`
+    (34 caracteres)."""
+    longos = {rev: len(rev) for rev in _revisions() if len(rev) > 32}
+    assert not longos, f"revision acima de 32 caracteres (VARCHAR(32) do alembic): {longos}"
+
+
 def test_ordem_alfabetica_dos_arquivos_bate_com_a_ordem_da_corrente():
     """Os arquivos são lidos por nome quando alguém abre a pasta: se o número do
     arquivo não acompanhar a posição na corrente, a leitura humana ("qual foi a

@@ -1,6 +1,6 @@
 """Chat-level Mini App identity and Imaginai session-zero stage.
 
-Revision ID: 0078_chat_mini_app_and_setup_stage
+Revision ID: 0078_chat_mini_app
 Revises: 0077_sound_effects
 Create Date: 2026-09-18
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0078_chat_mini_app_and_setup_stage"
+revision: str = "0078_chat_mini_app"
 down_revision: str | None = "0077_sound_effects"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
