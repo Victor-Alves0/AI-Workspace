@@ -461,7 +461,9 @@ select:focus-visible {
   width: 100%;
   max-width: 21rem;
   flex-shrink: 0;
-  padding: 0.25rem 0.25rem 0;
+  border-radius: 1.5rem;
+  background: rgb(var(--c-surface) / 0.1);
+  padding: 0.875rem 1rem 0.75rem;
 }
 /* Aba que abre ACIMA do card: fica no fluxo da coluna, então cresce para cima
  * sem cobrir o card nem mudar a posição dele. */
@@ -471,8 +473,7 @@ select:focus-visible {
   display: flex;
   height: clamp(16rem, 52vh, 27rem);
   min-height: 0;
-  border-bottom: 1px solid rgb(var(--c-border));
-  padding-bottom: 0.75rem;
+
   flex-direction: column;
   gap: 0.5rem;
   overflow: hidden;
@@ -854,7 +855,10 @@ select:focus-visible {
     gap: 0.5rem;
     padding-inline: 0.75rem;
     padding-top: 1rem;
-    padding-bottom: 0.75rem;
+    /* a linha de botões do card de baixo fica no CENTRO da promptbox:
+     * --prompt-center = distância do pé do frame ao centro da caixa (medida na
+     * página); 1.9375rem = meio botão (19px) + padding inferior do card (12px) */
+    padding-bottom: max(0.75rem, calc(var(--prompt-center, 4.5rem) - 1.9375rem));
     border: 0;
     border-radius: 0;
     background: transparent;

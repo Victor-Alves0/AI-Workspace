@@ -216,6 +216,27 @@ export default function ChatPage() {
   // num chat Imaginai, o botão do Mini App só mostra/oculta os painéis laterais
   const [imaginaiDocksHidden, setImaginaiDocksHidden] = useState(false);
   const imaginaiDocksShown = activeMiniApp === "imaginai" && Boolean(active) && !imaginaiDocksHidden;
+  // Imaginai: a linha de botões dos cards laterais fica no CENTRO da promptbox. A caixa
+  // muda de altura (multilinha, anexos), então o centro é medido e publicado como
+  // --prompt-center no frame; o CSS dos docks usa. Só decoração: o scroll do chat não
+  // depende disto (o compositor segue no fluxo).
+  const gameFrameRef = useRef<HTMLDivElement>(null);
+  const promptBoxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const frame = gameFrameRef.current;
+    const box = promptBoxRef.current;
+    if (!imaginaiDocksShown || !frame || !box) return;
+    const update = () => {
+      const f = frame.getBoundingClientRect();
+      const b = box.getBoundingClientRect();
+      frame.style.setProperty("--prompt-center", `${Math.max(0, f.bottom - (b.top + b.height / 2))}px`);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(box);
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, [imaginaiDocksShown]);
   // campanha nova: o primeiro turno (a IA cumprimentando) é disparado assim que o
   // rascunho estiver pronto — o efeito abaixo roda com o estado já limpo
   const [pendingKickoff, setPendingKickoff] = useState<string | null>(null);
@@ -2481,7 +2502,7 @@ export default function ChatPage() {
                     da medição escondia o fim do conteúdo ("o scroll morre").
                     O pb-14 só afasta a última linha do gradiente; é constante e não
                     depende de medição nenhuma. */}
-                <div className="chat-game-frame relative flex min-h-0 flex-1 flex-col">
+                <div ref={gameFrameRef} className="chat-game-frame relative flex min-h-0 flex-1 flex-col">
                 <div className="chat-game-stage relative flex min-h-0 flex-1">
                   <div
                     ref={scrollRef}
@@ -2673,7 +2694,7 @@ export default function ChatPage() {
                           {showAsk && askSpec && (
                             <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                           )}
-                          <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} />
+                          <div ref={promptBoxRef}><PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} /></div>
                         </div>
                       </div>
                       {speakingMessageId && !imaginaiDocksShown && (
