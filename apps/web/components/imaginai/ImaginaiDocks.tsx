@@ -271,7 +271,7 @@ export default function ImaginaiDocks({
               <ImaginaiSheetHead label={DND_CHARACTER_SECTIONS.find((section) => section.id === characterSection)?.label ?? ""} onClose={() => setCharacterSection(null)} />
               <div className="imaginai-feature">
                 {characterSection === "inventory" && snapshot ? (
-                  <ImaginaiInventoryPanel campaignId={snapshot.campaign.id} system={system} />
+                  <ImaginaiInventoryPanel campaignId={snapshot.campaign.id} ownerId={snapshot.character?.id ?? null} system={system} />
                 ) : null}
                 {characterSection === "sheet" ? (
                   <ImaginaiSheetPanel

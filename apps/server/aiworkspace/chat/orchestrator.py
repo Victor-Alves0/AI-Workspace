@@ -1361,6 +1361,29 @@ def _merge_usage(total: dict[str, float], usage: dict) -> None:
         total["cost"] = total.get("cost", 0.0) + cost
 
 
+_PREP_ACTION_RE = re.compile(r'"action"\s*:\s*"([a-z_]{2,40})"')
+_PREP_STEP = 1500   # a cada ~1,5 KB escritos, um novo aviso (não um por token)
+
+
+def _tool_preparing_events(buffer: dict[int, dict], announced: dict[int, int]) -> list[dict]:
+    """Avisos "a IA está escrevendo a chamada X" enquanto os argumentos chegam."""
+    out = []
+    for idx, slot in buffer.items():
+        fn = slot.get("function") or {}
+        name = fn.get("name") or ""
+        if not name:
+            continue
+        chars = len(fn.get("arguments") or "")
+        last = announced.get(idx)
+        if last is not None and chars - last < _PREP_STEP:
+            continue
+        announced[idx] = chars
+        acao = _PREP_ACTION_RE.search(fn.get("arguments") or "")
+        out.append({"type": "tool_preparing", "name": name, "chars": chars,
+                    "action": acao.group(1) if acao else None})
+    return out
+
+
 def _accumulate_tool_calls(buffer: dict[int, dict], deltas: list[dict]) -> None:
     """Agrega fragmentos de tool_calls vindos do streaming (formato OpenAI)."""
     for d in deltas:
@@ -3103,6 +3126,10 @@ async def run_turn(
             assistant_text = _synth_text
             break
         tool_buffer: dict[int, dict] = {}
+        # progresso da ESCRITA dos argumentos de cada tool (índice → chars já avisados):
+        # um expand_world gera um JSON enorme por minutos, e sem isto a tela só mostrava
+        # os três pontinhos — parecia travado
+        tool_preparing: dict[int, int] = {}
         finish_reason: str | None = None
         usage: dict | None = None
         got_chunk = False
@@ -3171,6 +3198,8 @@ async def run_turn(
                                 yield {"type": "token", "text": c}
                     if delta.get("tool_calls"):
                         _accumulate_tool_calls(tool_buffer, delta["tool_calls"])
+                        for aviso in _tool_preparing_events(tool_buffer, tool_preparing):
+                            yield aviso
                     # imagem nativa: pode chegar no delta ou na mensagem final do chunk
                     raw_imgs = delta.get("images") or (choice.get("message") or {}).get("images") or []
                     for im in raw_imgs:

@@ -67,6 +67,8 @@ export interface GenerationDeps {
  * assim o hook pode ser chamado no TOPO do componente sem depender da ordem de
  * declaração das dependências (artifactsEnabled/reloadMessages etc. vêm depois).
  */
+export type PreparingTool = { name: string; action: string | null; chars: number };
+
 export function useGeneration(getDeps: () => GenerationDeps) {
   const [streaming, setStreaming] = useState("");
   const [streamingReasoning, setReasoningText] = useState("");
@@ -76,6 +78,9 @@ export function useGeneration(getDeps: () => GenerationDeps) {
     if (!text) setStreamingSteps([]);
   }, []);
   const [toolEvents, setToolEvents] = useState<ToolEvent[]>([]);
+  // a IA está ESCREVENDO os argumentos de uma ferramenta (JSON grande leva minutos)
+  const [preparingTool, setPreparingTool] = useState<PreparingTool | null>(null);
+  const preparingRef = useRef<PreparingTool | null>(null);
   const [generatingImage, setGeneratingImage] = useState(false);
   const [consultingKnowledge, setConsultingKnowledge] = useState(false);
   const [transcribingAudio, setTranscribingAudio] = useState(false);
@@ -209,6 +214,17 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       document.addEventListener("pointercancel", onPointerUp, true);
     }
     const handler = (ev: any) => {
+      if (ev.type === "tool_preparing") {
+        const prep = { name: String(ev.name || ""), action: ev.action ?? null, chars: Number(ev.chars) || 0 };
+        preparingRef.current = prep;
+        if (paint()) setPreparingTool(prep);
+        return;
+      }
+      if (preparingRef.current) {
+        // qualquer outro evento (a chamada saiu, texto, fim) encerra o "escrevendo"
+        preparingRef.current = null;
+        setPreparingTool(null);
+      }
       if (ev.type === "token") {
         if (state.acc === "" && paint()) setGeneratingImage(false); // 1º token = respondendo em texto
         if (paint()) setStreamPhase("streaming");
@@ -409,6 +425,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
     streamingReasoning, setStreamingReasoning,
     streamingSteps,
     toolEvents, setToolEvents,
+    preparingTool,
     generatingImage, setGeneratingImage,
     consultingKnowledge, setConsultingKnowledge,
     transcribingAudio, setTranscribingAudio,

@@ -277,7 +277,7 @@ export default function ChatPage() {
   }));
   const {
     streaming, setStreaming, streamingReasoning, setStreamingReasoning, streamingSteps,
-    toolEvents, setToolEvents, generatingImage, setGeneratingImage,
+    toolEvents, setToolEvents, preparingTool, generatingImage, setGeneratingImage,
     consultingKnowledge, setConsultingKnowledge, transcribingAudio, setTranscribingAudio,
     subagents, setSubagents, guardNote, setGuardNote, liveArtifact, setLiveArtifact,
     sending, setSending, streamPhase, setStreamPhase, stopRef, makeStreamHandler, resumeStream, handleStop,
@@ -2688,7 +2688,7 @@ export default function ChatPage() {
                       reasoningLive={sending}
                       toolEvents={toolEvents.length ? toolEvents : undefined}
                       toolsLive={sending}
-                      status={statusFor({ sending, phase: streamPhase, streaming, streamingReasoning, generatingImage, consultingKnowledge, transcribingAudio, toolEvents })}
+                      status={statusFor({ sending, phase: streamPhase, streaming, streamingReasoning, generatingImage, consultingKnowledge, transcribingAudio, toolEvents, preparingTool })}
                       footer={generatingImage ? <GeneratingImage /> : consultingKnowledge ? <ConsultingKnowledge /> : transcribingAudio ? <TranscribingAudio /> : undefined}
                     />
                     </SoundAutoplayContext.Provider>
@@ -2970,6 +2970,16 @@ export default function ChatPage() {
 }
 
 /** Nome amigável (pt-BR) de uma ferramenta p/ a linha de status ao vivo. */
+// ações das ferramentas do Imaginai (o `action` dos argumentos), em linguagem de mesa
+const ACTION_LABELS: Record<string, string> = {
+  expand_world: "expandindo o mundo", build_world: "criando o mundo", set_concept: "registrando o conceito",
+  set_character: "registrando a ficha", roll_abilities: "rolando os atributos", begin_adventure: "abrindo a aventura",
+  spellbook: "escrevendo magias", entity_image: "guardando a imagem", resolve: "resolvendo a ação",
+  roll: "rolando o teste", adjudicate: "decidindo a consequência", roleplay: "interpretando o NPC",
+  saving_throw: "rolando a resistência", apply_effect: "aplicando o efeito", ally: "chamando um aliado",
+  fate: "decidindo o destino", new_character: "preparando um novo personagem", dice: "rolando dados",
+};
+
 function prettyTool(name: string): string {
   const map: Record<string, string> = {
     code__files__browse: "lendo arquivos do projeto",
@@ -2996,9 +3006,16 @@ function statusFor(f: {
   sending: boolean; phase: import("./useGeneration").StreamPhase; streaming: string; streamingReasoning: string;
   generatingImage: boolean; consultingKnowledge: boolean; transcribingAudio: boolean;
   toolEvents: ToolEvent[];
+  preparingTool?: import("./useGeneration").PreparingTool | null;
 }): string | null {
   if (!f.sending) return null;
   if (f.generatingImage || f.consultingKnowledge || f.transcribingAudio) return null;
+  if (f.preparingTool) {
+    // a IA está escrevendo a chamada (ex.: o JSON inteiro de uma expansão de mundo)
+    const kb = f.preparingTool.chars >= 1024 ? ` (${(f.preparingTool.chars / 1024).toFixed(1)} KB)` : "";
+    const oque = (f.preparingTool.action && ACTION_LABELS[f.preparingTool.action]) || prettyTool(f.preparingTool.name);
+    return `Escrevendo — ${oque}…${kb}`;
+  }
   const last = f.toolEvents.length ? f.toolEvents[f.toolEvents.length - 1] : null;
   if (last && last.kind === "call") return `Executando — ${prettyTool(last.name)}…`;
   if (f.phase === "preparing") return "Preparando contexto e aguardando o provider…";

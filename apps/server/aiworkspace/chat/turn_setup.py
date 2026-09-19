@@ -312,15 +312,10 @@ def _has_vision(model_config: ModelConfig | None) -> bool:
 
 
 def _token_warn(model_config: ModelConfig | None, user: User) -> int:
-    """Limite de aviso de uso (tokens/turno): override do modelo → padrão do perfil
-    → 0 (desligado). Guarda de custo: só AVISA, não bloqueia."""
-    if model_config is not None:
-        v = (model_config.capabilities or {}).get("token_warn")
-        if v is not None:
-            try:
-                return int(v)
-            except (TypeError, ValueError):
-                pass
+    """Limite de aviso de uso (tokens/turno) do PERFIL (Configurações → Conta); 0 =
+    desligado. Só avisa, não bloqueia. O override por modelo saiu da UI (19/09) — um
+    valor antigo gravado no modelo não pode continuar valendo sem controle visível."""
+    del model_config
     try:
         return int((user.profile or {}).get("token_warn") or 0)
     except (TypeError, ValueError):

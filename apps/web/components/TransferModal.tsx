@@ -171,6 +171,7 @@ export default function TransferModal({
   pinHint,
   hasConfig,
   onConfig,
+  childOpen = false,
 }: {
   title: string;
   items: TransferItem[];
@@ -186,8 +187,11 @@ export default function TransferModal({
   pinHint?: string;
   hasConfig?: (key: string) => boolean;
   onConfig?: (key: string) => void;
+  /** uma janela filha (a engrenagem) está aberta por cima: o clique nela — inclusive no
+   * X dela — acontece "fora" deste modal, e fechava os dois de uma vez */
+  childOpen?: boolean;
 }) {
-  const ref = useClickOutside<HTMLDivElement>(onClose);
+  const ref = useClickOutside<HTMLDivElement>(() => { if (!childOpen) onClose(); });
   const [q, setQ] = useState("");
   const [markLeft, setMarkLeft] = useState<Set<string>>(new Set());
   const [markRight, setMarkRight] = useState<Set<string>>(new Set());

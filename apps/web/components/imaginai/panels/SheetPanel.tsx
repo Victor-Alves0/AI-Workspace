@@ -199,7 +199,7 @@ export function ImaginaiCharacterEditor({
                 const mod = Number.isFinite(value) ? Math.floor((value - 10) / 2) : 0;
                 return <label key={key} className="flex flex-col items-center rounded-xl border border-border bg-surface2/60 px-2 py-2 transition-colors focus-within:border-violet-400/60">
                   <span className="text-[10px] font-semibold tracking-wide text-muted">{label}</span>
-                  <input aria-label={label} type="number" min="1" max="30" value={attributes[key] ?? "10"} onChange={(event) => setAttributes((current) => ({ ...current, [key]: event.target.value }))} className="mt-0.5 w-full bg-transparent text-center font-mono text-lg text-ink outline-none" />
+                  <input aria-label={label} type="number" min="1" max="30" value={attributes[key] ?? "10"} onChange={(event) => setAttributes((current) => ({ ...current, [key]: event.target.value }))} className="mt-0.5 w-full bg-transparent text-center font-mono text-lg text-ink outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none" />
                   <span className="font-mono text-[11px] text-violet-300">{signed(mod)}</span>
                 </label>;
               })}

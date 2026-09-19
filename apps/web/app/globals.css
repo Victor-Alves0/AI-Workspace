@@ -876,7 +876,7 @@ select:focus-visible {
   /* aba aberta: ~30% maior que a original (52vh / 27rem); encolhe só se faltar
    * espaço na coluna */
   .imaginai-feature-sheet {
-    height: min(68vh, 35rem);
+    height: min(54vh, 28rem);
     flex: 0 1 auto;
     min-height: 14rem;
   }

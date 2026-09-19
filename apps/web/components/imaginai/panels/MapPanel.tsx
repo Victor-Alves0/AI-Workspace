@@ -154,17 +154,23 @@ export function ImaginaiMapPanel({ campaignId }: { campaignId: string }) {
     try { (event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId); } catch { /* noop */ }
     gesture.current = null;
   }
-  function onWheel(event: React.WheelEvent) {
+  useEffect(() => {
     const vp = viewportRef.current;
     if (!vp) return;
-    const rect = vp.getBoundingClientRect();
-    const mx = event.clientX - rect.left, my = event.clientY - rect.top;
-    setView((v) => {
-      const k2 = clamp(v.k * (event.deltaY < 0 ? 1.12 : 1 / 1.12), 0.3, 2.5);
-      const wx = (mx - v.x) / v.k, wy = (my - v.y) / v.k;
-      return { k: k2, x: mx - wx * k2, y: my - wy * k2 };
-    });
-  }
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = vp.getBoundingClientRect();
+      const mx = event.clientX - rect.left, my = event.clientY - rect.top;
+      setView((v) => {
+        const k2 = clamp(v.k * (event.deltaY < 0 ? 1.12 : 1 / 1.12), 0.3, 2.5);
+        const wx = (mx - v.x) / v.k, wy = (my - v.y) / v.k;
+        return { k: k2, x: mx - wx * k2, y: my - wy * k2 };
+      });
+    };
+    vp.addEventListener("wheel", onWheel, { passive: false });
+    return () => vp.removeEventListener("wheel", onWheel);
+  }, [nodes.length, loading]);
   const zoom = (dir: number) => {
     const vp = viewportRef.current;
     const cx = (vp?.clientWidth ?? 0) / 2, cy = (vp?.clientHeight ?? 0) / 2;
@@ -197,7 +203,6 @@ export function ImaginaiMapPanel({ campaignId }: { campaignId: string }) {
             onPointerDown={onPointerDownBg}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
-            onWheel={onWheel}
             aria-label="Mapa dos locais descobertos"
             className="absolute inset-0 cursor-grab touch-none select-none active:cursor-grabbing"
           >

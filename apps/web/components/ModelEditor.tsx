@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, AudioLines, BookOpen, Box, Brain, Camera, Check, ChevronDown, ChevronRight, Ear, FileText, Gauge, GitBranch, Info, Loader2, Mic2, Pin, Play, Plus, Search, Settings, ShieldAlert, Sliders, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
+import { ArrowLeft, AudioLines, BookOpen, Box, Brain, Camera, Check, ChevronDown, ChevronRight, Ear, FileText, GitBranch, Info, Loader2, Mic2, Pin, Play, Plus, Search, Settings, ShieldAlert, Sliders, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { API_URL, api, ApiError } from "@/lib/api";
 import { fileToAvatarDataUrl } from "@/lib/image";
 import type { KnowledgeBase, MemoryBank, Model, ModelConfig, Skill, SystemTool, Tool } from "@/lib/types";
@@ -791,9 +791,6 @@ export default function ModelEditor({
   const [mem, setMem] = useState<MemoryCfg | null>(
     ((model?.capabilities as Record<string, unknown> | undefined)?.memory as MemoryCfg) ?? null,
   );
-  const [tokenWarn, setTokenWarn] = useState<number | "">(
-    (((model?.capabilities as Record<string, unknown> | undefined)?.token_warn) as number) ?? "",
-  );
   // Subagentes: permissão de delegar (capability) + config (time/modo/limites em filter_config)
   const [subOn, setSubOn] = useState<boolean>((model?.capabilities as Record<string, unknown> | undefined)?.subagents === true);
   const [myModels, setMyModels] = useState<ModelConfig[]>([]);
@@ -1206,7 +1203,6 @@ export default function ModelEditor({
       };
     }
     // aviso de uso alto por-modelo (override do perfil); vazio/0 = herda o perfil
-    if (tokenWarn !== "" && Number(tokenWarn) > 0) capabilities.token_warn = Number(tokenWarn);
     // permissão de delegar a subagentes (capability)
     capabilities.subagents = subOn;
     // config dos filtros: só mantém a de filtros ativos (ex.: vision_router)
@@ -1882,7 +1878,7 @@ export default function ModelEditor({
                               <span className="min-w-0 flex-1">
                                 <span className="block truncate text-sm text-ink">{capability.label}</span>
                                 {enabledMembers.length > 1 && (
-                                  <span className="block truncate text-[11px] text-muted">{enabledMembers.length} operações ativas</span>
+                                  <span className="block truncate text-[11px] text-muted">{enabledMembers.length} {enabledMembers.length === 1 ? "ferramenta ativa" : "ferramentas ativas"}</span>
                                 )}
                               </span>
                               {contextDirect && (
@@ -1904,14 +1900,6 @@ export default function ModelEditor({
                         )}
                       </div>
                     </div>
-                  )}
-                  {toolIds.length > 0 && !codeMode && (
-                    <p className="text-[11px] text-muted">Use “Gerenciar” para fixar (pin) as ferramentas mais usadas.</p>
-                  )}
-                  {toolIds.includes("builtin:web.search.query") && (
-                    <p className="text-[11px] text-muted">
-                      <span className="text-ink-soft">Web</span> é uma única capacidade; abra a engrenagem para escolher Pesquisa, Ler Página e Navegador. Pesquisa e leitura entram diretamente no contexto para evitar uma rodada extra de descoberta.
-                    </p>
                   )}
                 </div>
               </div>
@@ -2138,24 +2126,6 @@ export default function ModelEditor({
                 </>
               )}
             </div>
-          </div>
-
-          {/* Guarda de tokens — aviso de uso alto POR-MODELO (override do perfil) */}
-          <div className="mt-8 flex items-center justify-between gap-3 border-t border-border pt-7">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
-              <span className="text-muted"><Gauge size={15} /></span>
-              Aviso de uso alto
-              <InfoHint text="Marca respostas deste modelo que passarem deste nº de tokens. Vazio = usa o padrão do seu perfil. Só avisa, não bloqueia." />
-            </h2>
-            <input
-              type="number"
-              min={0}
-              step={1000}
-              value={tokenWarn}
-              onChange={(e) => setTokenWarn(e.target.value === "" ? "" : Number(e.target.value))}
-              placeholder="Padrão do perfil"
-              className="w-40 rounded-lg border border-border bg-surface px-3 py-1.5 text-right text-sm text-ink outline-none transition-colors focus:border-accent placeholder:text-muted"
-            />
           </div>
 
           {/* Subagentes — este modelo (orquestrador) pode delegar a outros (operários) */}
@@ -2459,16 +2429,17 @@ export default function ModelEditor({
 
       {toolsModal && (
         <TransferModal
-          title="Capacidades do modelo"
+          title="Ferramentas do modelo"
           items={toolCapabilities}
           selected={selectedCapabilityKeys}
           onChange={setSelectedCapabilities}
           onClose={() => setToolsModal(false)}
           availableLabel="Disponíveis"
           selectedLabel="Ativadas"
-          searchPlaceholder="Buscar capacidades…"
+          searchPlaceholder="Buscar ferramentas…"
           hasConfig={() => true}
           onConfig={setOpenToolCapability}
+          childOpen={!!openToolCapability}
         />
       )}
       {skillsModal && (
@@ -2578,10 +2549,6 @@ export default function ModelEditor({
         if (!capability) return null;
         return (
           <CfgModal title={`Configurar — ${capability.label}`} onClose={() => setOpenToolCapability(null)}>
-            <p className="mb-4 text-xs leading-5 text-muted">
-              Escolha as operações que este modelo pode usar. Elas aparecem como uma única capacidade no seletor,
-              mas cada operação mantém sua própria validação e permissão de segurança.
-            </p>
             <div className="space-y-2">
               {capability.members.map((member) => {
                 const item = transferItems.find((tool) => tool.key === member);

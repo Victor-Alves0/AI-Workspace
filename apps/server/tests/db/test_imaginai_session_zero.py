@@ -129,6 +129,9 @@ async def _expansao(url: str) -> dict:
             snap = await service.create_campaign(db, user.id, CampaignCreate(chat_id=chat.id))
             campaign = await db.get(ImaginaiCampaign, uuid.UUID(snap["campaign"]["id"]))
             await setup.set_concept(db, campaign, {"name": "C", "genre": "g", "premise": "p"})
+            # o jogador fala do personagem ANTES do mundo existir: já grava (caso real 19/09)
+            out["personagem_no_conceito"] = await setup.set_character(
+                db, campaign, {"name": "Victor Vallor", "class": "Feiticeiro", "race": "Humano"})
             # mundo "antigo": sem caminhos, como a Coroa de Cinzas
             await setup.build_world(db, campaign, user.id, {"locations": [
                 {"name": "Vilagris", "visibility": "known"}, {"name": "Catedral", "visibility": "known"},
@@ -160,7 +163,11 @@ async def _expansao(url: str) -> dict:
 def test_expandir_liga_o_mapa_antigo_e_nao_duplica(banco, engine):
     migrar(engine, "head")
     r = asyncio.run(_expansao(banco))
+    assert r["personagem_no_conceito"]["saved"] is True
+    assert r["personagem_no_conceito"]["character"]["name"] == "Victor Vallor"
     assert r["antes"]["routes"] == []
+    assert r["expansao"]["tell_player"].startswith("O mundo cresceu: +1 locais")
+    assert "Ferreiro" not in r["expansao"]["tell_player"]          # só números, sem spoiler
     assert r["expansao"]["added"]["locations"] == ["Forja"]
     assert r["expansao"]["added"]["new_paths"] == 2
     assert r["de_novo"]["added"] == {"locations": [], "npcs": [], "factions": [],

@@ -354,10 +354,20 @@ async def expand_world(
     settings["lore"] = (lore + novas_verdades)[-MAX_LORE_TOTAL:]
     campaign.settings = settings
     await db.commit()
+    contagem = {
+        "locais": len(novos_locais), "NPCs e criaturas": len(novos_npcs),
+        "facções": len(novas_faccoes), "verdades de lore": len(novas_verdades),
+        "caminhos no mapa": novos_caminhos // 2,
+    }
+    resumo = ", ".join(f"+{n} {nome}" for nome, n in contagem.items() if n) or "nada novo"
     return {
         "stage": campaign.setup_stage,
         "added": {"locations": novos_locais, "npcs": novos_npcs, "factions": novas_faccoes,
                   "lore_entries": len(novas_verdades), "new_paths": novos_caminhos // 2},
+        # o que o JOGADOR recebe: números, não o conteúdo — o resto se descobre jogando
+        "tell_player": f"O mundo cresceu: {resumo}.",
+        "spoiler_rule": "Não liste nomes, descrições, segredos nem relações do que foi criado. "
+                        "Responda só com tell_player (uma frase) e siga a cena.",
     }
 
 
@@ -583,7 +593,7 @@ async def roll_abilities(
 ) -> dict[str, Any]:
     """4d6 (descarta o menor) seis vezes, no servidor. Rola UMA vez por personagem:
     repetir devolve a mesma rolagem — senão bastaria pedir de novo até sair 18."""
-    _require(campaign, "character")
+    _require(campaign, "concept", "character")
     player = await _player(db, campaign)
     if player is None:
         raise SetupError("Personagem da campanha não encontrado.")
@@ -607,8 +617,9 @@ async def set_character(
     roller: Roller = secure_roller,
 ) -> dict[str, Any]:
     """Acumula as escolhas do jogador e recalcula a ficha pelas regras (dnd5e_build).
-    Nada aqui é "anotado": o que volta é o que ficou gravado."""
-    _require(campaign, "character")
+    Nada aqui é "anotado": o que volta é o que ficou gravado. Vale já no conceito: o
+    que o jogador contar do personagem antes do mundo existir não se perde."""
+    _require(campaign, "concept", "character")
     fields = fields if isinstance(fields, dict) else {}
     player = await _player(db, campaign)
     if player is None:
