@@ -2643,6 +2643,8 @@ export default function ChatPage() {
                       loading={imaginaiLoading}
                       error={imaginaiError}
                       onSnapshotChange={setImaginaiSnapshot}
+                      onSendMessage={(text) => { void send(text); }}
+                      busy={sending}
                     />
                   ) : null}
                 </div>

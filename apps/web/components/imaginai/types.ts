@@ -144,6 +144,11 @@ export type ImaginaiSpell = {
   duration: string;
   components: unknown;
   description: string;
+  damage?: string;
+  damage_type?: string;
+  attack?: boolean;
+  save?: string;
+  healing?: number;
 };
 
 export type ImaginaiSpells = {

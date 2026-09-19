@@ -19,6 +19,7 @@ from __future__ import annotations
 import unicodedata
 from typing import Any
 
+from . import spells as spellbook
 from .combat import Roller, secure_roller
 
 ABILITIES = ("strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma")
@@ -500,21 +501,7 @@ def _spells(raw: Any, caster: dict[str, Any] | None, scores: dict[str, int], lev
     if not caster or not isinstance(raw, list):
         return []
     mod = modifier(scores[caster["ability"]])
-    out = []
-    for item in raw[:40]:
-        record = item if isinstance(item, dict) else {"name": item}
-        nome = " ".join(str(record.get("name") or "").split())[:80]
-        if not nome:
-            continue
-        try:
-            nivel = max(0, min(9, int(record.get("level", 0) or 0)))
-        except (TypeError, ValueError):
-            nivel = 0
-        spell: dict[str, Any] = {"key": norm(nome).replace(" ", "_"), "name": nome, "level": nivel, "prepared": True}
-        dano = str(record.get("damage") or "").replace(" ", "")
-        if dano:
-            spell["effect"] = {"attack_modifier": mod + prof, "damage": dano}
-        out.append(spell)
+    out = spellbook.merge([], raw, mod + prof)
     cantrips, spells = _spell_limits(caster, scores, level)
     if level == 1:
         n_c = sum(1 for s in out if s["level"] == 0)
@@ -644,7 +631,10 @@ def derive(build: dict[str, Any], roller: Roller = secure_roller) -> tuple[dict[
                 "ability": caster["ability"], "save_dc": 8 + prof + mod, "attack_modifier": prof + mod,
                 "cantrips_known": cantrips, "spells_known": spells,
             }
+            # campos planos que o grimório (spells_snapshot) e o kernel leem
             sheet["spell_attack_modifier"] = prof + mod
+            sheet["spell_save_dc"] = 8 + prof + mod
+            sheet["spellcasting_ability"] = caster["ability"]
             sheet["spell_slots"] = spell_slots(caster, level)
             sheet["spells"] = _spells(build.get("spells"), caster, scores, level, prof)
     return sheet, missing, build

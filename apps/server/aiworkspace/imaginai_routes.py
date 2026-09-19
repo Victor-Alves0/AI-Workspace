@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -98,6 +99,26 @@ async def update_campaign(
         campaign = await service.owned_campaign(db, user.id, campaign_id)
         return await service.update_campaign(db, campaign, body)
     except Exception as exc:  # noqa: BLE001
+        _raise_domain_error(exc)
+
+
+class SpellsUpdate(BaseModel):
+    spells: list[dict[str, Any]] = Field(default_factory=list, max_length=60)
+
+
+@router.put("/campaigns/{campaign_id}/character/spells")
+async def replace_spells(
+    campaign_id: uuid.UUID,
+    body: SpellsUpdate,
+    user: ApprovedUser,
+    db: DbSession,
+):
+    """O jogador edita o grimório no painel (lista inteira)."""
+    try:
+        campaign = await service.owned_campaign(db, user.id, campaign_id, lock=True)
+        return await service.write_spells(db, campaign, body.spells, replace=True)
+    except Exception as exc:  # noqa: BLE001
+        await db.rollback()
         _raise_domain_error(exc)
 
 

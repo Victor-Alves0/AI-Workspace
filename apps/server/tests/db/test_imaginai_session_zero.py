@@ -107,3 +107,65 @@ def test_campos_textuais_nao_viram_numero_inventado(campo):
 
     _, missing, _ = dnd5e_build.derive({})
     assert any(m.startswith(campo) for m in missing)
+
+
+async def _expansao(url: str) -> dict:
+    from sqlalchemy import select
+
+    from aiworkspace.imaginai import service, setup
+    from aiworkspace.models import Chat, ImaginaiCampaign, ImaginaiEntity, User
+    from aiworkspace.schemas.imaginai import CampaignCreate
+
+    eng = create_async_engine(_async(url))
+    out: dict = {}
+    try:
+        async with AsyncSession(eng, expire_on_commit=False) as db:
+            user = User(email=f"{uuid.uuid4().hex[:8]}@t.local", hashed_password="x")
+            db.add(user)
+            await db.flush()
+            chat = Chat(user_id=user.id, title="t", mini_app="imaginai")
+            db.add(chat)
+            await db.commit()
+            snap = await service.create_campaign(db, user.id, CampaignCreate(chat_id=chat.id))
+            campaign = await db.get(ImaginaiCampaign, uuid.UUID(snap["campaign"]["id"]))
+            await setup.set_concept(db, campaign, {"name": "C", "genre": "g", "premise": "p"})
+            # mundo "antigo": sem caminhos, como a Coroa de Cinzas
+            await setup.build_world(db, campaign, user.id, {"locations": [
+                {"name": "Vilagris", "visibility": "known"}, {"name": "Catedral", "visibility": "known"},
+            ], "starting_location": "Vilagris"})
+            out["antes"] = await service.map_snapshot(db, campaign)
+            out["expansao"] = await setup.expand_world(db, campaign, user.id, {
+                "locations": [{"name": "Vilagris", "connections": ["Catedral"]},
+                              {"name": "Forja", "visibility": "known", "connections": ["Vilagris"]}],
+                "npcs": [{"name": "Ferreiro", "location": "Forja"}],
+                "lore": ["Os sinos tocam sozinhos."],
+            })
+            out["de_novo"] = await setup.expand_world(db, campaign, user.id, {
+                "locations": [{"name": "Forja"}], "npcs": [{"name": "Ferreiro"}],
+            })
+            out["depois"] = await service.map_snapshot(db, campaign)
+            forja = await db.scalar(select(ImaginaiEntity).where(
+                ImaginaiEntity.campaign_id == campaign.id, ImaginaiEntity.name == "Forja"))
+            out["ferreiro_na_forja"] = await db.scalar(select(ImaginaiEntity.id).where(
+                ImaginaiEntity.name == "Ferreiro", ImaginaiEntity.location_id == forja.id))
+            out["grimorio"] = await service.write_spells(db, campaign, [
+                {"name": "Raio de Fogo", "level": 0, "damage": "1d10", "range": "36 m",
+                 "description": "Um cisco de fogo."},
+            ])
+    finally:
+        await eng.dispose()
+    return out
+
+
+def test_expandir_liga_o_mapa_antigo_e_nao_duplica(banco, engine):
+    migrar(engine, "head")
+    r = asyncio.run(_expansao(banco))
+    assert r["antes"]["routes"] == []
+    assert r["expansao"]["added"]["locations"] == ["Forja"]
+    assert r["expansao"]["added"]["new_paths"] == 2
+    assert r["de_novo"]["added"] == {"locations": [], "npcs": [], "factions": [],
+                                     "lore_entries": 0, "new_paths": 0}
+    assert len(r["depois"]["routes"]) == 2
+    assert r["ferreiro_na_forja"] is not None
+    raio = r["grimorio"]["spells"][0]
+    assert raio["range"] == "36 m" and raio["description"] == "Um cisco de fogo."

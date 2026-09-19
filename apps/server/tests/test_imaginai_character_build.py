@@ -79,6 +79,7 @@ def test_feiticeiro_humano_sai_calculado_pelo_livro():
     # sábio: arcanismo + história; classe: persuasão + intuição
     assert set(sheet["skills"]) == {"arcana", "history", "persuasion", "insight"}
     assert sheet["spellcasting"]["save_dc"] == 13             # 8 + 2 + CAR(+3)
+    assert sheet["spell_save_dc"] == 13 and sheet["spell_attack_modifier"] == 5
     assert sheet["spell_slots"] == {"1": {"current": 2, "max": 2}}
     besta = next(a for a in sheet["attacks"] if a["name"] == "Besta leve")
     assert besta["attack_modifier"] == 4 and besta["damage"] == "1d8+2"

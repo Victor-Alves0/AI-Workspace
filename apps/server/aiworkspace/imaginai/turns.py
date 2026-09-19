@@ -27,6 +27,27 @@ from ..models import (
 from ..schemas.imaginai import ActionRequest
 from . import dnd5e_build, encounters, service, setup
 
+_SPELL_SCHEMA = {"type": "object", "properties": {
+    "name": {"type": "string"},
+    "level": {"type": "integer", "description": "0 = cantrip"},
+    "school": {"type": "string"},
+    "casting_time": {"type": "string"}, "range": {"type": "string"},
+    "duration": {"type": "string"},
+    "components": {"type": "string", "description": "e.g. V, S, M (a pinch of ash)"},
+    "concentration": {"type": "boolean"}, "ritual": {"type": "boolean"},
+    "description": {"type": "string", "description": "Full rules text, as the player would read it."},
+    "damage": {"type": "string", "description": "Dice, if it deals damage (e.g. 1d10)."},
+    "damage_type": {"type": "string"},
+    "save": {"type": "string", "description": "Saving throw ability, if it asks for one."},
+    "healing": {"type": "integer"},
+}}
+
+_EXPANSION_DESCRIPTION = (
+    "New locations/NPCs/factions/lore added to the EXISTING world. Link places with "
+    "`connections` (new and old names); an old location may be repeated with only "
+    "`connections` to add paths. Existing names are never duplicated."
+)
+
 _WORLD_TOOL = {
     "type": "function",
     "function": {
@@ -35,14 +56,17 @@ _WORLD_TOOL = {
             "Consulta e altera, com validação autoritativa, o mundo RPG deste chat. "
             "Use context para atualizar a cena; roleplay antes de interpretar um NPC; "
             "resolve antes de narrar qualquer ação ou consequência; roll quando a "
-            "resolução exigir teste; adjudicate para concluir ações criativas sem teste."
+            "resolução exigir teste; adjudicate para concluir ações criativas sem teste; "
+            "expand_world para acrescentar locais, NPCs, facções e lore ao mundo; spellbook "
+            "para escrever/atualizar magias da ficha (aprendeu uma magia, detalhou uma conhecida)."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["context", "roleplay", "resolve", "roll", "adjudicate"],
+                    "enum": ["context", "roleplay", "resolve", "roll", "adjudicate",
+                             "expand_world", "spellbook"],
                 },
                 "step": {
                     "type": "integer",
@@ -76,6 +100,11 @@ _WORLD_TOOL = {
                     "type": "string",
                     "description": "ID retornado por resolve; obrigatório em roll/adjudicate.",
                 },
+                "world": {"type": "object", "description": "expand_world: " + _EXPANSION_DESCRIPTION},
+                "spells": {"type": "array", "items": _SPELL_SCHEMA,
+                           "description": "spellbook: magias a adicionar/atualizar (por nome), completas."},
+                "remove_spells": {"type": "array", "items": {"type": "string"},
+                                  "description": "spellbook: nomes de magias a remover."},
                 "ability": {
                     "type": "string",
                     "enum": [
@@ -123,15 +152,16 @@ _SETUP_TOOL = {
             "set_character: save the player's choices — the server computes the sheet (HP, AC, "
             "proficiencies, attacks, spellcasting) and returns what is still missing. "
             "begin_adventure: end session zero, hand out starting equipment and start play, "
-            "once nothing is missing."
+            "once nothing is missing. expand_world: add more to the world already built."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["status", "set_concept", "build_world", "character_options",
-                             "roll_abilities", "set_character", "begin_adventure"],
+                    "enum": ["status", "set_concept", "build_world", "expand_world",
+                             "character_options", "roll_abilities", "set_character",
+                             "begin_adventure"],
                 },
                 "concept": {
                     "type": "object",
@@ -172,7 +202,7 @@ _SETUP_TOOL = {
                             "damage": {"type": "string", "description": "Dice, e.g. 1d6+2"},
                             "visibility": {"type": "string", "enum": ["known", "aware", "hidden"]},
                         }}},
-                        "starting_location": {"type": "string", "description": "Name of the location where play starts."},
+                        "starting_location": {"type": "string", "description": "Name of the location where play starts (build_world only)."},
                         "opening_scene": {"type": "string"},
                     },
                 },
@@ -200,10 +230,9 @@ _SETUP_TOOL = {
                         "expertise": {"type": "array", "items": {"type": "string"}, "description": "Rogue only."},
                         "hp_method": {"type": "string", "enum": ["average", "roll"],
                                       "description": "Levels above 1 only (level 1 is always max die + CON)."},
-                        "spells": {"type": "array", "items": {"type": "object", "properties": {
-                            "name": {"type": "string"}, "level": {"type": "integer"},
-                            "damage": {"type": "string", "description": "Dice, if it deals damage."},
-                        }}},
+                        "spells": {"type": "array", "items": _SPELL_SCHEMA,
+                                   "description": "Write each spell in full (casting time, range, "
+                                                  "duration, components, rules text)."},
                         "alignment": {"type": "string"},
                         "backstory": {"type": "string"},
                     },
@@ -212,6 +241,12 @@ _SETUP_TOOL = {
             "required": ["action"],
         },
     },
+}
+
+# expand_world no jogo usa o MESMO formato de mundo da sessão zero
+_WORLD_TOOL["function"]["parameters"]["properties"]["world"] = {
+    **_SETUP_TOOL["function"]["parameters"]["properties"]["world"],
+    "description": _EXPANSION_DESCRIPTION,
 }
 
 _SETUP_CONCEPT_PROTOCOL = """## Imaginai — sessão zero: o conceito da campanha
@@ -252,7 +287,9 @@ D&D 5e. Você conduz; o SERVIDOR calcula e rola — você nunca inventa número 
       mostre os seis resultados com os dados. Deixe ELE distribuir (sugira pela classe se pedir) e
       grave com `ability_method` + `abilities` (valores base, antes do bônus racial);
    c) perícias: mostre a lista da classe e deixe ele escolher (`class_skills`); Ladino escolhe
-      também `expertise`. Conjuradores: truques e magias de 1º nível dentro do limite retornado;
+      também `expertise`. Conjuradores: truques e magias de 1º nível dentro do limite retornado —
+      escreva cada magia COMPLETA (tempo de conjuração, alcance, duração, componentes, texto da
+      regra, dano/cura/salvaguarda), porque o jogador a lê no painel e você a usa para narrar;
    d) história e tendência.
 3. Depois de cada `set_character`, mostre ao jogador o que o servidor calculou (`sheet`: PV pelo
    dado de vida, CA pela armadura, salvaguardas e perícias proficientes, ataques, conjuração) e
@@ -297,6 +334,10 @@ Regras obrigatórias:
    se descreve pelo estado (`health`), nunca por número. `encounter.outcome`: `victory` (inimigos
    caídos), `escaped` (o jogador saiu do alcance) ou `defeat` (o personagem caiu — narre-o
    inconsciente, não morto, e não o faça agir). Não é possível descansar durante o combate.
+11. Quando o jogador pedir para expandir a campanha (ou a história pedir), use `expand_world`:
+   locais novos ligados aos antigos por `connections`, NPCs com persona, facções e lore coerentes
+   com o que já existe. O que é novo nasce oculto/rumor; revele jogando, não na lista.
+12. Magia aprendida ou detalhada vai para a ficha com `spellbook`, sempre completa.
 """
 
 
@@ -613,6 +654,23 @@ async def _npc_context(
     }
 
 
+def _corrupted_text(value: Any, path: str = "") -> str | None:
+    """Caminho do primeiro texto com U+FFFD (caractere perdido na geração), ou None."""
+    if isinstance(value, str):
+        return (path or "texto") if "�" in value else None
+    if isinstance(value, dict):
+        for key, item in value.items():
+            found = _corrupted_text(item, f"{path}.{key}" if path else str(key))
+            if found:
+                return found
+    if isinstance(value, list):
+        for i, item in enumerate(value):
+            found = _corrupted_text(item, f"{path}[{i}]")
+            if found:
+                return found
+    return None
+
+
 @dataclass(slots=True)
 class ImaginaiTurnBridge:
     user_id: uuid.UUID
@@ -620,6 +678,14 @@ class ImaginaiTurnBridge:
     turn_key: str
 
     async def run(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
+        corrompido = _corrupted_text(args)
+        if corrompido:
+            # o provedor às vezes parte um caractere acentuado entre tokens e manda
+            # U+FFFD ("contra��do"); gravado, vira lixo permanente no mundo/na ficha
+            return {
+                "error": "Texto corrompido nos argumentos (caractere U+FFFD em "
+                         f"{corrompido!r}). Reenvie a MESMA chamada com a acentuação correta."
+            }
         if name == "imaginai_setup":
             return await _setup_action(self, args)
         if name != "imaginai_world":
@@ -630,6 +696,20 @@ class ImaginaiTurnBridge:
             player = await _player(db, campaign)
             if action == "context":
                 return {"kind": "imaginai_context", "scene": await scene_context(db, campaign)}
+            if action == "expand_world":
+                locked = await service.owned_campaign(db, self.user_id, self.campaign_id, lock=True)
+                try:
+                    result = await setup.expand_world(db, locked, self.user_id, args.get("world") or {})
+                except setup.SetupError as exc:
+                    return {"kind": "imaginai_expansion", "error": str(exc)}
+                return {"kind": "imaginai_expansion", **result}
+            if action == "spellbook":
+                locked = await service.owned_campaign(db, self.user_id, self.campaign_id, lock=True)
+                result = await service.write_spells(
+                    db, locked, list(args.get("spells") or []),
+                    remove=list(args.get("remove_spells") or []),
+                )
+                return {"kind": "imaginai_spellbook", "spells": [s["name"] for s in result["spells"]]}
             if action == "roleplay":
                 return await _npc_context(db, campaign, player, str(args.get("target") or ""))
             if action == "resolve":
@@ -698,6 +778,8 @@ async def _setup_action(bridge: "ImaginaiTurnBridge", args: dict[str, Any]) -> d
                 result = await setup.set_concept(db, campaign, args.get("concept") or {})
             elif action == "build_world":
                 result = await setup.build_world(db, campaign, bridge.user_id, args.get("world") or {})
+            elif action == "expand_world":
+                result = await setup.expand_world(db, campaign, bridge.user_id, args.get("world") or {})
             elif action == "character_options":
                 result = {"stage": campaign.setup_stage, **dnd5e_build.options()}
             elif action == "roll_abilities":

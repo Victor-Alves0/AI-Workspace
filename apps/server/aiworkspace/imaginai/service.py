@@ -397,6 +397,47 @@ def _merge_character_setup(state: dict[str, Any], body: CharacterUpdate) -> dict
     return result
 
 
+def _spell_attack_modifier(dnd: dict[str, Any]) -> int | None:
+    value = dnd.get("spell_attack_modifier")
+    if value is None and isinstance(dnd.get("spellcasting"), dict):
+        value = dnd["spellcasting"].get("attack_modifier")
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+async def write_spells(
+    db: AsyncSession,
+    campaign: ImaginaiCampaign,
+    incoming: list[Any],
+    *,
+    remove: list[Any] | None = None,
+    replace: bool = False,
+) -> dict[str, Any]:
+    """Grava magias da ficha (jogador no painel ou narrador no jogo). `replace` troca a
+    lista inteira (editor); senão adiciona/atualiza por nome e remove as indicadas."""
+    from . import spells as spellbook
+
+    character = await db.scalar(
+        select(ImaginaiEntity).where(
+            ImaginaiEntity.campaign_id == campaign.id,
+            ImaginaiEntity.kind == "character",
+            ImaginaiEntity.key == "player",
+        ).with_for_update()
+    )
+    if character is None:
+        raise WorldNotFoundError("Personagem não encontrado")
+    state = copy.deepcopy(character.state or {})
+    dnd = state.get("dnd5e") if isinstance(state.get("dnd5e"), dict) else {}
+    atual = [] if replace else dnd.get("spells", [])
+    dnd["spells"] = spellbook.merge(atual, incoming, _spell_attack_modifier(dnd), remove=remove)
+    state["dnd5e"] = dnd
+    character.state = state
+    await db.commit()
+    return await spells_snapshot(db, campaign)
+
+
 async def update_player_character(
     db: AsyncSession,
     campaign: ImaginaiCampaign,
@@ -833,7 +874,13 @@ def _spells_from_state(dnd: dict[str, Any]) -> list[dict[str, Any]]:
             "range": str(record.get("range") or "")[:80],
             "duration": str(record.get("duration") or "")[:80],
             "components": record.get("components", []),
-            "description": str(record.get("description") or "")[:1_500],
+            "description": str(record.get("description") or "")[:4_000],
+            # mecânica editável pelo jogador (o `effect` é remontado ao salvar)
+            "damage": str(record.get("damage") or (record.get("effect") or {}).get("damage") or "")[:20],
+            "damage_type": str(record.get("damage_type") or "")[:40],
+            "attack": bool(record.get("attack", (record.get("effect") or {}).get("roll_kind") == "spell_attack")),
+            "save": str(record.get("save") or "")[:20],
+            "healing": _score(record.get("healing") or (record.get("effect") or {}).get("healing"), 0),
         })
     return sorted(spells, key=lambda spell: (spell["level"], spell["name"].casefold()))
 

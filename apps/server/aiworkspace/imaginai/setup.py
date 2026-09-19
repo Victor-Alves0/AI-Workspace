@@ -108,12 +108,15 @@ def _int(value: Any, fallback: int, low: int, high: int) -> int:
 _DAMAGE_RE = re.compile(r"^(\d+d\d+|\d+)([+-]\d+)?$")
 
 
-def validate_world(spec: Any) -> dict[str, Any]:
+def validate_world(spec: Any, existing: dict[str, str] | None = None) -> dict[str, Any]:
     """Normaliza o mundo proposto pelo narrador — ou explica o que falta.
 
     O modelo escreve o mundo livremente; aqui ele vira algo que o banco aceita: nomes
     obrigatórios, tetos de quantidade, local inicial que existe, NPC apontando para um
-    local conhecido, estatísticas de combate dentro de faixas sãs."""
+    local conhecido, estatísticas de combate dentro de faixas sãs.
+
+    `existing` ({nome_casefold: nome}) = expansão de um mundo que já existe: pode vir sem
+    local novo, e NPCs/caminhos podem apontar para locais antigos."""
     if not isinstance(spec, dict):
         raise SetupError("Envie o mundo como um objeto com locations, npcs, factions e lore.")
 
@@ -130,12 +133,13 @@ def validate_world(spec: Any) -> dict[str, Any]:
                     if isinstance(c, str) and _text(c, 255)
                 ],
             })
-    if not locations:
+    if not locations and existing is None:
         raise SetupError("O mundo precisa de ao menos um local (inclua o local inicial).")
 
-    nomes = {loc["name"].casefold(): loc["name"] for loc in locations}
+    nomes = dict(existing or {})
+    nomes.update({loc["name"].casefold(): loc["name"] for loc in locations})
     # rotas: só entre locais que existem, sem laço, e nos DOIS sentidos (estrada é de mão dupla)
-    ligacoes: dict[str, set[str]] = {loc["name"]: set() for loc in locations}
+    ligacoes: dict[str, set[str]] = {nome: set() for nome in nomes.values()}
     for loc in locations:
         for alvo in loc["connections"]:
             real = nomes.get(alvo.casefold())
@@ -144,9 +148,11 @@ def validate_world(spec: Any) -> dict[str, Any]:
                 ligacoes[real].add(loc["name"])
     for loc in locations:
         loc["connections"] = sorted(ligacoes[loc["name"]])
+    # caminhos novos que chegam a locais ANTIGOS (a expansão atualiza os dois lados)
+    edges = sorted({tuple(sorted((a, b))) for a, alvos in ligacoes.items() for b in alvos})
     inicial = _text(spec.get("starting_location"), 255)
     if inicial.casefold() not in nomes:
-        inicial = locations[0]["name"]          # sem indicação válida: o primeiro local
+        inicial = locations[0]["name"] if locations else ""   # sem indicação: o primeiro local
 
     npcs = []
     for raw in (spec.get("npcs") or [])[:MAX_NPCS]:
@@ -185,7 +191,7 @@ def validate_world(spec: Any) -> dict[str, Any]:
     lore = [_text(line, 600) for line in (spec.get("lore") or [])[:MAX_LORE] if _text(line, 600)]
     return {
         "locations": locations, "starting_location": inicial, "npcs": npcs,
-        "factions": factions, "lore": lore,
+        "factions": factions, "lore": lore, "edges": edges,
         "opening_scene": _text(spec.get("opening_scene"), 5000),
     }
 
@@ -197,6 +203,115 @@ def _visibility_state(visibility: str) -> dict[str, Any]:
     if visibility == "aware":
         return {"discovery": "aware"}
     return {"hidden": True}
+
+
+MAX_LORE_TOTAL = 60
+
+
+async def expand_world(
+    db: AsyncSession, campaign: ImaginaiCampaign, user_id: uuid.UUID, spec: Any,
+) -> dict[str, Any]:
+    """Faz o mundo crescer sem refazê-lo: locais, NPCs, facções e lore NOVOS, e caminhos
+    ligando o novo ao antigo (ou antigos entre si — é assim que um mapa sem rotas ganha
+    linhas). Nome que já existe não duplica: um local antigo repetido só recebe caminhos."""
+    _require(campaign, "character", "play")
+    antigos = {
+        e.name.casefold(): e for e in await db.scalars(
+            select(ImaginaiEntity).where(
+                ImaginaiEntity.campaign_id == campaign.id,
+                ImaginaiEntity.kind == "location",
+                ImaginaiEntity.active.is_(True),
+            ).with_for_update()
+        )
+    }
+    world = validate_world(spec, existing={k: e.name for k, e in antigos.items()})
+    taken = set(await db.scalars(
+        select(ImaginaiEntity.key).where(ImaginaiEntity.campaign_id == campaign.id)
+    ))
+    nomes_pessoas = {
+        n.casefold() for n in await db.scalars(
+            select(ImaginaiEntity.name).where(
+                ImaginaiEntity.campaign_id == campaign.id,
+                ImaginaiEntity.kind.in_(("npc", "creature", "faction")),
+            )
+        )
+    }
+
+    locais = dict(antigos)
+    novos_locais = []
+    for loc in world["locations"]:
+        if loc["name"].casefold() in locais:
+            continue
+        entity = ImaginaiEntity(
+            campaign_id=campaign.id, user_id=user_id, kind="location",
+            key=slug(loc["name"], taken), name=loc["name"], description=loc["description"],
+            private_notes=loc["secret"] or None,
+            state={**_visibility_state(loc["visibility"]), "map": {"connections": []}},
+        )
+        db.add(entity)
+        locais[loc["name"].casefold()] = entity
+        novos_locais.append(loc["name"])
+    await db.flush()
+
+    novos_caminhos = 0
+    for a, b in world["edges"]:
+        for origem, destino in ((a, b), (b, a)):
+            entity = locais.get(origem.casefold())
+            if entity is None:
+                continue
+            state = copy.deepcopy(entity.state or {})
+            mapa = state.get("map") if isinstance(state.get("map"), dict) else {}
+            atuais = [str(c) for c in mapa.get("connections") or []]
+            if destino.casefold() not in {c.casefold() for c in atuais}:
+                atuais.append(destino)
+                novos_caminhos += 1
+            state["map"] = {**mapa, "connections": atuais}
+            entity.state = state
+
+    novos_npcs = []
+    for npc in world["npcs"]:
+        if npc["name"].casefold() in nomes_pessoas:
+            continue
+        dnd: dict[str, Any] = {"hp": {"current": npc["hp"], "max": npc["hp"]},
+                               "armor_class": npc["ac"], "conditions": []}
+        if npc["damage"]:
+            dnd["attacks"] = [{"key": "attack", "name": "Ataque",
+                               "attack_modifier": npc["attack_bonus"], "damage": npc["damage"]}]
+        state = {**_visibility_state(npc["visibility"]), "dnd5e": dnd}
+        if npc["hostile"]:
+            state["hostile"] = True
+        local = locais.get((npc["location"] or "").casefold())
+        db.add(ImaginaiEntity(
+            campaign_id=campaign.id, user_id=user_id, kind=npc["kind"],
+            key=slug(npc["name"], taken), name=npc["name"], description=npc["description"],
+            location_id=local.id if local is not None else None,
+            private_notes=npc["persona"] or None, state=state,
+        ))
+        novos_npcs.append(npc["name"])
+
+    novas_faccoes = []
+    for faction in world["factions"]:
+        if faction["name"].casefold() in nomes_pessoas:
+            continue
+        db.add(ImaginaiEntity(
+            campaign_id=campaign.id, user_id=user_id, kind="faction",
+            key=slug(faction["name"], taken), name=faction["name"],
+            description=faction["description"], private_notes=faction["secret"] or None,
+            state=_visibility_state(faction["visibility"]),
+        ))
+        novas_faccoes.append(faction["name"])
+
+    settings = copy.deepcopy(campaign.settings or {})
+    lore = [str(x) for x in settings.get("lore") or []]
+    novas_verdades = [x for x in world["lore"] if x not in lore]
+    settings["lore"] = (lore + novas_verdades)[-MAX_LORE_TOTAL:]
+    campaign.settings = settings
+    await db.commit()
+    return {
+        "stage": campaign.setup_stage,
+        "added": {"locations": novos_locais, "npcs": novos_npcs, "factions": novas_faccoes,
+                  "lore_entries": len(novas_verdades), "new_paths": novos_caminhos // 2},
+    }
 
 
 # --------------------------------------------------------------------------- #

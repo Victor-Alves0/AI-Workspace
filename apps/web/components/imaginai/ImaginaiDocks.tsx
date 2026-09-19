@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BookOpen, Check, ChevronLeft, ChevronRight, Heart, Loader2, Settings, Shield, Sparkles, Users, X } from "lucide-react";
+import { BookOpen, Check, ChevronLeft, ChevronRight, Heart, Loader2, Pencil, Settings, Shield, Sparkles, Users, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ImaginaiSnapshot, ImaginaiSystemDefinition } from "./types";
 import { DND_CHARACTER_SECTIONS, DND_WORLD_SECTIONS, ImaginaiSheetHead, type CharacterSection, type WorldSection } from "./shared";
@@ -18,16 +18,23 @@ import { ImaginaiSheetPanel } from "./panels/SheetPanel";
  * Docks do primeiro sistema do Imaginai. A composição em dois painéis permite que
  * sistemas futuros forneçam seus próprios campos sem alterar a coluna central.
  */
+const EXPAND_FOCUS = ["locais", "NPCs", "facções", "criaturas", "lore", "caminhos no mapa"];
+
 export default function ImaginaiDocks({
   snapshot,
   loading,
   error,
   onSnapshotChange,
+  onSendMessage,
+  busy = false,
 }: {
   snapshot: ImaginaiSnapshot | null;
   loading: boolean;
   error: string | null;
   onSnapshotChange: (snapshot: ImaginaiSnapshot) => void;
+  /** manda uma mensagem no chat da campanha (a IA age sobre ela) */
+  onSendMessage?: (text: string) => void;
+  busy?: boolean;
 }) {
   const [characterSection, setCharacterSection] = useState<CharacterSection | null>(null);
   const [worldSection, setWorldSection] = useState<WorldSection | null>(null);
@@ -44,6 +51,9 @@ export default function ImaginaiDocks({
   const [startingLocationNameDraft, setStartingLocationNameDraft] = useState("");
   const [startingLocationDescriptionDraft, setStartingLocationDescriptionDraft] = useState("");
   const [savingConfig, setSavingConfig] = useState(false);
+  const [expandOpen, setExpandOpen] = useState(false);
+  const [expandFocus, setExpandFocus] = useState<string[]>(["locais", "NPCs", "caminhos no mapa"]);
+  const [expandDirection, setExpandDirection] = useState("");
   const [configError, setConfigError] = useState<string | null>(null);
   const dnd = (snapshot?.character?.state.dnd5e ?? {}) as Record<string, unknown>;
   const hp = (dnd.hp ?? {}) as Record<string, unknown>;
@@ -115,6 +125,18 @@ export default function ImaginaiDocks({
     setStartingLocationDescriptionDraft(snapshot.location?.description ?? "");
     setConfigError(null);
     setConfigOpen(true);
+  }
+
+  function requestExpansion() {
+    if (!onSendMessage || busy || expandFocus.length === 0) return;
+    const direcao = expandDirection.trim();
+    onSendMessage(
+      `Expanda a campanha com ${expandFocus.join(", ")}, coerentes e ligados ao que já existe.`
+      + (direcao ? ` Direção: ${direcao}` : ""),
+    );
+    setExpandOpen(false);
+    setExpandDirection("");
+    setConfigOpen(false);
   }
 
   async function saveCampaignConfig(event: React.FormEvent<HTMLFormElement>) {
@@ -296,7 +318,7 @@ export default function ImaginaiDocks({
             aria-labelledby="imaginai-campaign-settings-title"
             onSubmit={saveCampaignConfig}
             onMouseDown={(event) => event.stopPropagation()}
-            className="max-h-[calc(100dvh-2rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-surface p-4 shadow-menu"
+            className="max-h-[calc(100dvh-2rem)] w-full max-w-4xl overflow-y-auto rounded-2xl border border-border bg-surface p-5 shadow-menu"
           >
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -307,53 +329,70 @@ export default function ImaginaiDocks({
                 <X size={17} />
               </button>
             </div>
-            <label className="mt-4 block text-xs font-medium text-ink-soft">
-              Nome da campanha
-              <input
-                autoFocus
-                value={campaignNameDraft}
-                onChange={(event) => setCampaignNameDraft(event.target.value)}
-                maxLength={255}
-                required
-                className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-ink outline-none transition-colors focus:border-violet-400/70"
-              />
-            </label>
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <label className="block text-xs font-medium text-ink-soft">
-                Narração
-                <select value={narrationDraft} onChange={(event) => setNarrationDraft(event.target.value as typeof narrationDraft)} className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-ink outline-none focus:border-violet-400/70">
-                  <option value="balanced">Equilibrada</option>
-                  <option value="cinematic">Cinematográfica</option>
-                  <option value="gritty">Realista</option>
-                </select>
-              </label>
-              <label className="block text-xs font-medium text-ink-soft">
-                Dificuldade
-                <select value={difficultyDraft} onChange={(event) => setDifficultyDraft(event.target.value as typeof difficultyDraft)} className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-ink outline-none focus:border-violet-400/70">
-                  <option value="story">Narrativa</option>
-                  <option value="balanced">Equilibrada</option>
-                  <option value="challenging">Desafiadora</option>
-                </select>
-              </label>
-            </div>
-            <div className="mt-4 border-t border-border pt-4">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">Fundação do mundo</p>
-              <label className="mt-2 block text-xs font-medium text-ink-soft">Premissa
-                <textarea value={premiseDraft} onChange={(event) => setPremiseDraft(event.target.value)} maxLength={5000} rows={3} placeholder="O que torna esta campanha única?" className="mt-1.5 w-full resize-y rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm leading-5 text-ink outline-none focus:border-violet-400/70" />
-              </label>
-              <label className="mt-3 block text-xs font-medium text-ink-soft">Cena de abertura
-                <textarea value={openingSceneDraft} onChange={(event) => setOpeningSceneDraft(event.target.value)} maxLength={5000} rows={3} placeholder="Onde a história começa e o que está acontecendo?" className="mt-1.5 w-full resize-y rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm leading-5 text-ink outline-none focus:border-violet-400/70" />
-              </label>
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="mt-4 grid gap-5 md:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+              <div className="space-y-3">
+                <label className="block text-xs font-medium text-ink-soft">
+                  Nome da campanha
+                  <input
+                    autoFocus
+                    value={campaignNameDraft}
+                    onChange={(event) => setCampaignNameDraft(event.target.value)}
+                    maxLength={255}
+                    required
+                    className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-ink outline-none transition-colors focus:border-violet-400/70"
+                  />
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block text-xs font-medium text-ink-soft">
+                    Narração
+                    <select value={narrationDraft} onChange={(event) => setNarrationDraft(event.target.value as typeof narrationDraft)} className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-ink outline-none focus:border-violet-400/70">
+                      <option value="balanced">Equilibrada</option>
+                      <option value="cinematic">Cinematográfica</option>
+                      <option value="gritty">Realista</option>
+                    </select>
+                  </label>
+                  <label className="block text-xs font-medium text-ink-soft">
+                    Dificuldade
+                    <select value={difficultyDraft} onChange={(event) => setDifficultyDraft(event.target.value as typeof difficultyDraft)} className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-ink outline-none focus:border-violet-400/70">
+                      <option value="story">Narrativa</option>
+                      <option value="balanced">Equilibrada</option>
+                      <option value="challenging">Desafiadora</option>
+                    </select>
+                  </label>
+                </div>
                 <label className="block text-xs font-medium text-ink-soft">Local inicial
                   <input value={startingLocationNameDraft} onChange={(event) => setStartingLocationNameDraft(event.target.value)} maxLength={255} required className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-ink outline-none focus:border-violet-400/70" />
                 </label>
                 <label className="block text-xs font-medium text-ink-soft">Descrição do local
-                  <textarea value={startingLocationDescriptionDraft} onChange={(event) => setStartingLocationDescriptionDraft(event.target.value)} maxLength={5000} rows={2} placeholder="O que o personagem percebe?" className="mt-1.5 w-full resize-y rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm leading-5 text-ink outline-none focus:border-violet-400/70" />
+                  <textarea value={startingLocationDescriptionDraft} onChange={(event) => setStartingLocationDescriptionDraft(event.target.value)} maxLength={5000} rows={5} placeholder="O que o personagem percebe?" className="mt-1.5 w-full resize-y rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm leading-5 text-ink outline-none focus:border-violet-400/70" />
+                </label>
+              </div>
+              <div className="space-y-3">
+                <label className="block text-xs font-medium text-ink-soft">Premissa
+                  <textarea value={premiseDraft} onChange={(event) => setPremiseDraft(event.target.value)} maxLength={5000} rows={7} placeholder="O que torna esta campanha única?" className="mt-1.5 w-full resize-y rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm leading-5 text-ink outline-none focus:border-violet-400/70" />
+                </label>
+                <label className="block text-xs font-medium text-ink-soft">Cena de abertura
+                  <textarea value={openingSceneDraft} onChange={(event) => setOpeningSceneDraft(event.target.value)} maxLength={5000} rows={7} placeholder="Onde a história começa e o que está acontecendo?" className="mt-1.5 w-full resize-y rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm leading-5 text-ink outline-none focus:border-violet-400/70" />
                 </label>
               </div>
             </div>
-            <button type="button" onClick={() => setWorldBuilderOpen(true)} className="mt-4 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-violet-400/25 bg-violet-500/10 px-3 text-sm font-medium text-violet-100 transition-colors hover:bg-violet-500/20"><Sparkles size={15} /> Construir mundo e NPCs</button>
+            <div className="mt-5 grid gap-2 border-t border-border pt-4 sm:grid-cols-2">
+              <button type="button" onClick={() => setWorldBuilderOpen(true)} className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border bg-surface2/60 px-3 text-sm font-medium text-ink-soft transition-colors hover:bg-hover hover:text-ink"><Pencil size={15} /> Construir mundo e NPCs</button>
+              <button type="button" aria-expanded={expandOpen} disabled={!onSendMessage} onClick={() => setExpandOpen((open) => !open)} className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-violet-400/25 bg-violet-500/10 px-3 text-sm font-medium text-violet-100 transition-colors hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40"><Sparkles size={15} /> Expandir campanha</button>
+            </div>
+            {expandOpen ? (
+              <div className="mt-3 rounded-xl border border-violet-400/20 bg-violet-500/[0.06] p-3">
+                <div className="imaginai-chips flex-wrap" role="group" aria-label="O que expandir">
+                  {EXPAND_FOCUS.map((focus) => (
+                    <button key={focus} type="button" aria-pressed={expandFocus.includes(focus)} onClick={() => setExpandFocus((current) => current.includes(focus) ? current.filter((item) => item !== focus) : [...current, focus])} className="imaginai-chip">{focus}</button>
+                  ))}
+                </div>
+                <textarea value={expandDirection} onChange={(event) => setExpandDirection(event.target.value)} maxLength={1500} rows={2} placeholder="Direção (opcional): ex. mais sobre a Igreja do Osso, uma cidade portuária ao sul…" className="mt-2 w-full resize-y rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm leading-5 text-ink outline-none focus:border-violet-400/70" />
+                <div className="mt-2 flex justify-end">
+                  <button type="button" disabled={busy || expandFocus.length === 0} onClick={requestExpansion} className="flex min-h-10 items-center gap-2 rounded-xl bg-violet-500 px-4 text-sm font-medium text-white transition-colors hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50"><Sparkles size={14} /> Gerar</button>
+                </div>
+              </div>
+            ) : null}
             {configError ? <p className="mt-3 text-xs text-rose-400">{configError}</p> : null}
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" onClick={() => setConfigOpen(false)} className="min-h-11 cursor-pointer rounded-xl px-3 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">Cancelar</button>
