@@ -39,6 +39,12 @@ class SearchConfig:
     domain_filter: tuple[str, ...] = ()
 
 
+class SearchProviderError(Exception):
+    """O provider respondeu, mas não tem como entregar resultado — e o motivo importa
+    (ex.: SearXNG no ar com todos os motores barrados por CAPTCHA). Sem isto o motivo
+    virava "nenhum resultado" e ninguém sabia o que consertar."""
+
+
 _PROVIDERS = {
     "searxng": lambda q, c: _searxng(q, c),
     "tavily": lambda q, c: _tavily(q, c),
@@ -54,15 +60,27 @@ def _blocked(url: str, domains: tuple[str, ...]) -> bool:
     return any(d and d.lower() in u for d in domains)
 
 
-async def _one(provider: str, query: str, cfg: SearchConfig) -> list[SearchResult]:
+async def _one(
+    provider: str, query: str, cfg: SearchConfig
+) -> tuple[list[SearchResult], str | None]:
     fn = _PROVIDERS.get((provider or "").lower(), _PROVIDERS["duckduckgo"])
     try:
-        return await fn(query, cfg)
-    except Exception:  # noqa: BLE001 - um provider falho não derruba a busca
-        return []
+        return await fn(query, cfg), None
+    except Exception as exc:  # noqa: BLE001 - um provider falho não derruba a busca
+        motivo = str(exc).strip() or type(exc).__name__
+        return [], f"{provider}: {motivo[:300]}"
 
 
 async def web_search(query: str, cfg: SearchConfig) -> list[SearchResult]:
+    results, _ = await web_search_detailed(query, cfg)
+    return results
+
+
+async def web_search_detailed(
+    query: str, cfg: SearchConfig
+) -> tuple[list[SearchResult], list[str]]:
+    """Como `web_search`, mais o motivo de cada provider que falhou — para o teste de
+    conexão e a tool dizerem POR QUE veio vazio."""
     # define a lista de mecanismos a consultar
     if cfg.multi and cfg.providers:
         provs = list(dict.fromkeys(p.lower() for p in cfg.providers if p)) or ["duckduckgo"]
@@ -70,8 +88,12 @@ async def web_search(query: str, cfg: SearchConfig) -> list[SearchResult]:
         provs = [(cfg.provider or "duckduckgo").lower()]
 
     results: list[SearchResult] = []
+    errors: list[str] = []
     for p in provs:
-        results.extend(await _one(p, query, cfg))
+        found, err = await _one(p, query, cfg)
+        results.extend(found)
+        if err:
+            errors.append(err)
 
     # filtro de domínio + dedup por URL, preservando a ordem
     out: list[SearchResult] = []
@@ -87,7 +109,7 @@ async def web_search(query: str, cfg: SearchConfig) -> list[SearchResult]:
         out.append(r)
         if len(out) >= max(1, cfg.max_results):
             break
-    return out
+    return out, errors
 
 
 async def _duckduckgo(query: str, cfg: SearchConfig) -> list[SearchResult]:
@@ -117,14 +139,36 @@ async def _searxng(query: str, cfg: SearchConfig) -> list[SearchResult]:
         )
         resp.raise_for_status()
         data = resp.json()
+    results = data.get("results") or []
+    if not results:
+        # o SearXNG só repassa os motores (Google, DuckDuckGo…); de IP de servidor eles
+        # costumam devolver CAPTCHA. Ele lista quem falhou em `unresponsive_engines`.
+        falhas = _searxng_failures(data)
+        if falhas:
+            raise SearchProviderError(
+                "SearXNG respondeu, mas os motores falharam: " + ", ".join(falhas)
+            )
     return [
         {
             "title": r.get("title", ""),
             "url": r.get("url", ""),
             "content": r.get("content", ""),
         }
-        for r in data.get("results", [])[: cfg.max_results]
+        for r in results[: cfg.max_results]
     ]
+
+
+def _searxng_failures(data: dict) -> list[str]:
+    """`unresponsive_engines` = [[motor, motivo], ...] → ["duckduckgo (CAPTCHA)", ...]."""
+    out: list[str] = []
+    for item in data.get("unresponsive_engines") or []:
+        if isinstance(item, (list, tuple)) and item:
+            nome = str(item[0])
+            motivo = str(item[1]) if len(item) > 1 and item[1] else ""
+            out.append(f"{nome} ({motivo})" if motivo else nome)
+        elif isinstance(item, str):
+            out.append(item)
+    return out
 
 
 async def _tavily(query: str, cfg: SearchConfig) -> list[SearchResult]:

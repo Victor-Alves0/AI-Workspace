@@ -222,10 +222,12 @@ async def test_web_search(
              "searxng_url": body.searxng_url or ""}
     cfg = sift_service.search_config_from_secrets(tavily, brave, prefs)
     try:
-        from .search import web_search
-        results = await web_search("teste de conexão", cfg)
-        return {"ok": len(results) > 0, "count": len(results),
-                "error": None if results else "Nenhum resultado retornado"}
+        from .search import web_search_detailed
+        results, errors = await web_search_detailed("teste de conexão", cfg)
+        erro = None
+        if not results:
+            erro = "; ".join(errors) if errors else "Nenhum resultado retornado"
+        return {"ok": len(results) > 0, "count": len(results), "error": erro and erro[:400]}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "count": 0, "error": str(exc)[:200]}
 

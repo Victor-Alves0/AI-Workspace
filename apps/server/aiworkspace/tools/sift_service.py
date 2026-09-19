@@ -33,7 +33,7 @@ from sift.sandbox import SubprocessSandbox
 
 from .. import deep_search, finance
 from ..config import get_settings
-from ..search import SearchConfig, web_search
+from ..search import SearchConfig, web_search, web_search_detailed
 from . import toolctx
 from .sandbox import extract_valves, run_in_subprocess
 
@@ -1159,7 +1159,11 @@ def _register_builtins(
         def _web_search(query: str = "", limit: int = 5) -> dict[str, Any]:
             try:
                 n = max(1, min(int(limit or 5), 10))
-                results = asyncio.run(web_search(query, search_cfg))
+                results, errors = asyncio.run(web_search_detailed(query, search_cfg))
+                if not results and errors:
+                    # vazio POR FALHA ≠ vazio de verdade: o modelo precisa saber que a
+                    # busca não funcionou, senão conclui que "não existe nada sobre isso"
+                    return {"results": [], "error": "search unavailable — " + "; ".join(errors)}
                 # enxuga: trecho curto, sem campos redundantes → poucos tokens
                 trimmed = [
                     {

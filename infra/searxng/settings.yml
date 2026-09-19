@@ -28,5 +28,18 @@ search:
   safe_search: 1
   autocomplete: ""
 
-# motores: usa os padrões do SearXNG (Google, Bing, DuckDuckGo, Wikipedia, …).
-# Para desligar algum, adicione aqui `engines: [{name: <engine>, disabled: true}]`.
+# motores: os padrões do SearXNG + alguns extras ligados abaixo.
+# Rodando numa VPS/datacenter, Google e DuckDuckGo costumam responder CAPTCHA ao IP do
+# servidor ("SearxEngineCaptchaException" no log) — com só eles, TODA busca volta vazia.
+# Por isso ligamos motores que toleram melhor IP de servidor: com vários, basta um
+# responder. O teste de conexão (Configurações → Pesquisa) lista quais falharam e por quê.
+# Para desligar algum: `- name: <motor>` + `disabled: true`.
+engines:
+  - name: bing
+    disabled: false
+  - name: mojeek
+    disabled: false
+  - name: brave
+    disabled: false
+  - name: wikipedia
+    disabled: false
