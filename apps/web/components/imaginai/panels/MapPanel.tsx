@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { Loader2, MapPin, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ImaginaiMap } from "../types";
-import { ImaginaiFeatureStatus } from "../shared";
+import { EntityImage, ImaginaiFeatureStatus } from "../shared";
 
 type Node = ImaginaiMap["locations"][number] & { px: number; py: number };
 
@@ -139,7 +139,8 @@ function LocationDialog({ node, paths, onGo, onClose }: { node: Node; paths: Nod
           </div>
           <button type="button" onClick={onClose} aria-label="Fechar" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-ink"><X size={16} /></button>
         </div>
-        <p className="mt-3 max-h-[50vh] overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-ink-soft">{node.description || "Sem descrição registrada."}</p>
+        {node.image_url ? <EntityImage url={node.image_url} alt={node.name} className="mt-3 aspect-video w-full" /> : null}
+        <p className="mt-3 max-h-[40vh] overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-ink-soft">{node.description || "Sem descrição registrada."}</p>
         {paths.length ? (
           <div className="mt-4">
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">Caminhos</p>

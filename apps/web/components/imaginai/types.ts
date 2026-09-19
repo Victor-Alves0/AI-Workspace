@@ -1,6 +1,7 @@
 /** Contratos do mini app Imaginai (espelham os schemas do backend). */
 
 export type ImaginaiEntity = {
+  image_url?: string | null;
   id: string;
   kind: string;
   key: string;
@@ -119,6 +120,7 @@ export type ImaginaiInventory = {
 };
 
 export type ImaginaiCodexResult = {
+  image_url?: string | null;
   id: string;
   result_type: "entity" | "lore";
   kind: string;
@@ -160,7 +162,7 @@ export type ImaginaiSpells = {
 };
 
 export type ImaginaiMap = {
-  locations: { id: string; name: string; description: string; current: boolean; x: number | null; y: number | null; index: number }[];
+  locations: { id: string; name: string; description: string; current: boolean; x: number | null; y: number | null; index: number; image_url?: string | null }[];
   routes: { from: string; to: string; label: string }[];
 };
 

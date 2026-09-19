@@ -66,7 +66,7 @@ _WORLD_TOOL = {
                 "action": {
                     "type": "string",
                     "enum": ["context", "roleplay", "resolve", "roll", "adjudicate",
-                             "expand_world", "spellbook"],
+                             "expand_world", "spellbook", "entity_image"],
                 },
                 "step": {
                     "type": "integer",
@@ -105,6 +105,9 @@ _WORLD_TOOL = {
                            "description": "spellbook: magias a adicionar/atualizar (por nome), completas."},
                 "remove_spells": {"type": "array", "items": {"type": "string"},
                                   "description": "spellbook: nomes de magias a remover."},
+                "image_url": {"type": "string", "description":
+                              "entity_image: URL devolvida pela ferramenta de imagem (/images/<id>?t=...) "
+                              "para vincular ao `target`. Sem ela, devolve a imagem já salva do target."},
                 "ability": {
                     "type": "string",
                     "enum": [
@@ -161,7 +164,7 @@ _SETUP_TOOL = {
                     "type": "string",
                     "enum": ["status", "set_concept", "build_world", "expand_world",
                              "character_options", "roll_abilities", "set_character",
-                             "begin_adventure"],
+                             "begin_adventure", "entity_image"],
                 },
                 "concept": {
                     "type": "object",
@@ -206,6 +209,10 @@ _SETUP_TOOL = {
                         "opening_scene": {"type": "string"},
                     },
                 },
+                "target": {"type": "string", "description": "entity_image: entity name (or 'player')."},
+                "image_url": {"type": "string", "description":
+                              "entity_image: URL returned by the image tool, to link it to `target`; "
+                              "omit to get the saved image."},
                 "character": {
                     "type": "object",
                     "description": "Partial updates accumulate: send only what the player decided now.",
@@ -338,6 +345,11 @@ Regras obrigatórias:
    locais novos ligados aos antigos por `connections`, NPCs com persona, facções e lore coerentes
    com o que já existe. O que é novo nasce oculto/rumor; revele jogando, não na lista.
 12. Magia aprendida ou detalhada vai para a ficha com `spellbook`, sempre completa.
+13. Imagens SÓ quando o jogador pedir (retrato de NPC, local, item, do personagem). Gere com a
+   ferramenta de imagem disponível e, em seguida, vincule com `entity_image` {target, image_url}
+   — assim ela fica no Codex/mapa/ficha e pode ser reusada. Para mostrar de novo uma que já existe
+   (`images_saved` no estado), chame `entity_image` {target} e use o `markdown` devolvido; não gere
+   outra.
 """
 
 
@@ -359,6 +371,11 @@ async def _setup_turn_tools(
     sons = await sound_effects.instruction_if_available(db, user_id)
     if sons:
         protocolo = f"{protocolo}\n{sons}"
+    from . import images
+
+    salvas = await images.images_in_campaign(db, campaign)
+    if salvas:
+        estado["images_saved"] = salvas
     estado_json = json.dumps(estado, ensure_ascii=False, default=str)
     return NativeToolOpts(
         specs=[_SETUP_TOOL],
@@ -654,6 +671,22 @@ async def _npc_context(
     }
 
 
+async def _entity_image(db: AsyncSession, user_id: uuid.UUID, campaign_id: uuid.UUID,
+                        args: dict[str, Any]) -> dict[str, Any]:
+    from . import images
+
+    campaign = await service.owned_campaign(db, user_id, campaign_id, lock=True)
+    target = str(args.get("target") or "")
+    try:
+        if str(args.get("image_url") or "").strip():
+            result = await images.link_image(db, campaign, user_id, target, str(args["image_url"]))
+        else:
+            result = await images.show_image(db, campaign, target)
+    except images.ImageLinkError as exc:
+        return {"kind": "imaginai_image", "error": str(exc)}
+    return {"kind": "imaginai_image", **result}
+
+
 def _corrupted_text(value: Any, path: str = "") -> str | None:
     """Caminho do primeiro texto com U+FFFD (caractere perdido na geração), ou None."""
     if isinstance(value, str):
@@ -703,6 +736,8 @@ class ImaginaiTurnBridge:
                 except setup.SetupError as exc:
                     return {"kind": "imaginai_expansion", "error": str(exc)}
                 return {"kind": "imaginai_expansion", **result}
+            if action == "entity_image":
+                return await _entity_image(db, self.user_id, self.campaign_id, args)
             if action == "spellbook":
                 locked = await service.owned_campaign(db, self.user_id, self.campaign_id, lock=True)
                 result = await service.write_spells(
@@ -780,6 +815,8 @@ async def _setup_action(bridge: "ImaginaiTurnBridge", args: dict[str, Any]) -> d
                 result = await setup.build_world(db, campaign, bridge.user_id, args.get("world") or {})
             elif action == "expand_world":
                 result = await setup.expand_world(db, campaign, bridge.user_id, args.get("world") or {})
+            elif action == "entity_image":
+                return await _entity_image(db, bridge.user_id, bridge.campaign_id, args)
             elif action == "character_options":
                 result = {"stage": campaign.setup_stage, **dnd5e_build.options()}
             elif action == "roll_abilities":
@@ -816,6 +853,11 @@ async def prepare_turn_tools(
     if campaign.setup_stage in ("concept", "character"):
         return await _setup_turn_tools(db, campaign, user_id, bridge)
     context = await scene_context(db, campaign)
+    from . import images
+
+    salvas = await images.images_in_campaign(db, campaign)
+    if salvas:
+        context = {**context, "images_saved": salvas}
     context_json = json.dumps(context, ensure_ascii=False, default=str)
     # a narração de RPG é o caso de uso dos efeitos sonoros: no Imaginai eles valem
     # sem precisar ligar a capacidade no modelo (desde que haja ElevenLabs para tocar)

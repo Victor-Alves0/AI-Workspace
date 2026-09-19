@@ -36,6 +36,7 @@ from ..schemas.imaginai import (
     KnowledgeCreate,
 )
 from . import encounters
+from . import images as entity_images
 from .rules import ActionDecision, ActionIntent, EntitySnapshot, _blocked, ruleset_for
 from .systems import system_definition
 
@@ -99,6 +100,7 @@ def _entity_out(entity: ImaginaiEntity) -> dict[str, Any]:
         "owner_entity_id": str(entity.owner_entity_id) if entity.owner_entity_id else None,
         "state": entity.state or {},
         "active": entity.active,
+        "image_url": entity_images.image_url(entity),
     }
 
 
@@ -961,6 +963,7 @@ async def map_snapshot(db: AsyncSession, campaign: ImaginaiCampaign) -> dict[str
             "x": _map_coordinate(map_state.get("x")),
             "y": _map_coordinate(map_state.get("y")),
             "index": index,
+            "image_url": entity_images.image_url(location),
         })
     routes: list[dict[str, str]] = []
     seen_routes: set[tuple[str, str]] = set()
@@ -1055,6 +1058,8 @@ async def codex_search(
                 "knowledge": "known" if known else "aware",
                 "description": (codex.get("summary") or entity.description) if known else None,
                 "fields": codex.get("fields", {}) if known else {},
+                # imagem só do que o personagem conhece (a de um oculto revelaria a aparência)
+                "image_url": entity_images.image_url(entity) if known else None,
                 "redacted": [] if known else ["description", "details"],
             }
         )

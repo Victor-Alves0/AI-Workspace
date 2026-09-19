@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, Loader2, Pencil, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ImaginaiEntity, ImaginaiSnapshot, ImaginaiSystemDefinition } from "../types";
-import { ImaginaiFeatureStatus, abilityScore, numericState, signed } from "../shared";
+import { EntityImage, ImaginaiFeatureStatus, abilityScore, numericState, signed } from "../shared";
 
 export function ImaginaiSheetPanel({
   campaignId,
@@ -30,7 +31,10 @@ export function ImaginaiSheetPanel({
   return (
     <div className="imaginai-feature-scroll">
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-ink">Ficha</h3>
+        <div className="flex min-w-0 items-center gap-2">
+          {character.image_url ? <EntityImage url={character.image_url} alt={character.name} className="h-9 w-9 shrink-0 rounded-full" /> : null}
+          <h3 className="text-sm font-semibold text-ink">Ficha</h3>
+        </div>
         <button type="button" onClick={() => setEditing(true)} className="flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-[10px] font-medium text-violet-200 transition-colors hover:bg-violet-500/15 hover:text-white"><Pencil size={13} />Editar</button>
       </div>
       <div className="mt-2 grid grid-cols-3 gap-1">
@@ -162,41 +166,86 @@ export function ImaginaiCharacterEditor({
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-3 backdrop-blur-sm" onMouseDown={onClose}>
-      <form role="dialog" aria-modal="true" aria-labelledby="imaginai-character-editor-title" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()} className="max-h-[calc(100dvh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-surface p-4 shadow-menu">
-        <div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">D&D 5e</p><h2 id="imaginai-character-editor-title" className="mt-0.5 text-base font-semibold text-ink">Configurar personagem</h2></div><button type="button" onClick={onClose} aria-label="Fechar editor de personagem" className="flex h-10 w-10 items-center justify-center rounded-xl text-muted transition-colors hover:bg-hover hover:text-ink"><X size={17} /></button></div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <label className="text-xs font-medium text-ink-soft sm:col-span-2">Nome<input autoFocus required maxLength={255} value={name} onChange={(event) => setName(event.target.value)} className="imaginai-field" /></label>
-          <label className="text-xs font-medium text-ink-soft">Classe<select required value={characterClass} onChange={(event) => setCharacterClass(event.target.value)} className="imaginai-field"><option value="" disabled>Selecione uma classe</option>{DND5E_CLASSES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-          <label className="text-xs font-medium text-ink-soft">Nível<input required type="number" min="1" max="20" value={level} onChange={(event) => setLevel(event.target.value)} className="imaginai-field" /></label>
-          <label className="text-xs font-medium text-ink-soft">Ancestralidade<input maxLength={120} value={ancestry} onChange={(event) => setAncestry(event.target.value)} placeholder="Ex.: Elfo" className="imaginai-field" /></label>
-          <label className="text-xs font-medium text-ink-soft">Antecedente<input maxLength={120} value={background} onChange={(event) => setBackground(event.target.value)} placeholder="Ex.: Acólito" className="imaginai-field" /></label>
-          <label className="text-xs font-medium text-ink-soft sm:col-span-2">Tendência<input maxLength={80} value={alignment} onChange={(event) => setAlignment(event.target.value)} placeholder="Ex.: Neutro e Bom" className="imaginai-field" /></label>
-          <label className="text-xs font-medium text-ink-soft sm:col-span-2">História<textarea maxLength={8000} rows={5} value={backstory} onChange={(event) => setBackstory(event.target.value)} placeholder="De onde vem, o que perdeu, o que procura, quem deixou para trás…" className="imaginai-field resize-y leading-5" /></label>
-        </div>
-        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4"><label className="text-[10px] font-medium text-ink-soft">HP atual<input type="number" min="0" max="9999" value={hpCurrent} onChange={(event) => setHpCurrent(event.target.value)} className="imaginai-field" /></label><label className="text-[10px] font-medium text-ink-soft">HP máximo<input type="number" min="1" max="9999" value={hpMax} onChange={(event) => setHpMax(event.target.value)} className="imaginai-field" /></label><label className="text-[10px] font-medium text-ink-soft">CA<input type="number" min="0" max="99" value={armorClass} onChange={(event) => setArmorClass(event.target.value)} className="imaginai-field" /></label><label className="text-[10px] font-medium text-ink-soft">Deslocamento<input type="number" min="0" max="999" value={speed} onChange={(event) => setSpeed(event.target.value)} className="imaginai-field" /></label></div>
-        <fieldset className="mt-4"><legend className="text-xs font-medium text-ink-soft">Atributos</legend><div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-6">{DND5E_ABILITY_FIELDS.map(([key, label]) => <label key={key} className="rounded-xl border border-border bg-surface2/55 px-2 py-1.5 text-center text-[9px] font-semibold text-muted">{label}<input aria-label={label} type="number" min="1" max="30" value={attributes[key] ?? "10"} onChange={(event) => setAttributes((current) => ({ ...current, [key]: event.target.value }))} className="mt-1 block w-full bg-transparent text-center font-mono text-sm text-ink outline-none" /></label>)}</div></fieldset>
-        <fieldset className="mt-4">
-          <legend className="text-xs font-medium text-ink-soft">Salvaguardas proficientes</legend>
-          <div className="imaginai-chips mt-2 flex-wrap">
-            {DND5E_ABILITY_FIELDS.map(([key, label]) => <button key={key} type="button" aria-pressed={Boolean(saveProfs[key])} onClick={() => setSaveProfs((current) => ({ ...current, [key]: !current[key] }))} className="imaginai-chip">{label}</button>)}
-          </div>
-        </fieldset>
-        {system ? (
-          <fieldset className="mt-4">
-            <legend className="text-xs font-medium text-ink-soft">Perícias <span className="font-normal text-muted">· toque de novo para especialização</span></legend>
-            <div className="imaginai-chips mt-2 flex-wrap">
-              {Object.entries(system.sheet.skills).map(([key, label]) => {
-                const rank = skillRanks[key] ?? 0;
-                return <button key={key} type="button" aria-pressed={rank > 0} onClick={() => setSkillRanks((current) => ({ ...current, [key]: ((current[key] ?? 0) + 1) % 3 }))} className="imaginai-chip">{label}{rank >= 2 ? " ★" : ""}</button>;
+  const field = "mt-1 w-full min-h-10 rounded-xl border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-violet-400/70";
+  const section = "text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300";
+  // portal: o card do dock tem backdrop-filter/transform, que prendem um `fixed` DENTRO
+  // dele — o editor saía cortado no alto e no pé do card
+  return createPortal(
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-3 backdrop-blur-sm sm:p-6" onMouseDown={onClose}>
+      <form role="dialog" aria-modal="true" aria-labelledby="imaginai-character-editor-title" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()} className="flex max-h-full w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-menu">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-5 py-3.5">
+          <div><p className={section}>D&amp;D 5e</p><h2 id="imaginai-character-editor-title" className="mt-0.5 text-base font-semibold text-ink">Editar ficha</h2></div>
+          <button type="button" onClick={onClose} aria-label="Fechar editor de personagem" className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition-colors hover:bg-hover hover:text-ink"><X size={17} /></button>
+        </header>
+
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-4">
+          <section>
+            <p className={section}>Identidade</p>
+            <div className="mt-2 grid gap-3 sm:grid-cols-6">
+              <label className="text-xs font-medium text-ink-soft sm:col-span-4">Nome<input autoFocus required maxLength={255} value={name} onChange={(event) => setName(event.target.value)} className={field} /></label>
+              <label className="text-xs font-medium text-ink-soft sm:col-span-2">Nível<input required type="number" min="1" max="20" value={level} onChange={(event) => setLevel(event.target.value)} className={field} /></label>
+              <label className="text-xs font-medium text-ink-soft sm:col-span-2">Classe<select required value={characterClass} onChange={(event) => setCharacterClass(event.target.value)} className={field}><option value="" disabled>Selecione</option>{DND5E_CLASSES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+              <label className="text-xs font-medium text-ink-soft sm:col-span-2">Ancestralidade<input maxLength={120} value={ancestry} onChange={(event) => setAncestry(event.target.value)} placeholder="Humano" className={field} /></label>
+              <label className="text-xs font-medium text-ink-soft sm:col-span-2">Antecedente<input maxLength={120} value={background} onChange={(event) => setBackground(event.target.value)} placeholder="Acólito" className={field} /></label>
+              <label className="text-xs font-medium text-ink-soft sm:col-span-6">Tendência<input maxLength={80} value={alignment} onChange={(event) => setAlignment(event.target.value)} placeholder="Neutro e Bom" className={field} /></label>
+            </div>
+          </section>
+
+          <section>
+            <p className={section}>Atributos</p>
+            <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-6">
+              {DND5E_ABILITY_FIELDS.map(([key, label]) => {
+                const value = Number.parseInt(attributes[key] ?? "10", 10);
+                const mod = Number.isFinite(value) ? Math.floor((value - 10) / 2) : 0;
+                return <label key={key} className="flex flex-col items-center rounded-xl border border-border bg-surface2/60 px-2 py-2 transition-colors focus-within:border-violet-400/60">
+                  <span className="text-[10px] font-semibold tracking-wide text-muted">{label}</span>
+                  <input aria-label={label} type="number" min="1" max="30" value={attributes[key] ?? "10"} onChange={(event) => setAttributes((current) => ({ ...current, [key]: event.target.value }))} className="mt-0.5 w-full bg-transparent text-center font-mono text-lg text-ink outline-none" />
+                  <span className="font-mono text-[11px] text-violet-300">{signed(mod)}</span>
+                </label>;
               })}
             </div>
-          </fieldset>
-        ) : null}
-        {error ? <p className="mt-3 text-xs text-rose-400">{error}</p> : null}
-        <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={onClose} className="min-h-11 rounded-xl px-3 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">Cancelar</button><button type="submit" disabled={saving || !name.trim() || !characterClass} className="flex min-h-11 items-center gap-2 rounded-xl bg-violet-500 px-4 text-sm font-medium text-white transition-colors hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50">{saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}Salvar ficha</button></div>
+          </section>
+
+          <section>
+            <p className={section}>Combate</p>
+            <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <label className="text-xs font-medium text-ink-soft">PV atuais<input type="number" min="0" max="9999" value={hpCurrent} onChange={(event) => setHpCurrent(event.target.value)} className={field} /></label>
+              <label className="text-xs font-medium text-ink-soft">PV máximos<input type="number" min="1" max="9999" value={hpMax} onChange={(event) => setHpMax(event.target.value)} className={field} /></label>
+              <label className="text-xs font-medium text-ink-soft">CA<input type="number" min="0" max="99" value={armorClass} onChange={(event) => setArmorClass(event.target.value)} className={field} /></label>
+              <label className="text-xs font-medium text-ink-soft">Deslocamento<input type="number" min="0" max="999" value={speed} onChange={(event) => setSpeed(event.target.value)} className={field} /></label>
+            </div>
+          </section>
+
+          <section>
+            <p className={section}>Proficiências</p>
+            <p className="mt-2 text-xs font-medium text-ink-soft">Salvaguardas</p>
+            <div className="imaginai-chips mt-1.5 flex-wrap">
+              {DND5E_ABILITY_FIELDS.map(([key, label]) => <button key={key} type="button" aria-pressed={Boolean(saveProfs[key])} onClick={() => setSaveProfs((current) => ({ ...current, [key]: !current[key] }))} className="imaginai-chip">{label}</button>)}
+            </div>
+            {system ? <>
+              <p className="mt-3 text-xs font-medium text-ink-soft">Perícias <span className="font-normal text-muted">· toque de novo para especialização ★</span></p>
+              <div className="imaginai-chips mt-1.5 flex-wrap">
+                {Object.entries(system.sheet.skills).map(([key, label]) => {
+                  const rank = skillRanks[key] ?? 0;
+                  return <button key={key} type="button" aria-pressed={rank > 0} onClick={() => setSkillRanks((current) => ({ ...current, [key]: ((current[key] ?? 0) + 1) % 3 }))} className="imaginai-chip">{label}{rank >= 2 ? " ★" : ""}</button>;
+                })}
+              </div>
+            </> : null}
+          </section>
+
+          <section>
+            <p className={section}>História</p>
+            <textarea maxLength={8000} rows={6} value={backstory} onChange={(event) => setBackstory(event.target.value)} placeholder="De onde vem, o que perdeu, o que procura, quem deixou para trás…" className={`${field} resize-y leading-6`} />
+          </section>
+        </div>
+
+        <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-border px-5 py-3">
+          {error ? <p className="mr-auto text-xs text-rose-400">{error}</p> : null}
+          <button type="button" onClick={onClose} className="min-h-10 rounded-xl px-3 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">Cancelar</button>
+          <button type="submit" disabled={saving || !name.trim() || !characterClass} className="flex min-h-10 items-center gap-2 rounded-xl bg-violet-500 px-4 text-sm font-medium text-white transition-colors hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50">{saving ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}Salvar ficha</button>
+        </footer>
       </form>
-    </div>
+    </div>,
+    document.body,
   );
 }

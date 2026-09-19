@@ -2,6 +2,7 @@
 
 import { BookOpen, Map as MapIcon, Package, ScrollText, Sparkles, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { API_URL } from "@/lib/api";
 
 export const DND_CHARACTER_SECTIONS = [
   { id: "inventory", label: "Inventário", icon: Package },
@@ -60,6 +61,22 @@ export function ImaginaiSheetHead({ label, onClose }: { label: string; onClose: 
         <X size={15} />
       </button>
     </div>
+  );
+}
+
+/** Mídia servida pela API (/images/<id>?t=…) → URL absoluta. */
+export function mediaSrc(url: string): string {
+  return /^https?:/.test(url) ? url : `${API_URL}${url}`;
+}
+
+/** Imagem de entidade do mundo: clica e abre em tamanho real. */
+export function EntityImage({ url, alt, className = "" }: { url: string; alt: string; className?: string }) {
+  const src = mediaSrc(url);
+  return (
+    <a href={src} target="_blank" rel="noreferrer noopener" className={`block overflow-hidden rounded-xl border border-border bg-surface2 ${className}`}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt={alt} loading="lazy" className="h-full w-full object-cover" />
+    </a>
   );
 }
 

@@ -169,3 +169,66 @@ def test_expandir_liga_o_mapa_antigo_e_nao_duplica(banco, engine):
     assert r["ferreiro_na_forja"] is not None
     raio = r["grimorio"]["spells"][0]
     assert raio["range"] == "36 m" and raio["description"] == "Um cisco de fogo."
+
+
+async def _imagens(url: str) -> dict:
+    from aiworkspace.imaginai import images, service, setup
+    from aiworkspace.models import Chat, GeneratedImage, ImaginaiCampaign, User
+    from aiworkspace.schemas.imaginai import CampaignCreate
+
+    eng = create_async_engine(_async(url))
+    out: dict = {}
+    try:
+        async with AsyncSession(eng, expire_on_commit=False) as db:
+            dono = User(email=f"{uuid.uuid4().hex[:8]}@t.local", hashed_password="x")
+            outro = User(email=f"{uuid.uuid4().hex[:8]}@t.local", hashed_password="x")
+            db.add_all([dono, outro])
+            await db.flush()
+            chat = Chat(user_id=dono.id, title="t", mini_app="imaginai")
+            minha = GeneratedImage(user_id=dono.id, data=b"png", mime="image/png")
+            alheia = GeneratedImage(user_id=outro.id, data=b"png", mime="image/png")
+            db.add_all([chat, minha, alheia])
+            await db.commit()
+            snap = await service.create_campaign(db, dono.id, CampaignCreate(chat_id=chat.id))
+            campaign = await db.get(ImaginaiCampaign, uuid.UUID(snap["campaign"]["id"]))
+            await setup.set_concept(db, campaign, {"name": "C", "genre": "g", "premise": "p"})
+            await setup.build_world(db, campaign, dono.id, {
+                "locations": [{"name": "Vilagris", "visibility": "known"}],
+                "npcs": [{"name": "Gromm", "location": "Vilagris", "visibility": "known"},
+                         {"name": "Sumo-Sacerdote", "visibility": "hidden"}],
+                "starting_location": "Vilagris",
+            })
+            out["alheia"] = await _tentar_img(images.link_image(
+                db, campaign, dono.id, "Gromm", f"/images/{alheia.id}?t=x"))
+            out["gromm"] = await images.link_image(db, campaign, dono.id, "gromm", f"/images/{minha.id}?t=x")
+            await images.link_image(db, campaign, dono.id, "Sumo-Sacerdote", f"/images/{minha.id}?t=x")
+            await images.link_image(db, campaign, dono.id, "Vilagris", f"/images/{minha.id}?t=x")
+            out["mostrar"] = await images.show_image(db, campaign, "Gromm")
+            out["codex"] = (await service.codex_search(db, campaign))["results"]
+            out["mapa"] = await service.map_snapshot(db, campaign)
+            out["salvas"] = await images.images_in_campaign(db, campaign)
+    finally:
+        await eng.dispose()
+    return out
+
+
+async def _tentar_img(coro):
+    from aiworkspace.imaginai import images
+
+    try:
+        return await coro
+    except images.ImageLinkError as exc:
+        return {"erro": str(exc)}
+
+
+def test_imagem_vinculada_aparece_no_codex_e_no_mapa_sem_vazar_oculto(banco, engine):
+    migrar(engine, "head")
+    r = asyncio.run(_imagens(banco))
+    assert "erro" in r["alheia"]                           # imagem de outro usuário: recusada
+    assert r["gromm"]["image_url"].startswith("/images/")
+    assert r["mostrar"]["markdown"].startswith("![Gromm](/images/")
+    por_nome = {c["name"]: c for c in r["codex"]}
+    assert por_nome["Gromm"]["image_url"]
+    assert "Sumo-Sacerdote" not in por_nome                # oculto nem aparece
+    assert r["mapa"]["locations"][0]["image_url"]
+    assert set(r["salvas"]) == {"Gromm", "Sumo-Sacerdote", "Vilagris"}
