@@ -462,7 +462,7 @@ select:focus-visible {
   max-width: 21rem;
   flex-shrink: 0;
   border-radius: 1.5rem;
-  background: rgb(var(--c-surface) / 0.1);
+  background: rgb(var(--c-surface) / 0.25);
   padding: 0.875rem 1rem 0.75rem;
 }
 /* Aba que abre ACIMA do card: fica no fluxo da coluna, então cresce para cima
@@ -865,9 +865,19 @@ select:focus-visible {
   }
   /* aba aberta usa toda a altura que sobra da coluna (fixa pela página, não
    * pelo conteúdo) */
+  /* coluna esticada na altura do frame (com `align-items: end` no grid ela ficava
+   * do tamanho do conteúdo e a aba encolhia ao mínimo) */
+  .imaginai-world-dock,
+  .imaginai-character-dock,
+  .imaginai-world-dock[data-mobile-open],
+  .imaginai-character-dock[data-mobile-open] {
+    align-self: stretch;
+  }
+  /* aba aberta: ~30% maior que a original (52vh / 27rem); encolhe só se faltar
+   * espaço na coluna */
   .imaginai-feature-sheet {
-    height: auto;
-    flex: 1 1 0;
+    height: min(68vh, 35rem);
+    flex: 0 1 auto;
     min-height: 14rem;
   }
   /* o player de leitura mora no canto superior direito no modo Imaginai */
