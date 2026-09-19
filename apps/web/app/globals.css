@@ -447,21 +447,26 @@ select:focus-visible {
 .imaginai-character-dock[data-mobile-open="true"] {
   right: 0.75rem;
 }
-/* Mesma moldura da promptbox: borda neutra, cantos 3xl e sombra "prompt". */
+/* Cards chapados: sem sombra, fundo e borda a 60% em repouso — ficam no plano da
+ * conversa em vez de flutuar sobre ela — e 100% quando o cursor/foco chega. */
 .imaginai-dock-card {
   width: 100%;
   max-width: 21rem;
   flex-shrink: 0;
-  border: 1px solid rgb(var(--c-border));
+  border: 1px solid rgb(var(--c-border) / 0.6);
   border-radius: 1.5rem;
-  background: rgb(var(--c-surface));
+  background: rgb(var(--c-surface) / 0.6);
   padding: 0.875rem 1rem 0.75rem;
-  box-shadow: 0 8px 30px rgb(0 0 0 / 0.35);
-  transition: border-color 200ms ease;
+  box-shadow: none;
+  /* com fundo translúcido, o texto da conversa por trás (gaveta no celular) não briga */
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  transition: border-color 200ms ease, background-color 200ms ease;
 }
 .imaginai-dock-card:hover,
 .imaginai-dock-card:focus-within {
-  border-color: rgb(var(--c-accent) / 0.3);
+  border-color: rgb(var(--c-border));
+  background: rgb(var(--c-surface));
 }
 /* Aba que abre ACIMA do card: fica no fluxo da coluna, então cresce para cima
  * sem cobrir o card nem mudar a posição dele. */
