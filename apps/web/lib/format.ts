@@ -1,4 +1,4 @@
-// Formato de hora/data escolhido pelo usuário (Configurações → Personalização).
+// Formato de hora/data escolhido pelo usuário (Configurações → Conta).
 // As preferências ficam num módulo simples (não em contexto React) porque os
 // formatadores são chamados de funções utilitárias fora da árvore de componentes.
 // `setFormatPrefs` é chamado quando o perfil carrega.

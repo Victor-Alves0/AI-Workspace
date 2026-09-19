@@ -652,7 +652,7 @@ export default function ChatPage() {
     document.documentElement.classList.toggle("no-animations", off);
   }, [user]);
 
-  // formato de hora/data (Configurações → Personalização) para os utilitários
+  // formato de hora/data (Configurações → Conta) para os utilitários
   useEffect(() => {
     setFormatPrefs(user?.profile as { time_format?: string; date_format?: string } | undefined);
   }, [user]);

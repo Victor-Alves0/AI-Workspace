@@ -36,6 +36,8 @@ import {
   TerminalSquare,
   UserCog,
   CircleUserRound,
+  Dices,
+  LayoutGrid,
   X,
 } from "lucide-react";
 import {
@@ -94,7 +96,7 @@ import {
   type DesktopSettings,
 } from "@/lib/desktop";
 
-type Cat = "general" | "status" | "interface" | "connections" | "integrations" | "personalization" | "shortcuts" | "security" | "data" | "account" | "desktop" | "about";
+type Cat = "general" | "status" | "interface" | "connections" | "integrations" | "miniapps" | "shortcuts" | "security" | "data" | "account" | "desktop" | "about";
 
 // "desktop" só aparece quando a UI roda dentro do app instalado (ver isDesktop()).
 const CATS: { key: Cat; label: string; icon: React.ReactNode }[] = [
@@ -103,7 +105,7 @@ const CATS: { key: Cat; label: string; icon: React.ReactNode }[] = [
   { key: "interface", label: "Interface", icon: <PanelsTopLeft size={16} /> },
   { key: "connections", label: "Conexões", icon: <Cable size={16} /> },
   { key: "integrations", label: "Integrações", icon: <Blocks size={16} /> },
-  { key: "personalization", label: "Personalização", icon: <Sparkles size={16} /> },
+  { key: "miniapps", label: "Miniapps", icon: <LayoutGrid size={16} /> },
   { key: "shortcuts", label: "Atalhos", icon: <Keyboard size={16} /> },
   { key: "security", label: "Segurança", icon: <ShieldCheck size={16} /> },
   { key: "data", label: "Controle de Dados", icon: <Database size={16} /> },
@@ -136,12 +138,11 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Notificações", cat: "general" },
   { label: "Animações", cat: "general" },
   { label: "Fuso horário", cat: "general" },
-  { label: "Prompt do Sistema", cat: "personalization" },
-  { label: "Formato de hora", cat: "personalization" },
-  { label: "Formato de data", cat: "personalization" },
-  { label: "Aviso de uso alto", cat: "personalization" },
-  { label: "Avisar quando uma resposta passar de (tokens)", cat: "personalization" },
-  { label: "Parâmetros Avançados", cat: "personalization" },
+  { label: "Imaginai", cat: "miniapps" },
+  { label: "Formato de hora", cat: "account" },
+  { label: "Formato de data", cat: "account" },
+  { label: "Aviso de uso alto", cat: "account" },
+  { label: "Avisar quando uma resposta passar de (tokens)", cat: "account" },
   { label: "Atalhos de teclado", cat: "shortcuts" },
   { label: "Atalhos", cat: "shortcuts" },
   { label: "Segurança", cat: "security" },
@@ -824,7 +825,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
             {cat === "desktop" && <DesktopTab />}
             {cat === "about" && <AboutTab />}
             {cat === "interface" && <InterfaceTab profile={profile} set={set} view={connView} setView={setConnView} />}
-            {cat === "personalization" && <PersonalizationTab profile={profile} set={set} />}
+            {cat === "miniapps" && <MiniappsTab />}
             </>
             )}
           </div>
@@ -1553,70 +1554,22 @@ function AuditLogSection() {
   );
 }
 
-function PersonalizationTab({ profile, set }: { profile: Record<string, any>; set: (k: string, v: any) => void }) {
-  const [showAdvanced, setShowAdvanced] = useState(false);
+function MiniappsTab() {
   return (
     <div>
-      <Heading>Prompt do Sistema</Heading>
-      <textarea
-        rows={6}
-        value={profile.system_prompt ?? ""}
-        onChange={(e) => set("system_prompt", e.target.value)}
-        placeholder="Insira o prompt do sistema aqui"
-        className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
-      />
-
-      <Heading>Formato de data e hora</Heading>
-      <Row label="Formato de hora">
-        <select
-          value={profile.time_format ?? "24h"}
-          onChange={(e) => set("time_format", e.target.value)}
-          className="rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none"
-        >
-          <option value="24h">24 horas (14:30)</option>
-          <option value="12h">12 horas (2:30 PM)</option>
-        </select>
-      </Row>
-      <Row label="Formato de data">
-        <select
-          value={profile.date_format ?? "dmy"}
-          onChange={(e) => set("date_format", e.target.value)}
-          className="rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none"
-        >
-          <option value="dmy">DD/MM/AAAA</option>
-          <option value="mdy">MM/DD/AAAA</option>
-          <option value="ymd">AAAA-MM-DD</option>
-        </select>
-      </Row>
-
-      <Heading>Aviso de uso alto</Heading>
-      <Row label="Avisar quando uma resposta passar de (tokens)" info="0 = desligado. Marca a mensagem com um alerta; não bloqueia.">
-        <input
-          type="number"
-          min={0}
-          step={1000}
-          value={profile.token_warn ?? ""}
-          onChange={(e) => set("token_warn", e.target.value === "" ? 0 : Number(e.target.value))}
-          placeholder="0"
-          className="w-28 rounded-lg border border-border bg-surface px-3 py-1.5 text-right text-sm text-ink outline-none focus:border-accent"
-        />
-      </Row>
-
-      <Row label="Parâmetros Avançados">
-        <LinkBtn onClick={() => setShowAdvanced((v) => !v)}>{showAdvanced ? "Ocultar" : "Mostrar"}</LinkBtn>
-      </Row>
-      {showAdvanced && (
-        <>
-          <p className="text-xs text-muted">Parâmetros padrão (JSON) aplicados a novos chats — ex.: temperature, top_p.</p>
-          <textarea
-            rows={4}
-            value={profile.default_params_str ?? ""}
-            onChange={(e) => set("default_params_str", e.target.value)}
-            placeholder='{ "temperature": 0.7 }'
-            className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 font-mono text-xs text-ink outline-none focus:border-accent placeholder:text-muted"
-          />
-        </>
-      )}
+      <Heading>Miniapps</Heading>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-400/20 bg-violet-500/10 text-violet-300">
+            <Dices size={18} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-ink">Imaginai</p>
+            <p className="truncate text-xs text-muted">Mesa de RPG</p>
+          </div>
+          <span className="shrink-0 rounded-full bg-surface2 px-2 py-0.5 text-[10px] text-muted">Em breve</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1737,6 +1690,42 @@ function AccountTab({ user, profile, set }: { user: User | null; profile: Record
           </div>
         </div>
       )}
+
+      <Heading>Formato de data e hora</Heading>
+      <Row label="Formato de hora">
+        <select
+          value={profile.time_format ?? "24h"}
+          onChange={(e) => set("time_format", e.target.value)}
+          className="rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none"
+        >
+          <option value="24h">24 horas (14:30)</option>
+          <option value="12h">12 horas (2:30 PM)</option>
+        </select>
+      </Row>
+      <Row label="Formato de data">
+        <select
+          value={profile.date_format ?? "dmy"}
+          onChange={(e) => set("date_format", e.target.value)}
+          className="rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none"
+        >
+          <option value="dmy">DD/MM/AAAA</option>
+          <option value="mdy">MM/DD/AAAA</option>
+          <option value="ymd">AAAA-MM-DD</option>
+        </select>
+      </Row>
+
+      <Heading>Aviso de uso alto</Heading>
+      <Row label="Avisar quando uma resposta passar de (tokens)" info="0 = desligado. Marca a mensagem com um alerta; não bloqueia.">
+        <input
+          type="number"
+          min={0}
+          step={1000}
+          value={profile.token_warn ?? ""}
+          onChange={(e) => set("token_warn", e.target.value === "" ? 0 : Number(e.target.value))}
+          placeholder="0"
+          className="w-28 rounded-lg border border-border bg-surface px-3 py-1.5 text-right text-sm text-ink outline-none focus:border-accent"
+        />
+      </Row>
 
       <BudgetSettings profile={profile} set={set} />
     </div>
