@@ -35,7 +35,7 @@ from ..schemas.imaginai import (
     JournalUpdate,
     KnowledgeCreate,
 )
-from . import encounters
+from . import combat, encounters
 from . import images as entity_images
 from .rules import ActionDecision, ActionIntent, EntitySnapshot, _blocked, ruleset_for
 from .systems import system_definition
@@ -146,6 +146,29 @@ async def campaign_for_chat(
     return campaign
 
 
+def default_character_state() -> dict[str, Any]:
+    """Ficha em branco (campanha nova, ou personagem novo depois de uma morte)."""
+    return {
+        "dnd5e": {
+            "class": "Classe",
+            "level": 1,
+            "hp": {"current": 10, "max": 10},
+            "armor_class": 10,
+            "spells": [],
+            "spell_slots": {},
+            "discovered_entity_ids": [],
+            "attributes": {key: 10 for key in _ABILITY_KEYS},
+            "skills": {},
+            "currencies": {"cp": 0, "sp": 0, "ep": 0, "gp": 0, "pp": 0},
+            "proficiency_bonus": 2,
+            "initiative": 0,
+            "speed": 30,
+            "passive_perception": 10,
+            "conditions": [],
+        }
+    }
+
+
 async def create_campaign(
     db: AsyncSession, user_id: uuid.UUID, body: CampaignCreate
 ) -> dict[str, Any]:
@@ -217,34 +240,7 @@ async def create_campaign(
         key="player",
         name=body.character_name.strip(),
         location_id=starting_location.id,
-        state={
-            "dnd5e": {
-                "class": "Classe",
-                "level": 1,
-                "hp": {"current": 10, "max": 10},
-                "armor_class": 10,
-                "spells": [],
-                "spell_slots": {},
-                "discovered_entity_ids": [],
-                "attributes": {
-                    key: 10
-                    for key in (
-                        "strength",
-                        "dexterity",
-                        "constitution",
-                        "intelligence",
-                        "wisdom",
-                        "charisma",
-                    )
-                },
-                "skills": {},
-                "currencies": {"cp": 0, "sp": 0, "ep": 0, "gp": 0, "pp": 0},
-                "proficiency_bonus": 2,
-                "initiative": 0,
-                "speed": 30,
-                "passive_perception": 10,
-            }
-        },
+        state=default_character_state(),
     )
     db.add(character)
     await db.commit()
@@ -1349,6 +1345,35 @@ async def resolve_action(
                 "replayed": True,
             }
     decision, actor, target = await evaluate_action(db, campaign, body, lock=True)
+    if encounters.is_player(actor):
+        from . import effects
+
+        status_pj = effects.player_status(actor)
+        condicoes = combat.conditions_of(actor.state)
+        incapaz = any(combat.CONDITIONS.get(c["key"], {}).get("incapacitated") for c in condicoes)
+        if status_pj == "dead":
+            decision = _blocked(
+                "character_dead",
+                "O personagem está morto. Pergunte ao jogador: continuar com a mesma ficha "
+                "(fate=revived, se a história permitir) ou com um personagem novo (new_character).",
+            )
+        elif status_pj == "down":
+            decision = _blocked(
+                "character_down",
+                "O personagem está caído (0 PV). Decida o destino pela história com `fate`.",
+            )
+        elif body.action_type == "pass_turn":
+            # passar a vez (atordoado, esperando, defendendo): gasta o turno e nada mais
+            decision = ActionDecision(
+                status="allowed", reason_code="turn_passed", reason="O personagem passa a vez.",
+                consumes_turn=True, event_type="turn_passed",
+            )
+        elif encounters.active(campaign) and incapaz:
+            decision = _blocked(
+                "incapacitated",
+                "O personagem está incapacitado e não pode agir neste turno. Use "
+                "action_type=pass_turn para passar a vez.",
+            )
     if encounters.active(campaign) and body.action_type == "rest":
         decision = _blocked("in_combat", "Não é possível descansar com inimigos lutando.")
     attempt_input = copy.deepcopy(body.parameters)
@@ -1535,14 +1560,29 @@ async def resolve_check(
     public = public if isinstance(public, dict) else {}
     roll_kind = str(public.get("roll_kind") or "")
     is_attack = attempt.action_type == "attack" or roll_kind == "spell_attack"
+    target_for_mode = None
+    if attempt.target_id:
+        target_for_mode = await _owned_entity(db, campaign, attempt.target_id, lock=True)
+    mode = advantage if advantage in {"normal", "advantage", "disadvantage"} else "normal"
+    mode_reasons: list[str] = []
+    auto_crit = False
     if is_attack:
         modifier = int(public.get("attack_modifier", 0) or 0)
         resolved_ability = "attack"
         difficulty = max(1, int(public.get("target_ac", 10) or 10))
+        # condições dos dois lados dão vantagem/desvantagem (o narrador não precisa lembrar)
+        atacante = combat.fighter_from(str(actor.id), actor.name, actor.state, None, "player")
+        alvo_f = (combat.fighter_from(str(target_for_mode.id), target_for_mode.name,
+                                      target_for_mode.state, None, "hostile")
+                  if target_for_mode is not None else None)
+        mode, mode_reasons = combat.attack_mode(atacante, alvo_f, mode)
+        auto_crit = bool(alvo_f is not None and alvo_f.has("auto_crit"))
     else:
         modifier, resolved_ability = _dnd_check_modifier(actor, ability, skill)
         difficulty = max(5, min(int(dc), 30))
-    mode = advantage if advantage in {"normal", "advantage", "disadvantage"} else "normal"
+        if any(combat.CONDITIONS.get(c["key"], {}).get("check_dis") for c in combat.conditions_of(actor.state)):
+            mode = "normal" if mode == "advantage" else "disadvantage"
+            mode_reasons = ["condição (desvantagem em testes)"]
     rolls = [secrets.randbelow(20) + 1]
     if mode != "normal":
         rolls.append(secrets.randbelow(20) + 1)
@@ -1563,6 +1603,8 @@ async def resolve_check(
         "total": total,
         "success": success,
         "result": "success" if success else "failure",
+        "mode": mode,
+        "mode_reasons": mode_reasons,
     }
     event_type = decision.get("event_type") or "ability_check_resolved"
     combate = None
@@ -1587,7 +1629,7 @@ async def resolve_check(
         for mutation in applicable_mutations:
             _apply_mutation(mutation, entities)
     if is_attack:
-        critical = die == 20
+        critical = die == 20 or (success and auto_crit)
         damage = 0
         damage_rolls: list[int] = []
         damage_modifier = 0

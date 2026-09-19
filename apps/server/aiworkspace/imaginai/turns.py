@@ -58,7 +58,11 @@ _WORLD_TOOL = {
             "resolve antes de narrar qualquer ação ou consequência; roll quando a "
             "resolução exigir teste; adjudicate para concluir ações criativas sem teste; "
             "expand_world para acrescentar locais, NPCs, facções e lore ao mundo; spellbook "
-            "para escrever/atualizar magias da ficha (aprendeu uma magia, detalhou uma conhecida)."
+            "para escrever/atualizar magias da ficha (aprendeu uma magia, detalhou uma conhecida); "
+            "saving_throw para teste de resistência de qualquer um; apply_effect para dano/cura/"
+            "condição em DADOS fora do ataque comum (armadilha, queda, magia com resistência); "
+            "ally para um NPC passar a lutar junto; fate para decidir o destino de quem caiu a 0 PV; "
+            "new_character depois de uma morte; dice para qualquer rolagem livre."
         ),
         "parameters": {
             "type": "object",
@@ -66,7 +70,9 @@ _WORLD_TOOL = {
                 "action": {
                     "type": "string",
                     "enum": ["context", "roleplay", "resolve", "roll", "adjudicate",
-                             "expand_world", "spellbook", "entity_image"],
+                             "expand_world", "spellbook", "entity_image",
+                             "saving_throw", "apply_effect", "ally", "fate",
+                             "new_character", "dice"],
                 },
                 "step": {
                     "type": "integer",
@@ -77,7 +83,7 @@ _WORLD_TOOL = {
                 "action_type": {
                     "type": "string",
                     "description": (
-                        "Intenção normalizada. Mecânicas nativas: take_item, drop_item, "
+                        "Intenção normalizada. Mecânicas nativas: pass_turn (passar a vez), take_item, drop_item, "
                         "equip_item, unequip_item, use_item, pay_currency, interact, "
                         "cast_spell, examine, move, travel, attack, rest, wait e "
                         "start_encounter (emboscada: inimigos atacam primeiro). Para "
@@ -134,6 +140,20 @@ _WORLD_TOOL = {
                     "maxLength": 2000,
                     "description": "Consequência objetiva, sem criar fatos ou itens não estabelecidos.",
                 },
+                "damage": {"type": "string", "description": "apply_effect: dados de dano, ex. 3d6"},
+                "damage_type": {"type": "string"},
+                "healing": {"type": "string", "description": "apply_effect: dados de cura, ex. 2d4+2"},
+                "half": {"type": "boolean", "description": "apply_effect: o alvo passou na resistência (metade)."},
+                "condition": {"type": "string", "description":
+                              "apply_effect: poisoned, frightened, blinded, prone, restrained, invisible, "
+                              "incapacitated, stunned, paralyzed, unconscious, petrified, charmed, grappled"},
+                "rounds": {"type": "integer", "minimum": 1, "maximum": 100,
+                           "description": "Duração da condição em rodadas (omita = até ser removida)."},
+                "remove_condition": {"type": "string"},
+                "join": {"type": "boolean", "description": "ally: true entra ao lado do jogador; false sai."},
+                "fate": {"type": "string", "enum": ["dead", "stabilized", "captured", "rescued", "revived"],
+                         "description": "fate: o que a história decide para o personagem caído."},
+                "expression": {"type": "string", "description": "dice: ex. 1d20+2, 4d6kh3, 2d20kh1"},
             },
             "required": ["action"],
             "additionalProperties": False,
@@ -203,6 +223,13 @@ _SETUP_TOOL = {
                             "hp": {"type": "integer"}, "ac": {"type": "integer"},
                             "attack_bonus": {"type": "integer"},
                             "damage": {"type": "string", "description": "Dice, e.g. 1d6+2"},
+                            "actions": {"type": "array", "description":
+                                        "Several actions: attacks {name, attack_bonus, damage, condition?} "
+                                        "or save abilities {name, save, dc, damage, half, condition, rounds} "
+                                        "(breath, venom, spells).",
+                                        "items": {"type": "object"}},
+                            "saves": {"type": "object", "description": "Saving-throw bonuses, e.g. {\"DES\": 3}"},
+                            "ally": {"type": "boolean", "description": "Fights on the player's side."},
                             "visibility": {"type": "string", "enum": ["known", "aware", "hidden"]},
                         }}},
                         "starting_location": {"type": "string", "description": "Name of the location where play starts (build_world only)."},
@@ -350,6 +377,24 @@ Regras obrigatórias:
    — assim ela fica no Codex/mapa/ficha e pode ser reusada. Para mostrar de novo uma que já existe
    (`images_saved` no estado), chame `entity_image` {target} e use o `markdown` devolvido; não gere
    outra.
+14. Combate tem três lados: jogador, ALIADOS e hostis. Um NPC que decide lutar junto vira aliado com
+   `ally` {target, join:true}; os aliados agem no turno deles (também em `encounter.enemy_turns`,
+   com attacker_side=ally) — narre-os como narra os inimigos. Criaturas podem ter várias ações
+   (ataque ou habilidade com teste de resistência); o servidor escolhe e rola.
+15. CONDIÇÕES (envenenado, caído, atordoado, paralisado...) mudam os dados sozinhas: vantagem/
+   desvantagem e crítico já vêm calculados (`mode`, `mode_reasons`). Aplique/remova com
+   `apply_effect` {condition|remove_condition, rounds}. Atordoado/paralisado/inconsciente não age:
+   use action_type `pass_turn`.
+16. TESTES DE RESISTÊNCIA: armadilha, veneno, magia com CD → `saving_throw` {target, ability, dc};
+   depois aplique o resultado com `apply_effect` (dano em DADOS, `half` se passou; condição se
+   falhou). Magia do jogador que pede resistência do alvo: CD = spell_save_dc da ficha. Queda,
+   fogo, desabamento: `apply_effect` com o dano em dados. Nunca escreva números de dano.
+17. MORTE: quem cai a 0 PV fica caído e o turno trava até você decidir `fate` pela HISTÓRIA —
+   dead, stabilized, captured, rescued (e revived para trazer um morto de volta, se a ficção
+   permitir). A morte é real. Depois dela, pergunte ao jogador se quer continuar com a mesma ficha
+   (fate=revived) ou com um personagem novo (`new_character`: o antigo fica no mundo como falecido).
+18. `dice` para rolagens livres (tabela aleatória, sorte). Rolagens que o JOGADOR fizer no chat
+   aparecem como mensagens "🎲 ..." — use o resultado quando ele rolar por conta própria.
 """
 
 
@@ -687,6 +732,39 @@ async def _entity_image(db: AsyncSession, user_id: uuid.UUID, campaign_id: uuid.
     return {"kind": "imaginai_image", **result}
 
 
+async def _effect_action(db: AsyncSession, user_id: uuid.UUID, campaign_id: uuid.UUID,
+                         action: str, args: dict[str, Any]) -> dict[str, Any]:
+    from . import effects
+
+    campaign = await service.owned_campaign(db, user_id, campaign_id, lock=True)
+    target = str(args.get("target") or "")
+    try:
+        if action == "saving_throw":
+            result = await effects.saving_throw(
+                db, campaign, user_id, target, str(args.get("ability") or ""),
+                int(args.get("dc") or 10), str(args.get("advantage") or "normal"))
+        elif action == "apply_effect":
+            result = await effects.apply_effect(
+                db, campaign, user_id, target, damage=args.get("damage"),
+                damage_type=str(args.get("damage_type") or ""), healing=args.get("healing"),
+                half=bool(args.get("half")), condition=args.get("condition"),
+                rounds=args.get("rounds"), remove_condition=args.get("remove_condition"),
+                reason=str(args.get("summary") or ""))
+        elif action == "ally":
+            result = await effects.set_ally(db, campaign, user_id, target, args.get("join", True) is not False)
+        elif action == "fate":
+            result = await effects.decide_fate(
+                db, campaign, user_id, str(args.get("fate") or ""), str(args.get("summary") or ""))
+        elif action == "new_character":
+            result = await effects.new_character(db, campaign, user_id)
+        else:
+            result = await effects.roll_dice(
+                db, campaign, user_id, str(args.get("expression") or ""), str(args.get("summary") or ""))
+    except effects.EffectError as exc:
+        return {"kind": f"imaginai_{action}", "error": str(exc)}
+    return {"kind": f"imaginai_{action}", **result}
+
+
 def _corrupted_text(value: Any, path: str = "") -> str | None:
     """Caminho do primeiro texto com U+FFFD (caractere perdido na geração), ou None."""
     if isinstance(value, str):
@@ -738,6 +816,8 @@ class ImaginaiTurnBridge:
                 return {"kind": "imaginai_expansion", **result}
             if action == "entity_image":
                 return await _entity_image(db, self.user_id, self.campaign_id, args)
+            if action in {"saving_throw", "apply_effect", "ally", "fate", "new_character", "dice"}:
+                return await _effect_action(db, self.user_id, self.campaign_id, action, args)
             if action == "spellbook":
                 locked = await service.owned_campaign(db, self.user_id, self.campaign_id, lock=True)
                 result = await service.write_spells(
@@ -858,6 +938,14 @@ async def prepare_turn_tools(
     salvas = await images.images_in_campaign(db, campaign)
     if salvas:
         context = {**context, "images_saved": salvas}
+    from . import effects
+
+    jogador = await _player(db, campaign)
+    status_pj = effects.player_status(jogador)
+    if status_pj != "alive":
+        context = {**context, "player_status": status_pj,
+                   "player_status_note": "Caído: decida `fate`." if status_pj == "down"
+                   else "Morto: pergunte se continua com a mesma ficha (fate=revived) ou new_character."}
     context_json = json.dumps(context, ensure_ascii=False, default=str)
     # a narração de RPG é o caso de uso dos efeitos sonoros: no Imaginai eles valem
     # sem precisar ligar a capacidade no modelo (desde que haja ElevenLabs para tocar)

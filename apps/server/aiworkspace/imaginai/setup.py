@@ -108,6 +108,57 @@ def _int(value: Any, fallback: int, low: int, high: int) -> int:
 _DAMAGE_RE = re.compile(r"^(\d+d\d+|\d+)([+-]\d+)?$")
 
 
+def _actions(raw: Any) -> list[dict[str, Any]]:
+    """Ações de criatura: ataque ({name, attack_bonus, damage}) ou habilidade com teste
+    de resistência ({name, save, dc, damage, half, condition, rounds}) — normalizadas
+    pelo mesmo código que o combate usa."""
+    from . import combat
+
+    out = []
+    for item in (raw if isinstance(raw, list) else [])[:6]:
+        if not isinstance(item, dict):
+            continue
+        dano = _text(item.get("damage"), 16).replace(" ", "").casefold()
+        item = {**item, "damage": dano if _DAMAGE_RE.fullmatch(dano) else "",
+                "attack_modifier": item.get("attack_bonus", item.get("attack_modifier"))}
+        acao = combat._normalize_action(item)
+        if acao:
+            acao["name"] = _text(acao["name"], 80)
+            out.append(acao)
+    return out
+
+
+def _saves(raw: Any) -> dict[str, int]:
+    from . import combat
+
+    out = {}
+    for key, value in (raw.items() if isinstance(raw, dict) else []):
+        ability = combat.ability_key(key)
+        if ability:
+            out[ability] = _int(value, 0, -5, 20)
+    return out
+
+
+def _npc_state(npc: dict[str, Any]) -> dict[str, Any]:
+    """Estado de um NPC/criatura novo (build_world e expand_world)."""
+    dnd: dict[str, Any] = {"hp": {"current": npc["hp"], "max": npc["hp"]},
+                           "armor_class": npc["ac"], "conditions": []}
+    acoes = list(npc.get("actions") or [])
+    if not acoes and npc["damage"]:
+        acoes = [{"key": "attack", "name": "Ataque", "type": "attack",
+                  "attack_modifier": npc["attack_bonus"], "damage": npc["damage"]}]
+    if acoes:
+        dnd["attacks"] = acoes
+    if npc.get("saves"):
+        dnd["saves"] = npc["saves"]
+    state = {**_visibility_state(npc["visibility"]), "dnd5e": dnd}
+    if npc["hostile"]:
+        state["hostile"] = True
+    elif npc.get("ally"):
+        state["ally"] = True
+    return state
+
+
 def validate_world(spec: Any, existing: dict[str, str] | None = None) -> dict[str, Any]:
     """Normaliza o mundo proposto pelo narrador — ou explica o que falta.
 
@@ -174,6 +225,9 @@ def validate_world(spec: Any, existing: dict[str, str] | None = None) -> dict[st
             "ac": _int(raw.get("ac"), 12 if kind == "creature" else 10, 1, 30),
             "attack_bonus": _int(raw.get("attack_bonus"), 3, -5, 20),
             "damage": dano if _DAMAGE_RE.fullmatch(dano) else "",
+            "actions": _actions(raw.get("actions")),
+            "saves": _saves(raw.get("saves")),
+            "ally": bool(raw.get("ally")) and not bool(raw.get("hostile")),
             # quem está no local inicial é visto de cara; o resto se descobre jogando
             "visibility": _visibility(raw.get("visibility"), "known" if no_inicio else "hidden"),
         })
@@ -272,14 +326,7 @@ async def expand_world(
     for npc in world["npcs"]:
         if npc["name"].casefold() in nomes_pessoas:
             continue
-        dnd: dict[str, Any] = {"hp": {"current": npc["hp"], "max": npc["hp"]},
-                               "armor_class": npc["ac"], "conditions": []}
-        if npc["damage"]:
-            dnd["attacks"] = [{"key": "attack", "name": "Ataque",
-                               "attack_modifier": npc["attack_bonus"], "damage": npc["damage"]}]
-        state = {**_visibility_state(npc["visibility"]), "dnd5e": dnd}
-        if npc["hostile"]:
-            state["hostile"] = True
+        state = _npc_state(npc)
         local = locais.get((npc["location"] or "").casefold())
         db.add(ImaginaiEntity(
             campaign_id=campaign.id, user_id=user_id, kind=npc["kind"],
@@ -438,18 +485,7 @@ async def build_world(
     await db.flush()
 
     for npc in world["npcs"]:
-        dnd: dict[str, Any] = {
-            "hp": {"current": npc["hp"], "max": npc["hp"]},
-            "armor_class": npc["ac"], "conditions": [],
-        }
-        if npc["damage"]:
-            dnd["attacks"] = [{
-                "key": "attack", "name": "Ataque",
-                "attack_modifier": npc["attack_bonus"], "damage": npc["damage"],
-            }]
-        state = {**_visibility_state(npc["visibility"]), "dnd5e": dnd}
-        if npc["hostile"]:
-            state["hostile"] = True
+        state = _npc_state(npc)
         local = locais.get((npc["location"] or "").casefold())
         db.add(ImaginaiEntity(
             campaign_id=campaign.id, user_id=user_id, kind=npc["kind"],

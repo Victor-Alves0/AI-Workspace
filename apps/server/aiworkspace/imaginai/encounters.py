@@ -33,11 +33,46 @@ def active(campaign: ImaginaiCampaign) -> bool:
     return bool(isinstance(enc, dict) and enc.get("active"))
 
 
+def side_of(entity: ImaginaiEntity, player_id: str) -> str:
+    if str(entity.id) == player_id:
+        return "player"
+    return "ally" if combat.is_ally(entity.state) else "hostile"
+
+
 def _fighter(entity: ImaginaiEntity, side: str) -> combat.Fighter | None:
     return combat.fighter_from(
         str(entity.id), entity.name, entity.state,
         str(entity.location_id) if entity.location_id else None, side,
     )
+
+
+def write_conditions(entity: ImaginaiEntity, conditions: tuple[dict[str, Any], ...]) -> None:
+    """Grava as condições onde a ficha delas mora (dnd5e, ou a raiz nas criaturas)."""
+    state = copy.deepcopy(entity.state or {})
+    alvo = state["dnd5e"] if isinstance(state.get("dnd5e"), dict) else state
+    alvo["conditions"] = [dict(c) for c in conditions]
+    entity.state = state
+
+
+async def _allies_here(
+    db: AsyncSession, campaign: ImaginaiCampaign, player: ImaginaiEntity,
+) -> list[ImaginaiEntity]:
+    """Aliados que entram no combate: `ally`, de pé e no mesmo local do jogador."""
+    if player.location_id is None:
+        return []
+    rows = await db.scalars(
+        select(ImaginaiEntity).where(
+            ImaginaiEntity.campaign_id == campaign.id,
+            ImaginaiEntity.location_id == player.location_id,
+            ImaginaiEntity.kind.in_(_COMBATANT_KINDS),
+            ImaginaiEntity.active.is_(True),
+            ImaginaiEntity.id != player.id,
+        ).with_for_update()
+    )
+    return [
+        e for e in rows
+        if combat.is_ally(e.state) and (combat.hp_of(e.state) or (0, 0))[0] > 0
+    ]
 
 
 async def _hostiles_here(
@@ -110,27 +145,36 @@ async def _run(
     player: ImaginaiEntity, encounter: dict[str, Any],
     entities: dict[str, ImaginaiEntity],
 ) -> dict[str, Any]:
-    """Resolve os turnos inimigos e grava: HP do jogador, eventos, estado do encontro."""
+    """Resolve os turnos das criaturas (hostis e aliados) e grava: HP e condições de
+    todo mundo que mudou, um evento por turno e o estado do encontro."""
+    from .service import _apply_mutation   # tardio: service importa este módulo
+
     pid = str(player.id)
     fighters: dict[str, combat.Fighter] = {}
     for eid, entity in entities.items():
-        lutador = _fighter(entity, "player" if eid == pid else "hostile")
+        lutador = _fighter(entity, side_of(entity, pid))
         if lutador is not None:
             fighters[eid] = lutador
 
     report = combat.run_enemy_turns(encounter, fighters, pid, combat.secure_roller)
 
-    antes = fighters[pid].hp if pid in fighters else None
-    depois = report.fighters[pid].hp if pid in report.fighters else None
-    if antes is not None and depois is not None and depois != antes:
-        from .service import _apply_mutation   # tardio: service importa este módulo
-        _apply_mutation(
-            {"op": "adjust_hp", "entity_id": pid, "amount": depois - antes}, {pid: player},
-        )
+    for eid, depois in report.fighters.items():
+        antes = fighters.get(eid)
+        entity = entities.get(eid)
+        if antes is None or entity is None:
+            continue
+        if depois.hp != antes.hp:
+            _apply_mutation({"op": "adjust_hp", "entity_id": eid, "amount": depois.hp - antes.hp},
+                            {eid: entity})
+        if depois.conditions != antes.conditions:
+            write_conditions(entity, depois.conditions)
     for turno in report.enemy_turns:
+        tipo = ("turn_skipped" if turno.get("kind") == "skipped"
+                else "ally_attack" if turno.get("attacker_side") == "ally" else "enemy_attack")
+        alvo = turno.get("target_id")
         db.add(_event(
-            campaign, user_id, "enemy_attack", uuid.UUID(turno["attacker_id"]), player.id,
-            player.location_id, turno,
+            campaign, user_id, tipo, uuid.UUID(turno["attacker_id"]),
+            uuid.UUID(alvo) if alvo else None, player.location_id, turno,
         ))
     if not report.encounter.get("active") and report.encounter.get("outcome"):
         db.add(_event(
@@ -152,6 +196,7 @@ async def start(
     """Abre um encontro: rola iniciativa e já resolve os inimigos que agem antes do
     jogador. Sem inimigo de pé no local, não há combate (devolve None)."""
     inimigos = await _hostiles_here(db, campaign, player)
+    aliados = await _allies_here(db, campaign, player)
     if target is not None and not is_player(target):
         vida = combat.hp_of(target.state)
         if vida is not None and vida[0] > 0 and target.location_id == player.location_id:
@@ -161,10 +206,10 @@ async def start(
     if not inimigos:
         return None
 
-    entidades = {str(player.id): player, **{str(e.id): e for e in inimigos}}
+    entidades = {str(player.id): player, **{str(e.id): e for e in [*inimigos, *aliados]}}
     lutadores = [
-        lutador for eid, entity in entidades.items()
-        if (lutador := _fighter(entity, "player" if eid == str(player.id) else "hostile"))
+        lutador for entity in entidades.values()
+        if (lutador := _fighter(entity, side_of(entity, str(player.id))))
     ]
     if not any(l.side == "player" for l in lutadores):
         return None          # personagem sem ficha de combate: nada a disputar
@@ -191,6 +236,11 @@ async def after_player_turn(
     entidades = await _entities_by_id(db, campaign, ids)
     entidades[str(player.id)] = player           # o objeto já travado pelo chamador
     encontro = combat.end_player_turn(encontro, str(player.id))
+    # fim do turno do jogador: as condições dele com duração perdem uma rodada
+    atuais = combat.conditions_of(player.state)
+    passadas = combat.tick_conditions(atuais)
+    if passadas != atuais:
+        write_conditions(player, passadas)
     return await _run(db, campaign, user_id, player, encontro, entidades)
 
 
@@ -211,7 +261,7 @@ async def summary(
     pid = str(player.id)
     lutadores = {}
     for entity in entidades:
-        lutador = _fighter(entity, "player" if str(entity.id) == pid else "hostile")
+        lutador = _fighter(entity, side_of(entity, pid))
         if lutador is not None:
             lutadores[str(entity.id)] = lutador
     return combat.public_view(enc, lutadores, pid)

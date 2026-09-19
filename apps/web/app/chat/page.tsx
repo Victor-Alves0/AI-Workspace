@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, ChevronDown, ChevronUp, Code2, Copy, Dices, FlaskConical, GitBranch, Image as ImageIcon, Link2, Loader2, Menu, MessageSquareDashed, Mic, Pause, Play, RotateCcw, RotateCw, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
+import { CHAT_COMMANDS, parseCommand, splitRollArgs, type ParsedCommand } from "@/lib/commands";
 import { copyText } from "@/lib/clipboard";
 import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamRoundtable } from "@/lib/sse";
 import { seekSpeaking, seekSpeakingTo, setSpeakingRate, speak, startBrowserDictation, startRecording, stopSpeaking, subscribeSpeechProgress, toggleSpeakingPaused, transcribe, type SpeechProgress } from "@/lib/voice";
@@ -1488,6 +1489,35 @@ export default function ChatPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingKickoff, active, sending, draftMiniApp]);
 
+  async function runCommand({ command, args }: ParsedCommand) {
+    const toast = (title: string, body?: string) => {
+      const id = Date.now() + Math.random();
+      setToasts((t) => [...t, { id, title, body }]);
+      setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
+    };
+    if (command.name === "help") {
+      toast("Comandos", CHAT_COMMANDS.map((c) => `${c.usage} — ${c.description}`).join("\n"));
+      setInput("");
+      return;
+    }
+    if (command.name === "compact") {
+      setInput("");
+      await compactContext();
+      return;
+    }
+    if (command.name === "roll") {
+      if (!active) { toast("Abra uma conversa para rolar dados"); return; }
+      const { expression, label } = splitRollArgs(args || "1d20");
+      try {
+        await api.post(`/chats/${active.id}/roll`, { expression, label });
+        setInput("");
+        await reloadMessages(active.id);
+      } catch (e) {
+        toast("Rolagem inválida", e instanceof ApiError ? e.message : undefined);
+      }
+    }
+  }
+
   async function send(textArg?: string) {
     // textArg vem dos seletores de opção (kind:"ask"); senão usa o campo de texto
     const override = typeof textArg === "string";
@@ -1496,6 +1526,12 @@ export default function ChatPage() {
     // só para o payload/validação, sem perder espaços/quebras do rascunho do usuário.
     const draftBeforeSend = input;
     const text = (override ? textArg : draftBeforeSend).trim();
+    // comandos "//" (//roll, //compact, //help): executam aqui, não vão para a IA
+    const cmd = parseCommand(text);
+    if (cmd) {
+      await runCommand(cmd);
+      return;
+    }
     // mesa-redonda: a mensagem do usuário GUIA a conversa; roda os participantes.
     // (funciona no rascunho: runRoundtable cria o chat no 1º envio)
     if (isRoundtable) {
@@ -2896,7 +2932,7 @@ export default function ChatPage() {
               </span>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-ink">{t.title}</p>
-                {t.body && <p className="mt-0.5 truncate text-xs text-muted">{t.body}</p>}
+                {t.body && <p className="mt-0.5 line-clamp-6 whitespace-pre-line text-xs text-muted">{t.body}</p>}
               </div>
               <button onClick={() => dismissToast(t.id)} className="shrink-0 text-muted transition-colors hover:text-ink">
                 <X size={14} />

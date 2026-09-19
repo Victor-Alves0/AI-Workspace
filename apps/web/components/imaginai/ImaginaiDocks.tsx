@@ -18,6 +18,13 @@ import { ImaginaiSheetPanel } from "./panels/SheetPanel";
  * Docks do primeiro sistema do Imaginai. A composição em dois painéis permite que
  * sistemas futuros forneçam seus próprios campos sem alterar a coluna central.
  */
+const CONDITION_LABELS: Record<string, string> = {
+  poisoned: "envenenado", frightened: "amedrontado", blinded: "cego", prone: "caído",
+  restrained: "contido", invisible: "invisível", incapacitated: "incapacitado", stunned: "atordoado",
+  paralyzed: "paralisado", petrified: "petrificado", charmed: "enfeitiçado", grappled: "agarrado",
+  deafened: "surdo", exhaustion: "exaustão",
+};
+
 const EXPAND_FOCUS = ["locais", "NPCs", "facções", "criaturas", "lore", "caminhos no mapa"];
 
 export default function ImaginaiDocks({
@@ -67,6 +74,11 @@ export default function ImaginaiDocks({
   const armorClass = typeof dnd.armor_class === "number" ? dnd.armor_class : null;
   const campaignName = snapshot?.campaign.name ?? "Nome da Campanha";
   const characterName = snapshot?.character?.name ?? "Nome do personagem";
+  // caído (0 PV, o narrador decide o destino) ou morto
+  const vitalStatus = dnd.dead ? "Morto" : typeof hp.current === "number" && hp.current <= 0 ? "Caído" : null;
+  const activeConditions = (Array.isArray(dnd.conditions) ? dnd.conditions : [])
+    .map((c: unknown) => (c && typeof c === "object" ? String((c as Record<string, unknown>).key ?? "") : String(c)))
+    .filter((key: string) => key && key !== "unconscious");
   const stage = snapshot?.campaign.setup_stage;
   const status = loading
     ? "Abrindo mundo…"
@@ -281,6 +293,12 @@ export default function ImaginaiDocks({
             </div>
             <h2 className="mt-1.5 truncate text-sm font-semibold leading-5 text-ink" title={characterName}>{characterName}</h2>
             <p className="mt-0.5 truncate text-[11px] leading-4 text-muted">{className} · Nível {level}</p>
+            {vitalStatus || activeConditions.length ? (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {vitalStatus ? <span className={`rounded px-1.5 text-[10px] font-medium leading-5 ${vitalStatus === "Morto" ? "bg-rose-500/20 text-rose-200" : "bg-amber-400/15 text-amber-200"}`}>{vitalStatus}</span> : null}
+                {activeConditions.map((key: string) => <span key={key} className="rounded bg-amber-400/10 px-1.5 text-[10px] leading-5 text-amber-200">{CONDITION_LABELS[key] ?? key}</span>)}
+              </div>
+            ) : null}
             <div className="mt-2.5 grid grid-cols-2 gap-1.5">
               <div className="flex min-w-0 items-center justify-between gap-2 rounded-xl bg-surface2/70 px-2.5 py-1.5">
                 <span className="flex items-center gap-1.5 text-[11px] font-medium text-ink-soft"><Heart size={13} className="shrink-0 text-rose-400" /> HP</span>

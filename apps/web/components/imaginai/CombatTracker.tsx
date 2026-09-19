@@ -15,7 +15,7 @@ const HEALTH_TONE: Record<string, string> = {
 };
 
 function HealthChip({ entry }: { entry: Entry }) {
-  if (entry.side === "player" && typeof entry.hp === "number") {
+  if ((entry.side === "player" || entry.side === "ally") && typeof entry.hp === "number") {
     const ratio = entry.hp_max ? entry.hp / entry.hp_max : 1;
     const tone = entry.hp <= 0 ? HEALTH_TONE.caído : ratio > 0.5 ? HEALTH_TONE.ileso : ratio > 0.25 ? HEALTH_TONE.ferido : HEALTH_TONE["gravemente ferido"];
     return <span className={`shrink-0 rounded-md px-1.5 py-0.5 font-mono text-[10px] tabular-nums ${tone}`}>{entry.hp}/{entry.hp_max}</span>;
@@ -46,8 +46,19 @@ export default function CombatTracker({ encounter }: { encounter: ImaginaiEncoun
               } ${caido ? "opacity-50" : ""}`}
             >
               <span className="w-5 shrink-0 text-center font-mono text-[10px] tabular-nums text-muted">{entry.initiative}</span>
-              <span className={`min-w-0 flex-1 truncate ${entry.side === "player" ? "font-medium text-ink" : "text-ink-soft"} ${caido ? "line-through" : ""}`}>
-                {entry.name}
+              <span className="min-w-0 flex-1">
+                <span className={`block truncate ${entry.side === "player" ? "font-medium text-ink" : entry.side === "ally" ? "text-emerald-200" : "text-ink-soft"} ${caido ? "line-through" : ""}`}>
+                  {entry.name}{entry.side === "ally" ? <span className="ml-1 text-[9px] text-emerald-300/80">aliado</span> : null}
+                </span>
+                {entry.conditions?.length ? (
+                  <span className="mt-0.5 flex flex-wrap gap-1">
+                    {entry.conditions.map((c) => (
+                      <span key={c.key} className="rounded bg-amber-400/10 px-1 text-[9px] leading-4 text-amber-200" title={c.rounds ? `${c.rounds} rodada(s)` : "até ser removida"}>
+                        {c.label}{c.rounds ? ` ${c.rounds}` : ""}
+                      </span>
+                    ))}
+                  </span>
+                ) : null}
               </span>
               {entry.current && entry.side === "player" ? (
                 <span className="shrink-0 text-[10px] font-medium text-violet-200">Sua vez</span>

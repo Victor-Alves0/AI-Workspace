@@ -1,20 +1,23 @@
 """Combate por turnos do Imaginai (D&D 5e) — o núcleo, sem banco.
 
-Antes, o combate era unilateral: o jogador atacava e o HP do alvo caía, mas nada fazia
-o inimigo revidar. O narrador podia DESCREVER o goblin acertando, só que o HP do
-personagem não mudava — quebrando a promessa central do Imaginai, de que o mundo é
-autoritativo e o modelo narra, mas não decide resultados.
+O servidor decide TUDO que é mecânico no combate: quem entra, a ordem de iniciativa, a
+ação de cada criatura no turno dela e quando o combate acaba. O narrador só narra o
+que sai daqui. É puro de propósito: recebe estados, devolve estados, e o dado é
+injetável — então o combate inteiro é testável sem banco e sem sorte.
 
-Este módulo decide TUDO que é mecânico no combate: quem entra, a ordem de iniciativa,
-o ataque de cada inimigo no turno dele e quando o combate acaba. É puro de propósito:
-recebe estados, devolve estados, e o dado é injetável — então o combate inteiro é
-testável sem banco e sem sorte. `service.py` só persiste o que sai daqui.
+Três lados: o jogador, os ALIADOS (NPCs lutando junto, agem no turno deles contra os
+hostis) e os HOSTIS (agem contra o jogador e os aliados). Cada criatura pode ter várias
+ações — ataque (d20 contra a CA) ou habilidade com TESTE DE RESISTÊNCIA (baforada,
+magia, veneno: CD fixa, meio dano se passar, condição se falhar) — e as CONDIÇÕES
+(envenenado, caído, atordoado...) mudam os dados: vantagem, desvantagem, turno perdido,
+resistência que falha sozinha, acerto crítico garantido.
 """
 
 from __future__ import annotations
 
 import re
 import secrets
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -30,6 +33,76 @@ DEFAULT_ATTACK: dict[str, Any] = {
     "key": "strike", "name": "Ataque", "attack_modifier": 3,
     "damage": "1d6+1", "damage_type": "",
 }
+
+ABILITIES = ("strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma")
+_ABILITY_ALIASES = {
+    "for": "strength", "str": "strength", "forca": "strength",
+    "des": "dexterity", "dex": "dexterity", "destreza": "dexterity",
+    "con": "constitution", "constituicao": "constitution",
+    "int": "intelligence", "inteligencia": "intelligence",
+    "sab": "wisdom", "wis": "wisdom", "sabedoria": "wisdom",
+    "car": "charisma", "cha": "charisma", "carisma": "charisma",
+}
+
+# --------------------------------------------------------------------------- #
+# Condições (PHB, apêndice A) — só o que muda dados                            #
+# --------------------------------------------------------------------------- #
+#   attack_dis / attack_adv   → os ATAQUES de quem tem a condição
+#   attacked_adv / attacked_dis → ataques CONTRA quem tem a condição
+#   check_dis                 → testes de atributo de quem tem a condição
+#   incapacitated             → perde o turno
+#   auto_fail                 → resistências que falham sozinhas
+#   dex_save_dis              → desvantagem em resistência de Destreza
+#   auto_crit                 → acerto contra ele é crítico (alcance corpo a corpo)
+CONDITIONS: dict[str, dict[str, Any]] = {
+    "poisoned": {"label": "envenenado", "attack_dis": True, "check_dis": True},
+    "frightened": {"label": "amedrontado", "attack_dis": True, "check_dis": True},
+    "blinded": {"label": "cego", "attack_dis": True, "attacked_adv": True},
+    "prone": {"label": "caído", "attack_dis": True, "attacked_adv": True},
+    "restrained": {"label": "contido", "attack_dis": True, "attacked_adv": True, "dex_save_dis": True},
+    "invisible": {"label": "invisível", "attack_adv": True, "attacked_dis": True},
+    "incapacitated": {"label": "incapacitado", "incapacitated": True},
+    "stunned": {"label": "atordoado", "incapacitated": True, "attacked_adv": True,
+                "auto_fail": ("strength", "dexterity")},
+    "paralyzed": {"label": "paralisado", "incapacitated": True, "attacked_adv": True,
+                  "auto_fail": ("strength", "dexterity"), "auto_crit": True},
+    "unconscious": {"label": "inconsciente", "incapacitated": True, "attacked_adv": True,
+                    "auto_fail": ("strength", "dexterity"), "auto_crit": True},
+    "petrified": {"label": "petrificado", "incapacitated": True, "attacked_adv": True,
+                  "auto_fail": ("strength", "dexterity")},
+    "charmed": {"label": "enfeitiçado"},
+    "grappled": {"label": "agarrado"},
+    "deafened": {"label": "surdo"},
+    "exhaustion": {"label": "exaustão", "check_dis": True},
+}
+_CONDITION_ALIASES = {
+    "envenenado": "poisoned", "amedrontado": "frightened", "assustado": "frightened",
+    "cego": "blinded", "caido": "prone", "derrubado": "prone", "contido": "restrained",
+    "impedido": "restrained", "preso": "restrained", "invisivel": "invisible",
+    "incapacitado": "incapacitated", "atordoado": "stunned", "paralisado": "paralyzed",
+    "inconsciente": "unconscious", "petrificado": "petrified", "enfeiticado": "charmed",
+    "encantado": "charmed", "agarrado": "grappled", "surdo": "deafened", "exausto": "exhaustion",
+    "exaustao": "exhaustion",
+}
+
+
+def _norm(value: Any) -> str:
+    text = unicodedata.normalize("NFKD", str(value or "")).encode("ascii", "ignore").decode()
+    return text.strip().casefold()
+
+
+def condition_key(value: Any) -> str | None:
+    key = _norm(value).replace(" ", "_")
+    if key in CONDITIONS:
+        return key
+    return _CONDITION_ALIASES.get(_norm(value))
+
+
+def ability_key(value: Any) -> str | None:
+    key = _norm(value)
+    if key in ABILITIES:
+        return key
+    return _ABILITY_ALIASES.get(key)
 
 
 def secure_roller(sides: int) -> int:
@@ -67,38 +140,98 @@ def is_hostile(state: Any) -> bool:
     return bool(s.get("hostile") or dnd_state(state).get("hostile"))
 
 
+def is_ally(state: Any) -> bool:
+    """NPC que luta ao lado do jogador (`ally`, gravado pela ação `ally` do narrador)."""
+    s = state if isinstance(state, dict) else {}
+    return bool(s.get("ally") or dnd_state(state).get("ally")) and not is_hostile(state)
+
+
 def armor_class(state: Any) -> int:
     return max(1, _int(dnd_state(state).get("armor_class"), 10))
+
+
+def _score(value: Any) -> int:
+    if isinstance(value, dict):
+        value = value.get("score", 10)
+    return _int(value, 10)
 
 
 def initiative_bonus(state: Any) -> int:
     """Modificador de Destreza. Criatura sem atributos entra com +0."""
     attributes = dnd_state(state).get("attributes")
     attributes = attributes if isinstance(attributes, dict) else {}
-    dexterity = attributes.get("dexterity", 10)
-    if isinstance(dexterity, dict):
-        dexterity = dexterity.get("score", 10)
-    return (_int(dexterity, 10) - 10) // 2
+    return (_score(attributes.get("dexterity", 10)) - 10) // 2
+
+
+def save_modifiers(state: Any) -> dict[str, int]:
+    """Bônus de resistência por atributo: modificador + proficiência onde a ficha marca.
+    `saves` explícito (bloco de estatísticas de criatura) tem precedência."""
+    dnd = dnd_state(state)
+    explicit = dnd.get("saves") if isinstance(dnd.get("saves"), dict) else {}
+    attributes = dnd.get("attributes") if isinstance(dnd.get("attributes"), dict) else {}
+    profs = dnd.get("saving_throws") if isinstance(dnd.get("saving_throws"), dict) else {}
+    prof = _int(dnd.get("proficiency_bonus"), 2)
+    out: dict[str, int] = {}
+    for ability in ABILITIES:
+        chave = next((k for k in explicit if ability_key(k) == ability), None)
+        if chave is not None:
+            out[ability] = _int(explicit[chave])
+            continue
+        mod = (_score(attributes.get(ability, 10)) - 10) // 2
+        marcado = profs.get(ability)
+        proficient = marcado is True or (isinstance(marcado, dict) and marcado.get("proficient"))
+        out[ability] = mod + (prof if proficient else 0)
+    return out
+
+
+def conditions_of(state: Any) -> tuple[dict[str, Any], ...]:
+    raw = dnd_state(state).get("conditions")
+    out = []
+    for item in raw if isinstance(raw, list) else []:
+        record = item if isinstance(item, dict) else {"key": item}
+        key = condition_key(record.get("key") or record.get("name"))
+        if key:
+            rounds = record.get("rounds")
+            out.append({"key": key, "rounds": _int(rounds) if rounds is not None else None})
+    return tuple(out)
+
+
+def _normalize_action(raw: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    base = {
+        "key": str(raw.get("key") or "attack"),
+        "name": str(raw.get("name") or raw.get("key") or "Ataque"),
+        "damage": str(raw.get("damage") or ""),
+        "damage_type": str(raw.get("damage_type") or ""),
+    }
+    condicao = condition_key(raw.get("condition"))
+    if condicao:
+        base["condition"] = condicao
+        base["condition_rounds"] = max(1, min(_int(raw.get("condition_rounds") or raw.get("rounds"), 1), 10))
+    save = ability_key(raw.get("save"))
+    if save:
+        return {**base, "type": "save", "save": save, "dc": max(5, min(_int(raw.get("dc"), 12), 30)),
+                "half": raw.get("half", True) is not False}
+    if not base["damage"] and not condicao:
+        return None
+    return {**base, "type": "attack", "attack_modifier": _int(raw.get("attack_modifier"), 0)}
+
+
+def actions_of(state: Any) -> tuple[dict[str, Any], ...]:
+    """Tudo o que a criatura sabe fazer no turno: ataques e habilidades com resistência."""
+    attacks = dnd_state(state).get("attacks")
+    if isinstance(attacks, dict):
+        attacks = [{"key": str(k), **(v if isinstance(v, dict) else {})} for k, v in attacks.items()]
+    out = [a for a in (_normalize_action(r) for r in (attacks if isinstance(attacks, list) else [])) if a]
+    return tuple(out) or ({**DEFAULT_ATTACK, "type": "attack"},)
 
 
 def attack_profile(state: Any) -> dict[str, Any]:
-    """O ataque que um inimigo usa no turno dele: o primeiro cadastrado, ou o padrão."""
-    attacks = dnd_state(state).get("attacks")
-    if isinstance(attacks, dict):
-        attacks = [
-            {"key": str(key), **(value if isinstance(value, dict) else {})}
-            for key, value in attacks.items()
-        ]
-    if isinstance(attacks, list):
-        for raw in attacks:
-            if isinstance(raw, dict) and raw.get("damage"):
-                return {
-                    "key": str(raw.get("key") or "attack"),
-                    "name": str(raw.get("name") or raw.get("key") or "Ataque"),
-                    "attack_modifier": _int(raw.get("attack_modifier"), 0),
-                    "damage": str(raw["damage"]),
-                    "damage_type": str(raw.get("damage_type") or ""),
-                }
+    """A primeira ação de ATAQUE da criatura (ou o ataque padrão)."""
+    for action in actions_of(state):
+        if action["type"] == "attack" and action.get("damage"):
+            return {k: action[k] for k in ("key", "name", "attack_modifier", "damage", "damage_type")}
     return dict(DEFAULT_ATTACK)
 
 
@@ -119,8 +252,7 @@ def roll_damage(expression: str, roller: Roller, *, critical: bool = False) -> t
 
 
 def health_label(current: int, maximum: int) -> str:
-    """Como o JOGADOR enxerga a vida do inimigo. No 5e o mestre não diz o HP exato;
-    diz o estado aparente — e é isso que a interface e o narrador recebem."""
+    """Como o JOGADOR enxerga a vida do inimigo: estado aparente, não o número."""
     if maximum <= 0:
         return "desconhecido"
     if current <= 0:
@@ -134,23 +266,41 @@ def health_label(current: int, maximum: int) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Combatentes e encontro                                                       #
+# Combatentes                                                                  #
 # --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class Fighter:
     id: str
     name: str
-    side: str                      # "player" | "hostile"
+    side: str                      # "player" | "ally" | "hostile"
     hp: int
     hp_max: int
     ac: int
     location_id: str | None
     initiative_bonus: int = 0
     attack: dict[str, Any] = field(default_factory=lambda: dict(DEFAULT_ATTACK))
+    actions: tuple[dict[str, Any], ...] = ()
+    conditions: tuple[dict[str, Any], ...] = ()
+    saves: dict[str, int] = field(default_factory=dict)
 
     @property
     def down(self) -> bool:
         return self.hp <= 0
+
+    def has(self, flag: str) -> bool:
+        return any(CONDITIONS.get(c["key"], {}).get(flag) for c in self.conditions)
+
+    def auto_fails(self, ability: str) -> bool:
+        return any(ability in CONDITIONS.get(c["key"], {}).get("auto_fail", ()) for c in self.conditions)
+
+    @property
+    def incapacitated(self) -> bool:
+        return self.has("incapacitated")
+
+    def all_actions(self) -> tuple[dict[str, Any], ...]:
+        if self.actions:
+            return self.actions
+        return ({"type": "attack", **self.attack},)
 
 
 def fighter_from(entity_id: str, name: str, state: Any, location_id: str | None,
@@ -164,7 +314,30 @@ def fighter_from(entity_id: str, name: str, state: Any, location_id: str | None,
         id=str(entity_id), name=name or "?", side=side, hp=current, hp_max=maximum,
         ac=armor_class(state), location_id=str(location_id) if location_id else None,
         initiative_bonus=initiative_bonus(state), attack=attack_profile(state),
+        actions=actions_of(state), conditions=conditions_of(state), saves=save_modifiers(state),
     )
+
+
+def add_condition(conditions: tuple[dict[str, Any], ...], key: str, rounds: int | None) -> tuple[dict[str, Any], ...]:
+    """Aplica (ou renova pela maior duração) uma condição."""
+    atual = [c for c in conditions if c["key"] != key]
+    anterior = next((c for c in conditions if c["key"] == key), None)
+    if anterior is not None and rounds is not None and anterior.get("rounds") is not None:
+        rounds = max(rounds, anterior["rounds"])
+    elif anterior is not None and anterior.get("rounds") is None:
+        rounds = None
+    return (*atual, {"key": key, "rounds": rounds})
+
+
+def tick_conditions(conditions: tuple[dict[str, Any], ...]) -> tuple[dict[str, Any], ...]:
+    """Fim do turno de quem tem as condições: as com duração perdem uma rodada."""
+    out = []
+    for c in conditions:
+        if c.get("rounds") is None:
+            out.append(c)
+        elif c["rounds"] > 1:
+            out.append({**c, "rounds": c["rounds"] - 1})
+    return tuple(out)
 
 
 def roll_initiative(fighters: list[Fighter], roller: Roller) -> list[dict[str, Any]]:
@@ -185,8 +358,7 @@ def roll_initiative(fighters: list[Fighter], roller: Roller) -> list[dict[str, A
 def start(fighters: list[Fighter], player_id: str, roller: Roller, *,
           player_already_acted: bool) -> dict[str, Any]:
     """Novo encontro. `player_already_acted`: o combate começou PELO ataque do jogador,
-    então esse ataque conta como o turno dele nesta rodada — o ponteiro vai para logo
-    depois dele. Numa emboscada, começa do topo da ordem."""
+    então esse ataque conta como o turno dele nesta rodada."""
     order = roll_initiative(fighters, roller)
     turn = 0
     if player_already_acted:
@@ -196,9 +368,7 @@ def start(fighters: list[Fighter], player_id: str, roller: Roller, *,
 
 
 def end_player_turn(encounter: dict[str, Any], player_id: str) -> dict[str, Any]:
-    """O jogador acabou de agir: o ponteiro sai da vez DELE para o próximo. Se o ponteiro
-    não estava no jogador (estado antigo, reprocessamento), fica onde está — avançar às
-    cegas pularia o turno de um inimigo."""
+    """O jogador acabou de agir: o ponteiro sai da vez DELE para o próximo."""
     enc = {**encounter}
     order = enc.get("order") or []
     turn = int(enc.get("turn") or 0)
@@ -207,34 +377,155 @@ def end_player_turn(encounter: dict[str, Any], player_id: str) -> dict[str, Any]
     return enc
 
 
+# --------------------------------------------------------------------------- #
+# Turnos das criaturas                                                         #
+# --------------------------------------------------------------------------- #
 @dataclass
 class TurnReport:
-    """O que aconteceu nos turnos inimigos — vira evento no ledger e texto p/ o narrador."""
+    """O que aconteceu nos turnos das criaturas — vira evento e texto p/ o narrador."""
     enemy_turns: list[dict[str, Any]]
     fighters: dict[str, Fighter]
     encounter: dict[str, Any]
 
 
-def _outcome(encounter: dict, fighters: dict[str, Fighter], player_id: str) -> str | None:
+def _outcome(fighters: dict[str, Fighter], player_id: str) -> str | None:
     player = fighters.get(player_id)
     if player is None or player.down:
         return "defeat"
     inimigos = [
         f for f in fighters.values()
-        if f.side == "hostile" and not f.down
-        and f.location_id == player.location_id
+        if f.side == "hostile" and not f.down and f.location_id == player.location_id
     ]
     if inimigos:
         return None
-    # ninguém de pé no mesmo lugar: ou venceu, ou se afastou do combate
     vivos_longe = any(f.side == "hostile" and not f.down for f in fighters.values())
     return "escaped" if vivos_longe else "victory"
 
 
+def _opponents(actor: Fighter, pool: dict[str, Fighter]) -> list[Fighter]:
+    """Hostil mira jogador e aliados; aliado mira hostis. Só quem está de pé e no local."""
+    lados = {"player", "ally"} if actor.side == "hostile" else {"hostile"}
+    return [
+        f for f in pool.values()
+        if f.side in lados and not f.down and f.location_id == actor.location_id
+    ]
+
+
+def _pick(items: list, roller: Roller) -> Any:
+    """Escolha por dado (determinística nos testes); com uma opção, não gasta dado."""
+    return items[0] if len(items) == 1 else items[roller(len(items)) - 1]
+
+
+def _d20(mode: str, roller: Roller) -> tuple[int, list[int]]:
+    rolls = [roller(20)]
+    if mode != "normal":
+        rolls.append(roller(20))
+    die = max(rolls) if mode == "advantage" else min(rolls) if mode == "disadvantage" else rolls[0]
+    return die, rolls
+
+
+def attack_mode(attacker: Fighter | None, target: Fighter | None, requested: str = "normal") -> tuple[str, list[str]]:
+    """Vantagem/desvantagem pelo que as condições dizem (e o pedido do narrador).
+    Uma de cada se anulam — regra do 5e."""
+    adv, dis, motivos = requested == "advantage", requested == "disadvantage", []
+    if attacker is not None:
+        for c in attacker.conditions:
+            regra = CONDITIONS.get(c["key"], {})
+            if regra.get("attack_adv"):
+                adv = True
+                motivos.append(f"{regra['label']} (atacante)")
+            if regra.get("attack_dis"):
+                dis = True
+                motivos.append(f"{regra['label']} (atacante)")
+    if target is not None:
+        for c in target.conditions:
+            regra = CONDITIONS.get(c["key"], {})
+            if regra.get("attacked_adv"):
+                adv = True
+                motivos.append(f"{regra['label']} (alvo)")
+            if regra.get("attacked_dis"):
+                dis = True
+                motivos.append(f"{regra['label']} (alvo)")
+    if adv and not dis:
+        return "advantage", motivos
+    if dis and not adv:
+        return "disadvantage", motivos
+    return "normal", motivos
+
+
+def roll_save(target: Fighter, ability: str, dc: int, roller: Roller,
+              requested: str = "normal") -> dict[str, Any]:
+    """Teste de resistência no servidor: d20 + bônus; condições podem falhar sozinhas."""
+    if target.auto_fails(ability):
+        return {"ability": ability, "dc": dc, "rolls": [], "die": None, "modifier": 0,
+                "total": None, "success": False, "auto_fail": True}
+    mode = requested
+    if ability == "dexterity" and target.has("dex_save_dis"):
+        mode = "normal" if mode == "advantage" else "disadvantage"
+    die, rolls = _d20(mode, roller)
+    mod = target.saves.get(ability, 0)
+    total = die + mod
+    return {"ability": ability, "dc": dc, "rolls": rolls, "die": die, "modifier": mod,
+            "total": total, "success": total >= dc, "auto_fail": False, "mode": mode}
+
+
+def _resolve_action(actor: Fighter, target: Fighter, action: dict[str, Any],
+                    roller: Roller) -> tuple[dict[str, Any], Fighter]:
+    """Uma ação contra um alvo. Devolve (registro do turno, alvo atualizado)."""
+    record: dict[str, Any] = {
+        "attacker_id": actor.id, "attacker": actor.name, "attacker_side": actor.side,
+        "target_id": target.id, "target": target.name, "target_side": target.side,
+        "attack_name": action.get("name") or "Ataque", "kind": action["type"],
+        "damage_type": action.get("damage_type") or "", "damage": 0, "damage_rolls": [],
+        "condition_applied": None,
+    }
+    novo = target
+    if action["type"] == "save":
+        save = roll_save(target, action["save"], int(action["dc"]), roller)
+        dano, dados = (0, [])
+        if action.get("damage"):
+            cheio, dados = roll_damage(action["damage"], roller)
+            dano = cheio if not save["success"] else (cheio // 2 if action.get("half", True) else 0)
+        record.update(save=save, saved=save["success"], hit=not save["success"], damage=dano,
+                      damage_rolls=dados, critical=False)
+        if not save["success"] and action.get("condition"):
+            record["condition_applied"] = action["condition"]
+    else:
+        mode, motivos = attack_mode(actor, target)
+        modificador = _int(action.get("attack_modifier"), 0)
+        die, rolls = _d20(mode, roller)
+        total = die + modificador
+        acertou = die == 20 or (die != 1 and total >= target.ac)
+        critico = die == 20 or (acertou and target.has("auto_crit"))
+        dano, dados = (0, [])
+        if acertou and action.get("damage"):
+            dano, dados = roll_damage(str(action["damage"]), roller, critical=critico)
+        record.update(die=die, rolls=rolls, mode=mode, mode_reasons=motivos, modifier=modificador,
+                      total=total, target_ac=target.ac, hit=acertou, critical=critico,
+                      damage=dano, damage_rolls=dados)
+        if acertou and action.get("condition"):
+            record["condition_applied"] = action["condition"]
+    if record["damage"]:
+        novo = replace(novo, hp=max(0, novo.hp - record["damage"]))
+    if record["condition_applied"]:
+        novo = replace(novo, conditions=add_condition(
+            novo.conditions, record["condition_applied"], action.get("condition_rounds", 1)))
+    if novo.down and not target.down:
+        # quem cai fica inconsciente (e o que for hostil para de lutar)
+        novo = replace(novo, conditions=add_condition(novo.conditions, "unconscious", None))
+    record["target_hp_after"] = novo.hp
+    if target.side in {"player", "ally"}:
+        record["target_hp"] = novo.hp
+        record["target_hp_max"] = novo.hp_max
+    else:
+        record["target_health"] = health_label(novo.hp, novo.hp_max)
+    return record, novo
+
+
 def run_enemy_turns(encounter: dict[str, Any], fighters: dict[str, Fighter],
                     player_id: str, roller: Roller) -> TurnReport:
-    """Avança a ordem a partir do ponteiro atual e resolve cada turno inimigo até a vez
-    do jogador voltar — ou o combate acabar. Nada aqui é decidido pelo modelo."""
+    """Avança a ordem a partir do ponteiro e resolve o turno de cada criatura (hostis e
+    aliados) até a vez do jogador voltar — ou o combate acabar."""
     enc = {**encounter, "order": list(encounter.get("order") or [])}
     pool = dict(fighters)
     turns: list[dict[str, Any]] = []
@@ -242,9 +533,8 @@ def run_enemy_turns(encounter: dict[str, Any], fighters: dict[str, Fighter],
     if not order or not enc.get("active"):
         return TurnReport([], pool, enc)
 
-    # teto defensivo: uma ordem corrompida nunca vira laço infinito
-    for _ in range(len(order) * 2 + 2):
-        fim = _outcome(enc, pool, player_id)
+    for _ in range(len(order) * 2 + 2):          # teto: ordem corrompida não vira laço
+        fim = _outcome(pool, player_id)
         if fim is not None:
             enc.update(active=False, outcome=fim)
             break
@@ -253,50 +543,36 @@ def run_enemy_turns(encounter: dict[str, Any], fighters: dict[str, Fighter],
             enc["round"] = int(enc.get("round") or 1) + 1
         vez = order[enc["turn"]]
         if vez["id"] == player_id:
-            break                                # a vez voltou ao jogador
-        atacante = pool.get(vez["id"])
+            break
         enc["turn"] += 1
-        alvo = pool.get(player_id)
-        if atacante is None or atacante.down or atacante.side != "hostile" or alvo is None:
+        ator = pool.get(vez["id"])
+        if ator is None or ator.down or ator.side not in {"hostile", "ally"}:
             continue
-        if atacante.location_id != alvo.location_id:
-            continue                             # o jogador saiu do alcance
-        turns.append(_enemy_attack(atacante, alvo, roller))
-        dano = turns[-1]["damage"]
-        if dano:
-            pool[player_id] = replace(alvo, hp=max(0, alvo.hp - dano))
-        turns[-1]["target_hp"] = pool[player_id].hp
-        turns[-1]["target_hp_max"] = pool[player_id].hp_max
+        if ator.incapacitated:
+            turns.append({"attacker_id": ator.id, "attacker": ator.name, "attacker_side": ator.side,
+                          "kind": "skipped", "reason": ", ".join(
+                              CONDITIONS[c["key"]]["label"] for c in ator.conditions
+                              if CONDITIONS.get(c["key"], {}).get("incapacitated")),
+                          "damage": 0})
+        else:
+            alvos = _opponents(ator, pool)
+            if alvos:
+                alvo = _pick(alvos, roller)
+                acoes = ator.all_actions()
+                acao = acoes[(int(enc.get("round") or 1) - 1) % len(acoes)]
+                registro, novo = _resolve_action(ator, alvo, acao, roller)
+                pool[alvo.id] = novo
+                turns.append(registro)
+        pool[ator.id] = replace(pool[ator.id], conditions=tick_conditions(pool[ator.id].conditions))
     else:
         enc.update(active=False, outcome=enc.get("outcome") or "stalled")
     return TurnReport(turns, pool, enc)
 
 
-def _enemy_attack(atacante: Fighter, alvo: Fighter, roller: Roller) -> dict[str, Any]:
-    """d20 + ataque contra a CA do jogador. 20 natural é crítico; 1 natural erra sempre."""
-    ataque = atacante.attack
-    modificador = _int(ataque.get("attack_modifier"), 0)
-    die = roller(20)
-    total = die + modificador
-    critico = die == 20
-    acertou = critico or (die != 1 and total >= alvo.ac)
-    dano, dados = (0, [])
-    if acertou:
-        dano, dados = roll_damage(str(ataque.get("damage") or ""), roller, critical=critico)
-    return {
-        "attacker_id": atacante.id, "attacker": atacante.name,
-        "attack_name": ataque.get("name") or "Ataque",
-        "die": die, "modifier": modificador, "total": total, "target_ac": alvo.ac,
-        "hit": acertou, "critical": critico,
-        "damage": dano, "damage_rolls": dados,
-        "damage_type": ataque.get("damage_type") or "",
-    }
-
-
 def public_view(encounter: dict[str, Any] | None, fighters: dict[str, Fighter],
                 player_id: str) -> dict[str, Any] | None:
-    """Encontro como o JOGADOR o vê: a própria vida em números, a dos inimigos como
-    estado aparente, e de quem é a vez."""
+    """Encontro como o JOGADOR o vê: vida própria e dos aliados em números, a dos
+    inimigos como estado aparente, condições de todos e de quem é a vez."""
     if not encounter:
         return None
     order = encounter.get("order") or []
@@ -306,13 +582,19 @@ def public_view(encounter: dict[str, Any] | None, fighters: dict[str, Fighter],
     for entry in order:
         fighter = fighters.get(entry["id"])
         linha: dict[str, Any] = {
-            "id": entry["id"], "name": entry["name"], "side": entry["side"],
+            "id": entry["id"], "name": entry["name"],
+            "side": fighter.side if fighter is not None else entry["side"],
             "initiative": entry["initiative"], "current": entry["id"] == atual,
         }
         if fighter is not None:
-            if entry["id"] == player_id:
+            if fighter.side in {"player", "ally"}:
                 linha.update(hp=fighter.hp, hp_max=fighter.hp_max)
             linha["health"] = health_label(fighter.hp, fighter.hp_max)
+            linha["conditions"] = [
+                {"key": c["key"], "label": CONDITIONS.get(c["key"], {}).get("label", c["key"]),
+                 "rounds": c.get("rounds")}
+                for c in fighter.conditions
+            ]
         linhas.append(linha)
     return {
         "active": bool(encounter.get("active")),

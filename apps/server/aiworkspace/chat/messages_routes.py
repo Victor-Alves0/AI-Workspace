@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -167,6 +168,35 @@ async def ephemeral(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+class RollIn(BaseModel):
+    expression: str = Field(min_length=1, max_length=120)
+    label: str = Field(default="", max_length=80)
+
+
+@router.post("/{chat_id}/roll")
+async def roll_dice(
+    chat_id: uuid.UUID,
+    body: RollIn,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    """Comando //roll do compositor: o SERVIDOR rola (o jogador não escolhe o número) e a
+    rolagem entra na conversa como mensagem — a IA a vê no próximo turno. Não dispara
+    resposta da IA, igual a uma rolagem na mesa do roll20."""
+    from .. import dice
+
+    chat = await _get_owned_chat(db, chat_id, user)
+    try:
+        resultado = dice.roll(body.expression)
+    except dice.DiceError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    linha = dice.chat_line(resultado, body.label.strip())
+    msg = Message(chat_id=chat.id, role="user", content=linha)
+    db.add(msg)
+    await db.commit()
+    return {"ok": True, "content": linha, "result": resultado.as_dict(), "message_id": str(msg.id)}
 
 
 @router.post("/{chat_id}/messages")

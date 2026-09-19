@@ -51,6 +51,7 @@ function flattenRefs(refs: KnowledgeRef[]): RefDoc[] {
   return out;
 }
 import { API_URL, uploadFile } from "@/lib/api";
+import { matchCommands, type ChatCommand } from "@/lib/commands";
 import { MenuItem, finePointer, useClickOutside } from "./ui";
 import { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME } from "./CodespaceFileBrowser";
 import { toolCategoryIcon, toolCategoryTitle } from "./toolCategory";
@@ -613,6 +614,14 @@ export default function PromptBox({
   }, [prompts, slashQuery]);
   const promptMenuOpen = !dismissed && promptMatches.length > 0;
 
+  // "//" = comandos do chat (//roll, //compact...). Só enquanto o nome é digitado.
+  const commandQuery = useMemo(() => {
+    const m = /^\/\/([\w?]*)$/.exec(value);
+    return m ? m[1] : null;
+  }, [value]);
+  const commandMatches = useMemo(() => (commandQuery === null ? [] : matchCommands(commandQuery)), [commandQuery]);
+  const commandMenuOpen = !dismissed && commandMatches.length > 0;
+
   // "$slug" em QUALQUER ponto da mensagem (menção): detecta o token "$query" logo
   // antes do cursor (início da linha ou após espaço). Assim dá p/ escrever a
   // mensagem E citar a skill inline — ela vira um chip e some do texto ao escolher.
@@ -677,7 +686,7 @@ export default function PromptBox({
   useEffect(() => {
     setHi(0);
     setDismissed(false);
-  }, [slashQuery, dollarQuery, atQuery, hashQuery]);
+  }, [slashQuery, dollarQuery, atQuery, hashQuery, commandQuery]);
 
   function pickRef(e: RefDoc) {
     if (hashToken) {
@@ -714,6 +723,11 @@ export default function PromptBox({
   }
   const attachedAgent = useMemo(() => agents.find((a) => a.id === agentId) ?? null, [agents, agentId]);
 
+  function pickCommand(c: ChatCommand) {
+    // roll pede argumentos: deixa "//roll " para completar; os demais já estão prontos
+    onChange(c.name === "roll" ? "//roll " : `//${c.name}`);
+    requestAnimationFrame(() => taRef.current?.focus());
+  }
   function pickPrompt(p: Prompt) {
     onChange(p.content);
     requestAnimationFrame(() => taRef.current?.focus());
@@ -851,7 +865,29 @@ export default function PromptBox({
               : "Solte para anexar"}
           </div>
         )}
-        {promptMenuOpen && (
+        {commandMenuOpen && (
+          <div className="animate-pop absolute bottom-full left-3 right-3 z-50 mb-2 overflow-hidden rounded-xl border border-border bg-surface shadow-menu">
+            <p className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">Comandos</p>
+            <div className="max-h-60 overflow-y-auto py-1">
+              {commandMatches.map((c, i) => (
+                <button
+                  key={c.name}
+                  onMouseEnter={() => setHi(i)}
+                  onClick={() => pickCommand(c)}
+                  className={`block w-full px-3 py-2 text-left transition-colors ${i === hi ? "bg-hover" : ""}`}
+                >
+                  <span className="font-mono text-sm text-accent-hover">//{c.name}</span>
+                  {c.aliases.length ? <span className="ml-1.5 font-mono text-xs text-muted">{c.aliases.map((a) => `//${a}`).join(" ")}</span> : null}
+                  <span className="block truncate text-xs text-muted">{c.description}</span>
+                </button>
+              ))}
+            </div>
+            <p className="border-t border-border px-3 py-1.5 text-[10px] text-muted">
+              ↑↓ navegar · Enter/Tab usar · Esc ignorar
+            </p>
+          </div>
+        )}
+        {promptMenuOpen && !commandMenuOpen && (
           <div className="animate-pop absolute bottom-full left-3 right-3 z-50 mb-2 overflow-hidden rounded-xl border border-border bg-surface shadow-menu">
             <p className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">Prompts</p>
             <div className="max-h-60 overflow-y-auto py-1">
@@ -1064,7 +1100,7 @@ export default function PromptBox({
           onPaste={canAttach ? onPaste : undefined}
           onKeyDown={(e) => {
             // menu ativo: prompts ("/"), skills ("$"), agentes ("@") ou refs ("#") — nunca juntos
-            const count = promptMenuOpen ? promptMatches.length : skillMenuOpen ? skillMatches.length : agentMenuOpen ? agentMatches.length : refMenuOpen ? refMatches.length : 0;
+            const count = commandMenuOpen ? commandMatches.length : promptMenuOpen ? promptMatches.length : skillMenuOpen ? skillMatches.length : agentMenuOpen ? agentMatches.length : refMenuOpen ? refMatches.length : 0;
             if (count > 0) {
               if (e.key === "ArrowDown") {
                 e.preventDefault();
@@ -1078,7 +1114,8 @@ export default function PromptBox({
               }
               if (e.key === "Enter" || e.key === "Tab") {
                 e.preventDefault();
-                if (promptMenuOpen) pickPrompt(promptMatches[hi] ?? promptMatches[0]);
+                if (commandMenuOpen) pickCommand(commandMatches[hi] ?? commandMatches[0]);
+                else if (promptMenuOpen) pickPrompt(promptMatches[hi] ?? promptMatches[0]);
                 else if (skillMenuOpen) pickSkill(skillMatches[hi] ?? skillMatches[0]);
                 else if (agentMenuOpen) pickAgent(agentMatches[hi] ?? agentMatches[0]);
                 else pickRef(refMatches[hi] ?? refMatches[0]);

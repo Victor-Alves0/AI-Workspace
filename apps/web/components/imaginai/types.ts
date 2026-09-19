@@ -46,12 +46,13 @@ export type ImaginaiEncounter = {
   order: {
     id: string;
     name: string;
-    side: "player" | "hostile";
+    side: "player" | "ally" | "hostile";
     initiative: number;
     current: boolean;
     health?: "ileso" | "ferido" | "gravemente ferido" | "caído" | "desconhecido";
     hp?: number;
     hp_max?: number;
+    conditions?: { key: string; label: string; rounds: number | null }[];
   }[];
 };
 
