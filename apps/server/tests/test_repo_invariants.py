@@ -92,6 +92,37 @@ def test_ordem_alfabetica_dos_arquivos_bate_com_a_ordem_da_corrente():
     assert list(reversed(corrente)) == por_numero, "a numeração não segue a corrente"
 
 
+def test_todo_volume_do_server_existe_e_pertence_ao_app_na_imagem():
+    """O container roda como `app` (não-root). Um volume nomeado montado sobre um
+    caminho que NÃO existe na imagem nasce pertencendo ao root — e o processo não
+    consegue escrever nele. Foi assim que os anexos quebraram: `/data/uploads` estava
+    no compose mas faltava no `mkdir`/`chown` do Dockerfile, e todo upload virava erro
+    interno (que o navegador ainda mostrava como "erro de CORS")."""
+    compose = (_REPO / "docker-compose.yml").read_text(encoding="utf-8")
+    dockerfile = (_SERVER / "Dockerfile").read_text(encoding="utf-8")
+    # bloco do serviço `server` (até o próximo serviço no mesmo nível)
+    bloco = re.search(r"(?ms)^  server:\n(.*?)(?=^  [a-z0-9_-]+:\n)", compose)
+    assert bloco, "serviço `server` não encontrado no docker-compose.yml"
+    # só volumes NOMEADOS (`nome:/caminho`); bind mounts do host (./x:/y) não contam
+    montagens = re.findall(r"- ([a-z0-9_]+):(/[^\s:]+)", bloco.group(1))
+    assert montagens, "nenhum volume nomeado no serviço `server` (regex desatualizada?)"
+
+    criadas = " ".join(re.findall(r"mkdir -p ([^\\\n]+)", dockerfile)).split()
+    chowned = " ".join(re.findall(r"chown -R app:app ([^\\\n]+)", dockerfile)).split()
+
+    def coberto(destino: str, caminhos: list[str]) -> bool:
+        # a própria pasta, ou um ancestral (chown -R /home/app cobre /home/app/.cache)
+        return any(destino == c or destino.startswith(c.rstrip("/") + "/") for c in caminhos)
+
+    faltando = [
+        destino for _, destino in montagens
+        if not coberto(destino, criadas) or not coberto(destino, chowned)
+    ]
+    assert not faltando, (
+        f"volume(s) sem `mkdir -p`/`chown app:app` no Dockerfile do server: {faltando}"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # Modelos                                                                      #
 # --------------------------------------------------------------------------- #

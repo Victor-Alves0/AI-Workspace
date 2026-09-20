@@ -307,9 +307,28 @@ class UploadQuotaExceeded(UploadError):
         )
 
 
-def ensure_root() -> None:
-    """Cria a pasta no boot: falhar aqui é melhor do que no primeiro envio."""
+def storage_probe() -> str | None:
+    """Cria a pasta e ESCREVE um arquivo de teste. Devolve o motivo da falha, ou None.
+
+    Criar a pasta não prova nada: um volume montado somente-leitura, um dono errado ou
+    disco cheio só aparecem na hora de gravar — antes, no primeiro anexo do usuário,
+    virando um erro interno sem explicação."""
+    destino = root()
     try:
-        root().mkdir(parents=True, exist_ok=True)
-    except OSError as exc:  # noqa: BLE001
-        logger.warning("não foi possível criar %s (%s)", root(), exc)
+        destino.mkdir(parents=True, exist_ok=True)
+        teste = destino / ".escrita-ok"
+        teste.write_bytes(b"ok")
+        teste.unlink(missing_ok=True)
+    except OSError as exc:
+        return f"{destino}: {exc.strerror or exc}"
+    return None
+
+
+def ensure_root() -> None:
+    """Checagem no boot: falhar aqui (e dizer por quê) é melhor do que no primeiro envio."""
+    motivo = storage_probe()
+    if motivo:
+        logger.error(
+            "ANEXOS INDISPONÍVEIS — não dá para gravar em %s. Verifique o volume de "
+            "uploads (montagem, permissão de escrita e espaço em disco).", motivo,
+        )

@@ -201,3 +201,17 @@ async def test_falha_de_disco_vira_mensagem_e_nao_500(tmp_path, monkeypatch):
         await svc.store_stream(None, uuid.uuid4(), "nota.txt", "text/plain", _pedacos())
     assert erro.value.status_code == 507
     assert "volume de uploads" in erro.value.message
+
+
+def test_probe_de_escrita_detecta_pasta_impossivel(tmp_path, monkeypatch):
+    """Criar a pasta não prova que dá para gravar (volume somente-leitura, dono
+    errado, disco cheio) — o boot precisa avisar ANTES do primeiro anexo."""
+    from aiworkspace import uploads_service as svc
+
+    monkeypatch.setattr(svc, "root", lambda: tmp_path / "uploads")
+    assert svc.storage_probe() is None
+
+    arquivo = tmp_path / "arquivo"
+    arquivo.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(svc, "root", lambda: arquivo / "uploads")
+    assert svc.storage_probe() is not None

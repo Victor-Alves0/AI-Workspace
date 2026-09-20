@@ -63,9 +63,13 @@ RUN chmod +x entrypoint.sh
 # não roda como root dentro do container. HOME gravável p/ caches de modelos
 # (fastembed/huggingface) usados pela SIFT e pelo mem0. /data/codespace guarda
 # as working copies + índices dos projetos do Codespace (volume codespace_data).
+# Toda pasta que recebe VOLUME precisa existir AQUI e pertencer ao app: um volume
+# nomeado montado sobre um caminho que não existe na imagem nasce do root, e o
+# processo (não-root) não consegue escrever. Foi o que derrubou os anexos —
+# /data/uploads faltava nesta linha e todo upload virava erro interno.
 RUN useradd --create-home --uid 10001 app \
-    && mkdir -p /home/app/.cache /data/codespace \
-    && chown -R app:app /home/app /data/codespace
+    && mkdir -p /home/app/.cache /data/codespace /data/uploads \
+    && chown -R app:app /home/app /data/codespace /data/uploads
 USER app
 # HOME/caches de modelos (fastembed→/tmp por padrão; redirecionados p/ o volume mlcache).
 # mise: dirs no volume codespace_data (persistem os toolchains instalados); MISE_YES

@@ -49,6 +49,9 @@ async def info(admin: User = Depends(require_admin), db: AsyncSession = Depends(
         "signup_enabled": await signups_allowed(db),
         "secrets_in_env": s.secrets_in_env,
         "web_search_provider": s.web_search_provider,
+        # anexos: o volume aceita ESCRITA? (falhar aqui é o que derruba /uploads)
+        "uploads_dir": s.uploads_dir,
+        "uploads_writable_error": _uploads_probe(),
         "voice_base_url": s.voice_base_url,
         "openrouter_base_url": s.openrouter_base_url,
         "max_tool_iterations": s.max_tool_iterations,
@@ -58,6 +61,12 @@ async def info(admin: User = Depends(require_admin), db: AsyncSession = Depends(
             "mem_mb": s.tool_mem_mb,
         },
     }
+
+
+def _uploads_probe() -> str | None:
+    from . import uploads_service
+
+    return uploads_service.storage_probe()
 
 
 @router.get("/health")
