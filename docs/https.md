@@ -26,7 +26,7 @@ Portas 80/443 ocupadas? `HTTPS_PORT=8443` e `HTTP_PORT=8080`, por exemplo.
 
 ## Confiar no certificado local (IP/LAN)
 
-Com `CADDY_TLS=internal`, o Caddy cria uma autoridade certificadora própria. Instale a
+No modo padrão (`CADDY_MODE=local`), o Caddy cria uma autoridade certificadora própria. Instale a
 raiz dela nas máquinas que vão usar o app e o aviso some:
 
 ```bash

@@ -218,7 +218,7 @@ services:
 
   # HTTPS pronto para uso: um proxy na frente serve o front em / e a API em /api,
   # no MESMO endereço. Certificado automático (CA interna do Caddy para IP/LAN;
-  # Let's Encrypt quando CADDY_SITE é um domínio público e CADDY_TLS é seu e-mail).
+  # Let's Encrypt quando CADDY_SITE é um domínio público e CADDY_MODE=public).
   # Veja docs/https.md. As portas 3000/8000 continuam publicadas para quem prefere
   # acessar direto (HTTP), então nada quebra ao atualizar.
   proxy:

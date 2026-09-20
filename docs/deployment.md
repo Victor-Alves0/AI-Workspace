@@ -71,7 +71,7 @@ CORS in the way and the session cookie covers the whole address. Full guide:
 
 - **LAN/VPN/IP:** nothing to configure. The certificate comes from Caddy's internal CA; trust
   it once (see the guide) and the browser warning goes away.
-- **Public domain:** `CADDY_SITE=app.your-domain.com`, `CADDY_TLS=you@email.com` (Let's Encrypt,
+- **Public domain:** `CADDY_SITE=app.your-domain.com`, `CADDY_MODE=public` (Let's Encrypt,
   renewed automatically) and `WEB_ORIGIN=https://app.your-domain.com`.
 - Ports 80/443 busy? `HTTP_PORT`/`HTTPS_PORT`.
 - `TRUST_PROXY` is `true` by default so rate-limiting and the IP allowlist see the real client
