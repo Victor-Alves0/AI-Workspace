@@ -376,6 +376,11 @@ function MiniAppsMenu({
 
 const MAX_HEIGHT = 192; // px — cresce até aqui e então rola internamente
 
+/** Acima disto, colar texto no compositor cria um anexo .txt em vez de encher o campo
+ * (o servidor recusa mensagem acima de 100 mil caracteres, e o texto gigante no prompt
+ * engole a janela de contexto). */
+const PASTE_AS_FILE_CHARS = 4000;
+
 export default function PromptBox({
   value,
   onChange,
@@ -554,6 +559,15 @@ export default function PromptBox({
   async function onPaste(e: React.ClipboardEvent) {
     const imgs = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith("image/"));
     if (imgs.length) { e.preventDefault(); await addFiles(imgs); }
+    // TEXTO LONGO vira anexo (como no ChatGPT): a mensagem tem teto de 100 mil
+    // caracteres no servidor, e um texto gigante no meio do prompt também come o
+    // contexto todo. Como arquivo, ele é extraído uma vez e citado.
+    const texto = e.clipboardData?.getData("text/plain") ?? "";
+    if (!imgs.length && canFiles && texto.length > PASTE_AS_FILE_CHARS) {
+      e.preventDefault();
+      const nome = `Texto colado ${new Date().toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}.txt`;
+      await addFiles([new File([texto], nome, { type: "text/plain" })]);
+    }
   }
   // arrastar-e-soltar arquivos sobre o campo
   const [dragOver, setDragOver] = useState(false);

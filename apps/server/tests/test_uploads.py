@@ -183,3 +183,21 @@ def test_arquivo_sumido_do_disco_nao_derruba_a_leitura(uploads_dir):
     row = Upload(id=uuid.uuid4(), user_id=uuid.uuid4(), filename="sumiu.pdf",
                  mime="application/pdf", size=10, kind="file", path="u/sumiu")
     assert svc.read_bytes(row) is None
+
+
+async def test_falha_de_disco_vira_mensagem_e_nao_500(tmp_path, monkeypatch):
+    """Volume de uploads não montado/sem permissão: antes estourava 500 seco (e, sem
+    CORS na resposta de erro, o navegador só dizia "bloqueado por CORS")."""
+    from aiworkspace import uploads_service as svc
+
+    arquivo = tmp_path / "isto-e-um-arquivo"
+    arquivo.write_text("x", encoding="utf-8")
+    monkeypatch.setattr(svc, "root", lambda: arquivo / "uploads")   # pasta impossível
+
+    async def _pedacos():
+        yield b"conteudo"
+
+    with pytest.raises(svc.UploadStorageError) as erro:
+        await svc.store_stream(None, uuid.uuid4(), "nota.txt", "text/plain", _pedacos())
+    assert erro.value.status_code == 507
+    assert "volume de uploads" in erro.value.message

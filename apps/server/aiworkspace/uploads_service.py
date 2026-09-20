@@ -136,7 +136,11 @@ async def store_stream(
     upload_id = uuid.uuid4()
     relative = f"{user_id}/{upload_id}"
     destination = root() / relative
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        logger.exception("uploads: não deu para criar %s", destination.parent)
+        raise UploadStorageError(destination, exc) from exc
 
     size = 0
     try:
@@ -151,6 +155,10 @@ async def store_stream(
         livre = settings.upload_quota_bytes - await used_bytes(db, user_id)
         if size > livre:
             raise UploadQuotaExceeded(settings.upload_quota_bytes)
+    except OSError as exc:
+        destination.unlink(missing_ok=True)
+        logger.exception("uploads: falha ao gravar %s", destination)
+        raise UploadStorageError(destination, exc) from exc
     except Exception:
         destination.unlink(missing_ok=True)
         raise
@@ -273,6 +281,20 @@ class UploadTooLarge(UploadError):
 class UploadEmpty(UploadError):
     def __init__(self):
         super().__init__("Arquivo vazio.")
+
+
+class UploadStorageError(UploadError):
+    """O disco recusou (pasta sem permissão, volume não montado, sem espaço). Vira
+    mensagem explicando ONDE olhar — antes virava 500 seco e, sem CORS na resposta, o
+    navegador só dizia "bloqueado por CORS"."""
+
+    status_code = 507
+
+    def __init__(self, destino: Path, exc: OSError):
+        super().__init__(
+            f"O servidor não conseguiu gravar o anexo em {destino.parent} ({exc.strerror or exc}). "
+            "Verifique o volume de uploads (permissão de escrita e espaço em disco)."
+        )
 
 
 class UploadQuotaExceeded(UploadError):

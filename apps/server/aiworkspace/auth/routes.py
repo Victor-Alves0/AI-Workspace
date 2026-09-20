@@ -90,9 +90,20 @@ async def auth_config(db: AsyncSession = Depends(get_db)):
     return {"allow_signups": await signups_allowed(db)}
 
 
-def _set_auth_cookies(response: Response, user: User) -> None:
+def _is_https(request: Request | None) -> bool:
+    """A conexão DESTE acesso é https? (o proxy informa em X-Forwarded-Proto)."""
+    if request is None:
+        return get_settings().web_origin.startswith("https")
+    encaminhado = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    return (encaminhado or request.url.scheme) == "https"
+
+
+def _set_auth_cookies(response: Response, user: User, request: Request | None = None) -> None:
+    # `Secure` vem do ENDEREÇO usado agora, não do WEB_ORIGIN: com WEB_ORIGIN https e
+    # acesso por http (IP da LAN/VPN), o cookie marcado Secure era DESCARTADO pelo
+    # navegador e tudo respondia 401 — parecia sessão expirada.
     s = get_settings()
-    secure = s.web_origin.startswith("https")
+    secure = _is_https(request)
     uid = str(user.id)
     tv = user.token_version
     response.set_cookie(
@@ -147,7 +158,7 @@ async def register(
     await db.commit()
     await db.refresh(user)
 
-    _set_auth_cookies(response, user)
+    _set_auth_cookies(response, user, request)
     return user
 
 
@@ -182,13 +193,14 @@ async def login(
             await audit_service.record("login_failed", user_id=user.id, request=request, detail={"reason": "bad_2fa"})
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "2fa_invalid")
 
-    _set_auth_cookies(response, user)
+    _set_auth_cookies(response, user, request)
     await audit_service.record("login", user_id=user.id, request=request)
     return user
 
 
 @router.post("/refresh", response_model=UserOut)
 async def refresh(
+    request: Request,
     response: Response,
     aw_refresh: str | None = Cookie(default=None),
     db: AsyncSession = Depends(get_db),
@@ -210,7 +222,7 @@ async def refresh(
     if token_version != user.token_version:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sessão revogada; faça login novamente")
 
-    _set_auth_cookies(response, user)  # rotação
+    _set_auth_cookies(response, user, request)  # rotação
     return user
 
 
@@ -262,5 +274,5 @@ async def change_password(
     await db.refresh(user)
     await audit_service.record("password_changed", user_id=user.id, request=request)
     # reemite cookies para a sessão atual não cair imediatamente após a troca
-    _set_auth_cookies(response, user)
+    _set_auth_cookies(response, user, request)
     return {"ok": True}

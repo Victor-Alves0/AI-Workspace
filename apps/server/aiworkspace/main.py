@@ -372,17 +372,6 @@ def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="AI Workspace API", version="0.1.0", lifespan=lifespan)
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.cors_origins,
-        # em dev, também reflete origens da LAN (localhost/IPs privados) p/ acesso
-        # pelo IP da máquina (celular). Em produção é None (só as origens exatas).
-        allow_origin_regex=settings.cors_origin_regex,
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Authorization", "X-Timezone"],
-    )
-
     # CORS da API pública: ela autentica por Bearer, nunca por cookie, então liberar
     # qualquer origem NÃO expõe a sessão do navegador — e com "*" o próprio browser
     # proíbe credenciais na resposta. Sem isto, uma aplicação web que chamasse /v1
@@ -454,6 +443,23 @@ def create_app() -> FastAPI:
             response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains"
         response.headers["X-Server-Time-Ms"] = f"{ms:.1f}"
         return response
+
+    # O CORS entra POR ÚLTIMO de propósito: em Starlette, o último middleware
+    # adicionado é o MAIS EXTERNO. Assim ele envolve também as respostas que o
+    # middleware acima cria sozinho (IP bloqueado, corpo grande demais, erro
+    # interno) — antes elas saíam sem `Access-Control-Allow-Origin` e o navegador
+    # mostrava "bloqueado por CORS" no lugar do erro de verdade (foi o que
+    # escondeu a falha do /uploads).
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        # em dev, também reflete origens da LAN (localhost/IPs privados) p/ acesso
+        # pelo IP da máquina (celular). Em produção é None (só as origens exatas).
+        allow_origin_regex=settings.cors_origin_regex,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", "X-Timezone"],
+    )
 
     @app.exception_handler(ApiError)
     async def api_error_handler(_request: Request, exc: ApiError):
