@@ -108,9 +108,10 @@ services:
       # qualquer comando executado pela IA conseguiria lê-lo. Ver docs/trust-model.md.
       # - ./secrets:/run/secrets:ro
     ports:
-      # host bind + porta configuráveis (o painel do admin diz quais valores pôr
-      # no .env). Ex.: SERVER_BIND=127.0.0.1 SERVER_PORT=8000
-      - "${SERVER_BIND:-0.0.0.0}:${SERVER_PORT:-8000}:8000"
+      # LOOPBACK por padrão: quem entrega o app para a rede é o `proxy` (HTTPS). A
+      # porta 8000 fica só para depuração local. Para expor a API em HTTP direto
+      # (desaconselhado), SERVER_BIND=0.0.0.0 no .env.
+      - "${SERVER_BIND:-127.0.0.1}:${SERVER_PORT:-8000}:8000"
       # Callback fixo do login ChatGPT/Codex. A OpenAI retorna para
       # localhost:1455; esta publicação permite concluir o OAuth sem copiar URL
       # quando o navegador roda na mesma máquina do AI Workspace.
@@ -212,7 +213,8 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
     ports:
-      - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-3000}:3000"
+      # idem: o acesso normal é https://<host>/ pelo `proxy`
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-3000}:3000"
 
   # HTTPS pronto para uso: um proxy na frente serve o front em / e a API em /api,
   # no MESMO endereço. Certificado automático (CA interna do Caddy para IP/LAN;

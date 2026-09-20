@@ -61,3 +61,33 @@ def test_cookie_secure_segue_o_acesso_e_nao_o_web_origin():
     # atrás de proxy: quem manda é o X-Forwarded-Proto
     assert auth_routes._is_https(_Req("http", {"x-forwarded-proto": "https"})) is True
     assert auth_routes._is_https(_Req("http", {"x-forwarded-proto": "https, http"})) is True
+
+
+# --------------------------------------------------------------------------- #
+# Quais origens são aceitas sem ninguém editar o .env                          #
+# --------------------------------------------------------------------------- #
+def _regex(app_env: str):
+    import re
+
+    from aiworkspace.config import Settings
+
+    return re.compile(Settings(app_env=app_env).cors_origin_regex)
+
+
+@pytest.mark.parametrize("origem,aceita", [
+    ("https://10.10.0.10", True),            # IP da VPN, pelo proxy
+    ("https://192.168.1.203", True),         # IP da LAN
+    ("https://10.10.0.10:8443", True),       # proxy em outra porta
+    ("https://localhost", True),
+    ("http://10.10.0.10:3000", False),       # HTTP direto: caminho aposentado
+    ("https://meusite.com", False),          # público exige WEB_ORIGIN explícito
+    ("https://8.8.8.8", False),              # IP público não é "a casa do usuário"
+])
+def test_em_producao_so_a_rede_local_em_https_entra_sozinha(origem, aceita):
+    """Self-hosted acessado ora pela LAN, ora pela VPN: exigir que o dono liste cada
+    IP no WEB_ORIGIN só produzia "bloqueado por CORS" sem explicação."""
+    assert bool(_regex("production").match(origem)) is aceita
+
+
+def test_em_desenvolvimento_a_lan_em_http_continua_valendo():
+    assert _regex("development").match("http://192.168.1.203:3000")

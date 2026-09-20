@@ -343,22 +343,32 @@ class Settings(BaseSettings):
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.web_origin.split(",") if o.strip()]
 
+    # localhost e IPs privados (10/8, 192.168/16, 172.16/12) — a casa do usuário
+    _REDE_LOCAL = (
+        r"localhost|127\.0\.0\.1|\[::1\]|"
+        r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+        r"192\.168\.\d{1,3}\.\d{1,3}|"
+        r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+    )
+
     @property
     def cors_origin_regex(self) -> str | None:
-        """Em desenvolvimento (local-first), reflete origens da LAN — localhost e IPs
-        privados (10/8, 192.168/16, 172.16/12) em qualquer porta — para abrir o app
-        pelo IP da máquina (ex.: pelo celular). Em produção retorna None: só as
-        origens EXATAS de WEB_ORIGIN são aceitas (sem afrouxar CORS na internet)."""
+        """Origens aceitas ALÉM das exatas de WEB_ORIGIN.
+
+        Em desenvolvimento: qualquer origem da LAN, http ou https — abrir pelo IP da
+        máquina (celular) tem que funcionar sem configurar nada.
+
+        Em produção: a mesma LAN, mas só em HTTPS. O caso real é o self-hosted acessado
+        ora pelo IP da LAN, ora pelo da VPN: exigir que o dono liste cada IP no
+        WEB_ORIGIN só gera "bloqueado por CORS" sem explicação. HTTP fica de fora (é o
+        caminho que queremos aposentar) e a internet pública também — endereço público
+        continua exigindo WEB_ORIGIN explícito.
+
+        Cookie de sessão é SameSite=Lax: uma página hostil na mesma rede não consegue
+        fazer o navegador enviar a sessão do usuário nestas chamadas."""
         if self.is_production:
-            return None
-        return (
-            r"^https?://("
-            r"localhost|127\.0\.0\.1|\[::1\]|"
-            r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
-            r"192\.168\.\d{1,3}\.\d{1,3}|"
-            r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
-            r")(:\d+)?$"
-        )
+            return rf"^https://({self._REDE_LOCAL})(:\d+)?$"
+        return rf"^https?://({self._REDE_LOCAL})(:\d+)?$"
 
     @property
     def sync_database_url(self) -> str:
