@@ -24,23 +24,17 @@ cp .env.example .env
 python -c "import secrets; print(secrets.token_urlsafe(48))"   # paste into APP_SECRET
 ```
 
-Adjust:
+Three lines is the whole file for an IP-based install:
 
 ```dotenv
 APP_ENV=production
 APP_SECRET=<the generated value>
 POSTGRES_PASSWORD=<a strong password>
-
-# The origin you'll open in the browser. In production CORS accepts ONLY what's
-# here. Use the VPS IP or your domain, with port 3000:
-WEB_ORIGIN=http://YOUR_IP_OR_DOMAIN:3000
-
-# Leave EMPTY: the browser calls the backend on the same host, port 8000.
-NEXT_PUBLIC_API_URL=
 ```
 
-> Going to use it from several addresses (e.g. localhost **and** the IP)? List them
-> comma-separated: `WEB_ORIGIN=http://localhost:3000,http://YOUR_IP:3000`
+No origin to declare: the proxy serves frontend and API on the **same** address, and any
+private-network IP over https is accepted. A public domain adds three more lines — see
+[Domain + HTTPS](#domain--https).
 
 ### 2. Bring it up
 
@@ -50,17 +44,22 @@ docker compose up -d --build
 
 ### 3. Open the firewall ports
 
-The app publishes **3000** (web) and **8000** (server):
+The app is reached through the proxy, on **443** (and **80**, which redirects and is what
+Let's Encrypt validates against):
 
 ```bash
 # ufw (Ubuntu/Debian)
-sudo ufw allow 3000/tcp
-sudo ufw allow 8000/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow 80/tcp
 ```
 
-> On AWS/GCP/Oracle, also open 3000 and 8000 in the **Security Group** in the console.
+> On AWS/GCP/Oracle, also open 443 and 80 in the **Security Group** in the console.
 
-Visit **http://YOUR_IP:3000**, register (you become admin) and paste the OpenRouter key.
+Visit **https://YOUR_IP**, register (you become admin) and paste the OpenRouter key. The first
+visit warns about the certificate (internal CA) until you trust it — [https.md](https.md).
+
+> Ports **3000** and **8000** stay on loopback: they are the plain-HTTP way in, kept for local
+> debugging. To publish them anyway, `WEB_BIND=0.0.0.0` / `SERVER_BIND=0.0.0.0`.
 
 ## Domain + HTTPS
 
@@ -113,12 +112,26 @@ All state lives in Postgres (data + vectors + embeddings). A single `pg_dump` co
 docker compose exec -T db pg_dump -U aiworkspace -Fc aiworkspace > backup.dump
 ```
 
-**Restore** (into a fresh/clean environment):
+**Restore** — the admin panel does it for you (Admin → Backup); the equivalent by hand is two
+steps, and **never** `pg_restore --clean` straight onto the live database. `--clean` only drops
+what the dump knows about, so an older backup leaves the newer tables in place, the drops fail on
+their foreign keys and the database ends up half old, half erased:
 
 ```bash
+docker compose stop server
 docker compose up -d db
-docker compose exec -T db pg_restore -U aiworkspace -d aiworkspace --clean --if-exists < backup.dump
-docker compose up -d
+
+# 1) dump → SQL script. A corrupt dump fails HERE, before the database is touched.
+docker compose exec -T db sh -c \
+  'cat > /tmp/b.dump && pg_restore --no-owner --no-privileges -f /tmp/r.sql /tmp/b.dump' < backup.dump
+
+# 2) empty the schema and apply the script in ONE transaction: any error rolls everything back
+docker compose exec -T db sh -c \
+  'printf "DROP SCHEMA IF EXISTS public CASCADE;\nCREATE SCHEMA public;\n" > /tmp/p.sql \
+   && psql -U aiworkspace -d aiworkspace --single-transaction --set=ON_ERROR_STOP=1 -f /tmp/p.sql -f /tmp/r.sql \
+   && rm -f /tmp/b.dump /tmp/r.sql /tmp/p.sql'
+
+docker compose up -d   # startup migrations bring the schema back to head
 ```
 
 > **To migrate to another machine, carry the same `APP_SECRET`.** Per-user secrets are encrypted
@@ -149,10 +162,10 @@ docker compose up -d server
 
 - [ ] `APP_ENV=production` and a strong `APP_SECRET` (generated, not the default).
 - [ ] `POSTGRES_PASSWORD` changed.
-- [ ] `WEB_ORIGIN` with the real origin(s); `NEXT_PUBLIC_API_URL` empty (or the API domain).
-- [ ] `ENABLE_SIGNUP=false` after creating your account.
-- [ ] Reverse proxy with HTTPS and `TRUST_PROXY=true`.
-- [ ] Firewall/Security Group opening only what's needed.
+- [ ] `WEB_ORIGIN` only if you use a public domain (an IP needs nothing).
+- [ ] Sign-ups closed in the admin panel after creating your account (they start closed).
+- [ ] Reached over HTTPS through the `proxy` service, with `TRUST_PROXY=true`.
+- [ ] Firewall/Security Group opening only 443/80.
 - [ ] A scheduled backup routine (`pg_dump`).
 - [ ] Consider `ALLOW_CODE_MODE=false` if there are untrusted users.
 </content>

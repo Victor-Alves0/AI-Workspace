@@ -172,18 +172,24 @@ def test_todo_modelo_esta_exportado_em_models():
 # --------------------------------------------------------------------------- #
 # Configuração                                                                 #
 # --------------------------------------------------------------------------- #
-def test_toda_variavel_de_ambiente_aparece_no_env_example():
-    """Regra do projeto: variável nova SEMPRE entra no `.env.example` (ativa ou
-    comentada com o default). Sem isso ela existe só na cabeça de quem a criou — e
-    quem for instalar o app nunca descobre que ela existe."""
+def test_toda_variavel_de_ambiente_esta_documentada():
+    """Regra do projeto: variável nova SEMPRE aparece documentada. Sem isso ela
+    existe só na cabeça de quem a criou — e quem instalar o app nunca descobre.
+
+    São DOIS lugares, de propósito: o `.env.example` é curto (só o que exige
+    decisão humana) e `docs/configuration.md` é a referência completa, com o
+    default de cada uma. O que não couber no primeiro tem que estar no segundo."""
     exemplo = (_REPO / ".env.example").read_text(encoding="utf-8")
-    # o arquivo documenta tanto `VAR=` (ativa) quanto `#VAR=` / `# VAR=` (com o default)
-    declaradas = set(re.findall(r"(?m)^\s*#?\s*([A-Z][A-Z0-9_]*)\s*=", exemplo))
+    referencia = (_REPO / "docs" / "configuration.md").read_text(encoding="utf-8")
+    # `VAR=` (atribuição, nos dois) e `` `VAR` `` (tabelas da referência)
+    texto = exemplo + referencia
+    declaradas = set(re.findall(r"(?m)^\s*#?\s*([A-Z][A-Z0-9_]*)\s*=", texto))
+    declaradas |= set(re.findall(r"`([A-Z][A-Z0-9_]{2,})`", referencia))
     faltando = sorted(
         nome.upper() for nome in Settings.model_fields
         if nome.upper() not in declaradas
     )
-    assert not faltando, f"variáveis sem menção no .env.example: {faltando}"
+    assert not faltando, f"variáveis sem documentação: {faltando}"
 
 
 # --------------------------------------------------------------------------- #

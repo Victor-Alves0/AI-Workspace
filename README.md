@@ -193,7 +193,9 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 docker compose up -d --build
 ```
 
-Open **http://localhost:3000**. The **first user to register becomes admin**. Then, under
+Open **https://localhost** (the browser warns about the certificate on the first visit — the
+stack issues its own; see [docs/https.md](docs/https.md)). The **first user to register becomes
+admin**. Then, under
 **⚙ Settings → Connections → APIs**, paste your **[OpenRouter](https://openrouter.ai/keys) key**
 (it's encrypted), pick a model and start chatting.
 

@@ -90,7 +90,7 @@ Three kinds of test share the suite:
 |---|---|---|
 | Behavior | `test_run_turn_integration`, `test_civitai` | the turn/tool does what it promises |
 | Secrecy | `test_imaginai_visibility`, `test_integration_clients` | what must **not** leak: hidden entities, a token inside an error message |
-| Invariant | `test_repo_invariants`, `test_version_sync` | rules the repository must keep: one migration chain, every model exported, every env var in `.env.example`, every hover-only control still reachable by touch |
+| Invariant | `test_repo_invariants`, `test_version_sync` | rules the repository must keep: one migration chain, every model exported, every env var documented (`.env.example` or `docs/configuration.md`), every hover-only control still reachable by touch |
 
 The invariants are the cheapest way to keep a convention alive — they fail on the next commit
 that forgets it, instead of on a phone, months later. When you add a rule that lives in someone's

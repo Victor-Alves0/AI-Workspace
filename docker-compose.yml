@@ -51,7 +51,10 @@ services:
       VOICE_BASE_URL: ${VOICE_BASE_URL:-https://api.openai.com/v1}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aiworkspace}:${POSTGRES_PASSWORD:-aiworkspace}@db:5432/${POSTGRES_DB:-aiworkspace}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
-      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      # origens exatas aceitas pelo CORS. O padrão cobre o acesso normal (proxy
+      # HTTPS na própria máquina); a LAN/VPN em https é aceita pelo regex do
+      # config.py, então só um DOMÍNIO público precisa de WEB_ORIGIN no .env.
+      WEB_ORIGIN: ${WEB_ORIGIN:-https://localhost}
       # atrás do proxy (serviço `proxy`), o IP do cliente vem em X-Forwarded-For
       TRUST_PROXY: ${TRUST_PROXY:-true}
       # Embedder da descoberta de tools da SIFT. O default (bge-small-en) é
