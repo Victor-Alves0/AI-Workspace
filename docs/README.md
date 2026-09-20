@@ -13,6 +13,7 @@ Reference guide for AI Workspace. If you just want to get it running, start with
 | [harness-coupling.md](harness-coupling.md) | Cross-cutting view: how the layers depend on each other and fail *between* layers; DB-session/loop discipline; maintenance checklist |
 | [configuration.md](configuration.md) | Reference for every environment variable (`.env`) |
 | [deployment.md](deployment.md)       | LAN/VPS, domain + HTTPS, backup/restore, updates, `APP_SECRET` rotation |
+| [https.md](https.md)                 | HTTPS out of the box: front and API on one address, certificates for LAN/VPN or a public domain |
 | [public-api.md](public-api.md)       | OpenAI-compatible API (`/v1`) and key management |
 | [security.md](security.md)           | Security model, attack surface and recommendations |
 | [trust-model.md](trust-model.md)     | Who is trusted with what; why the AI — not the user — is the untrusted actor (PT) |

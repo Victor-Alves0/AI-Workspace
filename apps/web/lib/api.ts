@@ -1,17 +1,23 @@
 // Cliente HTTP fino. Sempre envia cookies (credentials: include) p/ a auth via cookie httpOnly.
 
 /** Base da API. Prioridade:
- *  1. NEXT_PUBLIC_API_URL, se definida no build (setups avançados / domínio próprio).
- *  2. Mesmo host da página + porta 8000 — assim, abrir o app pelo IP da máquina
- *     (ex.: pelo celular na LAN) faz as chamadas irem para esse IP, não para o
- *     localhost do dispositivo. Local-first: a API mora no mesmo host do front.
- *  3. Fallback SSR: localhost:8000. */
+ *  1. NEXT_PUBLIC_API_URL, se definida no build (domínio próprio). Um caminho
+ *     relativo ("/api") vale: vira a MESMA origem da página.
+ *  2. Página servida pelo proxy (sem porta explícita, ex.: https://casa/ ) → a API
+ *     mora na mesma origem, em /api. Mesma origem = sem CORS e com o cookie de
+ *     sessão valendo no endereço inteiro.
+ *  3. Acesso direto ao front (porta 3000) → mesmo host, porta 8000. Local-first:
+ *     abrir pelo IP da máquina (celular na LAN) continua funcionando.
+ *  4. Fallback SSR: localhost:8000. */
 function resolveApiUrl(): string {
   const env = (process.env.NEXT_PUBLIC_API_URL || "").trim();
-  if (env) return env.replace(/\/$/, "");
   if (typeof window !== "undefined") {
-    return `${window.location.protocol}//${window.location.hostname}:8000`;
+    const { origin, protocol, hostname, port } = window.location;
+    if (env) return env.startsWith("/") ? `${origin}${env.replace(/\/$/, "")}` : env.replace(/\/$/, "");
+    if (!port || port === "80" || port === "443") return `${origin}/api`;
+    return `${protocol}//${hostname}:8000`;
   }
+  if (env && !env.startsWith("/")) return env.replace(/\/$/, "");
   return "http://localhost:8000";
 }
 

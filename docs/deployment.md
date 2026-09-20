@@ -64,27 +64,25 @@ Visit **http://YOUR_IP:3000**, register (you become admin) and paste the OpenRou
 
 ## Domain + HTTPS
 
-For real production, put a **reverse proxy** (Caddy/nginx/Traefik) in front, terminating TLS,
-pointing `/` to `web:3000` and (if you prefer to split it) a dedicated URL to `server:8000`. In
-that case:
+**HTTPS already comes with the stack**: the `proxy` service (Caddy) serves the front at
+`https://<host>/` and the API at `https://<host>/api` — one address for both, so there is no
+CORS in the way and the session cookie covers the whole address. Full guide:
+[https.md](https.md).
 
-- `WEB_ORIGIN=https://your-domain.com`
-- If the backend has its own domain, set `NEXT_PUBLIC_API_URL=https://api.your-domain.com`
-  **and rebuild the web** (`docker compose up -d --build web`) — that URL is baked into the build.
-- Enable `TRUST_PROXY=true` so rate-limiting sees the real IP via `X-Forwarded-For`.
-- You can even skip publishing the server port: let only the proxy reach it with
-  `SERVER_BIND=127.0.0.1`.
+- **LAN/VPN/IP:** nothing to configure. The certificate comes from Caddy's internal CA; trust
+  it once (see the guide) and the browser warning goes away.
+- **Public domain:** `CADDY_SITE=app.your-domain.com`, `CADDY_TLS=you@email.com` (Let's Encrypt,
+  renewed automatically) and `WEB_ORIGIN=https://app.your-domain.com`.
+- Ports 80/443 busy? `HTTP_PORT`/`HTTPS_PORT`.
+- `TRUST_PROXY` is `true` by default so rate-limiting and the IP allowlist see the real client
+  via `X-Forwarded-For`. Set it to `false` if you publish port 8000 straight to the internet.
+- You can stop publishing the app ports entirely and let only the proxy reach them:
+  `SERVER_BIND=127.0.0.1` and `WEB_BIND=127.0.0.1`.
 
-Minimal example with **Caddy** (automatic TLS):
-
-```caddy
-your-domain.com {
-    reverse_proxy localhost:3000
-}
-api.your-domain.com {
-    reverse_proxy localhost:8000
-}
-```
+`NEXT_PUBLIC_API_URL` stays **empty** in this setup: through the proxy the front calls `/api` on
+its own origin, and on a direct visit to port 3000 it still calls `host:8000`. Only set it when
+the backend has a domain of its own (`https://api.your-domain.com`) — that one is baked into the
+build, so rebuild the web afterwards.
 
 ## Updating
 

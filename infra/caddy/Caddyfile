@@ -1,0 +1,37 @@
+# HTTPS do AI Workspace — um endereço só para tudo.
+#
+#   https://<host>/       → front (web:3000)
+#   https://<host>/api/*  → API  (server:8000)
+#
+# Mesma ORIGEM para os dois: o navegador não trata as chamadas como cross-site, então
+# não há CORS no caminho e o cookie de sessão vale no endereço inteiro (era a origem
+# dos 401 ao alternar entre IP da LAN e IP da VPN).
+#
+# Certificado:
+#   CADDY_TLS=internal (padrão) → o Caddy emite um certificado da CA interna dele.
+#     Serve para IP da LAN/VPN e para nomes locais. O navegador avisa até você
+#     confiar na CA (docs/https.md explica como pegá-la).
+#   CADDY_TLS=<seu e-mail>      → Let's Encrypt automático. Use com um DOMÍNIO
+#     público em CADDY_SITE (ex.: CADDY_SITE=app.seudominio.com) e as portas 80/443
+#     alcançáveis da internet.
+{
+	# sem API de administração exposta numa instalação self-hosted
+	admin off
+}
+
+{$CADDY_SITE::443} {
+	tls {$CADDY_TLS:internal}
+	encode zstd gzip
+
+	# a API vem antes: /api/chats → server:8000/chats
+	handle_path /api/* {
+		reverse_proxy server:8000 {
+			# streaming (SSE do chat) precisa sair na hora, sem buffer
+			flush_interval -1
+		}
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}

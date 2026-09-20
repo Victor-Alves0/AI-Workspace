@@ -52,6 +52,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aiworkspace}:${POSTGRES_PASSWORD:-aiworkspace}@db:5432/${POSTGRES_DB:-aiworkspace}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
       WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:3000}
+      # atrás do proxy (serviço `proxy`), o IP do cliente vem em X-Forwarded-For
+      TRUST_PROXY: ${TRUST_PROXY:-true}
       # Embedder da descoberta de tools da SIFT. O default (bge-small-en) é
       # inglês-only e forte; o system prompt instrui o modelo a escrever queries
       # do search_tools em INGLÊS (com fallback no idioma do usuário p/ tools
@@ -212,9 +214,35 @@ services:
     ports:
       - "${WEB_BIND:-0.0.0.0}:${WEB_PORT:-3000}:3000"
 
+  # HTTPS pronto para uso: um proxy na frente serve o front em / e a API em /api,
+  # no MESMO endereço. Certificado automático (CA interna do Caddy para IP/LAN;
+  # Let's Encrypt quando CADDY_SITE é um domínio público e CADDY_TLS é seu e-mail).
+  # Veja docs/https.md. As portas 3000/8000 continuam publicadas para quem prefere
+  # acessar direto (HTTP), então nada quebra ao atualizar.
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - web
+      - server
+    environment:
+      CADDY_SITE: ${CADDY_SITE:-:443}
+      CADDY_TLS: ${CADDY_TLS:-internal}
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # certificados emitidos + CA interna (precisa sobreviver a recriações, senão
+      # o navegador vê um certificado novo a cada `up`)
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTP_PORT:-80}:80"
+
 volumes:
   pgdata:
   mlcache:
   evolution_instances:
   codespace_data:
   uploads_data:
+  caddy_data:
+  caddy_config:

@@ -92,6 +92,22 @@ def test_ordem_alfabetica_dos_arquivos_bate_com_a_ordem_da_corrente():
     assert list(reversed(corrente)) == por_numero, "a numeração não segue a corrente"
 
 
+def test_o_proxy_de_https_aponta_para_um_caddyfile_que_existe():
+    """O HTTPS vem do serviço `proxy` montando um Caddyfile do repositório. Se o
+    arquivo mudar de lugar, o container sobe com a config padrão do Caddy (uma página
+    "Congratulations") e o app inteiro some do :443 — sem erro nenhum no `up`."""
+    compose = (_REPO / "docker-compose.yml").read_text(encoding="utf-8")
+    montagens = re.findall(r"- \./([^:\s]+):/etc/caddy/Caddyfile", compose)
+    assert montagens, "serviço `proxy` sem Caddyfile montado"
+    for caminho in montagens:
+        arquivo = _REPO / caminho
+        assert arquivo.is_file(), f"Caddyfile ausente: {caminho}"
+        texto = arquivo.read_text(encoding="utf-8")
+        # as duas rotas que o front espera: /api → server, resto → web
+        assert "handle_path /api/*" in texto and "reverse_proxy server:8000" in texto
+        assert "reverse_proxy web:3000" in texto
+
+
 def test_todo_volume_do_server_existe_e_pertence_ao_app_na_imagem():
     """O container roda como `app` (não-root). Um volume nomeado montado sobre um
     caminho que NÃO existe na imagem nasce pertencendo ao root — e o processo não
