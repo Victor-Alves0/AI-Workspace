@@ -1,0 +1,9 @@
+# Rede local (padrão): CA interna do Caddy, emitindo SOB DEMANDA.
+#
+# Sem `on_demand` o Caddy não sabe para QUAL nome emitir quando o site é o curinga
+# `:443` e derruba o handshake ("tlsv1 alert internal error"). Com ele, o primeiro
+# acesso por https://<ip-ou-nome> gera o certificado daquele endereço na hora.
+# `ask` não é exigido aqui porque a CA é interna: não há emissão pública para abusar.
+tls internal {
+	on_demand
+}

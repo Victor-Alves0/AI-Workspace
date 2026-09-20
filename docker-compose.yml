@@ -229,9 +229,12 @@ services:
       - server
     environment:
       CADDY_SITE: ${CADDY_SITE:-:443}
-      CADDY_TLS: ${CADDY_TLS:-internal}
+      # local = CA interna emitindo sob demanda (IP da LAN/VPN, localhost);
+      # public = certificado do Let's Encrypt para o domínio de CADDY_SITE
+      CADDY_MODE: ${CADDY_MODE:-local}
     volumes:
-      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # a pasta inteira: o Caddyfile importa tls-local.caddy / tls-public.caddy
+      - ./infra/caddy:/etc/caddy:ro
       # certificados emitidos + CA interna (precisa sobreviver a recriações, senão
       # o navegador vê um certificado novo a cada `up`)
       - caddy_data:/data

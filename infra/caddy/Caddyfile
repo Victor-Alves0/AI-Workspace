@@ -7,20 +7,21 @@
 # não há CORS no caminho e o cookie de sessão vale no endereço inteiro (era a origem
 # dos 401 ao alternar entre IP da LAN e IP da VPN).
 #
-# Certificado:
-#   CADDY_TLS=internal (padrão) → o Caddy emite um certificado da CA interna dele.
-#     Serve para IP da LAN/VPN e para nomes locais. O navegador avisa até você
-#     confiar na CA (docs/https.md explica como pegá-la).
-#   CADDY_TLS=<seu e-mail>      → Let's Encrypt automático. Use com um DOMÍNIO
-#     público em CADDY_SITE (ex.: CADDY_SITE=app.seudominio.com) e as portas 80/443
-#     alcançáveis da internet.
+# O certificado vem do arquivo tls-{CADDY_MODE}.caddy:
+#   CADDY_MODE=local  (padrão) → CA interna do Caddy, emitindo SOB DEMANDA para o
+#     nome/IP que chegar. É o que faz `https://192.168.1.10` e `https://10.10.0.10`
+#     funcionarem sem ninguém listar endereço nenhum. O navegador avisa até você
+#     confiar na CA (docs/https.md).
+#   CADDY_MODE=public         → certificado público automático (Let's Encrypt), para
+#     um DOMÍNIO em CADDY_SITE (ex.: CADDY_SITE=app.seudominio.com) com as portas
+#     80/443 alcançáveis da internet.
 {
 	# sem API de administração exposta numa instalação self-hosted
 	admin off
 }
 
 {$CADDY_SITE::443} {
-	tls {$CADDY_TLS:internal}
+	import tls-{$CADDY_MODE:local}.caddy
 	encode zstd gzip
 
 	# a API vem antes: /api/chats → server:8000/chats

@@ -19,8 +19,8 @@ acessar direto, e o mesmo build do front funciona dos dois jeitos: pelo proxy el
 
 | Como você acessa | `.env` | Certificado |
 |---|---|---|
-| IP da LAN/VPN, `localhost`, nome de rede local | nada (padrão) | CA interna do Caddy — o navegador avisa até você confiar nela |
-| Domínio público | `CADDY_SITE=app.seudominio.com` e `CADDY_TLS=seu@email` | Let's Encrypt, automático e já confiável |
+| IP da LAN/VPN, `localhost`, nome de rede local | nada (padrão) | CA interna do Caddy, emitida **sob demanda** para o endereço acessado — o navegador avisa até você confiar nela |
+| Domínio público | `CADDY_SITE=app.seudominio.com` e `CADDY_MODE=public` | Let's Encrypt, automático e já confiável |
 
 Portas 80/443 ocupadas? `HTTPS_PORT=8443` e `HTTP_PORT=8080`, por exemplo.
 
@@ -44,7 +44,7 @@ Sem instalar, tudo funciona igual: o navegador só mostra um aviso na primeira v
 
 ```env
 CADDY_SITE=app.seudominio.com
-CADDY_TLS=seu@email.com
+CADDY_MODE=public
 WEB_ORIGIN=https://app.seudominio.com
 ```
 

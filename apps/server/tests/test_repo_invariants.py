@@ -97,15 +97,23 @@ def test_o_proxy_de_https_aponta_para_um_caddyfile_que_existe():
     arquivo mudar de lugar, o container sobe com a config padrão do Caddy (uma página
     "Congratulations") e o app inteiro some do :443 — sem erro nenhum no `up`."""
     compose = (_REPO / "docker-compose.yml").read_text(encoding="utf-8")
-    montagens = re.findall(r"- \./([^:\s]+):/etc/caddy/Caddyfile", compose)
-    assert montagens, "serviço `proxy` sem Caddyfile montado"
+    montagens = re.findall(r"- \./([^:\s]+):/etc/caddy(?:/Caddyfile)?:", compose)
+    assert montagens, "serviço `proxy` sem a config do Caddy montada"
     for caminho in montagens:
-        arquivo = _REPO / caminho
+        alvo = _REPO / caminho
+        arquivo = alvo / "Caddyfile" if alvo.is_dir() else alvo
         assert arquivo.is_file(), f"Caddyfile ausente: {caminho}"
         texto = arquivo.read_text(encoding="utf-8")
         # as duas rotas que o front espera: /api → server, resto → web
         assert "handle_path /api/*" in texto and "reverse_proxy server:8000" in texto
         assert "reverse_proxy web:3000" in texto
+        # cada modo de TLS precisa do arquivo que o Caddyfile importa: sem o
+        # `on_demand` do modo local, o site curinga `:443` derruba o handshake
+        # ("tlsv1 alert internal error") por não saber para qual nome emitir
+        for modo, exigido in (("local", "on_demand"), ("public", "")):
+            parte = arquivo.parent / f"tls-{modo}.caddy"
+            assert parte.is_file(), f"faltando {parte.name} (importado pelo Caddyfile)"
+            assert exigido in parte.read_text(encoding="utf-8")
 
 
 def test_todo_volume_do_server_existe_e_pertence_ao_app_na_imagem():

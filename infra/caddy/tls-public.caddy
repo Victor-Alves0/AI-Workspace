@@ -1,0 +1,4 @@
+# Domínio público: certificado automático (Let's Encrypt / ZeroSSL).
+#
+# Sem diretiva `tls`: com um DOMÍNIO em CADDY_SITE, o Caddy já emite e renova
+# sozinho. Exige DNS apontando para a máquina e as portas 80/443 abertas.
