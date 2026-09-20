@@ -51,6 +51,44 @@ WEB_ORIGIN=https://app.seudominio.com
 O DNS precisa apontar para a máquina e as portas 80 e 443 precisam estar abertas — é
 assim que o Let's Encrypt valida o domínio. A renovação é automática.
 
+## Já existe um proxy no host?
+
+Se a máquina já roda Caddy/nginx/Traefik, as portas 80/443 estão ocupadas e o `up` falha
+com `address already in use` — só no serviço `proxy`; o resto sobe normalmente. Veja o que
+o proxy de lá serve antes de mexer:
+
+```bash
+systemctl status caddy --no-pager   # ou nginx / traefik
+cat /etc/caddy/Caddyfile
+```
+
+Três saídas:
+
+```bash
+# 1) aposentar o proxy do host e usar o do compose
+sudo systemctl stop caddy && sudo systemctl disable caddy && docker compose up -d
+
+# 2) manter os dois: o do compose em outras portas (.env)
+#    HTTPS_PORT=8443 / HTTP_PORT=8080   → https://SEU_IP:8443
+
+# 3) manter só o do host: não suba o proxy do compose
+docker compose up -d --scale proxy=0
+```
+
+Na opção 3, o proxy do host precisa das mesmas duas rotas — `/api/*` para a porta 8000
+**sem o prefixo** e o resto para a 3000. Copie de [`infra/caddy/Caddyfile`](../infra/caddy/Caddyfile):
+
+```caddy
+seu-dominio-ou-ip {
+	handle_path /api/* {
+		reverse_proxy localhost:8000
+	}
+	handle {
+		reverse_proxy localhost:3000
+	}
+}
+```
+
 ## Verificação rápida
 
 ```bash
