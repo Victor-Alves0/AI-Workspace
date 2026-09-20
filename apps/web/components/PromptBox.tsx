@@ -481,6 +481,11 @@ export default function PromptBox({
   activeMiniApp?: MiniAppId | null;
   onActiveMiniAppChange?: (app: MiniAppId | null) => void;
 }) {
+  // Enviar SÓ anexos é válido ("analise este arquivo" sem escrever nada), mas não
+  // no meio de um upload: o anexo ainda é um placeholder e o servidor o descartaria
+  // calado, como se o arquivo nunca tivesse sido enviado.
+  const subindo = attachments.some((a) => a.uploading);
+  const podeEnviar = (!!value.trim() || attachments.length > 0) && !subindo;
   const [plusOpen, setPlusOpen] = useState(false);
   const plusRef = useClickOutside<HTMLDivElement>(() => setPlusOpen(false));
   // "Chats de Referência": menu próprio com busca + lista (multi-seleção)
@@ -1153,7 +1158,7 @@ export default function PromptBox({
               // durante a geração, Enter ENFILEIRA (não abre 2º turno); Alt+Enter faz
               // STEER (injeta no turno em curso). Fora da geração, envia normal.
               if (sending && onQueue && value.trim()) onQueue(e.altKey);
-              else onSend();
+              else if (podeEnviar) onSend();
             }
           }}
           placeholder={placeholder}
@@ -1313,11 +1318,11 @@ export default function PromptBox({
                   <Square size={16} fill="currentColor" />
                 </button>
               </div>
-            ) : value.trim() ? (
+            ) : podeEnviar || subindo ? (
               <button
                 onClick={onSend}
-                disabled={sending}
-                title="Enviar"
+                disabled={sending || subindo}
+                title={subindo ? "Enviando anexos…" : "Enviar"}
                 className="rounded-full bg-accent p-2 text-ink transition-colors hover:bg-accent-hover disabled:opacity-50"
               >
                 <Send size={16} />

@@ -273,6 +273,7 @@ const EX_FORMATS = [
   { key: "xlsx", label: "Excel", desc: "Planilhas .xlsx/.xlsm" },
   { key: "pptx", label: "PowerPoint", desc: "Apresentações .pptx" },
   { key: "csv", label: "CSV", desc: "Tabelas .csv" },
+  { key: "text", label: "Texto puro", desc: "Markdown, JSON/YAML, logs, código e texto colado" },
 ];
 
 export function TextExtractionPanel({ value, onChange }: PanelProps) {

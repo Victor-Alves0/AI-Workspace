@@ -26,6 +26,7 @@ class ExtractionError(Exception):
 # defaults conservadores p/ conter o consumo de tokens
 DEFAULTS: dict = {
     "pdf": True,
+    "text": True,
     "docx": True,
     "xlsx": True,
     "pptx": True,
@@ -44,13 +45,31 @@ DEFAULTS: dict = {
 # tipos de imagem que o OCR (tesseract) consegue ler
 _IMAGE_EXT = (".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp", ".gif")
 
-# extensões e mimes suportados por tipo
+# Texto puro: markdown, JSON/YAML, logs, código — e o .txt que o compositor cria
+# ao colar um texto longo. Não precisa de parser, só de decodificar; sem isto o
+# modelo recebia "[anexo sem texto extraível]" para o arquivo mais comum de todos.
+_TEXT_EXT = (
+    ".txt", ".text", ".md", ".markdown", ".rst", ".log", ".tsv",
+    ".json", ".jsonl", ".ndjson", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".env",
+    ".xml", ".html", ".htm", ".css", ".svg", ".sql", ".diff", ".patch",
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".kt", ".c", ".h", ".cpp", ".hpp",
+    ".cs", ".go", ".rs", ".rb", ".php", ".sh", ".bash", ".zsh", ".ps1", ".r", ".swift",
+)
+_TEXT_MIME = (
+    "text/", "application/json", "application/xml", "+json", "+xml",
+    "application/javascript", "x-yaml", "x-sh", "x-httpd-php", "x-python",
+)
+
+# extensões e mimes suportados por tipo. A ORDEM importa: "csv" antes de "text",
+# senão um .csv (mime text/csv) cairia no ramo de texto puro e perderia o corte
+# por linhas.
 _KINDS = {
     "pdf": ((".pdf",), ("application/pdf",)),
     "docx": ((".docx",), ("wordprocessingml",)),
     "xlsx": ((".xlsx", ".xlsm"), ("spreadsheetml",)),
     "pptx": ((".pptx",), ("presentationml",)),
     "csv": ((".csv",), ("text/csv",)),
+    "text": (_TEXT_EXT, _TEXT_MIME),
 }
 
 
@@ -130,15 +149,19 @@ def extract(filename: str | None, mime: str | None, data: bytes, config: dict | 
             text = _xlsx(data, int(_cfg(config, "xlsx_max_rows") or 200))
         elif kind == "pptx":
             text = _pptx(data)
-        else:  # csv
+        elif kind == "csv":
             text = _csv_text(data, int(_cfg(config, "xlsx_max_rows") or 200))
+        else:  # texto puro
+            text = _plain_text(data)
     except ExtractionError:
         raise
     except Exception as exc:  # noqa: BLE001 - parsing de arquivo arbitrário
         logger.warning("Falha ao extrair '%s' (%s)", filename, exc)
         raise ExtractionError(f"não foi possível ler o arquivo ({type(exc).__name__})")
 
-    if _cfg(config, "collapse_whitespace"):
+    # texto puro sai como está: colapsar espaços destruiria indentação de código,
+    # tabelas de markdown e a coluna de um log
+    if kind != "text" and _cfg(config, "collapse_whitespace"):
         text = _collapse(text)
     max_chars = int(_cfg(config, "max_chars") or 0)
     if max_chars and len(text) > max_chars:
@@ -187,6 +210,23 @@ def _pdf_ocr(data: bytes, lang: str, max_pages: int) -> str:
         if page_text.strip():
             out.append(f"[Página {i} (OCR)]\n{page_text.strip()}")
     return "\n\n".join(out)
+
+
+def _plain_text(data: bytes) -> str:
+    """Decodifica texto puro, tentando as codificações usuais.
+
+    Byte NUL = binário disfarçado (um .txt que na verdade é um .doc antigo, um
+    arquivo renomeado). Melhor dizer que não dá do que despejar lixo no contexto —
+    o aviso volta como ExtractionError e vira nota no anexo."""
+    if 0 in data[:8192]:  # byte NUL
+        raise ExtractionError("arquivo binário, não texto")
+    for enc in ("utf-8-sig", "utf-8", "cp1252"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    # latin-1 aceita qualquer byte: último recurso para não perder o anexo inteiro
+    return data.decode("latin-1", "replace")
 
 
 def _docx(data: bytes) -> str:

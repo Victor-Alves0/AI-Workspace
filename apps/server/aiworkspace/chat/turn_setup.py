@@ -1176,7 +1176,13 @@ async def _resolve_upload(a: dict, ex_cfg: dict) -> dict | None:
                     text = f"[não foi possível extrair '{name}': {exc}]"
         return {
             "type": "file", "name": name, "upload_id": str(row.id),
-            "text": (text or f"[{name}: anexo sem texto extraível]")[:200_000],
+            # a nota é lida pelo MODELO: sem dizer o que fazer, ele inventa que não
+            # tem ferramenta para ler arquivos e devolve isso ao usuário
+            "text": (text or (
+                f"[O anexo '{name}' chegou ao servidor, mas não foi possível ler texto dele "
+                "(formato não suportado ou arquivo sem texto). Diga isso ao usuário e peça "
+                "o conteúdo colado ou em outro formato — não há ferramenta para abri-lo.]"
+            ))[:200_000],
         }
 
 
