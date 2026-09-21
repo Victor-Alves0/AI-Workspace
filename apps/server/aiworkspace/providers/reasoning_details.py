@@ -55,6 +55,40 @@ def text_of(details: Any) -> str:
     return "".join(partes)
 
 
+def history_entry(m: Any) -> dict[str, Any]:
+    """Mensagem gravada → mensagem do histórico, com os blocos de raciocínio da resposta.
+
+    Os blocos só valem para o modelo que os gerou (a assinatura do Claude é presa ao
+    modelo; o cifrado da OpenAI também): o id dele vai junto em `_details_model`, e
+    `for_model` decide no envio — o modelo do turno só é conhecido depois (agente "@",
+    troca de modelo no chat)."""
+    out: dict[str, Any] = {"role": m.role, "content": m.content}
+    r = getattr(m, "reasoning", None)
+    if m.role == "assistant" and isinstance(r, dict) and r.get("details"):
+        out["reasoning_details"] = r["details"]
+        if r.get("details_text"):
+            out["reasoning"] = r["details_text"]
+        out["_details_model"] = r.get("details_model") or ""
+    return out
+
+
+def for_model(messages: list[dict[str, Any]], model: str) -> list[dict[str, Any]]:
+    """Deixa no histórico só os blocos gerados por `model` e tira a marca interna.
+    Mensagens do próprio turno (loop de ferramentas) não têm marca: são deste modelo."""
+    out: list[dict[str, Any]] | None = None
+    for i, m in enumerate(messages):
+        if not isinstance(m, dict) or "_details_model" not in m:
+            continue
+        limpo = {k: v for k, v in m.items() if k != "_details_model"}
+        if m["_details_model"] != model:
+            limpo.pop("reasoning_details", None)
+            limpo.pop("reasoning", None)
+        if out is None:
+            out = list(messages)
+        out[i] = limpo
+    return messages if out is None else out
+
+
 def replayable(details: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Os blocos que podem voltar ao provedor na próxima chamada."""
     out: list[dict[str, Any]] = []

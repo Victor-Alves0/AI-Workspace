@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 
+from ..providers import reasoning_details as _reasoning_details
 from ..db import SessionLocal
 from ..models import Chat, Message, Notification, User
 from ..usage_service import usage_event_from_record
@@ -142,7 +143,7 @@ async def resume_chat_turn(
                             source_messages.append(m)
                             restantes.pop(i)
                             break
-                history = [{"role": m.role, "content": m.content} for m in restantes]
+                history = [_reasoning_details.history_entry(m) for m in restantes]
                 injected_text = "\n\n".join(texts).strip()
                 stable_sources = ":".join(reversed(source_ids))
                 turn_key = "queue:" + (
@@ -155,7 +156,7 @@ async def resume_chat_turn(
                 if source_messages and all(m.mini_app == "imaginai" for m in source_messages):
                     turn_mini_app = "imaginai"
             else:
-                history = [{"role": m.role, "content": m.content} for m in convo]
+                history = [_reasoning_details.history_entry(m) for m in convo]
                 # registra a nota como mensagem do usuário (transcrição legível do chat)
                 source_message = Message(chat_id=cid, role="user", content=injected_text)
                 db.add(source_message)

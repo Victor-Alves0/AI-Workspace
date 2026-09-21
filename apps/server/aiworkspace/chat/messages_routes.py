@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..providers import reasoning_details as _reasoning_details
 from .. import budget_service
 from ..auth.deps import require_approved
 from .. import uploads_service
@@ -282,7 +283,7 @@ async def send_message(
         .order_by(Message.created_at)
     )
     history = [
-        {"role": m.role, "content": m.content}
+        _reasoning_details.history_entry(m)
         for m in rows
         if m.content
     ]
@@ -587,7 +588,7 @@ async def regenerate_message(
         if not user_text and not user_attachments:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mensagem vazia")
         history = [
-            {"role": m.role, "content": m.content}
+            _reasoning_details.history_entry(m)
             for m in rows[:idx]
             if m.role in ("user", "assistant") and m.content and not m.compacted
         ]
@@ -611,7 +612,7 @@ async def regenerate_message(
         if not user_text:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sem prompt do usuário para refazer")
         history = [
-            {"role": m.role, "content": m.content}
+            _reasoning_details.history_entry(m)
             for m in prior[:cut]
             if m.role in ("user", "assistant") and m.content and not m.compacted
         ]
@@ -734,7 +735,7 @@ async def continue_message(
         )
 
     history = [
-        {"role": m.role, "content": m.content}
+        _reasoning_details.history_entry(m)
         for m in rows
         if m.role in ("user", "assistant") and m.content and not m.compacted
     ]

@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 
 from ..config import get_settings
-from . import turn_end
+from . import reasoning_details, turn_end
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +202,8 @@ async def complete(
     Modelos `codex/*` (assinatura ChatGPT) delegam ao adaptador de protocolo —
     TODOS os call sites (títulos, roteadores, juízes) funcionam sem saber disso."""
     from . import chatgpt_codex
+    # blocos de raciocínio do histórico só valem para o modelo que os gerou
+    messages = reasoning_details.for_model(messages, model)
     if chatgpt_codex.is_codex_model(model):
         return await chatgpt_codex.complete(api_key, model, messages, params=params, timeout=timeout)
     settings = get_settings()
@@ -241,6 +243,8 @@ async def complete_verbose(
     import time
 
     from . import chatgpt_codex
+    # blocos de raciocínio do histórico só valem para o modelo que os gerou
+    messages = reasoning_details.for_model(messages, model)
     if chatgpt_codex.is_codex_model(model):
         t0 = time.monotonic()
         try:
@@ -381,6 +385,8 @@ async def stream_chat(
     ChatGPT) delegam ao adaptador de protocolo (Responses API → mesmos chunks).
     """
     from . import chatgpt_codex
+    # blocos de raciocínio do histórico só valem para o modelo que os gerou
+    messages = reasoning_details.for_model(messages, model)
     if chatgpt_codex.is_codex_model(model):
         async for chunk in chatgpt_codex.stream_chat(api_key, model, messages, tools=tools, params=params):
             yield chunk

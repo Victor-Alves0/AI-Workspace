@@ -15,6 +15,7 @@ Tradução:
   saída    response.output_text.delta        → delta.content
            response.reasoning_summary_text.delta → delta.reasoning
            response.output_item.done(function_call) → delta.tool_calls
+           response.output_item.done(reasoning)     → delta.reasoning_details (cifrado)
            response.completed                → chunk final c/ usage
 """
 
@@ -71,10 +72,37 @@ def _text_of(content: Any) -> str:
     return "" if content is None else str(content)
 
 
+# Raciocínio cifrado que volta ao modelo (ver providers/reasoning_details). Com
+# `store: false` a OpenAI não guarda nada: o pensamento de uma chamada só continua na
+# seguinte se o item cifrado voltar na entrada. Vai SEM o `id` (o item não existe no
+# servidor — reenviá-lo dá "item not found"; o Codex CLI e o opencode fazem igual) e
+# só quando há `encrypted_content`.
+REASONING_FORMAT = "openai-responses-v1"
+
+
+def _reasoning_items(m: dict[str, Any]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for d in m.get("reasoning_details") or []:
+        if not isinstance(d, dict) or d.get("format") != REASONING_FORMAT:
+            continue
+        if d.get("type") != "reasoning.encrypted" or not isinstance(d.get("data"), str):
+            continue
+        resumo = d.get("summary_text") or ""
+        out.append({
+            "type": "reasoning",
+            "summary": [{"type": "summary_text", "text": resumo}] if resumo else [],
+            "encrypted_content": d["data"],
+        })
+    return out
+
+
 def build_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for m in messages:
         role = m.get("role") or "user"
+        if role == "assistant":
+            # o raciocínio vem antes do texto e das chamadas que ele produziu
+            items.extend(_reasoning_items(m))
         if role == "tool":
             items.append({
                 "type": "function_call_output",
@@ -145,7 +173,7 @@ def build_payload(model: str, messages: list[dict[str, Any]], *,
         "store": False,
         "stream": True,
         "reasoning": {"effort": _reasoning_effort(params), "summary": "auto"},
-        "include": [],
+        "include": ["reasoning.encrypted_content"],
     }
     conv = convert_tools(tools)
     if conv:
@@ -213,7 +241,17 @@ async def stream_chat(
                     yield {"choices": [{"delta": {"reasoning": ev.get("delta") or ""}}]}
                 elif et == "response.output_item.done":
                     item = ev.get("item") or {}
-                    if item.get("type") == "function_call":
+                    if item.get("type") == "reasoning" and isinstance(item.get("encrypted_content"), str):
+                        resumo = "".join(
+                            (p or {}).get("text") or "" for p in item.get("summary") or []
+                        )
+                        yield {"choices": [{"delta": {"reasoning_details": [{
+                            "type": "reasoning.encrypted",
+                            "format": REASONING_FORMAT,
+                            "data": item["encrypted_content"],
+                            "summary_text": resumo,
+                        }]}}]}
+                    elif item.get("type") == "function_call":
                         yield {"choices": [{"delta": {"tool_calls": [{
                             "index": tool_idx,
                             "id": item.get("call_id") or item.get("id") or f"call_{tool_idx}",

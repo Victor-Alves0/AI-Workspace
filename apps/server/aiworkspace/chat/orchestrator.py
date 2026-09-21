@@ -2665,6 +2665,20 @@ def _shape_tool_result(result: Any) -> tuple[str, Any]:
 #      "generate"` do estado da arte + fallback de modelo, não um erro canned.
 # --------------------------------------------------------------------------- #
 
+def _reasoning_payload(
+    text: str, seconds: float, details: list[dict[str, Any]], details_text: str, model: str,
+) -> dict[str, Any] | None:
+    """Raciocínio gravado na mensagem. `details` são os blocos da resposta final (com o
+    modelo que os gerou) — voltam no histórico; o texto é o que o "Pensou por…" mostra.
+    Só blocos, sem texto (cifrado da OpenAI/Gemini), também grava: a tela ignora."""
+    if not text and not details:
+        return None
+    out: dict[str, Any] = {"text": text, "seconds": round(seconds, 1)}
+    if details:
+        out.update(details=details, details_text=details_text, details_model=model)
+    return out
+
+
 def _tool_digest(tool_events: list[dict[str, Any]], *, limit: int = 600) -> str:
     """Renderiza chamadas+resultados de tools em texto legível (determinístico)."""
     lines: list[str] = []
@@ -3082,7 +3096,12 @@ async def run_turn(
 
     # 3-4. loop de tool calling. O +1 dá uma rodada de GRAÇA só-texto na última volta
     # (tools já cortadas) antes de a síntese em prompt limpo assumir.
+    # blocos de raciocínio da RESPOSTA FINAL (a última volta), gravados na mensagem
+    # para voltarem no histórico dos próximos turnos — ver reasoning_details
+    final_details: list[dict[str, Any]] = []
+    final_details_text = ""
     for _iter in range(max_iters + 1):
+        final_details, final_details_text = [], ""
         # STEER em tempo real: mensagens que o usuário enviou DURANTE o turno (steer=True)
         # entram AQUI, antes da próxima chamada ao modelo, como input prioritário. O turno
         # segue já ciente da correção — sem reiniciar nem descartar o trabalho feito. Se
@@ -3323,6 +3342,10 @@ async def run_turn(
                 assistant_text = answer
                 yield {"type": "token", "text": answer}
                 finish_reason = "stop"
+                iter_details.clear()  # aquele "raciocínio" era a resposta
+
+        final_details = reasoning_details.replayable(iter_details)
+        final_details_text = reasoning_text[iter_reasoning_from:] if final_details else ""
 
         # resgate: o modelo vazou tool_calls como texto (suprimidas em `leaked_text`).
         # Sem tool_calls estruturadas, tentamos reconstruí-las e seguir o loop como se
@@ -3563,10 +3586,8 @@ async def run_turn(
         "type": "done",
         "content": assistant_text,
         "usage": total_usage if has_usage else None,
-        "reasoning": (
-            {"text": reasoning_text, "seconds": round(reasoning_seconds, 1)}
-            if reasoning_text
-            else None
+        "reasoning": _reasoning_payload(
+            reasoning_text, reasoning_seconds, final_details, final_details_text, model,
         ),
         "tool_events": tool_events or None,
         "memories": mem_items or None,

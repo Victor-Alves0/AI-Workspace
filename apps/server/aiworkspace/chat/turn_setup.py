@@ -24,6 +24,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..providers import reasoning_details as _reasoning_details
 from .. import extraction
 from ..config import get_settings
 from ..db import SessionLocal
@@ -954,7 +955,7 @@ async def _recent_history(db: AsyncSession, chat_id: uuid.UUID, limit: int = 20)
         select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at)
     ))
     convo = [
-        {"role": m.role, "content": m.content}
+        _reasoning_details.history_entry(m)
         for m in rows
         if m.role in ("user", "assistant") and m.content and not m.compacted
     ]

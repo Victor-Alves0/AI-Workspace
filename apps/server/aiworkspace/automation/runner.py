@@ -20,6 +20,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from ..providers import reasoning_details as _reasoning_details
 from .. import bg, tracing
 from ..chat.turn_setup import _code_mode, _load_skills, _usage_record
 from ..chat.orchestrator import TurnSession, run_turn
@@ -179,7 +180,7 @@ async def _run_scheduled(db, automation: Automation, user: User) -> dict[str, An
             .order_by(Message.created_at.desc())
             .limit(30)
         ))
-        history = [{"role": m.role, "content": m.content} for m in reversed(rows) if m.content]
+        history = [_reasoning_details.history_entry(m) for m in reversed(rows) if m.content]
 
     # registra a instrução como mensagem do usuário (transcrição legível do chat).
     # NÃO commita aqui: tudo (chat novo + msg do usuário + resposta + notificação)
