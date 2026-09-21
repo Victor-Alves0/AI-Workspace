@@ -3411,7 +3411,7 @@ function ShareModal({
   const [publicId, setPublicId] = useState<string | null>(chat.public_id ?? null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
-  const url = publicId ? `${typeof window !== "undefined" ? window.location.origin : ""}/shared/${publicId}` : "";
+  const url = publicId ? `${typeof window !== "undefined" ? window.location.origin : ""}/shared?id=${publicId}` : "";
 
   // ao abrir sem link, cria um automaticamente
   useEffect(() => {

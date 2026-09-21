@@ -58,7 +58,7 @@ sudo ufw allow 80/tcp
 Visit **https://YOUR_IP**, register (you become admin) and paste the OpenRouter key. The first
 visit warns about the certificate (internal CA) until you trust it — [https.md](https.md).
 
-> Ports **3000** and **8000** stay on loopback: they are the plain-HTTP way in, kept for local
+> Ports **41414** (web) and **8000** (API) stay on loopback: they are the plain-HTTP way in, kept for local
 > debugging. To publish them anyway, `WEB_BIND=0.0.0.0` / `SERVER_BIND=0.0.0.0`.
 
 ## Domain + HTTPS
@@ -79,7 +79,7 @@ CORS in the way and the session cookie covers the whole address. Full guide:
   `SERVER_BIND=127.0.0.1` and `WEB_BIND=127.0.0.1`.
 
 `NEXT_PUBLIC_API_URL` stays **empty** in this setup: through the proxy the front calls `/api` on
-its own origin, and on a direct visit to port 3000 it still calls `host:8000`. Only set it when
+its own origin, and on a direct visit to port 41414 it still calls `host:8000`. Only set it when
 the backend has a domain of its own (`https://api.your-domain.com`) — that one is baked into the
 build, so rebuild the web afterwards.
 

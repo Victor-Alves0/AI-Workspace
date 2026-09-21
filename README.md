@@ -155,7 +155,7 @@ Docker Compose services:
 |-------------|:-------:|:-----------:|--------------------------------------------------|
 | `db`        | ✅      | internal    | Postgres 16 + pgvector (data + vectors)          |
 | `server`    | ✅      | `8000`      | FastAPI API                                       |
-| `web`       | ✅      | `3000`      | Next.js interface                                 |
+| `web`       | ✅      | `41414`     | Next.js interface                                 |
 | `searxng`   | opt-in  | `8080`      | `docker compose --profile search up -d`          |
 | `kokoro`    | opt-in  | `8880`      | `docker compose --profile voice up -d`           |
 | `evolution` | opt-in  | `8081`      | `docker compose --profile whatsapp up -d`        |

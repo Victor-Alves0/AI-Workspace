@@ -1,9 +1,9 @@
 # Monta o PACOTE DE CODIGO do app (camada leve da auto-atualizacao em 2 camadas).
 #
 # Diferente do build-engine.ps1 (que monta o motor pesado inteiro: Python, deps,
-# Postgres, Node, modelo), aqui so' embrulhamos o que muda a cada commit:
+# Postgres, modelo), aqui so' embrulhamos o que muda a cada commit:
 #   - site-packages/aiworkspace/  (backend, codigo puro)
-#   - web/                        (frontend Next.js "standalone", mesmo layout do motor)
+#   - web/                        (frontend exportado como estatico, mesmo layout do motor)
 #   - app/                        (alembic.ini + migracoes)
 # Produz `app-<versao>.zip` + `app-update.json` (manifesto com versao/url/sha256/
 # engine_required). O CI publica os dois no release fixo `app-latest`; o launcher
@@ -11,7 +11,6 @@
 #
 # Uso (na raiz do repo):  pwsh desktop/engine/build-app-package.ps1 -OutDir dist
 param(
-    [string]$NodeVersion = "20.18.0",   # so' p/ paridade; nao empacota node aqui
     # versao do codigo (camada leve). Vazio => SHA curto do git (fallback: timestamp).
     [string]$AppVersion = "",
     # base de download onde o .zip vai ficar acessivel (o release `app-latest`).
@@ -53,24 +52,22 @@ Get-ChildItem (Join-Path $SpOut "aiworkspace") -Recurse -Directory -Filter "__py
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
 # ----------------------------------------------------------------------------- #
-# 2) frontend: build "standalone" (mesmo layout do build-engine)
+# 2) frontend: export estatico (mesmo layout do build-engine)
 # ----------------------------------------------------------------------------- #
-Write-Host "==> build do frontend (npm ci + next build)"
+Write-Host "==> build do frontend (npm ci + export estatico)"
 Push-Location $WebDir
-$env:NEXT_PUBLIC_API_URL = ""
+# interface ESTATICA (sem Node): o aiworkspace.desktop serve estes arquivos e a API em
+# /api na mesma porta. API relativa => o front chama a propria origem + /api.
+$env:NEXT_OUTPUT = "export"
+$env:NEXT_PUBLIC_API_URL = "/api"
 npm ci
 if ($LASTEXITCODE -ne 0) { throw "npm ci falhou" }
 npm run build
-if ($LASTEXITCODE -ne 0) { throw "next build falhou" }
+if ($LASTEXITCODE -ne 0) { throw "next build (export) falhou" }
 Pop-Location
+Remove-Item Env:NEXT_OUTPUT, Env:NEXT_PUBLIC_API_URL -ErrorAction SilentlyContinue
 
-$WebOut = Join-Path $Stage "web"
-New-Item -ItemType Directory -Force (Join-Path $WebOut ".next") | Out-Null
-Copy-Item (Join-Path $WebDir ".next\standalone\*") $WebOut -Recurse -Force
-Copy-Item (Join-Path $WebDir ".next\static") (Join-Path $WebOut ".next\static") -Recurse -Force
-if (Test-Path (Join-Path $WebDir "public")) {
-    Copy-Item (Join-Path $WebDir "public") (Join-Path $WebOut "public") -Recurse -Force
-}
+Copy-Item (Join-Path $WebDir "out") (Join-Path $Stage "web") -Recurse -Force
 
 # ----------------------------------------------------------------------------- #
 # 3) app dir (alembic)

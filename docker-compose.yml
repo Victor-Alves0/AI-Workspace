@@ -216,14 +216,17 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
     ports:
-      # idem: o acesso normal é https://<host>/ pelo `proxy`
-      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-3000}:3000"
+      # idem: o acesso normal é https://<host>/ pelo `proxy`. No host, a porta é a
+      # PRÓPRIA do AI Workspace (41414): a 3000 vive ocupada por servidor de dev, e
+      # porta ocupada no host derruba o `up` inteiro. Dentro da rede do compose o
+      # web segue na 3000 (é o que o Caddy usa).
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-41414}:3000"
 
   # HTTPS pronto para uso: um proxy na frente serve o front em / e a API em /api,
   # no MESMO endereço. Certificado automático (CA interna do Caddy para IP/LAN;
   # Let's Encrypt quando CADDY_SITE é um domínio público e CADDY_MODE=public).
-  # Veja docs/https.md. As portas 3000/8000 continuam publicadas para quem prefere
-  # acessar direto (HTTP), então nada quebra ao atualizar.
+  # Veja docs/https.md. As portas 41414 (web) e 8000 (API) seguem publicadas no
+  # loopback para depuração em HTTP.
   proxy:
     image: caddy:2-alpine
     restart: unless-stopped

@@ -11,9 +11,9 @@ Os dois no **mesmo endereço**. Isso não é só estética: mesma origem signifi
 no caminho e um **cookie de sessão que vale no endereço inteiro** — os dois problemas que
 apareciam ao alternar entre o IP da LAN e o da VPN, cada um com sua sessão.
 
-As portas 3000 (front) e 8000 (API) continuam publicadas em HTTP para quem prefere
+As portas 41414 (front) e 8000 (API) continuam publicadas em HTTP, só no loopback, para quem prefere
 acessar direto, e o mesmo build do front funciona dos dois jeitos: pelo proxy ele chama
-`/api` na própria origem; pela porta 3000, chama `host:8000`.
+`/api` na própria origem; pela porta 41414, chama `host:8000`.
 
 ## O que você precisa escolher
 
@@ -76,7 +76,7 @@ docker compose up -d --scale proxy=0
 ```
 
 Na opção 3, o proxy do host precisa das mesmas duas rotas — `/api/*` para a porta 8000
-**sem o prefixo** e o resto para a 3000. Copie de [`infra/caddy/Caddyfile`](../infra/caddy/Caddyfile):
+**sem o prefixo** e o resto para a 41414. Copie de [`infra/caddy/Caddyfile`](../infra/caddy/Caddyfile):
 
 ```caddy
 seu-dominio-ou-ip {
@@ -84,7 +84,7 @@ seu-dominio-ou-ip {
 		reverse_proxy localhost:8000
 	}
 	handle {
-		reverse_proxy localhost:3000
+		reverse_proxy localhost:41414
 	}
 }
 ```

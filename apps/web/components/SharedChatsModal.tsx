@@ -49,7 +49,7 @@ export default function SharedChatsModal({ onClose }: { onClose: () => void }) {
   useEffect(() => { load(); }, [load]);
 
   const publicUrl = (c: SharedChat) =>
-    typeof window !== "undefined" ? `${window.location.origin}/shared/${c.public_id}` : c.url;
+    typeof window !== "undefined" ? `${window.location.origin}/shared?id=${c.public_id}` : c.url;
 
   async function copyLink(c: SharedChat) {
     try { await copyText(publicUrl(c)); setCopied(c.id); setTimeout(() => setCopied(null), 1400); } catch {}

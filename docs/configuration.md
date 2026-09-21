@@ -88,7 +88,7 @@ Outside Docker (`uvicorn`, desktop build) `.env` is read directly and every vari
 |---|---|---|
 | `DATABASE_URL` | assembled by compose | Only touch it to run the server outside Docker. |
 | `DB_PORT` / `DB_BIND` | `5432` / `127.0.0.1` | Postgres is **not** published on the host. To reach it with psql/DBeaver, copy `docker-compose.override.yml.example`. |
-| `WEB_BIND` / `WEB_PORT` | `127.0.0.1` / `3000` | Frontend in plain HTTP. Loopback by default: the proxy is what serves the network. |
+| `WEB_BIND` / `WEB_PORT` | `127.0.0.1` / `41414` | Frontend in plain HTTP. Loopback by default: the proxy is what serves the network. 41414 is AI Workspace's own port — 3000 is almost always taken by some dev server, and a taken host port makes `docker compose up` fail. |
 | `SERVER_BIND` / `SERVER_PORT` | `127.0.0.1` / `8000` | API in plain HTTP, same reasoning. |
 | `TRUST_PROXY` | `true` in compose | Makes the server trust `X-Forwarded-*` (real client IP, http/https). Turn it off if you publish port 8000 straight to the internet. |
 | `NEXT_PUBLIC_API_URL` | empty | Backend URL baked into the web build. **Leave it empty** — the frontend derives the API from the page origin, so one build serves localhost, LAN and VPS. |

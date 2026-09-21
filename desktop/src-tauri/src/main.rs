@@ -3,15 +3,17 @@
 
 //! Shell desktop do AI Workspace (instalador unico, sem Docker).
 //!
-//! O app EMBARCA o "motor" (Postgres + backend Python + frontend Node) como
-//! recursos e o supervisiona: ao abrir, sobe o motor por baixo (via o launcher
-//! PowerShell ja validado), mostra uma tela de "iniciando..." e navega para a
-//! interface local (http://localhost:3000) assim que ela responde. Ao sair,
-//! encerra o motor inteiro (inclusive o Postgres, que o pg_ctl desanexa).
+//! O app EMBARCA o "motor" (Postgres + backend Python, que tambem serve a interface
+//! como arquivos estaticos) e o supervisiona: ao abrir, sobe o motor por baixo (via o
+//! launcher PowerShell ja validado), mostra uma tela de "iniciando..." e navega para
+//! a interface local (http://localhost:41414, ou a porta que o launcher escolheu e
+//! gravou em data\port.txt) assim que ela responde. Ao sair, encerra o motor inteiro
+//! (inclusive o Postgres, que o pg_ctl desanexa).
 //!
 //! O shell tambem da o que um navegador nao da: icone na bandeja, "rodar em
 //! segundo plano" e "iniciar com o Windows".
 
+use std::io::{Read, Write};
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
@@ -27,8 +29,10 @@ use tauri::{
 use tauri_plugin_autostart::ManagerExt;
 
 const SETTINGS_FILE: &str = "desktop-settings.json";
-const WEB_URL: &str = "http://localhost:3000";
-// esconde o console do powershell/pg/uvicorn/node (CREATE_NO_WINDOW)
+/// Arquivo (na pasta de dados) onde o launcher grava a porta que escolheu: a
+/// preferida (41414) ou a proxima livre, se ela estiver ocupada.
+const PORT_FILE: &str = "port.txt";
+// esconde o console do powershell/pg/uvicorn (CREATE_NO_WINDOW)
 const NO_WINDOW: u32 = 0x0800_0000;
 
 /// Preferencias **da maquina**, nao da conta.
@@ -126,10 +130,35 @@ fn engine_paths(app: &AppHandle) -> Option<(PathBuf, PathBuf)> {
     Some((engine, data))
 }
 
-/// Uma porta local esta' aceitando conexao? (usado como sinal de "no ar").
-fn port_open(port: u16) -> bool {
+/// Porta que o launcher gravou para o motor desta instalacao.
+fn engine_port(app: &AppHandle) -> Option<u16> {
+    let (_, data) = engine_paths(app)?;
+    std::fs::read_to_string(data.join(PORT_FILE))
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// O AI Workspace esta' respondendo nesta porta? Pergunta a /api/health em vez de so'
+/// testar se a porta abriu: um port.txt velho (queda) pode apontar para uma porta que
+/// agora e' de OUTRO programa, e a janela navegaria para ele. O uvicorn so' abre a
+/// porta depois do startup, entao 200 aqui = API pronta.
+fn engine_ready(port: u16) -> bool {
     let addr: std::net::SocketAddr = ([127, 0, 0, 1], port).into();
-    std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(1)).is_ok()
+    let Ok(mut s) = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(1)) else {
+        return false;
+    };
+    let _ = s.set_read_timeout(Some(Duration::from_secs(2)));
+    let req = format!(
+        "GET /api/health HTTP/1.1\r\nHost: localhost:{port}\r\nConnection: close\r\n\r\n"
+    );
+    if s.write_all(req.as_bytes()).is_err() {
+        return false;
+    }
+    let mut buf = String::new();
+    let _ = s.read_to_string(&mut buf);
+    buf.starts_with("HTTP/1.1 200") && buf.contains("\"status\":\"ok\"")
 }
 
 /// Sobe o motor via o launcher PowerShell (mesma sequencia validada a mao):
@@ -138,11 +167,13 @@ fn spawn_engine(app: &AppHandle) -> Option<u32> {
     // Ja' ha' um motor no ar (outra instancia, ou uma sobra)? Nao sobe outro nem
     // toma posse — assim uma 2a abertura NAO derruba o motor da 1a ao sair (o
     // stop_engine so' age quando este processo e' o dono, i.e. pid = Some).
-    if port_open(3000) {
+    if engine_port(app).is_some_and(engine_ready) {
         return None;
     }
     let (engine, data) = engine_paths(app)?;
     let _ = std::fs::create_dir_all(&data);
+    // sobra de uma execucao que caiu: o launcher grava a porta nova ao subir
+    let _ = std::fs::remove_file(data.join(PORT_FILE));
     // `-File` com caminho ABSOLUTO quebra quando ha espaco no caminho de instalacao
     // ("AI Workspace"): o powershell le so' ate o espaco e reclama que "Workspace" nao tem
     // extensao .ps1. Rodamos com o diretorio de trabalho na pasta do motor e
@@ -171,17 +202,16 @@ fn spawn_engine(app: &AppHandle) -> Option<u32> {
 /// index.html dos assets) enquanto isso.
 fn wait_and_show(app: AppHandle) {
     std::thread::spawn(move || {
-        // Espera AS DUAS pontas: interface (3000) E API (8000). So' navegar quando
-        // a interface sobe deixa a pagina carregar antes da API responder — no 1o
-        // boot a API demora (baixa o modelo de embeddings), e chamadas como
-        // /auth/config falham, escondendo ate' o "criar conta". A porta 8000 so'
-        // abre depois do "startup complete" do uvicorn, entao e' um bom sinal de
-        // "API pronta". Ate' ~15 min no primeiro boot.
+        // Interface e API saem do MESMO processo e da mesma porta: quando a API
+        // responde, a interface tambem. No 1o boot a API demora (baixa o modelo de
+        // embeddings) — navegar antes faria /auth/config falhar e esconderia ate' o
+        // "criar conta". Ate' ~15 min no primeiro boot.
         for _ in 0..900 {
-            if port_open(3000) && port_open(8000) {
-                std::thread::sleep(Duration::from_millis(800));
+            if let Some(port) = engine_port(&app).filter(|p| engine_ready(*p)) {
                 if let Some(win) = app.get_webview_window("main") {
-                    let _ = win.eval(&format!("window.location.replace('{WEB_URL}')"));
+                    let _ = win.eval(&format!(
+                        "window.location.replace('http://localhost:{port}')"
+                    ));
                 }
                 return;
             }
@@ -190,7 +220,7 @@ fn wait_and_show(app: AppHandle) {
     });
 }
 
-/// Encerra o motor ao sair: mata a arvore do launcher (powershell + uvicorn + node)
+/// Encerra o motor ao sair: mata a arvore do launcher (powershell + uvicorn)
 /// e para o Postgres explicitamente (o pg_ctl o desanexa, entao taskkill /T nao o
 /// alcanca).
 fn stop_engine(app: &AppHandle) {

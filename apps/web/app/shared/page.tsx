@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Lock, MessageSquare } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import Markdown from "@/components/Markdown";
@@ -9,10 +9,22 @@ import Markdown from "@/components/Markdown";
 type SharedMessage = { role: string; content: string; created_at: string };
 type SharedChat = { title: string; model: string; messages: SharedMessage[]; created_at: string };
 
-/** Página pública (sem login) de uma conversa compartilhada — somente leitura. */
+/** Página pública (sem login) de uma conversa compartilhada — somente leitura.
+ *
+ *  O id vem em `?id=` (e não no caminho `/shared/<id>`): assim a página é UMA só e
+ *  exporta como arquivo estático, que o app desktop serve sem Node. Links antigos
+ *  `/shared/<id>` são redirecionados (next.config no servidor; o próprio app no desktop). */
 export default function SharedChatPage() {
-  const params = useParams<{ id: string }>();
-  const id = params?.id;
+  // useSearchParams exige Suspense no export estático
+  return (
+    <Suspense fallback={null}>
+      <SharedChat />
+    </Suspense>
+  );
+}
+
+function SharedChat() {
+  const id = useSearchParams()?.get("id") || "";
   const [chat, setChat] = useState<SharedChat | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [needPw, setNeedPw] = useState(false); // link protegido por senha

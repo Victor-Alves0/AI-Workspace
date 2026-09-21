@@ -180,7 +180,7 @@ def _shared_out(c: Chat, now: datetime) -> SharedChatOut:
         id=str(c.id),
         title=c.title,
         public_id=c.public_id or "",
-        url=f"/shared/{c.public_id}",
+        url=f"/shared?id={c.public_id}",
         has_password=bool(c.public_password_hash),
         expires_at=c.public_expires_at,
         expired=bool(c.public_expires_at and c.public_expires_at <= now),
@@ -236,7 +236,7 @@ async def share_chat(
     chat_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
 ):
     """Cria (ou retorna) o link público read-only do chat. Idempotente: reusa o
-    public_id existente. Devolve o token — o front monta a URL /shared/<token>."""
+    public_id existente. Devolve o token — o front monta a URL /shared?id=<token>."""
     chat = await _get_owned_chat(db, chat_id, user)
     if not chat.public_id:
         chat.public_id = secrets.token_urlsafe(12)[:24]
@@ -284,7 +284,7 @@ async def rotate_share(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Este chat não está compartilhado")
     chat.public_id = secrets.token_urlsafe(12)[:24]
     await db.commit()
-    return {"public_id": chat.public_id, "url": f"/shared/{chat.public_id}"}
+    return {"public_id": chat.public_id, "url": f"/shared?id={chat.public_id}"}
 
 
 @router.delete("/{chat_id}/share")

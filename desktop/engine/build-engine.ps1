@@ -9,7 +9,6 @@
 
 param(
     [string]$PythonVersion = "3.12.7",
-    [string]$NodeVersion   = "20.18.0",
     # binarios do Postgres (EDB). pgvector abaixo e' compilado p/ 16.14; como a ABI
     # de extensao e' estavel dentro do major 16, um minor proximo tambem carrega.
     [string]$PostgresUrl = "https://get.enterprisedb.com/postgresql/postgresql-16.14-1-windows-x64-binaries.zip",
@@ -114,36 +113,27 @@ foreach ($sub in @("lib", "share")) {
 }
 
 # ----------------------------------------------------------------------------- #
-# 4) Frontend (Next.js "standalone") + node.exe de runtime
+# 4) Frontend: export ESTATICO (sem Node no motor)
 #
-# Mesmo layout do Dockerfile de producao: standalone/ na raiz, .next/static e
-# public/ ao lado. Roda com `node server.js`. NEXT_PUBLIC_API_URL vazio => o front
-# deriva a API de host:8000 em runtime (lib/api.ts), igual ao deploy normal.
+# O Docker usa o build "standalone" (servidor Node); aqui a mesma interface sai
+# como arquivos estaticos, servidos pelo proprio backend (aiworkspace.desktop).
+# Sai o node.exe (~80 MB), um processo e uma porta.
 # ----------------------------------------------------------------------------- #
-Write-Host "==> build do frontend (npm ci + next build)"
+Write-Host "==> build do frontend (npm ci + export estatico)"
 Push-Location $WebDir
-$env:NEXT_PUBLIC_API_URL = ""
+# interface ESTATICA (sem Node): o aiworkspace.desktop serve estes arquivos e a API em
+# /api na mesma porta. API relativa => o front chama a propria origem + /api.
+$env:NEXT_OUTPUT = "export"
+$env:NEXT_PUBLIC_API_URL = "/api"
 npm ci
 if ($LASTEXITCODE -ne 0) { throw "npm ci falhou" }
 npm run build
-if ($LASTEXITCODE -ne 0) { throw "next build falhou" }
+if ($LASTEXITCODE -ne 0) { throw "next build (export) falhou" }
 Pop-Location
+Remove-Item Env:NEXT_OUTPUT, Env:NEXT_PUBLIC_API_URL -ErrorAction SilentlyContinue
 
 $WebOut = Join-Path $Out "web"
-New-Item -ItemType Directory -Force (Join-Path $WebOut ".next") | Out-Null
-Copy-Item (Join-Path $WebDir ".next\standalone\*") $WebOut -Recurse -Force
-Copy-Item (Join-Path $WebDir ".next\static") (Join-Path $WebOut ".next\static") -Recurse -Force
-if (Test-Path (Join-Path $WebDir "public")) {
-    Copy-Item (Join-Path $WebDir "public") (Join-Path $WebOut "public") -Recurse -Force
-}
-
-$NodeZip = Join-Path $Dl "node.zip"
-Get-File "https://nodejs.org/dist/v$NodeVersion/node-v$NodeVersion-win-x64.zip" $NodeZip
-$NodeTmp = Join-Path $Work "_node"
-Unzip $NodeZip $NodeTmp
-$NodeExe = Get-ChildItem $NodeTmp -Recurse -Filter node.exe | Select-Object -First 1
-New-Item -ItemType Directory -Force (Join-Path $Out "node") | Out-Null
-Copy-Item $NodeExe.FullName (Join-Path $Out "node\node.exe")
+Copy-Item (Join-Path $WebDir "out") $WebOut -Recurse -Force
 
 # ----------------------------------------------------------------------------- #
 # 5) app dir (alembic) + launcher
@@ -158,7 +148,7 @@ Copy-Item (Join-Path $PSScriptRoot "README.txt") $Out -ErrorAction SilentlyConti
 # ----------------------------------------------------------------------------- #
 # 5b) carimbo de versoes (auto-atualizacao em 2 camadas)
 #
-# engine-version.txt = camada PESADA (Python/deps/Postgres/Node). So muda quando
+# engine-version.txt = camada PESADA (Python/deps/Postgres). So muda quando
 #   deps/binarios mudam -> exige instalador completo novo.
 # app-version.txt     = camada LEVE (nosso codigo: aiworkspace + web + migracoes).
 #   Muda a cada commit -> o launcher baixa so o diff e troca em disco, sem reinstalar.

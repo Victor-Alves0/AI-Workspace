@@ -108,8 +108,8 @@ jobs:
             nativa, com ícone na bandeja, "rodar em segundo plano" e "iniciar com o
             Windows" (Configurações -> Aplicativo).
 
-            Requer o servidor no ar (por padrão `http://localhost:3000`; dá para
-            apontar para outra máquina em Configurações -> Aplicativo).
+            Não precisa de Docker nem de servidor: o instalador traz o banco e o
+            backend, e tudo roda numa porta só (http://localhost:41414).
 
             Já tem uma versão instalada? Rode este instalador por cima: ele atualiza
             no lugar e mantém seus dados (ficam fora da pasta de instalação).

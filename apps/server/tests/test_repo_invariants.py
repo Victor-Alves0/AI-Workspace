@@ -172,6 +172,32 @@ def test_todo_modelo_esta_exportado_em_models():
 # --------------------------------------------------------------------------- #
 # Configuração                                                                 #
 # --------------------------------------------------------------------------- #
+def test_interface_continua_exportavel_como_estatico():
+    """O app desktop serve a interface como arquivos estáticos (NEXT_OUTPUT=export),
+    sem Node. Isso só funciona enquanto a interface não usar nada que exija servidor:
+    rota de API, middleware, server action, cookies()/headers(), ou rota dinâmica
+    `[param]` (o export precisa saber todas as páginas no build). Um desses entrando
+    quebra o desktop inteiro, e o Docker nem percebe."""
+    app_dir = _WEB / "app"
+    problemas: list[str] = []
+    for arq in app_dir.rglob("*"):
+        rel = arq.relative_to(_WEB).as_posix()
+        if arq.is_dir() and arq.name.startswith("["):
+            problemas.append(f"{rel}: rota dinâmica (use ?param= como em /shared)")
+        elif arq.name in ("route.ts", "route.tsx", "route.js"):
+            problemas.append(f"{rel}: rota de API do Next")
+    for nome in ("middleware.ts", "middleware.js"):
+        if (_WEB / nome).exists():
+            problemas.append(f"{nome}: middleware exige servidor")
+    for arq in list(app_dir.rglob("*.ts*")) + list((_WEB / "lib").rglob("*.ts*")):
+        texto = arq.read_text(encoding="utf-8")
+        if re.search(r"""^\s*["']use server["']""", texto, re.M):
+            problemas.append(f"{arq.relative_to(_WEB).as_posix()}: server action")
+        if re.search(r"""from\s+["']next/headers["']""", texto):
+            problemas.append(f"{arq.relative_to(_WEB).as_posix()}: cookies()/headers() do servidor")
+    assert not problemas, "\n".join(problemas)
+
+
 def test_prompt_padrao_de_ferramentas_igual_no_editor_e_no_servidor():
     """O editor de modelos grava VAZIO quando o campo "quando usar" é igual ao padrão —
     é o que deixa uma melhoria no padrão alcançar os modelos já salvos. A comparação é

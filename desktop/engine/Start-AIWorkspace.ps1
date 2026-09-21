@@ -1,5 +1,9 @@
-# Inicia o AI Workspace COMPLETO sem Docker: Postgres embarcado + backend (API) +
-# frontend (interface web). Abre o navegador em http://localhost:3000.
+# Inicia o AI Workspace COMPLETO sem Docker: Postgres embarcado + UM processo Python
+# que serve a interface (arquivos estaticos) e a API numa porta so':
+#   http://localhost:41414/      interface
+#   http://localhost:41414/api   API
+# Porta propria do AI Workspace (a 3000/8000 vivem ocupadas por servidores de dev).
+# Se estiver ocupada, usa a proxima livre e grava em data\port.txt (o Tauri le' de la').
 #
 # Nada e instalado no sistema: o banco, os caches de modelo e o segredo do app
 # ficam em -DataDir (padrao: .\data\ ao lado do script). Apagar essa pasta = zerar.
@@ -13,14 +17,15 @@ param(
     # a mao, o padrao e' .\data\ ao lado do script.
     [string]$DataDir = "",
     # nao abrir o navegador (o Tauri exibe a propria janela)
-    [switch]$NoBrowser
+    [switch]$NoBrowser,
+    # porta preferida (se ocupada, tenta as 19 seguintes)
+    [int]$Port = 41414
 )
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 $Py     = Join-Path $Root "python\python.exe"
-$Node   = Join-Path $Root "node\node.exe"
 $PgBin  = Join-Path $Root "pgsql\bin"
 $AppDir = Join-Path $Root "app"
 $WebDir = Join-Path $Root "web"
@@ -28,16 +33,31 @@ $Data   = if ($DataDir) { $DataDir } else { Join-Path $Root "data" }
 $PgData = Join-Path $Data "pgdata"
 
 $PgPort  = 55432
-$ApiPort = 8000
-$WebPort = 3000
 $Loop    = "127.0.0.1"
 
 New-Item -ItemType Directory -Force $Data, (Join-Path $Data "cache") | Out-Null
 
+# --- porta do app: a preferida, ou a proxima livre ---
+# Um TcpListener no loopback e' o teste honesto: pega porta em uso E porta reservada
+# pelo Windows (Hyper-V/WSL reservam blocos inteiros, e a porta "livre" falha no bind).
+function Test-PortFree([int]$p) {
+    try {
+        $l = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $p)
+        $l.Start(); $l.Stop(); return $true
+    } catch { return $false }
+}
+$PortFile = Join-Path $Data "port.txt"
+Remove-Item $PortFile -ErrorAction SilentlyContinue
+$AppPort = $null
+foreach ($p in $Port..($Port + 19)) { if (Test-PortFree $p) { $AppPort = $p; break } }
+if (-not $AppPort) { throw "nenhuma porta livre entre $Port e $($Port + 19)" }
+if ($AppPort -ne $Port) { Write-Host "==> Porta $Port ocupada; usando $AppPort" }
+$AppUrl = "http://localhost:$AppPort"
+
 # ----------------------------------------------------------------------------- #
 # Auto-atualizacao do CODIGO do app (camada leve), em 2 camadas.
 #
-# O MOTOR pesado (Python/Postgres/Node/deps/modelo) e' instalado 1x pelo .exe e
+# O MOTOR pesado (Python/Postgres/deps/modelo) e' instalado 1x pelo .exe e
 # raramente muda. NOSSO codigo (aiworkspace + web + migracoes) muda a cada commit
 # e e' leve. Aqui, no boot e ANTES de subir os servidores, o launcher checa um
 # manifesto publicado e troca em disco so' esses arquivos leves — sem reinstalar
@@ -136,9 +156,18 @@ $env:HF_HOME             = Join-Path $Data "cache\huggingface"
 # Codespace: projetos/worktrees dentro de .\data\ (sem Docker, o "/data/codespace"
 # padrao nao existe no Windows). O exec do Codespace cai p/ subprocesso no host aqui.
 $env:CODESPACE_DATA_DIR  = Join-Path $Data "codespace"
-# a interface roda em localhost:3000 e chama a API em localhost:8000; libera as
-# duas grafias do loopback no CORS
-$env:WEB_ORIGIN          = "http://localhost:$WebPort,http://127.0.0.1:$WebPort"
+# interface e API na MESMA origem (sem CORS no caminho); as duas grafias do loopback
+$env:WEB_ORIGIN          = "http://localhost:$AppPort,http://127.0.0.1:$AppPort"
+# o aiworkspace.desktop serve a interface desta pasta e encaminha a porta 1455 (login
+# ChatGPT) para esta porta
+$env:AIW_WEB_DIR         = $WebDir
+$env:AIW_PORT            = "$AppPort"
+# retornos OAuth: a API mora em /api nesta origem. Precisam bater com o cadastrado no
+# console de cada provedor (docs/desktop.md).
+foreach ($svc in @("google", "github", "notion", "slack")) {
+    Set-Item "env:$($svc.ToUpper())_REDIRECT_URI" "$AppUrl/api/integrations/$svc/callback"
+}
+$env:OPENROUTER_REDIRECT_URI = "$AppUrl/api/integrations/providers/openrouter/callback"
 $env:PATH                = "$PgBin;$env:PATH"
 
 function Pg($exe) { Join-Path $PgBin $exe }
@@ -172,35 +201,31 @@ try {
     & $Py -m alembic upgrade head
     Pop-Location
 
-    # --- 5) backend (API) em segundo plano ---
-    Write-Host "==> Iniciando API em http://$($Loop):$ApiPort"
+    # --- 5) app (interface + API) em segundo plano, numa porta so' ---
+    # a porta vai para o arquivo ANTES de subir: o Tauri le' daqui para onde navegar
+    "$AppPort" | Out-File -Encoding ascii -NoNewline $PortFile
+    Write-Host "==> Iniciando o AI Workspace em $AppUrl"
     $procs += Start-Process -FilePath $Py -PassThru -WindowStyle Hidden `
-        -ArgumentList @("-m","uvicorn","aiworkspace.main:app","--host",$Loop,"--port","$ApiPort") `
+        -ArgumentList @("-m","uvicorn","aiworkspace.desktop:app","--host",$Loop,"--port","$AppPort") `
         -RedirectStandardOutput (Join-Path $Data "api.out.log") `
         -RedirectStandardError  (Join-Path $Data "api.err.log")
 
-    # --- 6) frontend (interface) em segundo plano ---
-    Write-Host "==> Iniciando interface em http://localhost:$WebPort"
-    $env:PORT = "$WebPort"; $env:HOSTNAME = $Loop; $env:NODE_ENV = "production"
-    $procs += Start-Process -FilePath $Node -PassThru -WindowStyle Hidden `
-        -WorkingDirectory $WebDir -ArgumentList @("server.js") `
-        -RedirectStandardOutput (Join-Path $Data "web.out.log") `
-        -RedirectStandardError  (Join-Path $Data "web.err.log")
-
-    # espera a interface responder e (se rodado a mao) abre o navegador
-    for ($i = 0; $i -lt 40; $i++) {
+    # espera a API responder (o uvicorn so' abre a porta depois do startup) e, se
+    # rodado a mao, abre o navegador. 1o boot baixa o modelo de embeddings: demora.
+    for ($i = 0; $i -lt 1800; $i++) {
         Start-Sleep -Milliseconds 500
-        try { if ((Invoke-WebRequest "http://localhost:$WebPort" -UseBasicParsing -TimeoutSec 2).StatusCode -ge 200) { break } } catch {}
+        try { if ((Invoke-WebRequest "$AppUrl/api/health" -UseBasicParsing -TimeoutSec 2).StatusCode -eq 200) { break } } catch {}
     }
-    if (-not $NoBrowser) { Start-Process "http://localhost:$WebPort" }
+    if (-not $NoBrowser) { Start-Process $AppUrl }
 
     Write-Host ""
-    Write-Host "==> AI Workspace no ar: http://localhost:$WebPort   (feche esta janela para encerrar)"
+    Write-Host "==> AI Workspace no ar: $AppUrl   (feche esta janela para encerrar)"
     # bloqueia enquanto os servidores estiverem vivos
     Wait-Process -Id ($procs | ForEach-Object { $_.Id })
 }
 finally {
     Write-Host "==> Encerrando..."
     foreach ($p in $procs) { if ($p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } }
+    Remove-Item $PortFile -ErrorAction SilentlyContinue
     & (Pg "pg_ctl.exe") -D $PgData -w -s stop
 }

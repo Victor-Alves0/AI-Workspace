@@ -5,8 +5,8 @@ background"** and **"start with Windows"**. Built with [Tauri](https://tauri.app
 
 ## What it adds
 
-The window loads the **same web interface** you use in the browser (by default
-`http://localhost:3000`), so behavior is identical — what the shell adds is what a browser
+The window loads the **same web interface** you use in the browser (at
+`http://localhost:41414`), so behavior is identical — what the shell adds is what a browser
 doesn't give you:
 
 | Feature | Where to configure |
@@ -21,6 +21,36 @@ doesn't give you:
 > login wouldn't stick. By pointing at the real origin, the CORS and cookies that already work
 > keep working.
 
+## One process, one port
+
+The engine runs **Postgres + one Python process**. That process
+(`aiworkspace.desktop`) serves both halves on the same port, the same shape the Caddy proxy
+gives the Docker install:
+
+| Path | Serves |
+|---|---|
+| `/api/*` | the API (the prefix is stripped before it reaches the API, exactly like Caddy's `handle_path`) |
+| `/auth/callback` | the ChatGPT/Codex login callback |
+| everything else | the interface, exported as static files (`NEXT_OUTPUT=export`) |
+
+There is no Node in the engine: the interface uses no server features (no API routes,
+middleware, server actions or `cookies()`/`headers()`), so the static export plus this
+dispatcher replaces the whole `web` container. A repository invariant keeps it that way.
+
+**Port 41414** is AI Workspace's own port — 3000 and 8000 are almost always taken by some dev
+server. If 41414 is busy (or reserved by Windows: Hyper-V/WSL reserve whole blocks), the
+launcher takes the next free one up to 41433 and writes it to `port.txt` in the data folder;
+the shell reads it from there and only navigates once `/api/health` answers — a stale file
+pointing at some other program's port is never followed.
+
+The OpenAI login always returns to `localhost:1455`; in Docker that port is published, here the
+app forwards it to its own port. If 1455 is taken, only that fallback flow is lost (the device
+code flow keeps working).
+
+**OAuth redirect URIs** (Google, GitHub, Notion, Slack) become
+`http://localhost:41414/api/integrations/<service>/callback` — register that in each
+provider's console. If the launcher had to fall back to another port, the URI changes with it.
+
 ## Preferences are per-machine
 
 The options live in `%APPDATA%\com.aiworkspace.app\desktop-settings.json` — **not** in the
@@ -31,14 +61,15 @@ category only appears in Settings when the UI runs inside the installed app.
 ## Install
 
 The installer is published on **[Releases](../../releases)** (built by CI, not versioned in the
-repository). It **embeds the whole engine** — Postgres, the Python backend, the Node frontend and
-the embeddings model — so there is no Docker to run: install, open, and it boots the stack itself.
+repository). It **embeds the whole engine** — Postgres, the Python backend (which also serves the
+static interface) and the embeddings model — so there is no Docker to run: install, open, and it
+boots the stack itself.
 
 ## Updates (two layers)
 
 Reinstalling ~1 GB for a small code change would be painful, so updates are split in two:
 
-- **Engine** (heavy: Python, dependencies, Postgres, Node, model) — versioned by
+- **Engine** (heavy: Python, dependencies, Postgres, model) — versioned by
   `desktop/engine/ENGINE_VERSION`. Rarely changes; a new value ships in a **full installer**.
 - **App code** (light: the `aiworkspace` backend package, the `web` frontend, the migrations) —
   changes every commit. Published on its own to the rolling **`app-latest`** release
