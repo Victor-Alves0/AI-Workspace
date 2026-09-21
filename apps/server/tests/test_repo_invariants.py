@@ -172,6 +172,23 @@ def test_todo_modelo_esta_exportado_em_models():
 # --------------------------------------------------------------------------- #
 # Configuração                                                                 #
 # --------------------------------------------------------------------------- #
+def test_prompt_padrao_de_ferramentas_igual_no_editor_e_no_servidor():
+    """O editor de modelos grava VAZIO quando o campo "quando usar" é igual ao padrão —
+    é o que deixa uma melhoria no padrão alcançar os modelos já salvos. A comparação é
+    com a cópia do padrão que vive no front; se ela divergir do servidor, o editor volta
+    a gravar a cópia e o padrão congela de novo em cada modelo salvo."""
+    import json
+
+    from aiworkspace.chat.orchestrator import DEFAULT_TOOL_PROMPT
+
+    fonte = (_WEB / "components" / "ModelEditor.tsx").read_text(encoding="utf-8")
+    m = re.search(r'const DEFAULT_TOOL_PROMPT =((?:\s*"(?:[^"\\]|\\.)*"\s*\+?)+);', fonte)
+    assert m, "DEFAULT_TOOL_PROMPT não encontrado em ModelEditor.tsx"
+    no_front = "".join(json.loads(p) for p in re.findall(r'"(?:[^"\\]|\\.)*"', m.group(1)))
+
+    assert no_front == DEFAULT_TOOL_PROMPT
+
+
 def test_toda_variavel_de_ambiente_esta_documentada():
     """Regra do projeto: variável nova SEMPRE aparece documentada. Sem isso ela
     existe só na cabeça de quem a criou — e quem instalar o app nunca descobre.

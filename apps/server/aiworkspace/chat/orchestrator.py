@@ -41,7 +41,7 @@ from ..knowledge import retrieval as kb_retrieval
 from ..knowledge.links import sign_doc_url
 from ..memory import mem0_service
 from ..models import GeneratedImage, Message
-from ..providers import image_gen, openrouter
+from ..providers import image_gen, openrouter, reasoning_details
 from ..tools import sift_service, toolctx
 from . import curator
 from .activity import with_activity
@@ -359,6 +359,17 @@ DEFAULT_TOOL_PROMPT = (
     "tool — never guess. If unsure whether a tool exists, call search_tools. Only "
     "answer from your own knowledge for general/creative questions."
 )
+
+# Textos que já foram o padrão acima. O editor de modelos gravava uma CÓPIA do padrão
+# ao salvar, então modelos salvos carregam um destes, literalmente — e trocar o padrão
+# não os alcançaria. Igual a um deles = "usar o padrão atual". Ao mudar
+# DEFAULT_TOOL_PROMPT, acrescente o texto antigo aqui.
+_STOCK_TOOL_PROMPTS = (DEFAULT_TOOL_PROMPT,)
+
+
+def _is_stock_tool_prompt(text: str) -> bool:
+    norm = " ".join((text or "").split())
+    return any(norm == " ".join(t.split()) for t in _STOCK_TOOL_PROMPTS)
 
 # Injetado SEMPRE (não sobrescrito pelo prompt custom do modelo) e SEM enumerar
 # ferramentas — mantém a premissa do SIFT (descoberta sob demanda, tokens mínimos).
@@ -1737,7 +1748,10 @@ def _assemble_tools_and_prompt(
         mode = sift_meta.get("sift_mode") or "prompt"
         catalog = sift_meta.get("catalog") or []
         meta = "run_code" if code_mode else "execute_tool"
-        custom = (sift_meta.get("sift_prompt") or "").strip() or DEFAULT_TOOL_PROMPT
+        custom = (sift_meta.get("sift_prompt") or "").strip()
+        if _is_stock_tool_prompt(custom):
+            custom = ""  # cópia gravada de um padrão antigo: vale o padrão de hoje
+        custom = custom or DEFAULT_TOOL_PROMPT
         a.sift_prompt = _compose_tool_prompt(a.sift_prompt, catalog, mode, custom, meta)
         if sift_meta.get("web_research_chain"):
             a.sift_prompt += "\n\n" + WEB_RESEARCH_WORKFLOW
@@ -3149,6 +3163,12 @@ async def run_turn(
         # providers/turn_end): aí o raciocínio DESTA volta era a resposta
         iter_reasoning_from = len(reasoning_text)
         answer_in_reasoning = False
+        # blocos estruturados do raciocínio desta volta (assinaturas, cifrados): voltam
+        # ao provedor junto da chamada de ferramenta — ver providers/reasoning_details
+        iter_details: list[dict[str, Any]] = []
+        # depois que a resposta começa, raciocínio tardio é descartado (mesma regra do
+        # provedor oficial do OpenRouter): senão ele se intercala no "Pensou por…"
+        iter_text_started = False
 
         # span da chamada ao provedor (kind=llm): tempo de parede da geração, nº de
         # tokens (preenchido ao fim) e a iteração do loop agêntico. Enter/exit manual
@@ -3174,13 +3194,20 @@ async def run_turn(
                     usage = chunk["usage"]
                 for choice in chunk.get("choices", []):
                     delta = choice.get("delta", {})
-                    if delta.get("reasoning"):
+                    _details = delta.get("reasoning_details")
+                    if not iter_text_started:
+                        reasoning_details.accumulate(iter_details, _details)
+                    # o texto corrido vem em `reasoning`; sem ele (só blocos), o texto
+                    # sai dos próprios blocos — nunca os dois, que são o mesmo conteúdo
+                    _piece = delta.get("reasoning") or reasoning_details.text_of(_details)
+                    if _piece and not iter_text_started:
                         now = time.monotonic()
                         if reasoning_started is None:
                             reasoning_started = now
-                        reasoning_text += delta["reasoning"]
-                        yield {"type": "reasoning", "text": delta["reasoning"]}
+                        reasoning_text += _piece
+                        yield {"type": "reasoning", "text": _piece}
                     if delta.get("content"):
+                        iter_text_started = True
                         c = delta["content"]
                         if suppressing_leak:
                             leaked_text += c  # dentro de um bloco vazado: não transmite
@@ -3339,9 +3366,18 @@ async def run_turn(
 
         # registra a mensagem do assistant com os tool_calls e executa cada um
         tool_calls = [tool_buffer[i] for i in sorted(tool_buffer)]
-        messages.append(
-            {"role": "assistant", "content": assistant_text or None, "tool_calls": tool_calls}
-        )
+        _assistant_msg: dict[str, Any] = {
+            "role": "assistant", "content": assistant_text or None, "tool_calls": tool_calls,
+        }
+        # o raciocínio que levou à chamada volta junto dela: sem isso o Claude (pensamento
+        # estendido) e o Gemini 3 perdem as assinaturas no meio do turno, e os demais
+        # retomam depois do resultado sem lembrar por que chamaram a ferramenta
+        _replay = reasoning_details.replayable(iter_details)
+        if _replay:
+            _assistant_msg["reasoning_details"] = _replay
+            if reasoning_text[iter_reasoning_from:]:
+                _assistant_msg["reasoning"] = reasoning_text[iter_reasoning_from:]
+        messages.append(_assistant_msg)
 
         # modo PARALELO: quando o modelo delega a vários operários numa tacada só,
         # roda-os concorrentemente (respeitando o teto de chamadas do turno). O

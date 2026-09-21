@@ -1283,7 +1283,9 @@ export default function ModelEditor({
       code_mode: toolsEnabled ? codeMode : false,
       sift_config: {
         mode: siftMode,
-        prompt: siftMode === "prompt" ? siftPrompt : "",
+        // texto igual ao padrão grava VAZIO: gravar a cópia congelava o padrão da época
+        // no modelo, e uma melhoria no padrão nunca o alcançava
+        prompt: siftMode === "prompt" && siftPrompt.trim() !== DEFAULT_TOOL_PROMPT.trim() ? siftPrompt : "",
         pinned: pinnedIds.filter((id) => toolIds.includes(id)),
       },
       skill_ids: skillIds,
