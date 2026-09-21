@@ -206,9 +206,11 @@ class _LocalBrowser:
             # Chrome usa, e ele se recusa a abrir ("No usable sandbox"). O modo local no
             # Linux é só de desenvolvimento/teste (produção usa o browserless do Docker);
             # o Windows nunca passa por aqui.
-            if sys.platform == "win32" or "sandbox" not in str(exc).lower():
+            # A mensagem nem sempre diz "sandbox" (às vezes só o SIGABRT), então no
+            # Linux qualquer falha ao abrir ganha uma segunda tentativa sem ele.
+            if sys.platform == "win32":
                 raise
-            logger.warning("navegador local sem sandbox (o sistema bloqueia o sandbox do Chrome)")
+            logger.warning("navegador local falhou ao abrir (%s); tentando sem sandbox", exc)
             return await self._launch(exe, sandbox=False)
 
     async def _launch(self, exe: str, *, sandbox: bool) -> str:
@@ -261,7 +263,9 @@ class _LocalBrowser:
             linhas = path.read_text(encoding="utf-8", errors="replace").strip().splitlines()
         except OSError:
             return ""
-        return " | ".join(linhas[-3:])[:400]
+        # o Chrome imprime o motivo numa linha FATAL/ERROR e depois o stack trace
+        uteis = [ln for ln in linhas if "FATAL" in ln or "ERROR" in ln] or linhas[-3:]
+        return " | ".join(uteis[-3:])[:400]
 
     @property
     def running(self) -> bool:
