@@ -199,6 +199,19 @@ class _LocalBrowser:
         if not exe:
             raise CDPError("nenhum Edge/Chrome/Chromium encontrado nesta máquina "
                            "(defina BROWSER_EXECUTABLE com o caminho do navegador)")
+        try:
+            return await self._launch(exe, sandbox=True)
+        except CDPError as exc:
+            # Linux: o Ubuntu 24+ bloqueia o namespace de usuário que o sandbox do
+            # Chrome usa, e ele se recusa a abrir ("No usable sandbox"). O modo local no
+            # Linux é só de desenvolvimento/teste (produção usa o browserless do Docker);
+            # o Windows nunca passa por aqui.
+            if sys.platform == "win32" or "sandbox" not in str(exc).lower():
+                raise
+            logger.warning("navegador local sem sandbox (o sistema bloqueia o sandbox do Chrome)")
+            return await self._launch(exe, sandbox=False)
+
+    async def _launch(self, exe: str, *, sandbox: bool) -> str:
         from .. import winjob
 
         self.profile = tempfile.mkdtemp(prefix="aiw-browser-")
@@ -206,22 +219,30 @@ class _LocalBrowser:
         if winjob.IS_WINDOWS:
             self.job = winjob.JobObject()
             flags = 0x08000000 | winjob.CREATE_SUSPENDED  # CREATE_NO_WINDOW, suspenso até entrar no job
-        self.proc = subprocess.Popen(
-            [exe, "--headless=new", "--remote-debugging-port=0",
-             f"--user-data-dir={self.profile}", "--no-first-run", "--no-default-browser-check",
-             "--disable-extensions", "--disable-background-networking", "--disable-sync",
-             "--mute-audio", "--hide-scrollbars", "about:blank"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags,
-        )
+        args = [exe, "--headless=new", "--remote-debugging-port=0",
+                f"--user-data-dir={self.profile}", "--no-first-run", "--no-default-browser-check",
+                "--disable-extensions", "--disable-background-networking", "--disable-sync",
+                "--mute-audio", "--hide-scrollbars"]
+        if not sandbox:
+            args.append("--no-sandbox")
+        # a saída de erro vai para um arquivo: se o navegador cair ao abrir, o motivo
+        # real entra na mensagem (antes ia para o nada e só sobrava um código de saída)
+        log_path = Path(self.profile) / "browser.log"
+        with open(log_path, "wb") as log:
+            self.proc = subprocess.Popen(args + ["about:blank"], stdout=subprocess.DEVNULL,
+                                         stderr=log, creationflags=flags)
         if self.job is not None:
             self.job.adopt(self.proc)
         # com --remote-debugging-port=0 o navegador escolhe a porta e a grava aqui
         arquivo = Path(self.profile) / "DevToolsActivePort"
         fim = time.monotonic() + 20
         while time.monotonic() < fim:
-            if self.proc.poll() not in (None, 0):  # 0 = repassou a outro processo
+            codigo = self.proc.poll()
+            if codigo not in (None, 0):  # 0 = repassou a outro processo
+                motivo = self._log_tail(log_path)
                 self.stop()
-                raise CDPError(f"o navegador local encerrou ao iniciar (código {self.proc.returncode})")
+                raise CDPError(f"o navegador local encerrou ao iniciar (código {codigo})"
+                               + (f": {motivo}" if motivo else ""))
             try:
                 linhas = arquivo.read_text(encoding="utf-8").split()
                 if len(linhas) >= 2:
@@ -229,8 +250,18 @@ class _LocalBrowser:
             except (OSError, ValueError):
                 pass
             await asyncio.sleep(0.1)
+        motivo = self._log_tail(log_path)
         self.stop()
-        raise CDPError("o navegador local não abriu a porta de depuração a tempo")
+        raise CDPError("o navegador local não abriu a porta de depuração a tempo"
+                       + (f": {motivo}" if motivo else ""))
+
+    @staticmethod
+    def _log_tail(path: Path) -> str:
+        try:
+            linhas = path.read_text(encoding="utf-8", errors="replace").strip().splitlines()
+        except OSError:
+            return ""
+        return " | ".join(linhas[-3:])[:400]
 
     @property
     def running(self) -> bool:

@@ -32,7 +32,10 @@ async def _mundo(db):
     await setup.build_world(db, campaign, user.id, {
         "locations": [{"name": "Praça", "visibility": "known"}], "starting_location": "Praça",
         "npcs": [
-            {"name": "Goblin", "kind": "creature", "hostile": True, "hp": 7, "ac": 13,
+            # vida alta de propósito: com 7 PV, o Gromm (aliado, 1d8+3) às vezes o matava
+            # antes da vez do jogador — o combate acabava e a trava de "atordoado só passa
+            # a vez", que só vale em combate, sumia do teste (falha em ~1 de 6 execuções)
+            {"name": "Goblin", "kind": "creature", "hostile": True, "hp": 60, "ac": 13,
              "location": "Praça", "visibility": "known",
              "actions": [{"name": "Dardo venenoso", "attack_bonus": 4, "damage": "1d4",
                           "condition": "poisoned", "rounds": 2}]},
