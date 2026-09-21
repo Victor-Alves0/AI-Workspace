@@ -300,6 +300,40 @@ def test_turno_inteiro_promove_o_raciocinio_a_resposta(monkeypatch):
     assert any(e["type"] == "reasoning_answer" for e in eventos)
 
 
+@pytest.mark.parametrize("bruto,esperado", [
+    # o caso real, duas vezes no mesmo chat: rótulo colado na primeira palavra
+    ("responseA lona range quando você empurra.", "A lona range quando você empurra."),
+    ("response\n\n— Tô de olho fechado.", "— Tô de olho fechado."),
+    # palavras de verdade continuam: não é rótulo
+    ("responses vêm depois.", "responses vêm depois."),
+    ("Response time matters.", "Response time matters."),
+])
+def test_rotulo_de_canal_nao_chega_na_resposta_promovida(monkeypatch, bruto, esperado):
+    """O DeepSeek V4 marca a passagem pensamento→resposta com um rótulo; com os tokens
+    especiais removidos pelo provedor, sobra "response" grudado no texto. Escondido no
+    "Pensou por…" ninguém via — promovido a resposta, virou "responseA árvore seca…"."""
+    import asyncio
+
+    from aiworkspace.chat.orchestrator import TurnSession, run_turn
+
+    _Resp.linhas, _Resp.lidas = [
+        _sse({"reasoning": bruto + EOS}),
+        _sse({}, finish="stop"),
+        "data: [DONE]",
+    ], 0
+    monkeypatch.setattr(openrouter.httpx, "AsyncClient", _Client)
+
+    async def go():
+        return [ev async for ev in run_turn(
+            api_key="k", model="deepseek/x", history=[], user_text="saio",
+            chat_system_prompt=None, params={}, use_tools=False, sift=None,
+            session=TurnSession(user_id="u"))]
+
+    done = next(e for e in asyncio.run(go()) if e["type"] == "done")
+
+    assert done["content"] == esperado
+
+
 def test_raciocinio_normal_continua_raciocinio(monkeypatch):
     """Sem fim de turno no raciocínio, nada muda: pensamento fica no "Pensou por…"."""
     import asyncio

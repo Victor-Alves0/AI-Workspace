@@ -93,6 +93,13 @@ _MISTRAL_RE = re.compile(r"\[TOOL_CALLS\]\s*(\[.*\]|\{.*\})", re.DOTALL)
 # (após o marcador de constraint, que pode estar corrompido). `functions.` é opcional
 # porque o modelo às vezes vaza o nome cru (`to=code__exec__run`).
 _HARMONY_RE = re.compile(r"to=(?:functions\.)?([A-Za-z_][\w.]*)")
+# Rótulo de canal que o modelo escreve ao passar do pensamento para a resposta, com os
+# tokens especiais em volta já removidos pelo provedor — sobra a palavra colada no
+# texto ("responseA porta abre."). Só aparece quando a resposta foi escrita no canal de
+# raciocínio. Minúsculo e seguido de algo que não continua a palavra: "responses"
+# nunca casa. Só o rótulo visto de fato (DeepSeek V4): "final"/"answer" seriam
+# palpites, e "final de semana…" é um começo legítimo em português.
+_CHANNEL_LABEL_RE = re.compile(r"^\s*response(?![a-z0-9_])\s*")
 
 
 def _mk_call(name: str, arguments: Any) -> dict:
@@ -3282,7 +3289,7 @@ async def run_turn(
         # cópia ou só um fecho — e o stream já foi cortado. A resposta é o raciocínio
         # desta volta: sai do "Pensou por…" e vai para a mensagem.
         if answer_in_reasoning and not assistant_text.strip() and not tool_buffer and not leaked_text:
-            answer = reasoning_text[iter_reasoning_from:].strip()
+            answer = _CHANNEL_LABEL_RE.sub("", reasoning_text[iter_reasoning_from:], count=1).strip()
             if answer and not _LEAK_START_RE.search(answer):
                 yield {"type": "reasoning_answer", "text": reasoning_text[iter_reasoning_from:]}
                 reasoning_text = reasoning_text[:iter_reasoning_from]
