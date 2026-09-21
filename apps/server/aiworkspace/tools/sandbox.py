@@ -13,6 +13,7 @@ recursos sem limite e não enxerga conexões/segredos do processo principal.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from typing import Any
@@ -35,7 +36,7 @@ try:
             pass
     _limit()
 except Exception:
-    pass  # SO sem suporte (ex.: Windows); o timeout do pai ainda protege
+    pass  # Windows: quem limita é o Job Object do pai (ver _exec)
 """
 
 # Runner de execução: injeta `valves` (defaults do VALVES + overrides) e chama run(**params).
@@ -78,6 +79,35 @@ class ToolExecutionError(Exception):
     pass
 
 
+class _Done:
+    """Resultado no formato do subprocess.run (returncode/stdout/stderr)."""
+
+    def __init__(self, returncode: int, stdout: str, stderr: str) -> None:
+        self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+
+def _run_windows(args: list[str], stdin: str, timeout: float, env: dict[str, str],
+                 cpu_seconds: int, memory_mb: int) -> _Done:
+    """Windows não tem rlimit: os mesmos tetos de CPU e memória vêm de um Job Object,
+    que também derruba qualquer processo que a ferramenta tenha criado."""
+    from .. import winjob
+
+    proc, job = winjob.popen(
+        args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        text=True, env=env, cpu_seconds=cpu_seconds, memory_mb=memory_mb,
+        creationflags=winjob.CREATE_NO_WINDOW,
+    )
+    try:
+        out, err = proc.communicate(stdin, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        job.terminate()
+        proc.communicate()
+        raise
+    finally:
+        job.close()
+    return _Done(proc.returncode, out, err)
+
+
 def _exec(runner: str, payload: dict[str, Any]) -> Any:
     s = get_settings()
     env = {
@@ -85,23 +115,33 @@ def _exec(runner: str, payload: dict[str, Any]) -> Any:
         "TOOL_MEM_MB": str(s.tool_mem_mb),
         "PATH": "/usr/bin:/bin",
     }
+    windows = sys.platform == "win32"
+    if windows:
+        # sem SYSTEMROOT o próprio Python do Windows falha (aleatoriedade, sockets)
+        env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", r"C:\Windows")
+    args = [sys.executable, "-I", "-c", runner]
     try:
-        proc = subprocess.run(
-            [sys.executable, "-I", "-c", runner],
-            input=json.dumps(payload),
-            capture_output=True,
-            text=True,
-            timeout=s.tool_timeout_seconds,
-            env=env,
-        )
+        if windows:
+            proc = _run_windows(args, json.dumps(payload), s.tool_timeout_seconds, env,
+                                int(s.tool_cpu_seconds), int(s.tool_mem_mb))
+        else:
+            proc = subprocess.run(
+                args,
+                input=json.dumps(payload),
+                capture_output=True,
+                text=True,
+                timeout=s.tool_timeout_seconds,
+                env=env,
+            )
     except subprocess.TimeoutExpired:
         raise ToolExecutionError(
             f"timeout: a ferramenta excedeu {s.tool_timeout_seconds}s"
         )
 
     if proc.returncode != 0 and not proc.stdout:
-        # returncode negativo = morto por sinal (ex.: -9 SIGKILL por limite de CPU/memória)
-        if proc.returncode < 0:
+        # returncode negativo = morto por sinal (ex.: -9 SIGKILL por limite de CPU/memória);
+        # no Windows, o job encerra com STATUS_QUOTA_EXCEEDED
+        if proc.returncode < 0 or proc.returncode == 0xC0000044:
             raise ToolExecutionError(
                 "a ferramenta foi interrompida por exceder o limite de CPU/memória"
             )

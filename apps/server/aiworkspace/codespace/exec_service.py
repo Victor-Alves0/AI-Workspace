@@ -3,7 +3,12 @@
 Baseline UNIVERSAL = subprocesso no host — funciona em Windows, Linux e no desktop
 sem Docker. `run_command` executa o comando com o CWD dentro do projeto/worktree,
 com env higienizado (sem segredos do servidor), timeout rígido com kill da ÁRVORE de
-processos (build spawna filhos) e teto de saída. No Linux ganha RLIMIT_CPU.
+processos (build spawna filhos) e teto de saída. Teto de CPU: RLIMIT_CPU no Linux, Job
+Object no Windows (aiworkspace.winjob) — que também é o "mata a árvore" de lá.
+
+Shell: no Linux, /bin/sh. No Windows, o bash do Git for Windows quando instalado (os
+prompts ensinam bash; `&&`, `ls`, `grep` e aspas funcionam igual), senão o cmd.exe —
+e `environment_note()` diz ao modelo qual ele tem.
 
 Se `settings.code_runner_url` estiver setado, encaminha para um container `runner`
 (isolamento mais forte) via HTTP; senão, roda no host. O chamador é sempre síncrono
@@ -12,8 +17,10 @@ Se `settings.code_runner_url` estiver setado, encaminha para um container `runne
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
+import shutil
 import signal
 import subprocess
 import time
@@ -22,11 +29,56 @@ from typing import Any
 
 import httpx
 
+from .. import winjob
 from ..config import get_settings
 
 logger = logging.getLogger(__name__)
 
 _IS_WINDOWS = os.name == "nt"
+
+
+@functools.lru_cache(maxsize=1)
+def windows_bash() -> str | None:
+    """bash.exe do Git for Windows (ou AIW_BASH). NUNCA o de System32 — aquele é o do
+    WSL, que roda noutro sistema de arquivos e não enxerga o projeto."""
+    forced = (os.environ.get("AIW_BASH") or "").strip()
+    if forced:
+        return forced if Path(forced).is_file() and "system32" not in forced.lower() else None
+    candidatos: list[Path] = []
+    git = shutil.which("git")
+    if git:  # <Git>\cmd\git.exe → <Git>\bin\bash.exe
+        candidatos.append(Path(git).resolve().parent.parent / "bin" / "bash.exe")
+    for base in (os.environ.get("PROGRAMFILES"), os.environ.get("PROGRAMFILES(X86)"),
+                 os.environ.get("LOCALAPPDATA") and os.path.join(os.environ["LOCALAPPDATA"], "Programs")):
+        if base:
+            candidatos.append(Path(base) / "Git" / "bin" / "bash.exe")
+    for c in candidatos:
+        if c.is_file() and "system32" not in str(c).lower():
+            return str(c)
+    return None
+
+
+def environment_note() -> str:
+    """Frase para a descrição do code.exec.run: o sistema e o shell REAIS. Os prompts
+    falam de bash e mise (a imagem Docker tem os dois); no Windows de um usuário pode
+    não ter nenhum — e o modelo precisa saber antes de escrever o comando."""
+    if not _IS_WINDOWS or get_settings().code_runner_url:
+        return ""
+    mise = "`mise` IS available" if shutil.which("mise") else \
+        "`mise` is NOT installed (use the toolchains already on the machine, or ask the user)"
+    if windows_bash():
+        return ("HOST: this project runs on WINDOWS, in Git Bash — bash syntax works; paths "
+                "look like /c/Users/...; " + mise + ".")
+    return ("HOST: this project runs on WINDOWS in cmd.exe — use Windows commands "
+            "(dir, type, copy, set VAR=x, &&), NOT bash; " + mise + ".")
+
+
+def _win_args(command: str) -> tuple[Any, bool]:
+    """(args, shell) do Popen no Windows: bash do Git quando houver, senão cmd.exe."""
+    bash = windows_bash()
+    if bash:
+        return [bash, "-lc", command], False
+    return command, True
 
 # Chaves de ambiente que NUNCA vão para o subprocesso (segredos do servidor). Não é
 # allowlist — preservamos PATH/HOME/locale (o build precisa) e removemos o sensível.
@@ -67,6 +119,12 @@ def _rlimit_preexec(cpu_seconds: int):
 
 
 def _kill_tree(proc: subprocess.Popen) -> None:
+    job = getattr(proc, "_aiw_job", None)
+    if job is not None:
+        # o job pega a árvore inteira — inclusive netos cujo pai já saiu, que o
+        # `taskkill /T` perde
+        job.terminate()
+        return
     if proc.poll() is not None:
         return
     try:
@@ -96,15 +154,41 @@ def spawn_host(command: str, root: Path, env_extra: dict | None = None,
     s = get_settings()
     if cpu_seconds is None:
         cpu_seconds = int(s.code_exec_cpu_seconds)
+    if _IS_WINDOWS:
+        return _spawn_windows(command, root, env_extra, cpu_seconds=max(0, int(cpu_seconds)))
     preexec = _rlimit_preexec(int(cpu_seconds)) if int(cpu_seconds) > 0 else _setsid_preexec()
-    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if _IS_WINDOWS else 0
     return subprocess.Popen(
         command, shell=True, cwd=str(root),
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, errors="replace", env=_clean_env(env_extra),
         preexec_fn=preexec,
-        creationflags=creationflags,
     )
+
+
+def _spawn_windows(command: str, root: Path, env_extra: dict | None, *, cpu_seconds: int) -> subprocess.Popen:
+    """Windows: Job Object (teto de CPU por processo + mata a árvore) e bash do Git
+    quando houver. O job fica pendurado no Popen (`_aiw_job`): vive enquanto o
+    processo é referenciado, e `_kill_tree`/`release` o usam."""
+    args, shell = _win_args(command)
+    env = _clean_env(env_extra)
+    env["CHERE_INVOKING"] = "1"  # bash de login do MSYS2 iria para a home; fica no CWD
+    proc, job = winjob.popen(
+        args, shell=shell, cwd=str(root),
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, errors="replace", env=env,
+        cpu_seconds=cpu_seconds,
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | winjob.CREATE_NO_WINDOW,
+    )
+    proc._aiw_job = job  # type: ignore[attr-defined]
+    return proc
+
+
+def release(proc: subprocess.Popen) -> None:
+    """Terminou: fecha o job (Windows). O que sobrou da árvore — um daemon que o
+    build largou rodando — morre junto, como o killpg faria."""
+    job = getattr(proc, "_aiw_job", None)
+    if job is not None:
+        job.close()
 
 
 def _setsid_preexec():
@@ -126,13 +210,13 @@ def spawn_server(command: str, root: Path, env_extra: dict | None = None) -> sub
     backend) roda por horas e o limite de CPU o mataria. Mantém o env higienizado e o
     grupo de processos próprio (p/ `kill_tree` derrubar a árvore). Só o preview_service
     usa isto — o run normal continua com o limite de CPU."""
-    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if _IS_WINDOWS else 0
+    if _IS_WINDOWS:
+        return _spawn_windows(command, root, env_extra, cpu_seconds=0)
     return subprocess.Popen(
         command, shell=True, cwd=str(root),
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, errors="replace", env=_clean_env(env_extra),
         preexec_fn=_setsid_preexec(),
-        creationflags=creationflags,
     )
 
 
@@ -168,7 +252,13 @@ def _run_host(command: str, root: Path, timeout: int, env_extra: dict | None) ->
             out, _ = proc.communicate(timeout=10)
         except Exception:  # noqa: BLE001
             out = ""
+    job = getattr(proc, "_aiw_job", None)
+    teto_cpu = bool(job is not None and job.killed_by_limit())  # antes de fechar o job
+    release(proc)
     out, truncated = cap_output(out)
+    if teto_cpu:
+        out = (out + "\n[encerrado: excedeu o teto de CPU do sandbox — rode em background "
+               "(background=true) para comandos longos]").lstrip()
     return {
         "exit_code": None if timed_out else proc.returncode,
         "output": out,

@@ -24,6 +24,24 @@ IS_WINDOWS = sys.platform == "win32"
 
 # flags de criação para o subprocess.Popen: nasce suspenso (retomado em `adopt`)
 CREATE_SUSPENDED = 0x00000004
+CREATE_NO_WINDOW = 0x08000000
+# código de saída de um processo que o job encerrou por estourar o teto de CPU
+STATUS_QUOTA_EXCEEDED = 0xC0000044
+
+
+def popen(args, *, cpu_seconds: int = 0, memory_mb: int = 0, creationflags: int = 0, **kwargs):
+    """subprocess.Popen dentro de um JobObject novo (Windows). Devolve (proc, job):
+    guarde o job enquanto o processo roda — fechá-lo encerra a árvore inteira."""
+    import subprocess
+
+    job = JobObject(cpu_seconds=cpu_seconds, memory_mb=memory_mb)
+    try:
+        proc = subprocess.Popen(args, creationflags=creationflags | CREATE_SUSPENDED, **kwargs)
+    except BaseException:
+        job.close()
+        raise
+    job.adopt(proc)
+    return proc, job
 
 if IS_WINDOWS:
     import ctypes
@@ -78,6 +96,23 @@ if IS_WINDOWS:
     _k32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
     _k32.CloseHandle.restype = wintypes.BOOL
     _k32.CloseHandle.argtypes = [wintypes.HANDLE]
+    _k32.QueryInformationJobObject.restype = wintypes.BOOL
+    _k32.QueryInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID,
+                                               wintypes.DWORD, wintypes.LPVOID]
+
+    _JobObjectBasicAccountingInformation = 1
+
+    class _ACCOUNTING(ctypes.Structure):
+        _fields_ = [
+            ("TotalUserTime", ctypes.c_longlong),
+            ("TotalKernelTime", ctypes.c_longlong),
+            ("ThisPeriodTotalUserTime", ctypes.c_longlong),
+            ("ThisPeriodTotalKernelTime", ctypes.c_longlong),
+            ("TotalPageFaultCount", wintypes.DWORD),
+            ("TotalProcesses", wintypes.DWORD),
+            ("ActiveProcesses", wintypes.DWORD),
+            ("TotalTerminatedProcesses", wintypes.DWORD),
+        ]
     _ntdll.NtResumeProcess.restype = ctypes.c_long
     _ntdll.NtResumeProcess.argtypes = [wintypes.HANDLE]
 
@@ -118,6 +153,18 @@ if IS_WINDOWS:
             if _ntdll.NtResumeProcess(handle) < 0:
                 proc.kill()
                 raise OSError("não foi possível retomar o processo suspenso")
+
+        def killed_by_limit(self) -> int:
+            """Quantos processos do job o Windows encerrou por VIOLAR um limite (CPU).
+            Vale mesmo com um shell no meio: o bash devolve o código do filho truncado,
+            e o STATUS_QUOTA_EXCEEDED nunca chegaria a quem chamou."""
+            if not self._h:
+                return 0
+            info = _ACCOUNTING()
+            if not _k32.QueryInformationJobObject(self._h, _JobObjectBasicAccountingInformation,
+                                                  ctypes.byref(info), ctypes.sizeof(info), None):
+                return 0
+            return int(info.TotalTerminatedProcesses)
 
         def terminate(self, code: int = 1) -> None:
             """Encerra todos os processos do job agora."""

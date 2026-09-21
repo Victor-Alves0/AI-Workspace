@@ -2037,6 +2037,8 @@ def _register_builtins(
                 "automatically; force it with background=true or disable with background=false. "
                 "Requires the project owner to have enabled execution; a bad exit code means the command "
                 "failed — read the output and fix."
+                # o ambiente REAL (Windows/cmd, sem mise…): o texto acima descreve a imagem Docker
+                + ((" " + exec_service.environment_note()) if exec_service.environment_note() else "")
             ),
             params={
                 "command": "string:o::the shell command to run (empty = the project's test_command)",

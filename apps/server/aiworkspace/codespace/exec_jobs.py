@@ -156,6 +156,7 @@ def _read_thread(job: Job) -> None:
         out, _ = job.proc.communicate()
     except Exception as exc:  # noqa: BLE001
         out = f"[erro lendo a saída: {exc}]"
+    exec_service.release(job.proc)  # Windows: fecha o job (e o que o comando largou rodando)
     text, truncated = exec_service.cap_output(out)
     job.output = text
     job.truncated = truncated
