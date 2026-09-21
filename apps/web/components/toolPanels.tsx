@@ -202,7 +202,7 @@ export function BrowserPanel({ value, onChange }: { value: Record<string, any>; 
         <div className="border-t border-border py-2.5">
           <div className="flex items-center gap-2 text-sm font-medium text-ink"><Monitor size={14} className="text-accent-hover" /> Endpoint CDP</div>
           <p className="mb-1 mt-2 text-xs text-muted">URL WebSocket (ws://host:porta)</p>
-          <input value={b.ws_url ?? ""} onChange={(e) => set("ws_url", e.target.value)} placeholder="ws://browser:3000"
+          <input value={b.ws_url ?? ""} onChange={(e) => set("ws_url", e.target.value)} placeholder="ws://browser:3000 ou local"
             className="w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-xs text-ink outline-none focus:border-accent" />
           <p className="mb-1 mt-2 text-xs text-muted">Token (opcional — protege o endpoint)</p>
           <input value={b.token ?? ""} onChange={(e) => set("token", e.target.value)} type="password" placeholder="BROWSER_TOKEN"

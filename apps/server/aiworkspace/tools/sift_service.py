@@ -960,7 +960,10 @@ async def _library_read(user_id: str | None, kind: str, key: str) -> dict[str, A
 def _browser_endpoint(browser_cfg: dict | None) -> str:
     """Endpoint CDP do navegador (ws_url[?token=]) resolvido por CAMADAS:
     config por-usuário (Conexões → Web) primeiro; senão o env (BROWSER_WS_URL/
-    BROWSER_TOKEN). Devolve "" quando desativado/sem URL — a tool avisa."""
+    BROWSER_TOKEN). Devolve "" quando desativado/sem URL — a tool avisa.
+
+    `local` = o Edge/Chrome instalado nesta máquina, em headless (o app desktop usa
+    isso; ver tools/browser_driver)."""
     cfg = browser_cfg or {}
     if cfg.get("enabled") is False:
         return ""
@@ -972,6 +975,8 @@ def _browser_endpoint(browser_cfg: dict | None) -> str:
         token = (s.browser_token or "").strip()
     if not ws:
         return ""
+    if ws.lower() == "local":
+        return "local"
     return f"{ws}?token={token}" if token else ws
 
 
@@ -1301,8 +1306,12 @@ def _register_builtins(
             endpoint = _browser_endpoint(browser_cfg)
             if not endpoint:
                 return {"error": "O navegador não está ativo. Configure-o em "
-                        "Configurações → Conexões → Web (ou suba o serviço: "
-                        "docker compose --profile browser up -d browser)."}
+                        "Configurações → Conexões → Web (`local` usa o Edge/Chrome "
+                        "desta máquina; no Docker: docker compose --profile browser "
+                        "up -d browser)."}
+            # a guarda anti-SSRF vale para TODA requisição da página, não só o goto:
+            # uma página podia redirecionar ou carregar recursos da rede interna
+            driver.url_guard = _public_web_url
             act = (action or "").strip().lower()
             chat_id = toolctx.current_chat_id.get()
             key = chat_id or (user_id or "anon")

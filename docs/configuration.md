@@ -123,7 +123,7 @@ registered in each provider's console — on a public domain all five change. Se
 | `SLACK_REDIRECT_URI` | `http://localhost:8000/integrations/slack/callback` |
 | `OPENROUTER_REDIRECT_URI` | `http://localhost:8000/integrations/providers/openrouter/callback` |
 | `GITHUB_DEVICE_CLIENT_ID` | empty — public client id of "Sign in with GitHub" (device flow); empty falls back to a Personal Access Token |
-| `BROWSER_WS_URL` | `ws://browser:3000` in compose — CDP endpoint of the headless browser; empty disables the tool |
+| `BROWSER_WS_URL` | `ws://browser:3000` in compose — CDP endpoint of the headless browser; `local` drives the Edge/Chrome installed on the machine (the desktop app uses this); empty disables the tool |
 | `EVOLUTION_API_URL` | empty = the compose service; set it for a remote Evolution instance |
 | `WHATSAPP_WEBHOOK_BASE` | `http://server:8000` — public https URL for Meta's official Cloud API webhooks |
 

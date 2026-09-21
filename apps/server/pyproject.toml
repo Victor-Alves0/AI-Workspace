@@ -70,10 +70,9 @@ dependencies = [
     # e transcreve pelo STT do usuário. Fixado numa faixa recente (o yt-dlp muda
     # rápido p/ acompanhar os sites; atualizar é rotina).
     "yt-dlp>=2024.12",
-    # Navegador headless (tool "web.browser.use"): SÓ o client Playwright (driver
-    # node incluído no wheel, ~50MB) — os browsers NÃO são instalados aqui; o
-    # Chromium roda no serviço `browser` (browserless) e conectamos via CDP.
-    "playwright>=1.48",
+    # Navegador headless (tool "web.browser.use"): CDP puro pelo `websockets` (acima),
+    # sem Playwright — que pesava ~140 MB só para ser um cliente CDP. O Chromium é o
+    # serviço `browser` (browserless) no Docker, ou o Edge/Chrome local no desktop.
     # Codespace — grafo de código (tools "code.graph.query"/"code.files.browse"):
     # GraphCodeMap (projeto próprio do Victor, ainda não publicado no PyPI — o
     # nome "codegraph" no PyPI é de OUTRO pacote, não confundir). Pinado num

@@ -161,6 +161,8 @@ $env:WEB_ORIGIN          = "http://localhost:$AppPort,http://127.0.0.1:$AppPort"
 # o aiworkspace.desktop serve a interface desta pasta e encaminha a porta 1455 (login
 # ChatGPT) para esta porta
 $env:AIW_WEB_DIR         = $WebDir
+# navegador headless (tool web.browser.use): o Edge/Chrome desta maquina, sem Docker
+$env:BROWSER_WS_URL      = "local"
 $env:AIW_PORT            = "$AppPort"
 # retornos OAuth: a API mora em /api nesta origem. Precisam bater com o cadastrado no
 # console de cada provedor (docs/desktop.md).
