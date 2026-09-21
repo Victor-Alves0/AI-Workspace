@@ -1825,7 +1825,7 @@ interface Status {
   voice: boolean; whatsapp: { count: number; connected: number };
   google: number; tuya: boolean;
   budget: { enabled: boolean; over: boolean; blocked: boolean; spent: number; cap: number; mode: string };
-  admin?: { db: boolean; evolution_configured: boolean; signup_open: boolean };
+  admin?: { db: boolean; evolution_configured: boolean; whatsapp_qr_backend?: string; signup_open: boolean };
 }
 
 function StatusTab({ user, onGoto }: { user: User | null; onGoto: (cat: Cat, view?: string) => void }) {
@@ -1903,7 +1903,7 @@ function StatusTab({ user, onGoto }: { user: User | null; onGoto: (cat: Cat, vie
           <Heading>Infraestrutura (admin)</Heading>
           <div className="space-y-2">
             <StatusRow label="Banco de dados" state={st.admin.db ? "ok" : "off"} detail={st.admin.db ? "Respondendo" : "Sem resposta"} />
-            <StatusRow label="Sidecar do WhatsApp (Evolution)" state={st.admin.evolution_configured ? "ok" : "off"} detail={st.admin.evolution_configured ? "Habilitado" : "Não habilitado (opcional)"} />
+            <StatusRow label="WhatsApp por QR Code" state={st.admin.evolution_configured ? "ok" : "off"} detail={st.admin.whatsapp_qr_backend === "local" ? "Motor local" : st.admin.evolution_configured ? "Evolution API" : "Não habilitado (opcional)"} />
             <StatusRow label="Cadastro de novos usuários" state={st.admin.signup_open ? "warn" : "ok"} detail={st.admin.signup_open ? "Aberto" : "Fechado"} />
           </div>
         </>

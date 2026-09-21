@@ -35,7 +35,8 @@ from ..models import (
     WhatsAppConnection,
     WhatsAppThread,
 )
-from . import discord_api, telegram_api, whatsapp_evolution as evolution, whatsapp_official as official
+from . import discord_api, telegram_api, whatsapp_official as official
+from . import whatsapp_qr as evolution
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +157,7 @@ async def read_messages(platform: str, connection_id: str, chat: str, limit: int
 
     if platform == "whatsapp":
         if conn.provider != "evolution":
-            raise MessagingError("ler histórico só está disponível no WhatsApp via QR (Evolution).")
+            raise MessagingError("ler histórico só está disponível no WhatsApp via QR Code.")
         jid = _to_wa_jid(chat)
         msgs = await evolution.find_messages(conn.instance, jid, limit=limit)
         return [{"from": "você" if m["from_me"] else (m["sender_name"] or "contato"),

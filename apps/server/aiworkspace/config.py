@@ -144,6 +144,12 @@ class Settings(BaseSettings):
     # via Meta Cloud API funciona sem nada disso).
     evolution_api_url: str = ""
     evolution_api_key: str = ""
+    # Motor do WhatsApp por QR Code: "evolution" (serviço do compose), "local" (whatsmeow
+    # embutido via neonize — o app desktop) ou "auto" (Evolution se configurada; senão o
+    # local, se instalado). Ver integrations/whatsapp_qr.py.
+    whatsapp_qr_backend: str = "auto"
+    # Onde o motor local guarda as sessões (um .db por conexão). Vazio = <uploads>/../whatsapp.
+    whatsapp_local_dir: str = ""
     # Base das URLs de webhook geradas. Para o Evolution (rede interna do compose)
     # o padrão resolve; para o Cloud API da Meta é preciso uma URL PÚBLICA https —
     # defina aqui o endereço externo do server (túnel/proxy reverso).

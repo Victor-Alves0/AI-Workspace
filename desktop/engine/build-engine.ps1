@@ -73,7 +73,8 @@ New-Item -ItemType Directory -Force $Site | Out-Null
 
 Write-Host "==> instalando o backend e dependencias (pode demorar)"
 python -m pip install --upgrade pip
-python -m pip install --target $Site $ServerDir
+# [whatsapp-local]: o WhatsApp por QR roda embutido (neonize) — sem Docker, nao ha Evolution
+python -m pip install --target $Site "$($ServerDir)[whatsapp-local]"
 if ($LASTEXITCODE -ne 0) { throw "pip install do backend falhou" }
 
 # ----------------------------------------------------------------------------- #

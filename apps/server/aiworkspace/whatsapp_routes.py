@@ -25,7 +25,7 @@ from . import bg
 from .auth.deps import require_approved
 from .config import get_settings
 from .db import get_db
-from .integrations import whatsapp_evolution as evolution
+from .integrations import whatsapp_qr as evolution
 from .integrations import whatsapp_official as official
 from .integrations import whatsapp_service
 from .models import User, WhatsAppConnection, WhatsAppThread
@@ -205,11 +205,7 @@ async def create_connection(
 
     if body.provider == "evolution":
         if not evolution.configured():
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "Evolution API não habilitada neste deploy. Suba o serviço com "
-                "`docker compose --profile whatsapp up -d` e defina EVOLUTION_API_KEY no .env.",
-            )
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, evolution.unavailable_reason())
         conn.instance = f"aw{uuid.uuid4().hex[:10]}"
         webhook_url = (
             settings.whatsapp_webhook_base.rstrip("/")
@@ -220,7 +216,7 @@ async def create_connection(
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(
                 status.HTTP_502_BAD_GATEWAY,
-                f"Falha ao criar a instância no Evolution: {exc}",
+                f"Falha ao iniciar a conexão do WhatsApp: {exc}",
             )
         conn.state = {"status": "connecting"}
     else:  # official

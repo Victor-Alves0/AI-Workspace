@@ -121,6 +121,15 @@ async def lifespan(app: FastAPI):
         await slack_socket.start()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível iniciar os sockets do Slack (%s)", exc)
+    # WhatsApp por QR com o motor LOCAL (app desktop): religa as sessões salvas — a
+    # Evolution é um serviço à parte e se religava sozinha; aqui, quem religa é o server
+    try:
+        from .integrations import whatsapp_qr
+        if whatsapp_qr.backend() == "local":
+            from .integrations import whatsapp_local
+            await whatsapp_local.resume_all()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Não foi possível religar o WhatsApp local (%s)", exc)
     # indexações da Base de Conhecimento interrompidas por restart (task em memória)
     try:
         from .knowledge import ingest as knowledge_ingest
@@ -184,6 +193,11 @@ async def lifespan(app: FastAPI):
         # PRIMEIRO no encerramento (loop e banco ainda vivos): salva o parcial de
         # qualquer geração em andamento — senão um deploy/restart perde o turno
         # inteiro (texto + logs de tools). Ver chat/generation.shutdown.
+        try:
+            from .integrations import whatsapp_local
+            await whatsapp_local.shutdown()
+        except Exception:  # noqa: BLE001 - best-effort
+            logger.warning("Falha ao desconectar o WhatsApp local no shutdown")
         try:
             from .codespace import exec_jobs
             await exec_jobs.shutdown()

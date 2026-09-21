@@ -34,7 +34,7 @@ from ..models import (
 )
 from ..usage_service import usage_event_from_record
 from . import channel_folders, channel_media, inbound_batch, wa_format
-from . import whatsapp_evolution as evolution
+from . import whatsapp_qr as evolution
 from . import whatsapp_official as official
 
 logger = logging.getLogger(__name__)

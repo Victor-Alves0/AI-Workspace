@@ -163,6 +163,10 @@ $env:WEB_ORIGIN          = "http://localhost:$AppPort,http://127.0.0.1:$AppPort"
 $env:AIW_WEB_DIR         = $WebDir
 # navegador headless (tool web.browser.use): o Edge/Chrome desta maquina, sem Docker
 $env:BROWSER_WS_URL      = "local"
+# WhatsApp por QR: motor embutido (sem Evolution), sessoes dentro de .\data\
+$env:WHATSAPP_QR_BACKEND = "local"
+$env:WHATSAPP_LOCAL_DIR  = Join-Path $Data "whatsapp"
+$env:UPLOADS_DIR         = Join-Path $Data "uploads"
 $env:AIW_PORT            = "$AppPort"
 # retornos OAuth: a API mora em /api nesta origem. Precisam bater com o cadastrado no
 # console de cada provedor (docs/desktop.md).

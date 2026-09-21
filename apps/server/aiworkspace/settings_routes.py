@@ -170,7 +170,7 @@ async def system_status(
     from sqlalchemy import func, select
 
     from .integrations import tuya_service, voice_service
-    from .integrations import whatsapp_evolution as evolution
+    from .integrations import whatsapp_qr as evolution
     from .models import GoogleAccount, WhatsAppConnection
 
     uid = user.id
@@ -199,6 +199,8 @@ async def system_status(
         out["admin"] = {
             "db": True,  # se chegou aqui, a sessão do banco respondeu
             "evolution_configured": evolution.configured(),
+            # motor do WhatsApp por QR em uso: "evolution" | "local" | "" (nenhum)
+            "whatsapp_qr_backend": evolution.backend(),
             "signup_open": bool(await get_setting(db, ALLOW_SIGNUPS, False)),
         }
     return out
