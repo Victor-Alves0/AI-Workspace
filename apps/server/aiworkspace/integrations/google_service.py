@@ -22,6 +22,7 @@ import re
 import time
 from email.message import EmailMessage
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 import jwt
@@ -254,12 +255,45 @@ async def revoke(refresh_token: str) -> None:
 # --------------------------------------------------------------------------- #
 # Clientes Gmail / Calendar (síncronos)
 # --------------------------------------------------------------------------- #
-def _service(token: str, api: str, version: str):
-    from google.oauth2.credentials import Credentials
-    from googleapiclient.discovery import build
+# REST direto por httpx: o google-api-python-client pesava ~110 MB (as descrições de
+# TODAS as APIs do Google) para as ~10 chamadas de Gmail e Agenda que fazemos.
+_GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me"
+_CALENDAR = "https://www.googleapis.com/calendar/v3/calendars"
 
-    creds = Credentials(token=token)
-    return build(api, version, credentials=creds, cache_discovery=False)
+
+class _Google:
+    """Cliente REST síncrono (as tools rodam em threadpool) com o token do usuário."""
+
+    def __init__(self, token: str) -> None:
+        self._c = httpx.Client(timeout=30, headers={"Authorization": f"Bearer {token}"})
+
+    def __enter__(self) -> "_Google":
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self._c.close()
+
+    def call(self, method: str, url: str, *, params: dict[str, Any] | None = None,
+             body: dict[str, Any] | None = None) -> dict[str, Any]:
+        # o Google quer true/false minúsculos; vazio/None = parâmetro ausente
+        q = {
+            k: ("true" if v is True else "false" if v is False else v)
+            for k, v in (params or {}).items() if v is not None and v != ""
+        }
+        r = self._c.request(method, url, params=q, json=body)
+        if r.status_code >= 400:
+            try:
+                msg = r.json()["error"]["message"]
+            except Exception:  # noqa: BLE001 - corpo sem o formato de erro do Google
+                msg = r.text[:200]
+            raise RuntimeError(f"Google {r.status_code}: {msg}")
+        return r.json() if r.content else {}
+
+
+def _cal_url(calendar_id: str, *resto: str) -> str:
+    """URL de uma agenda: o id pode ser um e-mail (`x@group.calendar.google.com`)."""
+    partes = [quote(calendar_id or "primary", safe="")] + [quote(r, safe="") for r in resto]
+    return f"{_CALENDAR}/" + "/".join(partes)
 
 
 def _hval(headers: list[dict], name: str) -> str:
@@ -309,23 +343,25 @@ def _clean_text(s: str) -> str:
 
 
 def gmail_search(token: str, query: str, max_results: int) -> dict[str, Any]:
+    with _Google(token) as g:
+        return _gmail_search(g, query, max_results)
+
+
+def _gmail_search(g: _Google, query: str, max_results: int) -> dict[str, Any]:
     """Lista mensagens do Gmail (metadados + snippet).
 
     ``max_results``: quantas puxar (metadados; teto ``GMAIL_METADATA_MAX``).
     ``0`` (ou negativo) = CONTAR todas que casam a ``query`` (ids paginados até
     ``GMAIL_SEARCH_HARD_MAX``) e devolver metadados só das primeiras
     ``GMAIL_COUNT_SAMPLE`` — `count` é a contagem real."""
-    svc = _service(token, "gmail", "v1")
     count_all = max_results <= 0
     want_ids = GMAIL_SEARCH_HARD_MAX if count_all else min(int(max_results), GMAIL_METADATA_MAX)
     ids: list[str] = []
     page_token: str | None = None
     while len(ids) < want_ids:
-        res = svc.users().messages().list(
-            userId="me", q=query or "",
-            maxResults=min(500, want_ids - len(ids)),
-            pageToken=page_token,
-        ).execute()
+        res = g.call("GET", f"{_GMAIL}/messages", params={
+            "q": query or "", "maxResults": min(500, want_ids - len(ids)), "pageToken": page_token,
+        })
         ids.extend(m["id"] for m in res.get("messages", []))
         page_token = res.get("nextPageToken")
         if not page_token:
@@ -333,10 +369,9 @@ def gmail_search(token: str, query: str, max_results: int) -> dict[str, Any]:
     meta_n = min(len(ids), GMAIL_COUNT_SAMPLE if count_all else want_ids)
     out = []
     for mid in ids[:meta_n]:
-        full = svc.users().messages().get(
-            userId="me", id=mid, format="metadata",
-            metadataHeaders=["From", "Subject", "Date"],
-        ).execute()
+        full = g.call("GET", f"{_GMAIL}/messages/{quote(mid, safe='')}", params={
+            "format": "metadata", "metadataHeaders": ["From", "Subject", "Date"],
+        })
         hs = full.get("payload", {}).get("headers", [])
         out.append({
             "id": full["id"],
@@ -376,8 +411,8 @@ GMAIL_BODY_MAX = 4000  # teto por e-mail; ler 5 de uma vez já são 20k chars de
 
 
 def gmail_get(token: str, msg_id: str, max_chars: int = GMAIL_BODY_MAX) -> dict[str, Any]:
-    svc = _service(token, "gmail", "v1")
-    full = svc.users().messages().get(userId="me", id=msg_id, format="full").execute()
+    with _Google(token) as g:
+        full = g.call("GET", f"{_GMAIL}/messages/{quote(msg_id, safe='')}", params={"format": "full"})
     payload = full.get("payload", {})
     hs = payload.get("headers", [])
     body = _decode_body(payload)
@@ -402,7 +437,6 @@ def gmail_get(token: str, msg_id: str, max_chars: int = GMAIL_BODY_MAX) -> dict[
 
 
 def gmail_send(token: str, to: str, subject: str, body: str, cc: str = "", html: str = "") -> dict[str, Any]:
-    svc = _service(token, "gmail", "v1")
     msg = EmailMessage()
     msg["To"] = to
     if cc:
@@ -414,7 +448,8 @@ def gmail_send(token: str, to: str, subject: str, body: str, cc: str = "", html:
     if html:
         msg.add_alternative(html, subtype="html")
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-    sent = svc.users().messages().send(userId="me", body={"raw": raw}).execute()
+    with _Google(token) as g:
+        sent = g.call("POST", f"{_GMAIL}/messages/send", body={"raw": raw})
     return {"ok": True, "id": sent.get("id")}
 
 
@@ -428,14 +463,16 @@ _MODIFY = {
 
 
 def gmail_modify(token: str, msg_id: str, action: str) -> dict[str, Any]:
-    svc = _service(token, "gmail", "v1")
+    url = f"{_GMAIL}/messages/{quote(msg_id, safe='')}"
     if action == "trash":
-        svc.users().messages().trash(userId="me", id=msg_id).execute()
+        with _Google(token) as g:
+            g.call("POST", f"{url}/trash")
         return {"ok": True, "id": msg_id, "action": "trash"}
     mod = _MODIFY.get(action)
     if mod is None:
         return {"error": f"unknown action '{action}' (use archive/trash/read/unread/star/unstar)"}
-    svc.users().messages().modify(userId="me", id=msg_id, body=mod).execute()
+    with _Google(token) as g:
+        g.call("POST", f"{url}/modify", body=mod)
     return {"ok": True, "id": msg_id, "action": action}
 
 
@@ -486,9 +523,7 @@ def _rfc3339(s: str) -> str:
 
 def cal_list(token: str, time_min: str, time_max: str, max_results: int,
              calendar_id: str = "primary") -> dict[str, Any]:
-    svc = _service(token, "calendar", "v3")
     kw: dict[str, Any] = {
-        "calendarId": calendar_id or "primary",
         "singleEvents": True,
         "orderBy": "startTime",
         "maxResults": max_results,
@@ -497,24 +532,23 @@ def cal_list(token: str, time_min: str, time_max: str, max_results: int,
         kw["timeMin"] = _rfc3339(time_min)
     if time_max:
         kw["timeMax"] = _rfc3339(time_max)
-    res = svc.events().list(**kw).execute()
+    with _Google(token) as g:
+        res = g.call("GET", _cal_url(calendar_id, "events"), params=kw)
     return {"events": [_event_out(e) for e in res.get("items", [])]}
 
 
 def cal_search(token: str, query: str, max_results: int,
                calendar_id: str = "primary") -> dict[str, Any]:
-    svc = _service(token, "calendar", "v3")
-    res = svc.events().list(
-        calendarId=calendar_id or "primary", q=query or "",
-        singleEvents=True, orderBy="startTime", maxResults=max_results,
-    ).execute()
+    with _Google(token) as g:
+        res = g.call("GET", _cal_url(calendar_id, "events"), params={
+            "q": query or "", "singleEvents": True, "orderBy": "startTime", "maxResults": max_results,
+        })
     return {"events": [_event_out(e) for e in res.get("items", [])]}
 
 
 def cal_create(token: str, summary: str, start: str, end: str, description: str = "",
                location: str = "", attendees: str = "",
                calendar_id: str = "primary", tz: str = "") -> dict[str, Any]:
-    svc = _service(token, "calendar", "v3")
     body: dict[str, Any] = {"summary": summary, "start": _when(start, tz), "end": _when(end, tz)}
     if description:
         body["description"] = description
@@ -522,14 +556,14 @@ def cal_create(token: str, summary: str, start: str, end: str, description: str 
         body["location"] = location
     if attendees:
         body["attendees"] = [{"email": e.strip()} for e in attendees.split(",") if e.strip()]
-    ev = svc.events().insert(calendarId=calendar_id or "primary", body=body).execute()
+    with _Google(token) as g:
+        ev = g.call("POST", _cal_url(calendar_id, "events"), body=body)
     return {"ok": True, **_event_out(ev)}
 
 
 def cal_update(token: str, event_id: str, summary: str = "", start: str = "", end: str = "",
                description: str = "", location: str = "",
                calendar_id: str = "primary", tz: str = "") -> dict[str, Any]:
-    svc = _service(token, "calendar", "v3")
     body: dict[str, Any] = {}
     if summary:
         body["summary"] = summary
@@ -543,13 +577,12 @@ def cal_update(token: str, event_id: str, summary: str = "", start: str = "", en
         body["location"] = location
     if not body:
         return {"error": "nothing to update"}
-    ev = svc.events().patch(
-        calendarId=calendar_id or "primary", eventId=event_id, body=body
-    ).execute()
+    with _Google(token) as g:
+        ev = g.call("PATCH", _cal_url(calendar_id, "events", event_id), body=body)
     return {"ok": True, **_event_out(ev)}
 
 
 def cal_delete(token: str, event_id: str, calendar_id: str = "primary") -> dict[str, Any]:
-    svc = _service(token, "calendar", "v3")
-    svc.events().delete(calendarId=calendar_id or "primary", eventId=event_id).execute()
+    with _Google(token) as g:
+        g.call("DELETE", _cal_url(calendar_id, "events", event_id))
     return {"ok": True, "id": event_id, "deleted": True}

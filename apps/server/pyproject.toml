@@ -48,11 +48,9 @@ dependencies = [
     # (mesmo motor fastembed da SIFT — 100% local, sem torch, sem chave extra)
     "langchain>=0.3",
     "langchain-community>=0.3",
-    # Integração Google Workspace (Gmail + Agenda): API client + credenciais OAuth.
-    # A troca/refresh de token é feita via httpx (já presente); o state OAuth é
-    # assinado com pyjwt (já presente). Puxa google-auth-httplib2/httplib2.
-    "google-api-python-client>=2.150",
-    "google-auth>=2.36",
+    # Integração Google Workspace (Gmail + Agenda): REST direto por httpx (já
+    # presente) — o google-api-python-client pesava ~110 MB para ~10 chamadas. O
+    # state OAuth é assinado com pyjwt (já presente).
     # Web Push (notificações do navegador): pywebpush + py-vapid (usam cryptography,
     # já presente). Chaves VAPID geradas uma vez e guardadas em app_settings.
     "pywebpush>=2.0",
