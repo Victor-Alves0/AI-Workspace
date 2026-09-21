@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 
 from ..config import get_settings
+from . import turn_end
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +221,7 @@ async def complete(
     choices = data.get("choices") or []
     if not choices:
         return ""
-    return (choices[0].get("message") or {}).get("content") or ""
+    return turn_end.cut((choices[0].get("message") or {}).get("content") or "")
 
 
 async def complete_verbose(
@@ -277,7 +278,7 @@ async def complete_verbose(
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc), "latency_ms": int((time.monotonic() - t0) * 1000)}
     choices = data.get("choices") or []
-    text = "" if not choices else ((choices[0].get("message") or {}).get("content") or "")
+    text = "" if not choices else turn_end.cut((choices[0].get("message") or {}).get("content") or "")
     usage = data.get("usage") or {}
     return {
         "text": text,
@@ -286,6 +287,46 @@ async def complete_verbose(
         "cost": usage.get("cost"),
         "latency_ms": latency_ms,
     }
+
+
+def _scrub_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Respostas antigas podem carregar o token de fim de turno que vazou antes desta
+    guarda existir. Tira só o token (ver turn_end.scrub); não muta a lista do chamador."""
+    out: list[dict[str, Any]] | None = None
+    for i, m in enumerate(messages):
+        c = m.get("content") if isinstance(m, dict) else None
+        if isinstance(c, str) and m.get("role") == "assistant":
+            limpo = turn_end.scrub(c)
+            if limpo != c:
+                if out is None:
+                    out = list(messages)
+                out[i] = {**m, "content": limpo}
+    return messages if out is None else out
+
+
+def _guard_chunk(guard: turn_end.TurnEndGuard, chunk: dict[str, Any]) -> bool:
+    """Passa o texto do chunk pela guarda de fim de turno (mutando o chunk).
+
+    Devolve True quando o fim de turno apareceu: o chunk sai com o texto até ali e
+    `finish_reason="stop"`, e o chamador encerra o stream."""
+    for choice in chunk.get("choices") or []:
+        if not isinstance(choice, dict):
+            continue
+        delta = choice.get("delta")
+        if not isinstance(delta, dict):
+            delta = choice["delta"] = {}
+        texto = delta.get("content")
+        if isinstance(texto, str) and texto:
+            delta["content"] = guard.feed(texto)
+        if guard.ended:
+            # o que vier junto do token já é a continuação descartada
+            delta.pop("tool_calls", None)
+            choice["finish_reason"] = "stop"
+        elif choice.get("finish_reason"):
+            # fim normal: o que ficou retido (começo de token que não se completou)
+            # era texto de verdade
+            delta["content"] = (delta.get("content") or "") + guard.flush()
+    return guard.ended
 
 
 async def stream_chat(
@@ -328,6 +369,7 @@ async def stream_chat(
     # Prompt caching: só no OpenRouter (compat/Ollama pode rejeitar conteúdo em blocos).
     # Marca o prefixo estável (system + tools + fim do histórico) — o maior ganho está
     # no loop agêntico, onde esse prefixo se repete a cada iteração.
+    messages = _scrub_history(messages)
     if not compat and settings.prompt_cache_enabled:
         messages, tools = _apply_prompt_cache(messages, tools)
     payload: dict[str, Any] = {
@@ -369,6 +411,7 @@ async def stream_chat(
                         yield {"type": "reasoning_effort", "effort": lowered}
                         continue  # refaz o request com o esforço rebaixado
                     raise RuntimeError(f"OpenRouter HTTP {resp.status_code}: {body}")
+                guard = turn_end.TurnEndGuard()
                 async for line in resp.aiter_lines():
                     if not line or not line.startswith("data:"):
                         continue
@@ -391,5 +434,18 @@ async def stream_chat(
                         else:
                             msg = str(err)
                         raise RuntimeError(f"OpenRouter stream: {str(msg)[:300]}")
+                    if _guard_chunk(guard, chunk):
+                        # Encerrar aqui fecha a conexão e o provedor para de gerar (e de
+                        # cobrar) a continuação. Custo: o chunk de `usage`, que só viria
+                        # no fim, não chega — este turno fica sem contabilização exata.
+                        logger.warning(
+                            "Modelo %s devolveu o token de fim de turno como texto; "
+                            "resposta cortada ali", model,
+                        )
+                        yield chunk
+                        return
                     yield chunk
+                resto = guard.flush()
+                if resto:
+                    yield {"choices": [{"index": 0, "delta": {"content": resto}}]}
             return
