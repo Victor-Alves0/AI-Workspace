@@ -3138,6 +3138,10 @@ async def run_turn(
         # desviamos o resto para `leaked_text`, resgatado após o stream.
         suppressing_leak = False
         leaked_text = ""
+        # o modelo pode encerrar o turno ainda no canal de raciocínio (ver
+        # providers/turn_end): aí o raciocínio DESTA volta era a resposta
+        iter_reasoning_from = len(reasoning_text)
+        answer_in_reasoning = False
 
         # span da chamada ao provedor (kind=llm): tempo de parede da geração, nº de
         # tokens (preenchido ao fim) e a iteração do loop agêntico. Enter/exit manual
@@ -3215,6 +3219,8 @@ async def run_turn(
                             tool_events.append({"kind": "result", "name": "image", "data": art})
                         except Exception as exc:  # noqa: BLE001
                             logger.warning("Falha ao guardar imagem nativa: %s", exc)
+                    if choice.get("turn_end_in_reasoning"):
+                        answer_in_reasoning = True
                     if choice.get("finish_reason"):
                         finish_reason = choice["finish_reason"]
         except Exception as exc:  # noqa: BLE001
@@ -3269,6 +3275,20 @@ async def run_turn(
         if reasoning_started is not None:
             reasoning_seconds += time.monotonic() - reasoning_started
             reasoning_started = None
+
+        # Fim de turno DENTRO do raciocínio: o modelo escreveu a resposta no canal de
+        # pensamento e encerrou a vez ali (o DeepSeek faz isso em roleplay). O que veio
+        # depois era a continuação que o provedor não parou — uma segunda versão, uma
+        # cópia ou só um fecho — e o stream já foi cortado. A resposta é o raciocínio
+        # desta volta: sai do "Pensou por…" e vai para a mensagem.
+        if answer_in_reasoning and not assistant_text.strip() and not tool_buffer and not leaked_text:
+            answer = reasoning_text[iter_reasoning_from:].strip()
+            if answer and not _LEAK_START_RE.search(answer):
+                yield {"type": "reasoning_answer", "text": reasoning_text[iter_reasoning_from:]}
+                reasoning_text = reasoning_text[:iter_reasoning_from]
+                assistant_text = answer
+                yield {"type": "token", "text": answer}
+                finish_reason = "stop"
 
         # resgate: o modelo vazou tool_calls como texto (suprimidas em `leaked_text`).
         # Sem tool_calls estruturadas, tentamos reconstruí-las e seguir o loop como se

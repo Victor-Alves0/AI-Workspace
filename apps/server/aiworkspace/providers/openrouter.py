@@ -304,29 +304,62 @@ def _scrub_history(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return messages if out is None else out
 
 
-def _guard_chunk(guard: turn_end.TurnEndGuard, chunk: dict[str, Any]) -> bool:
-    """Passa o texto do chunk pela guarda de fim de turno (mutando o chunk).
+class _TurnEndGuards:
+    """Uma guarda por canal: resposta (`content`) e raciocínio (`reasoning`)."""
+
+    def __init__(self) -> None:
+        self.content = turn_end.TurnEndGuard()
+        self.reasoning = turn_end.TurnEndGuard()
+
+    @property
+    def ended(self) -> bool:
+        return self.content.ended or self.reasoning.ended
+
+
+def _guard_chunk(guards: _TurnEndGuards, chunk: dict[str, Any]) -> bool:
+    """Passa o texto do chunk pelas guardas de fim de turno (mutando o chunk).
 
     Devolve True quando o fim de turno apareceu: o chunk sai com o texto até ali e
-    `finish_reason="stop"`, e o chamador encerra o stream."""
+    `finish_reason="stop"`, e o chamador encerra o stream.
+
+    Fim de turno no RACIOCÍNIO marca o choice com `turn_end_in_reasoning`: o modelo
+    encerrou a vez ainda no canal de pensamento — escreveu a resposta ali. O
+    orquestrador decide o que fazer com isso (promove a resposta); aqui só cortamos."""
     for choice in chunk.get("choices") or []:
         if not isinstance(choice, dict):
             continue
         delta = choice.get("delta")
         if not isinstance(delta, dict):
             delta = choice["delta"] = {}
+        pensamento = delta.get("reasoning")
+        if isinstance(pensamento, str) and pensamento:
+            delta["reasoning"] = guards.reasoning.feed(pensamento)
+        if guards.reasoning.ended:
+            # o que vem depois do token é a continuação que o provedor não parou
+            delta.pop("content", None)
+            delta.pop("tool_calls", None)
+            choice["turn_end_in_reasoning"] = True
+            choice["finish_reason"] = "stop"
+            continue
         texto = delta.get("content")
         if isinstance(texto, str) and texto:
-            delta["content"] = guard.feed(texto)
-        if guard.ended:
+            # começou a resposta: o que o raciocínio retinha era texto, não token
+            resto = guards.reasoning.flush()
+            if resto:
+                delta["reasoning"] = (delta.get("reasoning") or "") + resto
+            delta["content"] = guards.content.feed(texto)
+        if guards.content.ended:
             # o que vier junto do token já é a continuação descartada
             delta.pop("tool_calls", None)
             choice["finish_reason"] = "stop"
         elif choice.get("finish_reason"):
             # fim normal: o que ficou retido (começo de token que não se completou)
             # era texto de verdade
-            delta["content"] = (delta.get("content") or "") + guard.flush()
-    return guard.ended
+            resto = guards.reasoning.flush()
+            if resto:
+                delta["reasoning"] = (delta.get("reasoning") or "") + resto
+            delta["content"] = (delta.get("content") or "") + guards.content.flush()
+    return guards.ended
 
 
 async def stream_chat(
@@ -411,7 +444,7 @@ async def stream_chat(
                         yield {"type": "reasoning_effort", "effort": lowered}
                         continue  # refaz o request com o esforço rebaixado
                     raise RuntimeError(f"OpenRouter HTTP {resp.status_code}: {body}")
-                guard = turn_end.TurnEndGuard()
+                guards = _TurnEndGuards()
                 async for line in resp.aiter_lines():
                     if not line or not line.startswith("data:"):
                         continue
@@ -434,7 +467,7 @@ async def stream_chat(
                         else:
                             msg = str(err)
                         raise RuntimeError(f"OpenRouter stream: {str(msg)[:300]}")
-                    if _guard_chunk(guard, chunk):
+                    if _guard_chunk(guards, chunk):
                         # Encerrar aqui fecha a conexão e o provedor para de gerar (e de
                         # cobrar) a continuação. Custo: o chunk de `usage`, que só viria
                         # no fim, não chega — este turno fica sem contabilização exata.
@@ -445,7 +478,12 @@ async def stream_chat(
                         yield chunk
                         return
                     yield chunk
-                resto = guard.flush()
-                if resto:
-                    yield {"choices": [{"index": 0, "delta": {"content": resto}}]}
+                resto_r, resto = guards.reasoning.flush(), guards.content.flush()
+                if resto_r or resto:
+                    delta_final: dict[str, str] = {}
+                    if resto_r:
+                        delta_final["reasoning"] = resto_r
+                    if resto:
+                        delta_final["content"] = resto
+                    yield {"choices": [{"index": 0, "delta": delta_final}]}
             return

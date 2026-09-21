@@ -33,6 +33,10 @@ class ActivityTrace:
                 "name": event.get("name"),
                 "data": event.get("arguments" if kind == "tool_call" else "result"),
             }})
+        elif kind == "reasoning_answer":
+            # o último bloco de raciocínio era a resposta: sai das etapas
+            if self.steps and self.steps[-1]["kind"] == "reasoning":
+                self.steps.pop()
         elif kind == "guard_reset":
             self.archive()
             self.steps.append({"kind": "commentary", "text": "Revisando a resposta após a verificação de saída."})

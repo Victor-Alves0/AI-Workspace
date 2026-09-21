@@ -223,6 +223,11 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
                     collected["streamed"] += ev.get("text", "")
                 elif t == "reasoning":
                     collected["reasoning_streamed"] += ev.get("text", "")
+                elif t == "reasoning_answer":
+                    # o fim do raciocínio era a resposta (ver orchestrator)
+                    tail = ev.get("text", "")
+                    if tail and collected["reasoning_streamed"].endswith(tail):
+                        collected["reasoning_streamed"] = collected["reasoning_streamed"][: -len(tail)]
                 elif t == "usage" and isinstance(ev.get("usage"), dict):
                     # ``done`` normalmente traz o total consolidado e o substitui
                     # abaixo. Se o provider falhar depois de reportar uso mas antes

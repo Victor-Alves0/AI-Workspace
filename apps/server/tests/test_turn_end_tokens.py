@@ -216,3 +216,125 @@ def test_completion_sem_stream_tambem_corta():
     """Títulos, roteadores e juízes usam a completion sem stream."""
     assert cut(f"Título do chat{EOS}Outro título") == "Título do chat"
     assert turn_end.cut("sem token nenhum") == "sem token nenhum"
+
+
+# --------------------------------------------------------------------------- #
+# Fim de turno dentro do RACIOCÍNIO                                            #
+# --------------------------------------------------------------------------- #
+# O caso real (Ayala, DeepSeek V4 Flash, raciocínio "médio"): em 14 de 64 respostas a
+# cena inteira foi para o "Pensou por…" terminando em <｜end▁of▁sentence｜>, e a
+# resposta visível era a continuação que o provedor não parou — às vezes uma cópia,
+# às vezes outra versão, às vezes só um fecho de duas linhas.
+CENA = "A porta abre. Lea entra sozinha.\n\n— A escolha é sua. O que você decide?"
+
+
+@pytest.mark.asyncio
+async def test_stream_para_quando_o_raciocinio_encerra_o_turno(monkeypatch):
+    linhas = [
+        _sse({"reasoning": "A porta abre. Lea entra sozinha.\n\n"}),
+        _sse({"reasoning": "— A escolha é sua. O que você decide?<｜end▁of"}),
+        _sse({"reasoning": "▁sentence｜>"}),
+        _sse({"content": "Você olha para ela. A escolha está na sua frente."}),
+        _sse({}, finish="stop"),
+        "data: [DONE]",
+    ]
+    _Resp.linhas, _Resp.lidas = linhas, 0
+    monkeypatch.setattr(openrouter.httpx, "AsyncClient", _Client)
+
+    chunks = [c async for c in openrouter.stream_chat("key", "deepseek/x", [{"role": "user", "content": "oi"}])]
+
+    pensamento = "".join((ch.get("delta") or {}).get("reasoning") or "" for c in chunks for ch in c["choices"])
+    texto = "".join((ch.get("delta") or {}).get("content") or "" for c in chunks for ch in c["choices"])
+    assert pensamento == CENA
+    assert texto == ""  # o fecho pós-fim-de-turno nem foi lido
+    assert _Resp.lidas == 3
+    assert chunks[-1]["choices"][0]["turn_end_in_reasoning"] is True
+
+
+@pytest.mark.asyncio
+async def test_menor_que_retido_no_raciocinio_nao_se_perde(monkeypatch):
+    """O raciocínio pode terminar num `<` (ex.: "se x <") logo antes da resposta."""
+    linhas = [
+        _sse({"reasoning": "vale se x <"}),
+        _sse({"content": "Resposta."}),
+        _sse({}, finish="stop"),
+        "data: [DONE]",
+    ]
+    _Resp.linhas, _Resp.lidas = linhas, 0
+    monkeypatch.setattr(openrouter.httpx, "AsyncClient", _Client)
+
+    chunks = [c async for c in openrouter.stream_chat("key", "m/x", [{"role": "user", "content": "oi"}])]
+
+    pensamento = "".join((ch.get("delta") or {}).get("reasoning") or "" for c in chunks for ch in c["choices"])
+    assert pensamento == "vale se x <"
+
+
+def test_turno_inteiro_promove_o_raciocinio_a_resposta(monkeypatch):
+    """Ponta a ponta (provedor real com HTTP simulado → run_turn → done): a cena sai
+    do raciocínio e vira a resposta; o fecho inventado depois do fim de turno some."""
+    import asyncio
+
+    from aiworkspace.chat.orchestrator import TurnSession, run_turn
+
+    _Resp.linhas, _Resp.lidas = [
+        _sse({"reasoning": CENA + EOS}),
+        _sse({"content": "Você olha para ela. A escolha está na sua frente."}),
+        _sse({}, finish="stop"),
+        "data: [DONE]",
+    ], 0
+    monkeypatch.setattr(openrouter.httpx, "AsyncClient", _Client)
+
+    async def go():
+        return [ev async for ev in run_turn(
+            api_key="k", model="deepseek/x", history=[], user_text="pode entrar",
+            chat_system_prompt=None, params={}, use_tools=False, sift=None,
+            session=TurnSession(user_id="u"))]
+
+    eventos = asyncio.run(go())
+    done = next(e for e in eventos if e["type"] == "done")
+
+    assert done["content"] == CENA
+    assert "escolha está na sua frente" not in done["content"]
+    # nada sobra no "Pensou por…": aquele bloco inteiro era a resposta
+    assert not (done.get("reasoning") or {}).get("text")
+    assert any(e["type"] == "reasoning_answer" for e in eventos)
+
+
+def test_raciocinio_normal_continua_raciocinio(monkeypatch):
+    """Sem fim de turno no raciocínio, nada muda: pensamento fica no "Pensou por…"."""
+    import asyncio
+
+    from aiworkspace.chat.orchestrator import TurnSession, run_turn
+
+    _Resp.linhas, _Resp.lidas = [
+        _sse({"reasoning": "O jogador abriu a porta. Narrar a entrada da Lea."}),
+        _sse({"content": CENA}),
+        _sse({}, finish="stop"),
+        "data: [DONE]",
+    ], 0
+    monkeypatch.setattr(openrouter.httpx, "AsyncClient", _Client)
+
+    async def go():
+        return [ev async for ev in run_turn(
+            api_key="k", model="deepseek/x", history=[], user_text="pode entrar",
+            chat_system_prompt=None, params={}, use_tools=False, sift=None,
+            session=TurnSession(user_id="u"))]
+
+    eventos = asyncio.run(go())
+    done = next(e for e in eventos if e["type"] == "done")
+
+    assert done["content"] == CENA
+    assert done["reasoning"]["text"] == "O jogador abriu a porta. Narrar a entrada da Lea."
+    assert not any(e["type"] == "reasoning_answer" for e in eventos)
+
+
+def test_gravacao_tira_o_bloco_promovido_das_etapas():
+    """O "Pensou por…" salvo é montado pelo ActivityTrace a partir dos eventos."""
+    from aiworkspace.chat.activity import ActivityTrace
+
+    trace = ActivityTrace()
+    trace.add({"type": "reasoning", "text": CENA})
+    trace.add({"type": "reasoning_answer", "text": CENA})
+    trace.add({"type": "token", "text": CENA})
+
+    assert trace.reasoning(None) is None

@@ -238,6 +238,13 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         if (last?.kind === "reasoning") state.steps[state.steps.length - 1] = { ...last, text: last.text + ev.text };
         else state.steps.push({ kind: "reasoning", text: ev.text });
         maybeFlush();
+      } else if (ev.type === "reasoning_answer") {
+        // o modelo escreveu a resposta no canal de raciocínio e encerrou ali: esse
+        // bloco sai do "Pensou por…" (o texto chega em seguida como resposta)
+        const tail = String(ev.text || "");
+        if (tail && state.reason.endsWith(tail)) state.reason = state.reason.slice(0, -tail.length);
+        if (state.steps[state.steps.length - 1]?.kind === "reasoning") state.steps.pop();
+        maybeFlush();
       } else if (ev.type === "reasoning_effort") {
         // provider recusou o nível pedido; o backend rebaixou → o seletor reflete
         if (paint()) deps.onReasoningEffort?.(ev.effort);
