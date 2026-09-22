@@ -91,6 +91,16 @@ Get-ChildItem $Site -Directory -Recurse -Include "tests", "test" |
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 Get-ChildItem $Site -Directory -Recurse -Filter "__pycache__" |
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+# stubs de bibliotecas de TERCEIROS do jedi (~4,3 mil arquivos): sem eles o jedi
+# analisa o código-fonte da biblioteca; os stubs da stdlib ficam
+Remove-Item -Recurse -Force (Join-Path $Site "jedi\third_party\typeshed\stubs") -ErrorAction SilentlyContinue
+
+# Os pacotes só-Python (~10 mil arquivos) viram UM arquivo: site-packages.zip, de onde
+# o Python importa direto (ver pack_site.py). Roda com o Python embarcado para o .pyc
+# gravado no zip ser da mesma versão que vai executá-lo.
+& (Join-Path $PyDir "python.exe") (Join-Path $PSScriptRoot "pack_site.py") $Site (Join-Path $PyDir "Lib\site-packages.zip")
+if ($LASTEXITCODE -ne 0) { throw "empacotamento do site-packages falhou" }
+Add-Content $pth.FullName "Lib\site-packages.zip" -Encoding ascii
 
 # ...mas sem NENHUM .pyc a 1ª abertura leva ~1 min (compila tudo que importa, com o
 # antivírus olhando cada arquivo novo). Importar o app uma vez com o próprio Python
