@@ -74,8 +74,36 @@ New-Item -ItemType Directory -Force $Site | Out-Null
 Write-Host "==> instalando o backend e dependencias (pode demorar)"
 python -m pip install --upgrade pip
 # [whatsapp-local]: o WhatsApp por QR roda embutido (neonize) — sem Docker, nao ha Evolution
-python -m pip install --target $Site "$($ServerDir)[whatsapp-local]"
+# --no-compile: o pip pré-compila TODO .py (~11 mil __pycache__, 130 MB), inclusive
+# módulos que nunca são importados. Sem isso, o Python compila no 1º uso só o que
+# carrega, dentro da pasta do app (instalação por usuário = gravável).
+python -m pip install --no-compile --target $Site "$($ServerDir)[whatsapp-local]"
 if ($LASTEXITCODE -ne 0) { throw "pip install do backend falhou" }
+
+# O tempo de instalação é dominado pela QUANTIDADE de arquivos (o instalador e o
+# antivírus tratam um por um), não pelo tamanho. Suítes de teste dos pacotes não
+# rodam em produção. Só pastas "tests"/"test": "testing" (numpy.testing,
+# sqlalchemy.testing) pode ser importada em tempo de execução. O jedi fica inteiro
+# (os .pyi dele são os stubs que ele usa).
+Get-ChildItem $Site -Directory -Recurse -Include "tests", "test" |
+    Where-Object { $_.FullName -notlike "*\jedi\*" } |
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+Get-ChildItem $Site -Directory -Recurse -Filter "__pycache__" |
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+# ...mas sem NENHUM .pyc a 1ª abertura leva ~1 min (compila tudo que importa, com o
+# antivírus olhando cada arquivo novo). Importar o app uma vez com o próprio Python
+# embarcado gera o .pyc só do que ele carrega de fato (~2,4 mil, não 11 mil).
+Write-Host "==> pré-compilando os módulos que o app carrega"
+$env:APP_SECRET = "build-only-" + ("x" * 32)
+& (Join-Path $PyDir "python.exe") -c @"
+import importlib
+for m in ('aiworkspace.main', 'aiworkspace.desktop', 'fastembed', 'onnxruntime', 'neonize',
+          'mem0', 'langchain_community', 'yt_dlp', 'phonenumbers', 'PIL', 'jedi'):
+    importlib.import_module(m)
+"@
+if ($LASTEXITCODE -ne 0) { throw "o backend não importa com o Python embarcado" }
+Remove-Item Env:APP_SECRET
 
 # ----------------------------------------------------------------------------- #
 # 2) Postgres 16 (binarios EDB)
@@ -86,6 +114,13 @@ $PgTmp = Join-Path $Work "_pg"
 Unzip $PgZip $PgTmp
 # o zip da EDB extrai numa pasta "pgsql/"
 Move-Item (Join-Path $PgTmp "pgsql") (Join-Path $Out "pgsql")
+# O zip da EDB traz o pgAdmin 4 (~16 mil arquivos, 670 MB), o StackBuilder, a
+# documentação, os headers de compilação e os símbolos de depuração: nada disso roda
+# no app, que só usa bin/ (postgres, initdb, pg_ctl, pg_dump, psql), lib/ e share/.
+# Era ~80% dos arquivos do instalador.
+foreach ($extra in @("pgAdmin 4", "StackBuilder", "doc", "include", "symbols")) {
+    Remove-Item -Recurse -Force (Join-Path $Out "pgsql\$extra") -ErrorAction SilentlyContinue
+}
 
 # ----------------------------------------------------------------------------- #
 # 3) pgvector (merge de lib/ e share/ dentro do pgsql)
