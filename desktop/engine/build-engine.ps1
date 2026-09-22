@@ -15,6 +15,7 @@ param(
     # build comunitario do pgvector p/ Windows (vector.dll + share/extension)
     [string]$PgvectorRepo = "andreiramani/pgvector_pgsql_windows",
     [string]$PgvectorTag  = "0.8.3_16.14",
+    [string]$PgvectorAsset = "vector.v0.8.3-pg16.zip",
     # pasta final do bundle. Padrao: desktop/engine/out/aiworkspace-engine.
     # O build do app desktop passa desktop/src-tauri/engine (vira recurso do Tauri).
     [string]$OutDir = "",
@@ -125,16 +126,9 @@ foreach ($extra in @("pgAdmin 4", "StackBuilder", "doc", "include", "symbols")) 
 # ----------------------------------------------------------------------------- #
 # 3) pgvector (merge de lib/ e share/ dentro do pgsql)
 # ----------------------------------------------------------------------------- #
-$asset = (& gh release view $PgvectorTag --repo $PgvectorRepo `
-    --json assets --jq ".assets[] | select(.name|endswith(\"".zip\"")) | .url" 2>$null) | Select-Object -First 1
-if (-not $asset) {
-    # fallback sem gh: monta a URL de download direto do primeiro asset via API
-    $asset = (curl.exe -fsSL "https://api.github.com/repos/$PgvectorRepo/releases/tags/$PgvectorTag" |
-        ConvertFrom-Json).assets |
-        Where-Object { $_.name -like "*.zip" } |
-        Select-Object -First 1 -ExpandProperty browser_download_url
-}
-if (-not $asset) { throw "nao achei o asset .zip do pgvector em $PgvectorRepo@$PgvectorTag" }
+# link direto do arquivo (versão fixada): consultar a API do GitHub para descobrir o
+# nome falhava no CI — o gh às vezes falha e a API sem token responde 403 por limite
+$asset = "https://github.com/$PgvectorRepo/releases/download/$PgvectorTag/$PgvectorAsset"
 $PvZip = Join-Path $Dl "pgvector.zip"
 Get-File $asset $PvZip
 $PvTmp = Join-Path $Work "_pv"
