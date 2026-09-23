@@ -100,9 +100,61 @@ def _rotate_value(raw: str, old: Fernet, new: Fernet, prefixed: bool) -> str | N
     return (_FIELD_PREFIX + fresh) if prefixed else fresh
 
 
+# Tokens Fernet guardados DENTRO de JSON (crypto.encrypt → app_settings, conexões de
+# integração: tokens do ChatGPT, client secrets OAuth, chaves do ElevenLabs/Tuya…).
+# Todo token Fernet começa com a versão 0x80 → "gAAAAA" em base64.
+_FERNET_PREFIX = "gAAAAA"
+
+
+def _json_targets() -> list[tuple[str, str, str, str]]:
+    """(tabela, coluna, pk, tipo) de toda coluna JSON/JSONB do esquema."""
+    from sqlalchemy.dialects.postgresql import JSONB
+    from sqlalchemy.types import JSON
+
+    out: list[tuple[str, str, str, str]] = []
+    for mapper in Base.registry.mappers:
+        tbl = mapper.local_table
+        if tbl is None or not tbl.primary_key.columns:
+            continue
+        pk = list(tbl.primary_key.columns)[0].name
+        for col in tbl.columns:
+            if isinstance(col.type, JSONB):
+                out.append((tbl.name, col.name, pk, "jsonb"))
+            elif isinstance(col.type, JSON):
+                out.append((tbl.name, col.name, pk, "json"))
+    return sorted(set(out))
+
+
+def _rotate_json(obj, old: Fernet, new: Fernet, stats: dict):
+    """Recifra, recursivamente, as strings que são tokens Fernet da chave antiga."""
+    if isinstance(obj, dict):
+        return {k: _rotate_json(v, old, new, stats) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_rotate_json(v, old, new, stats) for v in obj]
+    if isinstance(obj, str) and obj.startswith(_FERNET_PREFIX) and len(obj) > 40:
+        try:
+            novo = _rotate_value(obj, old, new, prefixed=False)
+        except InvalidToken:
+            stats["failed"] += 1
+            return obj
+        if novo is None:
+            stats["skipped"] += 1
+            return obj
+        stats["changed"] += 1
+        return novo
+    return obj
+
+
 def rotate(old_secret: str, new_secret: str, *, dry_run: bool) -> dict:
-    old, new = _fernet_for(old_secret), _fernet_for(new_secret)
-    eng = create_engine(get_settings().sync_database_url)
+    return rotate_keys(_fernet_for(old_secret), _fernet_for(new_secret), dry_run=dry_run)
+
+
+def rotate_keys(old: Fernet, new: Fernet, *, dry_run: bool, database_url: str | None = None) -> dict:
+    """Recifra tudo o que a chave `old` cifrou para a chave `new`. Usado pela rotação
+    do APP_SECRET e pela restauração de um backup de OUTRA instalação (migração)."""
+    import json as _json
+
+    eng = create_engine(database_url or get_settings().sync_database_url)
     summary: dict[str, dict] = {}
     total_changed = total_skipped = total_failed = 0
     with eng.begin() as conn:
@@ -129,6 +181,25 @@ def rotate(old_secret: str, new_secret: str, *, dry_run: bool) -> dict:
                 changed += 1
             summary[f"{tg.table}.{tg.column}"] = {"changed": changed, "skipped": skipped, "failed": failed}
             total_changed += changed; total_skipped += skipped; total_failed += failed
+        # segredos dentro de JSON: o LIKE deixa de fora as linhas sem nenhum token
+        for table, column, pk, kind in _json_targets():
+            rows = conn.execute(
+                text(f'SELECT "{pk}" AS id, "{column}" AS val FROM "{table}" '
+                     f'WHERE "{column}"::text LIKE :p'),
+                {"p": f"%{_FERNET_PREFIX}%"},
+            ).all()
+            st = {"changed": 0, "skipped": 0, "failed": 0}
+            for rid, val in rows:
+                antes = st["changed"]
+                novo = _rotate_json(val, old, new, st)
+                if st["changed"] > antes and not dry_run:
+                    conn.execute(
+                        text(f'UPDATE "{table}" SET "{column}" = CAST(:v AS {kind}) WHERE "{pk}" = :id'),
+                        {"v": _json.dumps(novo), "id": rid},
+                    )
+            if any(st.values()):
+                summary[f"{table}.{column}"] = st
+            total_changed += st["changed"]; total_skipped += st["skipped"]; total_failed += st["failed"]
         if dry_run:
             conn.rollback()  # garante que nada foi escrito no dry-run
     eng.dispose()

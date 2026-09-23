@@ -47,8 +47,9 @@ def test_expressoes_invalidas_explicam(expr):
 
 
 def test_linha_do_chat():
+    """O texto é o que a IA lê (sem markdown); a interface desenha o cartão pelos dados."""
     linha = dice.chat_line(dice.roll("1d20+2", _dado(14)), "Furtividade")
-    assert linha == "🎲 **1d20+2** — Furtividade: [14] + 2 = **16**"
+    assert linha == "🎲 Rolagem de dados do usuário — 1d20+2 (Furtividade): [14] + 2 = 16"
 
 
 def test_rolagem_real_fica_no_intervalo():

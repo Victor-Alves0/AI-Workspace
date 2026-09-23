@@ -68,7 +68,6 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
   const [pasted, setPasted] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [modelsDraft, setModelsDraft] = useState<string | null>(null);
 
   // Device auth é consultado pelo servidor; no fallback de navegador, basta
   // consultar o status porque o callback local é quem conclui o OAuth.
@@ -186,30 +185,17 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
     }
   }
 
-  async function saveModels() {
-    if (modelsDraft == null) return;
-    setErr(null);
-    try {
-      await api.put("/integrations/subscriptions/chatgpt/models", {
-        models: modelsDraft.split(",").map((s) => s.trim()).filter(Boolean),
-      });
-      setModelsDraft(null);
-      await reload();
-    } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao salvar modelos");
-    }
-  }
-
   return (
     <div className="space-y-2.5 rounded-xl border border-border bg-surface p-3">
-      <p className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-ink">
-        ChatGPT (Plus/Pro) — Codex
+      <div>
+        <p className="text-xs font-semibold text-ink">ChatGPT</p>
         {st.connected && (
-          <span className="inline-flex items-center gap-0.5 text-[10px] font-normal text-green-500">
-            <Check size={11} /> conectado{st.email ? ` · ${st.email}` : ""}{st.plan ? ` · ${st.plan}` : ""}
-          </span>
+          <p className="mt-0.5 flex items-center gap-1 text-[11px] text-green-500">
+            <Check size={12} className="shrink-0" />
+            <span className="truncate">conectado{st.email ? ` · ${st.email}` : ""}{st.plan ? ` · ${st.plan}` : ""}</span>
+          </p>
         )}
-      </p>
+      </div>
 
       {!st.connected && !authUrl && (
         <>
@@ -314,29 +300,6 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
 
       {st.connected && (
         <div className="space-y-2">
-          <div>
-            <p className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted">Modelos nos seletores</p>
-            {modelsDraft == null ? (
-              <div className="flex flex-wrap items-center gap-1.5">
-                {(st.models ?? []).map((m) => (
-                  <span key={m} className="rounded-full bg-surface2 px-2.5 py-1 font-mono text-[11px] text-ink-soft">{m}</span>
-                ))}
-                <button
-                  onClick={() => setModelsDraft((st.models ?? []).map((m) => m.replace(/^codex\//, "")).join(", "))}
-                  className="rounded-full border border-border px-2.5 py-1 text-[11px] text-muted transition-colors hover:bg-hover hover:text-ink">
-                  Editar
-                </button>
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2">
-                <input value={modelsDraft} onChange={(e) => setModelsDraft(e.target.value)}
-                  placeholder="gpt-5, gpt-5-codex"
-                  className="w-full min-w-0 flex-1 basis-52 rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-xs text-ink outline-none focus:border-accent" />
-                <button onClick={saveModels} className="shrink-0 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover">Salvar</button>
-                <button onClick={() => setModelsDraft(null)} className="shrink-0 rounded-full border border-border px-3 py-1.5 text-xs text-muted hover:bg-hover hover:text-ink">Cancelar</button>
-              </div>
-            )}
-          </div>
           <button onClick={disconnect}
             className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:bg-hover hover:text-red-400">
             <Trash2 size={13} /> Desconectar

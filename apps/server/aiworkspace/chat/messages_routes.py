@@ -192,8 +192,12 @@ async def roll_dice(
         resultado = dice.roll(body.expression)
     except dice.DiceError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
-    linha = dice.chat_line(resultado, body.label.strip())
-    msg = Message(chat_id=chat.id, role="user", content=linha)
+    rotulo = body.label.strip()
+    linha = dice.chat_line(resultado, rotulo)
+    # role "user" + content = a IA vê a rolagem no próximo turno (entra no histórico);
+    # usage.kind="dice" = a interface a desenha como cartão no centro, não como bolha
+    msg = Message(chat_id=chat.id, role="user", content=linha,
+                  usage={"kind": "dice", "label": rotulo, **resultado.as_dict()})
     db.add(msg)
     await db.commit()
     return {"ok": True, "content": linha, "result": resultado.as_dict(), "message_id": str(msg.id)}

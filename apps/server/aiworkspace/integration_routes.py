@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import time
 import uuid
@@ -18,7 +19,7 @@ from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1109,6 +1110,29 @@ async def openrouter_connect(user: User = Depends(require_approved)):
     return RedirectResponse(openrouter_oauth.authorization_url(str(user.id)))
 
 
+@router.get("/providers/openrouter/connect-url")
+async def openrouter_connect_url(user: User = Depends(require_approved)):
+    """URL de autorização para abrir no NAVEGADOR do usuário (fora do app). O
+    `/connect` redireciona na própria janela e exige a sessão — que o navegador
+    externo não tem. A identidade viaja no `state` assinado, não no cookie."""
+    return {"url": openrouter_oauth.authorization_url(str(user.id), external=True)}
+
+
+def _external_done(ok: bool, detail: str = "") -> HTMLResponse:
+    """Fim do login aberto no navegador: o app confere sozinho e segue de lá."""
+    titulo = "OpenRouter conectado" if ok else "Não foi possível conectar"
+    texto = ("Pode fechar esta aba e voltar ao AI Workspace." if ok
+             else f"Volte ao AI Workspace e tente de novo. ({html.escape(detail)})")
+    return HTMLResponse(
+        "<!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width'>"
+        f"<title>{titulo}</title>"
+        "<body style='font-family:system-ui,sans-serif;background:#111113;color:#e7e7ea;"
+        "display:grid;place-items:center;height:100vh;margin:0'>"
+        f"<div style='text-align:center'><h2 style='margin:0 0 8px'>{titulo}</h2>"
+        f"<p style='color:#9a9aa3;margin:0'>{texto}</p></div></body>"
+    )
+
+
 @router.get("/providers/openrouter/callback/{state}")
 async def openrouter_callback(
     state: str, code: str = "", error: str = "", db: AsyncSession = Depends(get_db)
@@ -1118,8 +1142,12 @@ async def openrouter_callback(
     O `state` vem no CAMINHO (ver openrouter_oauth): a URL de autorização não tem
     parâmetro de state, então ele viaja dentro do próprio callback_url."""
     web = get_settings().web_origin.split(",")[0].strip().rstrip("/")
+    external = openrouter_oauth.is_external(state)
 
-    def _back(kv: str) -> RedirectResponse:
+    def _back(kv: str):
+        if external:  # aberto no navegador do usuário: não abrir o app ali
+            motivo = kv.split("reason=")[-1] if "reason=" in kv else ""
+            return _external_done(kv.endswith("=connected"), motivo)
         return RedirectResponse(f"{web}/chat?{kv}")
 
     if error:

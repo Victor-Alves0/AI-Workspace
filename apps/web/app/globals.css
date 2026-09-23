@@ -122,14 +122,20 @@ select:focus-visible {
 /* ------------------------------------------------------------------ */
 /* Animações                                                           */
 /* ------------------------------------------------------------------ */
+/* `translate`/`scale` (propriedades próprias), NÃO `transform`: animar `transform`
+   apagava o `-translate-x-1/2` do Tailwind durante a animação — menus centralizados
+   (círculo de contexto, botão "ir ao fim") surgiam deslocados e só depois pulavam
+   para o centro. As propriedades separadas se somam ao transform do elemento. */
 @keyframes pop {
   from {
     opacity: 0;
-    transform: translateY(-4px) scale(0.98);
+    translate: 0 -4px;
+    scale: 0.98;
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    translate: 0 0;
+    scale: 1;
   }
 }
 .animate-pop {

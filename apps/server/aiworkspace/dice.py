@@ -140,6 +140,8 @@ def roll(expression: str, roller: Roller = secure_roller) -> RollResult:
 
 
 def chat_line(result: RollResult, label: str = "") -> str:
-    """Texto da rolagem como aparece na conversa (e no contexto do modelo)."""
-    titulo = f" — {label}" if label else ""
-    return f"🎲 **{result.expression}**{titulo}: {result.breakdown()} = **{result.total}**"
+    """Texto da rolagem no CONTEXTO do modelo (sem markdown: a interface desenha a
+    rolagem como cartão a partir dos dados estruturados, não deste texto)."""
+    titulo = f" ({label})" if label else ""
+    return (f"🎲 Rolagem de dados do usuário — {result.expression}{titulo}: "
+            f"{result.breakdown()} = {result.total}")

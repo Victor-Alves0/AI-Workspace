@@ -83,6 +83,30 @@ def _range_start(range_key: str, today: date, earliest: date | None) -> tuple[da
     return start, gran
 
 
+def _parse_day(v: str | None) -> date | None:
+    try:
+        return date.fromisoformat((v or "").strip()[:10]) if v else None
+    except ValueError:
+        return None
+
+
+def _window(range_: str, from_: str | None, to: str | None, today: date,
+            earliest: date | None) -> tuple[str, date, date, str]:
+    """(chave, início, fim, granularidade). Com `from`/`to` válidos o intervalo é o
+    escolhido pelo usuário ("custom"); senão uma das janelas prontas, até hoje."""
+    ini, fim = _parse_day(from_), _parse_day(to)
+    if ini and fim:
+        if ini > fim:
+            ini, fim = fim, ini
+        fim = min(fim, today)
+        ini = min(ini, fim)
+        span = (fim - ini).days
+        return "custom", ini, fim, ("day" if span <= 31 else "week" if span <= 200 else "month")
+    key = range_ if range_ in _RANGES else "7d"
+    start, gran = _range_start(key, today, earliest)
+    return key, start, today, gran
+
+
 def _bucket_key(d: date, gran: str) -> date:
     if gran == "day":
         return d
@@ -116,6 +140,8 @@ def _bucket_label(d: date, gran: str, range_key: str) -> str:
 @router.get("/overview")
 async def overview(
     range_: str = Query("7d", alias="range", description="7d | 30d | 6m | 1y | all"),
+    from_: str | None = Query(None, alias="from", description="início AAAA-MM-DD (intervalo)"),
+    to: str | None = Query(None, description="fim AAAA-MM-DD (intervalo)"),
     tz_offset: int = Query(0, description="JS getTimezoneOffset() em minutos"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_approved),
@@ -142,7 +168,6 @@ async def overview(
 
     # baldes temporais (locais, deslocando pelo tz_offset do navegador). A janela e
     # a granularidade dependem do 'range' escolhido pelo usuário.
-    range_key = range_ if range_ in _RANGES else "7d"
     off = timedelta(minutes=tz_offset)
     local_today = (datetime.now(timezone.utc) - off).date()
 
@@ -153,13 +178,13 @@ async def overview(
             c0 = c0 if c0.tzinfo else c0.replace(tzinfo=timezone.utc)
             earliest = (c0.astimezone(timezone.utc) - off).date()
 
-    start, gran = _range_start(range_key, local_today, earliest)
+    range_key, start, end, gran = _window(range_, from_, to, local_today, earliest)
     # janela ANTERIOR de mesmo tamanho (p/ o "▲/▼ % vs período anterior")
-    span_days = (local_today - start).days + 1
+    span_days = (end - start).days + 1
     prev_start = start - timedelta(days=span_days)
     prev_end = start - timedelta(days=1)
 
-    keys = _bucket_keys(start, local_today, gran)
+    keys = _bucket_keys(start, end, gran)
     per_day = {
         d.isoformat(): {
             "date": d.isoformat(),
@@ -200,7 +225,7 @@ async def overview(
             prev["tokens"] += tokens
             prev["cost"] += cost
             prev["messages"] += 1
-        if local_date < start:
+        if local_date < start or local_date > end:
             continue
 
         # ---- daqui p/ baixo: DENTRO da janela selecionada ----
@@ -297,6 +322,8 @@ async def overview(
         "per_day": per_day_list,
         "series": series,
         "range": range_key,
+        "from": start.isoformat(),
+        "to": end.isoformat(),
         "granularity": gran,
         "credits": credits,
         "activity": activity,
@@ -321,6 +348,8 @@ async def overview(
 async def model_detail(
     key: str = Query(..., description="id do modelo (model_config_id ou id base)"),
     range_: str = Query("7d", alias="range", description="7d | 30d | 6m | 1y | all"),
+    from_: str | None = Query(None, alias="from", description="início AAAA-MM-DD (intervalo)"),
+    to: str | None = Query(None, description="fim AAAA-MM-DD (intervalo)"),
     tz_offset: int = Query(0, description="JS getTimezoneOffset() em minutos"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_approved),
@@ -344,7 +373,6 @@ async def model_detail(
         )
     ).all()
 
-    range_key = range_ if range_ in _RANGES else "7d"
     off = timedelta(minutes=tz_offset)
     local_today = (datetime.now(timezone.utc) - off).date()
 
@@ -358,8 +386,8 @@ async def model_detail(
             earliest = (c0.astimezone(timezone.utc) - off).date()
             break
 
-    start, gran = _range_start(range_key, local_today, earliest)
-    keys = _bucket_keys(start, local_today, gran)
+    range_key, start, end, gran = _window(range_, from_, to, local_today, earliest)
+    keys = _bucket_keys(start, end, gran)
     per_day = {
         d.isoformat(): {"date": d.isoformat(), "label": _bucket_label(d, gran, range_key),
                         "tokens": 0, "cost": 0.0, "messages": 0}
@@ -380,7 +408,7 @@ async def model_detail(
             continue
         cdt = r.created_at if r.created_at.tzinfo else r.created_at.replace(tzinfo=timezone.utc)
         local_date = (cdt.astimezone(timezone.utc) - off).date()
-        if local_date < start:
+        if local_date < start or local_date > end:
             continue
 
         name = (r.model_name or r.model or name).strip() or name
@@ -443,6 +471,8 @@ async def model_detail(
         "provider": provider,
         "vendor": "local" if provider == "ollama" else vendor,
         "range": range_key,
+        "from": start.isoformat(),
+        "to": end.isoformat(),
         "granularity": gran,
         "per_day": per_day_list,
         "by_tool": tool_list,

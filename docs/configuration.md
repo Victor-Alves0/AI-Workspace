@@ -184,6 +184,7 @@ they travel whole in the request to the provider.
 | Variable | Default | Description |
 |---|---|---|
 | `UPLOADS_DIR` | `/data/uploads` | Storage path (a named volume in compose). |
+| `UPDATE_CONTROL_DIR` | `/data/control` | Folder (bind-mounted from `./data/control`) where the admin panel drops update requests for the host agent (`sudo ./scripts/update-agent.sh install`). |
 | `UPLOAD_MAX_BYTES` | `500 MB` | Per file. |
 | `UPLOAD_IMAGE_MAX_BYTES` / `UPLOAD_AUDIO_MAX_BYTES` | `20 MB` / `25 MB` | Per image / per audio. |
 | `UPLOAD_MAX_PER_MESSAGE` | `20` | Attachments in one message. |

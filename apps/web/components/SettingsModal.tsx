@@ -170,7 +170,7 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Vosk", cat: "connections", view: "assistant-voice" },
   { label: "Testar escuta", cat: "connections", view: "assistant-voice" },
   // a chave do OpenRouter mora em Provedores (junto com os demais provedores de LLM)
-  { label: "Chave do OpenRouter", cat: "connections", view: "providers" },
+  { label: "Chave do OpenRouter", cat: "connections", view: "apis/providers" },
   { label: "Chave Tavily", cat: "connections", view: "apis/search" },
   { label: "Chave Brave Search", cat: "connections", view: "apis/search" },
   { label: "Chave Finnhub", cat: "connections", view: "apis/finance" },
@@ -178,8 +178,8 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Civitai", cat: "integrations", view: "civitai" },
   { label: "API token Civitai", cat: "integrations", view: "civitai" },
   { label: "Chave do provedor de voz", cat: "connections", view: "apis/voice" },
-  { label: "Provedores", cat: "connections", view: "providers" },
-  { label: "LiteLLM", cat: "connections", view: "providers" },
+  { label: "Provedores", cat: "connections", view: "apis/providers" },
+  { label: "LiteLLM", cat: "connections", view: "apis/providers" },
   { label: "Web", cat: "connections", view: "web" },
   { label: "SearXNG", cat: "connections", view: "web" },
   { label: "Pesquisa na web (mecanismo padrão)", cat: "connections", view: "web" },
@@ -584,19 +584,18 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
               />
             )}
             {cat === "connections" && (
-              (connView === "apis" || connView?.startsWith("apis/")) ? (
+              (connView === "apis" || connView?.startsWith("apis/") || connView === "providers") ? (
                 <ApisPanel
                   status={status}
                   reloadSecrets={reloadSecrets}
-                  initialSection={connView.includes("/") ? connView.split("/")[1] as ApiSection : undefined}
+                  initialSection={connView === "providers" ? "providers" : connView.includes("/") ? connView.split("/")[1] as ApiSection : undefined}
                   onBack={() => setConnView(null)}
+                  // recarrega TAMBÉM o status dos segredos: a chave do OpenRouter é salva
+                  // em Provedores e a aba Status a lê de lá (senão ficava "sem chave")
+                  onProvidersChanged={() => { onConnectionsChanged?.(); reloadSecrets(); }}
                 />
               ) : connView === "ollama" ? (
                 <OllamaPanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
-              ) : connView === "providers" ? (
-                // onChanged recarrega TAMBÉM o status dos segredos: a chave do OpenRouter
-                // é salva aqui agora e a aba Status a lê de lá (senão ficava "sem chave").
-                <ProvidersPanel onBack={() => setConnView(null)} onChanged={() => { onConnectionsChanged?.(); reloadSecrets(); }} />
               ) : connView === "voice" ? (
                 <VoicePanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
               ) : connView === "assistant-voice" ? (
@@ -620,11 +619,10 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                   <Heading>Conexões</Heading>
                   <CardGrid
                     cards={[
-                      { key: "apis", icon: <KeyRound size={22} />, name: "APIs", desc: "Voz, pesquisa e finanças" },
+                      { key: "apis", icon: <KeyRound size={22} />, name: "APIs", desc: "Provedores, voz, pesquisa e finanças" },
                       { key: "subscriptions", icon: <Crown size={22} />, name: "Assinaturas", desc: "Suas assinaturas" },
                       { key: "web", icon: <Globe size={22} />, name: "Web", desc: "Acesso a internet" },
                       { key: "ollama", icon: <SiOllama size={22} />, name: "Ollama", desc: "Utilize modelos locais" },
-                      { key: "providers", icon: <Server size={22} />, name: "Provedores", desc: "Provedores de LLMs" },
                       { key: "voice", icon: <AudioLines size={22} />, name: "Voz Local", desc: "Kokoro / clonagem de voz" },
                       { key: "assistant-voice", icon: <Bot size={22} />, name: "Assistente", desc: "Usabilidade de agentes" },
                     ]}
@@ -1854,7 +1852,7 @@ function StatusTab({ user, onGoto }: { user: User | null; onGoto: (cat: Cat, vie
           state={st.openrouter_key ? "ok" : "off"}
           detail={st.openrouter_key ? (orTest === "ok" ? "Válida ✓" : orTest === "fail" ? "A chave falhou no teste" : "Configurada") : "Necessária para conversar"}
           actionLabel={st.openrouter_key ? undefined : "Configurar"}
-          onAction={() => onGoto("connections", "providers")}
+          onAction={() => onGoto("connections", "apis/providers")}
           extra={st.openrouter_key && (
             <button onClick={testOpenRouter} disabled={testing} className="shrink-0 rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-60">
               {testing ? "Testando…" : "Testar"}
@@ -2180,9 +2178,9 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
  * lá cada provedor tem chave, base URL e modelos no MESMO lugar. Este arquivo cuida
  * das chaves de serviços (voz, pesquisa, finanças). */
 
-type ApiSection = "voice" | "search" | "finance";
+type ApiSection = "providers" | "voice" | "search" | "finance";
 
-const API_SECTION_COPY: Record<ApiSection, { title: string; description: string }> = {
+const API_SECTION_COPY: Record<Exclude<ApiSection, "providers">, { title: string; description: string }> = {
   voice: {
     title: "Voz",
     description: "Credencial usada para transcrição e síntese de voz.",
@@ -2243,16 +2241,21 @@ function ApisPanel({
   reloadSecrets,
   onBack,
   initialSection,
+  onProvidersChanged,
 }: {
   status: SecretStatus | null;
   reloadSecrets: () => void;
   onBack: () => void;
   initialSection?: ApiSection;
+  onProvidersChanged?: () => void;
 }) {
   const [section, setSection] = useState<ApiSection | null>(
-    initialSection && initialSection in API_SECTION_COPY ? initialSection : null,
+    initialSection && (initialSection === "providers" || initialSection in API_SECTION_COPY) ? initialSection : null,
   );
 
+  if (section === "providers") {
+    return <ProvidersPanel onBack={() => setSection(null)} onChanged={onProvidersChanged} />;
+  }
   if (section) {
     const copy = API_SECTION_COPY[section];
     return (
@@ -2283,13 +2286,17 @@ function ApisPanel({
 
   return (
     <DetailView title="APIs" onBack={onBack}>
-      {/* As chaves de LLM (OpenRouter, LiteLLM, personalizados) NÃO ficam mais aqui:
-          foram todas para Conexões → Provedores, junto com a URL e os modelos de cada
-          um. Aqui ficam só as chaves de SERVIÇOS (voz, pesquisa, finanças). */}
-      <p className="mb-4 text-xs leading-5 text-muted">
-        Escolha uma categoria para configurar as credenciais dos serviços.
-      </p>
-      <div className="grid gap-3 sm:grid-cols-3">
+      {/* Provedores (chaves de LLM: OpenRouter, LiteLLM, personalizados) é a 1ª seção;
+          as demais são chaves de SERVIÇOS (voz, pesquisa, finanças). */}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <ApiCategoryCard
+          icon={<Server size={20} />}
+          title="Provedores"
+          description="OpenRouter, LiteLLM e personalizados"
+          configured={status?.openrouter ? 1 : 0}
+          total={1}
+          onOpen={() => setSection("providers")}
+        />
         <ApiCategoryCard
           icon={<AudioLines size={20} />}
           title="Voz"

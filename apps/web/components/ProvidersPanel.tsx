@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronLeft, Loader2, LogIn, Plus, RefreshCw, Server, Trash2, TriangleAlert } from "lucide-react";
-import { api, API_URL, ApiError } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import { isDesktop, openExternal } from "@/lib/desktop";
 
 interface Provider {
   slug: string;
@@ -187,6 +188,38 @@ function OpenrouterForm({ configured, onCancel, onSaved }: {
   // o caminho de colar a chave continua existindo, mas escondido: o botão de
   // autorizar resolve o caso normal e evita o usuário caçar a chave no site.
   const [manual, setManual] = useState(false);
+  // autorizando no navegador do usuário: o painel confere até a chave chegar
+  const [waiting, setWaiting] = useState(false);
+  const vivo = useRef(true);
+  useEffect(() => () => { vivo.current = false; }, []);
+
+  /** Login no NAVEGADOR do usuário, não dentro do app: a volta do OpenRouter traz a
+   *  identidade no `state` assinado, então não depende da sessão daqui. */
+  async function connect() {
+    setErr("");
+    // na web, a aba abre JÁ no clique (depois de um await o navegador a bloqueia
+    // como pop-up); no desktop quem abre é o sistema, sem essa regra
+    const aba = isDesktop() ? null : window.open("about:blank", "_blank");
+    try {
+      const { url } = await api.get<{ url: string }>("/integrations/providers/openrouter/connect-url");
+      if (aba) { aba.opener = null; aba.location.href = url; }
+      else if (!(await openExternal(url))) { setErr("Não consegui abrir o navegador."); return; }
+    } catch (e) {
+      aba?.close();
+      setErr(e instanceof ApiError ? e.message : "Falha ao iniciar a conexão.");
+      return;
+    }
+    if (configured) return; // reconexão: a chave nova substitui a atual quando chegar
+    setWaiting(true);
+    for (let i = 0; i < 100 && vivo.current; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      try {
+        const st = await api.get<Record<string, boolean>>("/settings/secrets");
+        if (st.openrouter) { if (vivo.current) { setWaiting(false); onSaved(); } return; }
+      } catch { /* segue tentando */ }
+    }
+    if (vivo.current) setWaiting(false);
+  }
 
   async function save() {
     if (!key.trim()) { setErr("Informe a chave."); return; }
@@ -213,10 +246,12 @@ function OpenrouterForm({ configured, onCancel, onSaved }: {
 
       <div className="space-y-1.5">
         <button
-          onClick={() => { window.location.href = `${API_URL}/integrations/providers/openrouter/connect`; }}
-          className="flex items-center gap-2 rounded-full bg-accent px-5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
+          onClick={connect}
+          disabled={waiting}
+          className="flex items-center gap-2 rounded-full bg-accent px-5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-70"
         >
-          <LogIn size={15} /> {configured ? "Reconectar com OpenRouter" : "Conectar com OpenRouter"}
+          {waiting ? <Loader2 size={15} className="animate-spin" /> : <LogIn size={15} />}
+          {waiting ? "Aguardando a autorização no navegador…" : configured ? "Reconectar com OpenRouter" : "Conectar com OpenRouter"}
         </button>
         <p className="text-xs text-muted">
           Você autoriza no site do OpenRouter e a chave volta pronta — não precisa procurar nem colar nada.

@@ -10,10 +10,7 @@ import { api, API_URL, ApiError } from "@/lib/api";
 import type { AdminUser } from "@/lib/types";
 import ObservabilityView from "@/components/ObservabilityView";
 import HealthView from "@/components/HealthView";
-
-/* Repositório oficial do projeto — o botão "Padrão" da seção Atualização preenche
- * isto. Formato owner/repo: é o que a API do GitHub consome em /repos/{owner}/{repo}. */
-const DEFAULT_REPO = "Victor-Alves0/AI-Workspace";
+import { checkDesktopUpdate, installDesktopUpdate, isDesktop } from "@/lib/desktop";
 
 /* ------------------------------- navegação por cards ------------------------ */
 type AdminSection = "users" | "network" | "update" | "backup" | "observability" | "health";
@@ -52,24 +49,19 @@ function AdminCard({ icon, name, desc, badge, onClick }: {
   );
 }
 
-/* casca de uma seção: breadcrumb de volta + título */
-function AdminShell({ title, onBack, children }: { title: string; onBack: () => void; children: ReactNode }) {
-  return (
-    <div>
-      <nav className="mb-4 flex items-center gap-1.5 text-sm">
-        <button onClick={onBack} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-muted transition-colors hover:bg-hover hover:text-ink">
-          <ArrowLeft size={16} /> Painel do Admin
-        </button>
-        <span className="text-muted">/</span>
-        <span className="font-medium text-ink">{title}</span>
-      </nav>
-      {children}
-    </div>
-  );
+/* casca de uma seção. O "← Painel do Admin" fica só no cabeçalho da página: aqui
+   havia um segundo (breadcrumb), e a tela mostrava dois botões de voltar. */
+function AdminShell({ children }: { title: string; onBack: () => void; children: ReactNode }) {
+  return <div>{children}</div>;
 }
 
 interface NetworkCfg { host: string; port: number; allowed_ips: string[]; repo: string; branch: string; trust_proxy?: boolean; web_origin?: string }
-interface UpdateInfo { current_version: string; current_commit: string | null; repo: string; branch: string; latest_release: string | null; latest_commit: string | null; update_available: boolean; commits_behind: boolean | null; authenticated: boolean; error: string | null }
+interface UpdateInfo {
+  current_version: string; latest_release: string | null; update_available: boolean; error: string | null;
+  /** agente de atualização instalado no host (servidor Docker) */
+  agent?: boolean;
+  update_status?: { state: "running" | "done" | "failed"; at?: string; log?: string } | null;
+}
 
 const STATUS_STYLE: Record<string, string> = {
   active: "bg-green-500/15 text-green-400",
@@ -85,8 +77,6 @@ export default function AdminPage() {
   const [net, setNet] = useState<NetworkCfg | null>(null);
   const [ipsText, setIpsText] = useState("");
   const [netSaved, setNetSaved] = useState(false);
-  const [upd, setUpd] = useState<UpdateInfo | null>(null);
-  const [checking, setChecking] = useState(false);
   const [section, setSection] = useState<AdminSection | null>(null);
 
   const loadUsers = () =>
@@ -122,14 +112,6 @@ export default function AdminPage() {
     setNetSaved(true); setTimeout(() => setNetSaved(false), 1500);
   }
 
-  async function checkUpdate() {
-    setChecking(true);
-    try {
-      setUpd(await api.get<UpdateInfo>("/admin/update-check"));
-    } finally {
-      setChecking(false);
-    }
-  }
   const approve = async (id: string) => { await api.post(`/admin/users/${id}/approve`); loadUsers(); };
   const reject = async (id: string) => { await api.post(`/admin/users/${id}/reject`); loadUsers(); };
   const remove = async (id: string) => { await api.del(`/admin/users/${id}`); loadUsers(); };
@@ -333,91 +315,11 @@ export default function AdminPage() {
         </AdminShell>
         )}
 
-        {/* SEÇÃO: Atualização (checa o GitHub; aplica pelo update.sh no host) */}
+        {/* SEÇÃO: Atualização — compara com o repositório do projeto e atualiza */}
         {section === "update" && (
-        <AdminShell title="Atualização" onBack={() => setSection(null)}>
-        {net ? (
-          <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
-            <p className="flex items-center gap-2 text-sm font-semibold text-ink"><RefreshCw size={16} /> Atualização</p>
-            <div className="grid grid-cols-2 gap-3">
-              <label className="text-sm">
-                <span className="text-ink-soft">Repositório (owner/repo)</span>
-                <input value={net.repo ?? ""} onChange={(e) => setNet({ ...net, repo: e.target.value })} placeholder="usuario/ai-workspace"
-                  className="mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-sm text-ink outline-none focus:border-accent" />
-              </label>
-              <label className="text-sm">
-                <span className="text-ink-soft">Branch</span>
-                <input value={net.branch || "main"} onChange={(e) => setNet({ ...net, branch: e.target.value })} placeholder="main"
-                  className="mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-sm text-ink outline-none focus:border-accent" />
-              </label>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              {/* Preenche o repositório oficial do projeto. Guarda no formato owner/repo
-                  (é o que a API do GitHub usa em /repos/{owner}/{repo}); colar a URL
-                  inteira também funciona — o servidor normaliza. */}
-              <button
-                onClick={() => setNet({ ...net, repo: DEFAULT_REPO, branch: net.branch || "main" })}
-                title={`Preenche ${DEFAULT_REPO} (repositório oficial)`}
-                className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft hover:bg-surface2">
-                Padrão
-              </button>
-              <button onClick={saveNet} className="rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft hover:bg-surface2">Salvar repo</button>
-              <button onClick={checkUpdate} disabled={checking} className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-60">
-                <RefreshCw size={14} className={checking ? "animate-spin" : ""} /> Verificar atualizações
-              </button>
-            </div>
-            {upd && (
-              <div className={`rounded-lg border px-3 py-2.5 text-sm ${upd.update_available ? "border-amber-500/40 bg-amber-500/10" : "border-border bg-surface2"}`}>
-                {upd.error ? (
-                  <p className="text-red-400">{upd.error}</p>
-                ) : (
-                  <>
-                    <p className="text-ink">
-                      Versão atual: <span className="font-mono">{upd.current_version}</span>
-                      {upd.current_commit && <> (<span className="font-mono">{upd.current_commit}</span>)</>}
-                      {upd.latest_release && <> · Último release: <span className="font-mono">{upd.latest_release}</span></>}
-                      {upd.latest_commit && <> · Commit: <span className="font-mono">{upd.latest_commit}</span></>}
-                    </p>
-                    {upd.update_available ? (
-                      <p className="mt-1 text-amber-300">
-                        {upd.commits_behind
-                          ? `Há commits novos no branch ${upd.branch}.`
-                          : "Há uma atualização disponível."}{" "}
-                        No host, rode <span className="font-mono">./update.sh</span> para aplicar.
-                      </p>
-                    ) : (
-                      <p className="mt-1 text-green-400">
-                        {upd.commits_behind === false
-                          ? "Tudo atualizado (release e commit)."
-                          : `Você está na última release${upd.latest_release ? ` (${upd.latest_release})` : ""}.`}
-                      </p>
-                    )}
-                    {/* sem GIT_COMMIT na imagem não dá p/ comparar commits: o update.sh
-                        puxa o BRANCH, então dizer só "atualizado" esconderia código novo. */}
-                    {upd.commits_behind === null && upd.latest_commit && (
-                      <p className="mt-1 text-xs text-muted">
-                        Esta imagem não registra o commit de build, então só a release é
-                        comparada — o <span className="font-mono">./update.sh</span> acompanha o
-                        branch <span className="font-mono">{upd.branch}</span> e pode trazer
-                        código mais novo. Rode-o para passar a comparar commit a commit.
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
-            )}
-            <p className="text-xs leading-5 text-muted">
-              Repositório <span className="text-ink-soft">privado</span>? Conecte sua conta em
-              <span className="text-ink-soft"> Integrações → GitHub</span> — a verificação usa
-              esse token automaticamente{upd && !upd.authenticated ? " (nenhuma conta conectada agora)" : ""}.
-            </p>
-            <p className="text-xs leading-5 text-muted">
-              Por segurança, a atualização roda no <span className="text-ink-soft">host</span> (o container não tem acesso ao Docker):
-              execute <span className="font-mono text-ink-soft">./update.sh</span> na pasta do projeto — ele puxa do git, reconstrói, sobe e migra.
-            </p>
-          </div>
-        ) : <p className="text-sm text-muted">Carregando…</p>}
-        </AdminShell>
+          <AdminShell title="Atualização" onBack={() => setSection(null)}>
+            <UpdateSection />
+          </AdminShell>
         )}
 
         {/* SEÇÃO: Backup e migração */}
@@ -436,18 +338,164 @@ export default function AdminPage() {
  * segredos cifrados, imagens…) — tudo vive no Postgres, então um dump = backup
  * completo. Para migrar de VPS: exporte aqui, suba o app na máquina nova com o
  * MESMO APP_SECRET no .env e importe o arquivo. */
+/* Atualização: compara a versão instalada com o repositório do projeto e, se houver
+   versão nova, oferece atualizar. Desktop → atualizador do app (Tauri). Servidor →
+   pedido ao agente do host (scripts/update-agent.sh), que roda o update.sh. */
+function UpdateSection() {
+  const [info, setInfo] = useState<UpdateInfo | null>(null);
+  const [desktop, setDesktop] = useState<{ version: string } | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [showLog, setShowLog] = useState(false);
+  const onDesktop = isDesktop();
+
+  async function check() {
+    setChecking(true);
+    setMsg(null);
+    try {
+      const [i, d] = await Promise.all([
+        api.get<UpdateInfo>("/admin/update-check"),
+        onDesktop ? checkDesktopUpdate() : Promise.resolve(null),
+      ]);
+      setInfo(i);
+      setDesktop(d);
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : "Falha ao verificar." });
+    } finally {
+      setChecking(false);
+    }
+  }
+  useEffect(() => { void check(); }, []);
+
+  async function updateNow() {
+    setUpdating(true);
+    setMsg(null);
+    if (onDesktop) {
+      // baixa, instala e reinicia o app; só volta aqui se der erro
+      const err = await installDesktopUpdate();
+      if (err) setMsg({ ok: false, text: err });
+      setUpdating(false);
+      return;
+    }
+    try {
+      await api.post("/admin/update");
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : "Não foi possível pedir a atualização." });
+      setUpdating(false);
+      return;
+    }
+    // o host reconstrói e reinicia os containers: a API some por um tempo — segue
+    // perguntando até o agente dizer como terminou (ou desistir depois de 20 min)
+    const fim = Date.now() + 20 * 60_000;
+    let visto = false;
+    while (Date.now() < fim) {
+      await new Promise((r) => setTimeout(r, 4000));
+      try {
+        const i = await api.get<UpdateInfo>("/admin/update-check");
+        const st = i.update_status?.state;
+        if (st === "running") visto = true;
+        if (visto && (st === "done" || st === "failed")) {
+          setInfo(i);
+          setMsg(st === "done"
+            ? { ok: true, text: `Atualizado para a versão ${i.current_version}.` }
+            : { ok: false, text: "A atualização falhou no servidor." });
+          break;
+        }
+      } catch {
+        visto = true; // servidor reiniciando no meio do update.sh
+      }
+    }
+    setUpdating(false);
+  }
+
+  const disponivel = onDesktop ? !!desktop : !!info?.update_available;
+  const nova = onDesktop ? desktop?.version : info?.latest_release;
+  const podeAtualizar = onDesktop || !!info?.agent;
+  const log = info?.update_status?.log;
+
+  return (
+    <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
+      {!info && !msg ? (
+        <p className="flex items-center gap-2 text-sm text-muted"><Loader2 size={15} className="animate-spin" /> Verificando…</p>
+      ) : (
+        <>
+          {info && (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm text-ink">
+                  Versão instalada: <span className="font-mono">{info.current_version}</span>
+                </p>
+                {info.error ? (
+                  <p className="mt-0.5 text-xs text-red-400">{info.error}</p>
+                ) : disponivel ? (
+                  <p className="mt-0.5 text-xs text-amber-300">
+                    Nova versão disponível{nova ? <>: <span className="font-mono">{nova}</span></> : ""}
+                  </p>
+                ) : (
+                  <p className="mt-0.5 flex items-center gap-1 text-xs text-green-400"><Check size={13} /> Você está na versão mais recente</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={check} disabled={checking || updating}
+                  className="flex items-center gap-1.5 rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover disabled:opacity-50">
+                  <RefreshCw size={14} className={checking ? "animate-spin" : ""} /> Verificar
+                </button>
+                {disponivel && podeAtualizar && (
+                  <button onClick={updateNow} disabled={updating}
+                    className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
+                    {updating ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                    {updating ? "Atualizando…" : "Atualizar agora"}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+          {disponivel && !podeAtualizar && (
+            <p className="text-xs text-muted">
+              Para atualizar por aqui, instale o agente no servidor:{" "}
+              <span className="font-mono text-ink-soft">sudo ./scripts/update-agent.sh install</span>
+            </p>
+          )}
+          {msg && <p className={`text-sm ${msg.ok ? "text-green-400" : "text-red-400"}`}>{msg.text}</p>}
+          {log && msg && !msg.ok && (
+            <div>
+              <button onClick={() => setShowLog((v) => !v)} className="text-xs text-muted hover:text-ink">
+                {showLog ? "Ocultar log" : "Ver log"}
+              </button>
+              {showLog && (
+                <pre className="mt-1.5 max-h-60 overflow-auto rounded-lg bg-surface2 p-3 font-mono text-[11px] text-ink-soft">{log}</pre>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function BackupCard() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
   const [confirmFile, setConfirmFile] = useState<File | null>(null);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+  // senha do backup: com ela o arquivo restaura em OUTRA instalação (outro APP_SECRET,
+  // como o app desktop) — os segredos são recifrados para a chave do destino
+  const [exportPass, setExportPass] = useState("");
+  const [importPass, setImportPass] = useState("");
+  const [legacySecret, setLegacySecret] = useState("");
+  const [showLegacy, setShowLegacy] = useState(false);
 
   async function exportBackup() {
     setExporting(true);
     setResult(null);
     try {
-      const r = await fetch(`${API_URL}/admin/backup`, { credentials: "include" });
+      const r = await fetch(`${API_URL}/admin/backup`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: exportPass }),
+      });
       if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `Falha (${r.status})`);
       const blob = await r.blob();
       const a = document.createElement("a");
@@ -468,6 +516,8 @@ function BackupCard() {
     try {
       const form = new FormData();
       form.append("file", f);
+      form.append("password", importPass);
+      form.append("source_secret", showLegacy ? legacySecret : "");
       const r = await fetch(`${API_URL}/admin/restore`, { method: "POST", credentials: "include", body: form });
       const data = await r.json().catch(() => null);
       if (!r.ok) throw new Error(data?.detail ?? `Falha (${r.status})`);
@@ -484,13 +534,14 @@ function BackupCard() {
   return (
     <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
       <p className="flex items-center gap-2 text-sm font-semibold text-ink"><DatabaseBackup size={16} /> Backup e migração</p>
-      <p className="text-xs leading-5 text-muted">
-        Exporta o sistema <span className="text-ink-soft">inteiro</span> (usuários, chats, modelos, memórias, integrações,
-        segredos cifrados) num único arquivo. Para migrar de servidor: suba o app na máquina nova com o
-        <span className="font-mono text-ink-soft"> mesmo APP_SECRET</span> no .env e importe o arquivo aqui.
-      </p>
       <div className="flex flex-wrap items-center gap-2.5">
-        <button onClick={exportBackup} disabled={exporting} className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
+        <input
+          type="password" value={exportPass} onChange={(e) => setExportPass(e.target.value)}
+          placeholder="Senha do backup (para outra instalação)"
+          autoComplete="new-password"
+          className="w-64 rounded-full border border-border bg-surface2 px-4 py-1.5 text-sm text-ink outline-none transition-colors placeholder:text-muted focus:border-accent"
+        />
+        <button onClick={exportBackup} disabled={exporting || (exportPass.length > 0 && exportPass.length < 8)} className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
           {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Exportar sistema
         </button>
         <input ref={fileRef} type="file" accept=".backup,.dump" className="hidden"
@@ -505,6 +556,24 @@ function BackupCard() {
             Importar <span className="font-mono text-xs">{confirmFile.name}</span>?{" "}
             <span className="text-red-300">Isto SUBSTITUI todos os dados atuais</span> (usuários, chats, tudo). Não tem volta.
           </p>
+          <input
+            type="password" value={importPass} onChange={(e) => setImportPass(e.target.value)}
+            placeholder="Senha do backup (se ele tiver)"
+            autoComplete="off"
+            className="w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none placeholder:text-muted focus:border-accent"
+          />
+          {showLegacy ? (
+            <input
+              type="password" value={legacySecret} onChange={(e) => setLegacySecret(e.target.value)}
+              placeholder="APP_SECRET da instalação de origem"
+              autoComplete="off"
+              className="w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-sm text-ink outline-none placeholder:font-sans placeholder:text-muted focus:border-accent"
+            />
+          ) : (
+            <button onClick={() => setShowLegacy(true)} className="text-xs text-muted underline hover:text-ink">
+              Backup antigo, sem senha, de outra instalação?
+            </button>
+          )}
           <div className="flex items-center gap-2">
             <button onClick={() => importBackup(confirmFile)} className="rounded-full bg-red-500/90 px-4 py-1 text-xs font-medium text-white hover:bg-red-500">
               Sim, substituir tudo

@@ -48,8 +48,10 @@ def _b64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
-def sign_state(user_id: str) -> str:
-    """State assinado com um `jti` aleatório — o `jti` é a semente do verifier."""
+def sign_state(user_id: str, external: bool = False) -> str:
+    """State assinado com um `jti` aleatório — o `jti` é a semente do verifier.
+    `external`: o login foi aberto no NAVEGADOR do usuário (fora do app) — a volta
+    mostra uma página de "pode voltar ao app" em vez de abrir o app ali."""
     now = int(time.time())
     return jwt.encode(
         {
@@ -58,6 +60,7 @@ def sign_state(user_id: str) -> str:
             "jti": uuid.uuid4().hex,
             "iat": now,
             "exp": now + _STATE_TTL,
+            **({"ext": 1} if external else {}),
         },
         get_settings().app_secret,
         algorithm="HS256",
@@ -78,6 +81,14 @@ def verify_state(state: str) -> tuple[str, str] | None:
     return str(sub), str(jti)
 
 
+def is_external(state: str) -> bool:
+    try:
+        data = jwt.decode(state, get_settings().app_secret, algorithms=["HS256"])
+    except jwt.PyJWTError:
+        return False
+    return bool(data.get("ext"))
+
+
 def code_verifier(jti: str) -> str:
     """Verifier PKCE derivado do APP_SECRET + `jti`. 43 chars base64url (o mínimo da RFC)."""
     mac = hmac.new(
@@ -94,8 +105,8 @@ def callback_url(state: str) -> str:
     return f"{get_settings().openrouter_redirect_uri.rstrip('/')}/{state}"
 
 
-def authorization_url(user_id: str) -> str:
-    state = sign_state(user_id)
+def authorization_url(user_id: str, external: bool = False) -> str:
+    state = sign_state(user_id, external)
     _, jti = verify_state(state)  # type: ignore[misc]  # acabamos de assinar
     params = {
         "callback_url": callback_url(state),

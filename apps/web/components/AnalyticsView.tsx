@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowLeftRight, ArrowUp, BarChart3, ChevronDown, Coins, Cpu, Database, DollarSign, MessageSquare, Search, Sparkles, Wrench, Zap } from "lucide-react";
+import { ArrowDown, ArrowLeftRight, ArrowUp, BarChart3, CalendarDays, Check, ChevronDown, Coins, Cpu, Database, DollarSign, MessageSquare, Search, Sparkles, Wrench, Zap } from "lucide-react";
 import { api } from "@/lib/api";
 import { useClickOutside } from "./ui";
 
@@ -11,7 +11,9 @@ type PerDay = { date: string; label?: string; tokens: number; cost: number; mess
 type Series = { id: string; name: string; provider: string };
 type Credits = { total: number; usage: number; remaining: number };
 type Activity = { start: string; end?: string; year?: number; days: { d: string; t: number }[]; longest_streak: number; avg_day: number; avg_week: number; year_tokens?: number; total_tokens: number };
-type RangeKey = "7d" | "30d" | "6m" | "1y" | "all";
+type RangeKey = "7d" | "30d" | "6m" | "1y" | "all" | "custom";
+/** período escolhido: uma janela pronta ou um intervalo de datas (AAAA-MM-DD) */
+type Period = { key: RangeKey; from?: string; to?: string };
 type Metric = "tokens" | "cost" | "messages";
 type Overview = {
   by_model: ByModel[];
@@ -31,7 +33,7 @@ type Overview = {
 type ModelDay = { date: string; label: string; tokens: number; cost: number; messages: number };
 type ModelDetail = {
   key: string; model: string; base_model?: string; provider: string; vendor: string;
-  range: RangeKey; granularity: "day" | "week" | "month";
+  range: RangeKey; from?: string; to?: string; granularity: "day" | "week" | "month";
   per_day: ModelDay[];
   by_tool: { tool: string; tokens: number; calls: number }[];
   by_chat: { chat_id: string; title: string; tokens: number; cost: number; messages: number }[];
@@ -184,7 +186,7 @@ function Summary({ data, metric, busy, onMetric }: {
 /* ------------------------------- Top modelos ------------------------------- */
 function TopModels({ data, metric, onPick }: { data: Overview; metric: Metric; onPick?: (id: string) => void }) {
   const list = useMemo(
-    () => [...data.by_model].sort((a, b) => metricVal(metric, b) - metricVal(metric, a)).slice(0, 6),
+    () => [...data.by_model].sort((a, b) => metricVal(metric, b) - metricVal(metric, a)).slice(0, 10),
     [data, metric],
   );
   const max = Math.max(1, ...list.map((m) => metricVal(metric, m)));
@@ -199,14 +201,15 @@ function TopModels({ data, metric, onPick }: { data: Overview; metric: Metric; o
         <h2 className="text-sm font-semibold text-ink">Top modelos</h2>
         <span className="text-[11px] text-muted">por {METRICS.find((m) => m.key === metric)?.label.toLowerCase()}</span>
       </div>
-      <div className="space-y-2.5">
+      {/* até 10 modelos; ~5 à vista e o resto na rolagem interna do cartão */}
+      <div className="max-h-[14rem] space-y-2.5 overflow-y-auto pr-1">
         {list.map((m) => {
           const v = metricVal(metric, m);
           return (
             <button
               key={m.id}
               onClick={() => onPick?.(m.id)}
-              title="Ver detalhes deste modelo"
+              title={m.model}
               className="block w-full rounded-lg px-1 py-0.5 text-left transition-colors hover:bg-hover"
             >
               <div className="mb-1 flex items-center gap-2">
@@ -353,17 +356,6 @@ function CreditsCard({ credits }: { credits: Credits | null }) {
           {/* saldo atual em destaque — é o que o usuário realmente quer saber */}
           <p className="text-3xl font-bold tracking-tight text-ink">{fmtUSD(credits.remaining)}</p>
           <p className="text-xs text-muted">Saldo disponível na sua conta</p>
-          {/* histórico da conta (vitalício), claramente rotulado */}
-          <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border pt-3">
-            <div>
-              <p className="text-[11px] text-muted">Já adicionado</p>
-              <p className="text-sm font-semibold text-ink">{fmtUSD(credits.total)}</p>
-            </div>
-            <div>
-              <p className="text-[11px] text-muted">Já gasto</p>
-              <p className="text-sm font-semibold text-ink">{fmtUSD(credits.usage)}</p>
-            </div>
-          </div>
         </>
       ) : (
         <p className="text-sm text-muted">Configure sua chave do OpenRouter em Configurações → Conexões para ver o saldo.</p>
@@ -460,7 +452,7 @@ function ModelDetail({ detail, loading }: { detail: ModelDetail | null; loading:
             <span className={`rounded px-1.5 py-0.5 ${detail.provider === "ollama" ? "bg-emerald-400/15 text-emerald-300" : "bg-surface2 text-muted"}`}>
               {detail.provider === "ollama" ? "local" : detail.vendor}
             </span>
-            <span className="ml-2">{RANGES.find((r) => r.key === detail.range)?.label}</span>
+            <span className="ml-2">{periodLabel({ key: detail.range, from: detail.from, to: detail.to })}</span>
           </p>
         </div>
       </div>
@@ -593,7 +585,7 @@ function ModelSelect({ models, value, onPick, colorOf }: {
             <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-surface text-[10px] font-semibold" style={{ color: colorOf(cur.id) }}>
               {cur.model[0]?.toUpperCase()}
             </span>
-            <span className="max-w-[180px] truncate">{cur.model}</span>
+            <span className="max-w-[180px] truncate" title={cur.model}>{cur.model}</span>
           </>
         ) : (
           <span className="text-muted">Escolha um modelo</span>
@@ -615,6 +607,7 @@ function ModelSelect({ models, value, onPick, colorOf }: {
               <button
                 key={m.id}
                 onClick={() => { onPick(m.id); setOpen(false); setQ(""); }}
+                title={m.model}
                 className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition-colors hover:bg-hover ${m.id === value ? "bg-hover" : ""}`}
               >
                 <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-surface2 text-[10px] font-semibold" style={{ color: colorOf(m.id) }}>
@@ -634,12 +627,83 @@ function ModelSelect({ models, value, onPick, colorOf }: {
   );
 }
 
+const fmtDia = (iso?: string) => {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y.slice(2)}`;
+};
+function periodLabel(p: Period): string {
+  if (p.key === "custom") return p.from && p.to ? `${fmtDia(p.from)} – ${fmtDia(p.to)}` : "Intervalo";
+  return RANGES.find((r) => r.key === p.key)?.label ?? "";
+}
+const hojeIso = () => {
+  const d = new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+};
+
+/** Período: janelas prontas ou um intervalo de datas (mesmo visual dos demais menus). */
+function RangePicker({ value, onChange }: { value: Period; onChange: (p: Period) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useClickOutside<HTMLDivElement>(() => setOpen(false));
+  const [from, setFrom] = useState(value.from ?? "");
+  const [to, setTo] = useState(value.to ?? hojeIso());
+  const valido = !!from && !!to && from <= to;
+  const campo = "w-full rounded-lg border border-border bg-surface2 px-2.5 py-1.5 text-sm text-ink outline-none transition-colors focus:border-accent";
+  return (
+    <div className="relative ml-auto" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 rounded-lg border border-border bg-surface2 px-2.5 py-1.5 text-sm text-ink transition-colors hover:border-accent/50"
+      >
+        <CalendarDays size={14} className="text-muted" />
+        <span className="whitespace-nowrap">{periodLabel(value)}</span>
+        <ChevronDown size={14} className="text-muted" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-10 z-50 w-80 rounded-xl border border-border bg-surface p-1.5 shadow-menu animate-pop">
+          {RANGES.filter((r) => r.key !== "custom").map((r) => (
+            <button
+              key={r.key}
+              onClick={() => { onChange({ key: r.key }); setOpen(false); }}
+              className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-sm text-ink transition-colors hover:bg-hover"
+            >
+              {r.label}
+              {value.key === r.key && <Check size={14} className="text-accent-hover" />}
+            </button>
+          ))}
+          <div className="my-1.5 border-t border-border" />
+          <p className="px-2.5 pb-1.5 pt-0.5 text-[11px] font-medium uppercase tracking-wider text-muted">Intervalo</p>
+          <div className="grid grid-cols-2 gap-2 px-2.5">
+            <label className="text-[11px] text-muted">
+              De
+              <input type="date" value={from} max={to || hojeIso()} onChange={(e) => setFrom(e.target.value)} className={`mt-1 ${campo}`} />
+            </label>
+            <label className="text-[11px] text-muted">
+              Até
+              <input type="date" value={to} min={from || undefined} max={hojeIso()} onChange={(e) => setTo(e.target.value)} className={`mt-1 ${campo}`} />
+            </label>
+          </div>
+          <div className="flex justify-end px-2.5 pb-1.5 pt-2.5">
+            <button
+              disabled={!valido}
+              onClick={() => { onChange({ key: "custom", from, to }); setOpen(false); }}
+              className="rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Aplicar
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 type Tab = "overview" | "model";
 
 export default function AnalyticsView() {
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
-  const [range, setRange] = useState<RangeKey>("7d");
+  const [period, setPeriod] = useState<Period>({ key: "7d" });
   const [metric, setMetric] = useState<Metric>("tokens");
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
@@ -647,31 +711,35 @@ export default function AnalyticsView() {
   const [detail, setDetail] = useState<ModelDetail | null>(null);
   const [detailBusy, setDetailBusy] = useState(false);
 
-  function loadRange(r: RangeKey, initial = false) {
+  // query do período: janela pronta (range=) ou intervalo de datas (from=&to=)
+  const periodQuery = (p: Period) =>
+    p.key === "custom" && p.from && p.to ? `range=custom&from=${p.from}&to=${p.to}` : `range=${p.key}`;
+
+  function loadRange(r: Period, initial = false) {
     const off = new Date().getTimezoneOffset();
     if (!initial) setBusy(true);
     api
-      .get<Overview>(`/analytics/overview?range=${r}&tz_offset=${off}`)
+      .get<Overview>(`/analytics/overview?${periodQuery(r)}&tz_offset=${off}`)
       .then(setData)
       .catch(() => { if (initial) setData(null); })
       .finally(() => { setLoading(false); setBusy(false); });
   }
 
-  function loadDetail(key: string, r: RangeKey) {
+  function loadDetail(key: string, r: Period) {
     const off = new Date().getTimezoneOffset();
     setDetailBusy(true);
     api
-      .get<ModelDetail>(`/analytics/model?key=${encodeURIComponent(key)}&range=${r}&tz_offset=${off}`)
+      .get<ModelDetail>(`/analytics/model?key=${encodeURIComponent(key)}&${periodQuery(r)}&tz_offset=${off}`)
       .then(setDetail)
       .catch(() => setDetail(null))
       .finally(() => setDetailBusy(false));
   }
 
-  useEffect(() => { loadRange("7d", true); }, []);
+  useEffect(() => { loadRange({ key: "7d" }, true); }, []);
 
-  function changeRange(r: RangeKey) {
-    if (r === range) return;
-    setRange(r);
+  function changeRange(r: Period) {
+    if (r.key === period.key && r.from === period.from && r.to === period.to) return;
+    setPeriod(r);
     loadRange(r);
     if (modelKey) loadDetail(modelKey, r);
   }
@@ -680,11 +748,11 @@ export default function AnalyticsView() {
   function openModel(key: string) {
     setModelKey(key);
     setTab("model");
-    loadDetail(key, range);
+    loadDetail(key, period);
   }
   function selectModel(key: string) {
     setModelKey(key);
-    loadDetail(key, range);
+    loadDetail(key, period);
   }
 
   const empty = useMemo(() => !!data && (data.activity?.total_tokens ?? 0) === 0 && data.totals.messages === 0, [data]);
@@ -738,13 +806,7 @@ export default function AnalyticsView() {
         {tab === "model" && (
           <ModelSelect models={data.by_model} value={modelKey} onPick={selectModel} colorOf={overviewColorOf} />
         )}
-        <select
-          value={range}
-          onChange={(e) => changeRange(e.target.value as RangeKey)}
-          className="ml-auto rounded-lg border border-border bg-surface2 px-2 py-1 text-xs text-ink outline-none transition-colors focus:border-accent"
-        >
-          {RANGES.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
-        </select>
+        <RangePicker value={period} onChange={changeRange} />
       </div>
 
       {tab === "overview" ? (

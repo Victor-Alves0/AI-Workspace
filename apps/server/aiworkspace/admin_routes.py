@@ -14,7 +14,7 @@ from pathlib import Path
 from datetime import datetime
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -25,7 +25,10 @@ from . import __version__, audit_service, db_restore, network_config
 from .app_config import ALLOW_SIGNUPS, get_setting, set_setting
 from .auth.deps import require_admin
 from .config import get_settings
-from .crypto import BACKUP_MAGIC, BACKUP_MAGIC_V2, backup_decryptor, backup_encryptor
+from .crypto import (
+    BACKUP_MAGIC, BACKUP_MAGIC_V2, BACKUP_MAGIC_V3, BACKUP_V3_HEADER, backup_decryptor,
+    backup_encryptor, backup_password_decryptor, backup_password_encryptor, data_key_b64,
+)
 from .db import get_db
 from .models import User
 
@@ -204,6 +207,55 @@ async def _github_auth_header(db: AsyncSession, user_id) -> tuple[dict[str, str]
     return {}, False
 
 
+OFFICIAL_REPO = "Victor-Alves0/AI-Workspace"
+
+
+def _control_dir() -> Path:
+    return Path(get_settings().update_control_dir)
+
+
+def _update_agent_installed() -> bool:
+    """O `scripts/update-agent.sh install` deixa este marcador na pasta de controle."""
+    return (_control_dir() / "agent").is_file()
+
+
+def _update_status() -> dict | None:
+    """Estado do último pedido, escrito pelo agente do host (update-status.json)."""
+    import json
+
+    try:
+        return json.loads((_control_dir() / "update-status.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+@router.post("/update")
+async def request_update(admin: User = Depends(require_admin)):
+    """Pede ao agente do HOST que rode o update.sh (puxa, reconstrói, sobe, migra). O
+    container não roda nada disso: só grava o pedido na pasta montada do host."""
+    import json
+
+    if not _update_agent_installed():
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Agente de atualização não instalado no servidor "
+            "(sudo ./scripts/update-agent.sh install)",
+        )
+    atual = _update_status() or {}
+    if atual.get("state") == "running":
+        raise HTTPException(status.HTTP_409_CONFLICT, "Já há uma atualização em andamento")
+    pedido = {"requested_at": datetime.utcnow().isoformat() + "Z", "by": admin.email}
+    try:
+        (_control_dir() / "update-request").write_text(json.dumps(pedido), encoding="utf-8")
+    except OSError as exc:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            f"Não consegui gravar o pedido na pasta de controle: {exc}",
+        ) from exc
+    await audit_service.record("update_requested", user_id=admin.id)
+    return {"ok": True}
+
+
 @router.get("/update-check")
 async def update_check(
     admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)
@@ -213,7 +265,8 @@ async def update_check(
     responde 404 e não há como checar."""
     cfg = await network_config.load_config()
     # normaliza na LEITURA também: um valor salvo antes (URL crua) se cura sozinho
-    repo = _normalize_repo(cfg.get("repo") or "")
+    # repositório oficial do projeto, salvo override explícito (fork) na config
+    repo = _normalize_repo(cfg.get("repo") or "") or OFFICIAL_REPO
     branch = (cfg.get("branch") or "main").strip()
     out: dict = {
         "current_version": __version__,
@@ -226,10 +279,10 @@ async def update_check(
         "commits_behind": None,   # True/False; None = imagem sem GIT_COMMIT (desconhecido)
         "authenticated": False,
         "error": None,
+        # atualização pelo painel: há agente no host? e como foi o último pedido?
+        "agent": _update_agent_installed(),
+        "update_status": _update_status(),
     }
-    if not repo:
-        out["error"] = "Defina o repositório (owner/repo) para checar atualizações."
-        return out
     try:
         auth, has_token = await _github_auth_header(db, admin.id)
         out["authenticated"] = has_token
@@ -319,15 +372,45 @@ def _codespace_root() -> Path:
     return Path(get_settings().codespace_data_dir)
 
 
-def _build_backup_bundle(dump_path: str, tar_path: str) -> None:
-    """Empacota o dump do banco + os arquivos do Codespace num tar (bloqueante —
-    roda em threadpool). `database.dump` na raiz; a árvore de arquivos do Codespace
-    (que vive em disco, fora do banco) sob `codespace/`."""
-    cs = _codespace_root()
+def _uploads_root() -> Path:
+    return Path(get_settings().uploads_dir)
+
+
+def _build_backup_bundle(dump_path: str, tar_path: str, data_key: str | None = None) -> None:
+    """Empacota o dump do banco + os arquivos que vivem em disco num tar (bloqueante —
+    roda em threadpool): `database.dump` na raiz, o Codespace sob `codespace/` e os
+    anexos do chat sob `uploads/` (sem eles as mensagens restauradas apontariam para
+    arquivos inexistentes). `data_key` (só no backup com senha) vai em `keys.json`:
+    é a chave de DADOS da origem, que a restauração usa para recifrar os segredos."""
+    import json as _json
+
+    cs, up = _codespace_root(), _uploads_root()
     with tarfile.open(tar_path, "w") as tf:
         tf.add(dump_path, arcname="database.dump")
         if cs.is_dir():
             tf.add(str(cs), arcname="codespace")
+        if up.is_dir():
+            tf.add(str(up), arcname="uploads")
+        if data_key:
+            dados = _json.dumps({"data_key": data_key, "v": 1}).encode()
+            info = tarfile.TarInfo("keys.json")
+            info.size = len(dados)
+            import io as _io
+            tf.addfile(info, _io.BytesIO(dados))
+
+
+def _bundle_data_key(tar_path: str) -> str | None:
+    import json as _json
+
+    with tarfile.open(tar_path) as tf:
+        try:
+            src = tf.extractfile("keys.json")
+        except KeyError:
+            return None
+        if src is None:
+            return None
+        with src:
+            return (_json.loads(src.read() or b"{}") or {}).get("data_key")
 
 
 def _extract_db_dump(tar_path: str, dump_path: str) -> None:
@@ -341,17 +424,21 @@ def _extract_db_dump(tar_path: str, dump_path: str) -> None:
 
 
 def _restore_codespace(tar_path: str) -> int:
-    """Restaura a árvore `codespace/` do bundle para o diretório de dados do
-    Codespace (sobrescreve arquivo a arquivo). Ignora links e qualquer caminho
-    que escape da raiz (proteção contra path traversal). Retorna nº de arquivos."""
-    root = _codespace_root().resolve()
+    return _restore_tree(tar_path, "codespace/", _codespace_root())
+
+
+def _restore_tree(tar_path: str, prefix: str, dest_root: Path) -> int:
+    """Restaura a árvore `prefix` do bundle em `dest_root` (sobrescreve arquivo a
+    arquivo). Ignora links e qualquer caminho que escape da raiz (proteção contra
+    path traversal). Retorna nº de arquivos."""
+    root = dest_root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     n = 0
     with tarfile.open(tar_path) as tf:
         for m in tf.getmembers():
-            if not m.name.startswith("codespace/"):
+            if not m.name.startswith(prefix):
                 continue
-            rel = m.name[len("codespace/"):].lstrip("/")
+            rel = m.name[len(prefix):].lstrip("/")
             if not rel:
                 continue
             dest = (root / rel).resolve()
@@ -401,12 +488,27 @@ async def _dump_alembic_rev(path: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
+class BackupIn(BaseModel):
+    # senha do backup: permite restaurar em OUTRA instalação (outro APP_SECRET, como
+    # o app desktop). Vazia = backup só para esta instalação (AIWBK2, pelo APP_SECRET).
+    password: str = Field(default="", max_length=256)
+
+
+@router.post("/backup")
+async def export_backup_with_password(body: BackupIn, admin: User = Depends(require_admin)):
+    password = body.password.strip()
+    if password and len(password) < 8:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A senha do backup precisa ter ao menos 8 caracteres.")
+    return await export_backup(admin, password=password or None)
+
+
 @router.get("/backup")
-async def export_backup(admin: User = Depends(require_admin)):
-    """Baixa um backup completo do sistema: bundle cifrado (AIWBK2) com o dump do
-    banco (pg_dump custom) + os arquivos do Codespace (que vivem em disco). O
-    pg_dump vai para um arquivo temporário, o bundle é montado num tar e então
-    cifrado em streaming para o download."""
+async def export_backup(admin: User = Depends(require_admin), password: str | None = None):
+    """Baixa um backup completo do sistema: bundle cifrado com o dump do banco
+    (pg_dump custom) + os arquivos que vivem em disco (Codespace, anexos). Com senha
+    (AIWBK3) restaura em qualquer instalação; sem senha (AIWBK2) só onde o APP_SECRET
+    é o mesmo. O pg_dump vai para um arquivo temporário, o bundle é montado num tar e
+    então cifrado em streaming para o download."""
     _require_pg_tools()
     dump_f = tempfile.NamedTemporaryFile(suffix=".dump", delete=False)
     dump_path = dump_f.name
@@ -425,7 +527,8 @@ async def export_backup(admin: User = Depends(require_admin)):
             logger.error("pg_dump falhou: %s", err.decode(errors="replace")[-2000:])
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, "pg_dump falhou ao gerar o backup.")
         # empacota dump + arquivos do Codespace (tarfile é bloqueante → threadpool)
-        await run_in_threadpool(_build_backup_bundle, dump_path, tar_path)
+        await run_in_threadpool(
+            _build_backup_bundle, dump_path, tar_path, data_key_b64() if password else None)
     except BaseException:
         for p in (dump_path, tar_path):
             try:
@@ -436,8 +539,12 @@ async def export_backup(admin: User = Depends(require_admin)):
 
     async def stream():
         try:
-            # cifra o bundle em repouso (AES-CTR keyed pelo APP_SECRET); header primeiro
-            header, enc = backup_encryptor(BACKUP_MAGIC_V2)
+            # cifra o bundle em repouso (AES-CTR): pela senha (AIWBK3, migrável) ou
+            # pelo APP_SECRET (AIWBK2); header primeiro
+            if password:
+                header, enc = await run_in_threadpool(backup_password_encryptor, password)
+            else:
+                header, enc = backup_encryptor(BACKUP_MAGIC_V2)
             yield header
             with open(tar_path, "rb") as f:
                 while chunk := f.read(256 * 1024):
@@ -461,6 +568,8 @@ async def export_backup(admin: User = Depends(require_admin)):
 @router.post("/restore")
 async def import_backup(
     file: UploadFile,
+    password: str = Form(default=""),
+    source_secret: str = Form(default=""),
     admin: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -489,25 +598,40 @@ async def import_backup(
         with open(tmp.name, "rb") as f:
             head = f.read(len(BACKUP_MAGIC))
         is_v1 = head == BACKUP_MAGIC
-        is_v2 = head == BACKUP_MAGIC_V2
+        is_v3 = head == BACKUP_MAGIC_V3
+        is_v2 = head == BACKUP_MAGIC_V2 or is_v3  # V3 = mesmo bundle, cifrado por senha
+        # chave de DADOS da origem, quando o backup vem de OUTRA instalação: os segredos
+        # do banco (chaves de API, tokens) são recifrados para a chave local no fim
+        source_key: str | None = None
+        if is_v3 and not password.strip():
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Este backup tem senha — informe a senha do backup.")
         if is_v1 or is_v2:
             dec = tempfile.NamedTemporaryFile(suffix=".dec", delete=False)
             dec_path = dec.name
             try:
                 with open(tmp.name, "rb") as f:
-                    f.seek(len(head))
-                    nonce = f.read(16)
-                    d = backup_decryptor(nonce)
+                    if is_v3:
+                        d = await run_in_threadpool(
+                            backup_password_decryptor, f.read(BACKUP_V3_HEADER), password.strip())
+                    else:
+                        f.seek(len(head))
+                        nonce = f.read(16)
+                        d = backup_decryptor(nonce, source_secret.strip() or None)
                     while chunk := f.read(1024 * 1024):
                         dec.write(d.update(chunk))
                     dec.write(d.finalize())
                 dec.close()
-            except Exception:  # noqa: BLE001 — APP_SECRET errado, arquivo corrompido…
+            except ValueError:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Senha do backup incorreta.") from None
+            except Exception:  # noqa: BLE001 — chave errada, arquivo corrompido…
                 raise HTTPException(
                     status.HTTP_400_BAD_REQUEST,
-                    "Não consegui decifrar o backup — o APP_SECRET desta instalação "
-                    "precisa ser o mesmo de quando o backup foi gerado.",
+                    "Não consegui decifrar o backup — use a senha do backup (ou, num backup "
+                    "antigo sem senha, o APP_SECRET da instalação de origem).",
                 ) from None
+            if not is_v3 and source_secret.strip():
+                from .crypto import _fernet_key_b64
+                source_key = _fernet_key_b64(source_secret.strip())
             if is_v2:
                 # bundle (tar): extrai o database.dump p/ restaurar; a árvore
                 # codespace/ só é aplicada DEPOIS do pg_restore ter dado certo.
@@ -517,10 +641,13 @@ async def import_backup(
                 dmp.close()
                 try:
                     await run_in_threadpool(_extract_db_dump, bundle_path, dump_path)
-                except Exception:  # noqa: BLE001
+                    if is_v3:
+                        source_key = await run_in_threadpool(_bundle_data_key, bundle_path)
+                except Exception:  # noqa: BLE001 — chave errada vira tar ilegível
                     raise HTTPException(
                         status.HTTP_400_BAD_REQUEST,
-                        "Bundle de backup inválido (não contém o dump do banco).",
+                        "Bundle de backup inválido (chave errada ou arquivo corrompido) — "
+                        "nada foi alterado.",
                     ) from None
                 src_path = dump_path
             else:
@@ -598,16 +725,37 @@ async def import_backup(
                 "manualmente antes de usar o sistema."
             )
 
-        # bundle V2: restaura os arquivos do Codespace (só depois do banco ok, p/ não
+        # backup de OUTRA instalação: recifra os segredos (chaves de API, tokens OAuth,
+        # campos cifrados, JSON) da chave de dados de origem para a desta instalação
+        key_note = ""
+        if source_key and source_key != data_key_b64():
+            from cryptography.fernet import Fernet
+
+            from .crypto import _fernet
+            from .secret_rotation import rotate_keys
+            try:
+                res = await run_in_threadpool(
+                    lambda: rotate_keys(Fernet(source_key), _fernet(), dry_run=False))
+                logger.info("pós-restore: %d segredo(s) recifrado(s) para a chave local", res["changed"])
+                if res["failed"]:
+                    key_note = (f" ATENÇÃO: {res['failed']} segredo(s) não puderam ser recifrados "
+                                "— reconecte essas integrações.")
+            except Exception:  # noqa: BLE001 - o banco já foi restaurado; avisa
+                logger.exception("pós-restore: falha ao recifrar os segredos")
+                key_note = (" ATENÇÃO: os segredos (chaves de API, conexões) não foram "
+                            "recifrados — reconecte as integrações.")
+
+        # bundle: restaura os arquivos em disco (só depois do banco ok, p/ não
         # sobrescrever o disco se o pg_restore tivesse falhado). Best-effort.
         cs_note = ""
         if is_v2 and bundle_path:
             try:
                 n = await run_in_threadpool(_restore_codespace, bundle_path)
-                logger.info("pós-restore: %d arquivo(s) do Codespace restaurado(s)", n)
+                n_up = await run_in_threadpool(_restore_tree, bundle_path, "uploads/", _uploads_root())
+                logger.info("pós-restore: %d arquivo(s) do Codespace e %d anexo(s) restaurados", n, n_up)
             except Exception:  # noqa: BLE001 - não pode bloquear o restore do banco
-                logger.exception("pós-restore: falha ao restaurar arquivos do Codespace")
-                cs_note = " ATENÇÃO: os arquivos do Codespace não foram restaurados (veja os logs)."
+                logger.exception("pós-restore: falha ao restaurar arquivos do Codespace/anexos")
+                cs_note = " ATENÇÃO: arquivos do Codespace/anexos não foram restaurados (veja os logs)."
 
         # a sessão do WhatsApp (Evolution) vive FORA deste backup — no banco
         # "evolution" (separado) e no volume evolution_instances (arquivos do
@@ -640,7 +788,7 @@ async def import_backup(
             "ok": True,
             "note": "Backup restaurado e migrações aplicadas. Se os usuários mudaram, faça "
                     "login novamente. Recomendado: reiniciar o server (docker compose "
-                    "restart server)." + migrate_note + cs_note,
+                    "restart server)." + migrate_note + key_note + cs_note,
         }
     finally:
         # dec_path == bundle_path no V2 (o mesmo tar), então não repete

@@ -8,6 +8,7 @@ Segredos (ex.: chave do OpenRouter) ficam cifrados em repouso no banco.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 from functools import lru_cache
@@ -135,8 +136,7 @@ BACKUP_MAGIC = b"AIWBK1\n"     # 7 bytes - payload = pg_dump (formato antigo)
 BACKUP_MAGIC_V2 = b"AIWBK2\n"  # 7 bytes - payload = tar bundle (db + codespace)
 
 
-@lru_cache
-def _backup_key() -> bytes:
+def _backup_key_for(secret: str) -> bytes:
     kdf = HKDF(
         algorithm=hashes.SHA256(),
         length=32,
@@ -145,7 +145,12 @@ def _backup_key() -> bytes:
         salt=b"ai-workspace-backup-encryption",
         info=b"backup-aes-ctr",
     )
-    return kdf.derive(get_settings().app_secret.encode("utf-8"))
+    return kdf.derive(secret.encode("utf-8"))
+
+
+@lru_cache
+def _backup_key() -> bytes:
+    return _backup_key_for(get_settings().app_secret)
 
 
 def backup_encryptor(magic: bytes = BACKUP_MAGIC) -> tuple[bytes, "object"]:
@@ -157,8 +162,65 @@ def backup_encryptor(magic: bytes = BACKUP_MAGIC) -> tuple[bytes, "object"]:
     return magic + nonce, enc
 
 
-def backup_decryptor(nonce: bytes) -> "object":
-    return Cipher(algorithms.AES(_backup_key()), modes.CTR(nonce)).decryptor()
+def backup_decryptor(nonce: bytes, source_secret: str | None = None) -> "object":
+    """Decifra um AIWBK1/2. `source_secret` = APP_SECRET da instalação que gerou o
+    backup (migração de um backup antigo, sem senha); None = o desta instalação."""
+    key = _backup_key_for(source_secret) if source_secret else _backup_key()
+    return Cipher(algorithms.AES(key), modes.CTR(nonce)).decryptor()
+
+
+# --------------------------------------------------------------------------- #
+# AIWBK3 — backup para MIGRAR entre instalações (servidor → desktop, p. ex.).
+# Cifrado por uma SENHA escolhida na exportação (scrypt), não pelo APP_SECRET: a
+# instalação de destino não precisa ter o mesmo APP_SECRET (o desktop nem deixa
+# trocá-lo). O bundle leva a chave de DADOS da origem (`keys.json`) — ela só decifra
+# os segredos do banco (não assina sessões) — e a restauração os recifra para a
+# chave local. Header = MAGIC + salt(16) + nonce(16) + check(16): o `check` acusa
+# senha errada de cara (AES-CTR sozinho não detecta, só daria lixo).
+# --------------------------------------------------------------------------- #
+BACKUP_MAGIC_V3 = b"AIWBK3\n"
+BACKUP_V3_HEADER = len(BACKUP_MAGIC_V3) + 48
+
+
+def _v3_check(key: bytes) -> bytes:
+    import hmac as _hmac
+
+    return _hmac.new(key, b"aiworkspace-backup-v3", hashlib.sha256).digest()[:16]
+
+
+def backup_password_encryptor(password: str) -> tuple[bytes, "object"]:
+    salt, nonce = os.urandom(16), os.urandom(16)
+    key = base64.urlsafe_b64decode(_password_key(password, salt))  # 32 bytes crus p/ o AES
+    enc = Cipher(algorithms.AES(key), modes.CTR(nonce)).encryptor()
+    return BACKUP_MAGIC_V3 + salt + nonce + _v3_check(key), enc
+
+
+def backup_password_decryptor(header: bytes, password: str) -> "object":
+    """Decifrador do AIWBK3; ValueError("senha incorreta") se a senha não confere."""
+    import hmac as _hmac
+
+    base = len(BACKUP_MAGIC_V3)
+    salt, nonce, check = header[base:base + 16], header[base + 16:base + 32], header[base + 32:base + 48]
+    key = base64.urlsafe_b64decode(_password_key(password, salt))  # 32 bytes crus p/ o AES
+    if not _hmac.compare_digest(_v3_check(key), check):
+        raise ValueError("senha incorreta")
+    return Cipher(algorithms.AES(key), modes.CTR(nonce)).decryptor()
+
+
+def data_key_b64() -> str:
+    """Chave de DADOS desta instalação (a do Fernet dos segredos), p/ o bundle de
+    migração. Não é o APP_SECRET: não assina sessões nem decifra outros backups."""
+    return _fernet_key_b64(get_settings().app_secret)
+
+
+def _fernet_key_b64(secret: str) -> str:
+    kdf = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=b"ai-workspace-secret-encryption",
+        info=b"fernet-key",
+    )
+    return base64.urlsafe_b64encode(kdf.derive(secret.encode("utf-8"))).decode()
 
 
 class EncryptedText(TypeDecorator):

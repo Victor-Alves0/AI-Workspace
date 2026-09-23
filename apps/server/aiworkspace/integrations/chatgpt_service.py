@@ -362,8 +362,57 @@ async def public_config(db: AsyncSession, user_id: str) -> dict[str, Any]:
         "connected": True,
         "email": raw.get("email") or "",
         "plan": raw.get("plan") or "",
-        "models": [f"{MODEL_PREFIX}{m}" for m in (raw.get("models") or DEFAULT_MODELS)],
+        # todos os modelos da assinatura (lista do próprio ChatGPT), não uma lista editada
+        "models": [f"{MODEL_PREFIX}{m}" for m in await available_models(user_id)],
     }
+
+
+_MODELS_URL = "https://chatgpt.com/backend-api/codex/models"
+_MODELS_TTL = 3600
+_models_cache: dict[str, tuple[float, list[str]]] = {}
+
+
+def _parse_models(data: Any) -> list[str]:
+    """Slugs listáveis da resposta do /models do Codex (o mesmo que o Codex CLI lê).
+    Tolerante ao formato: `models` ou `data`, `slug` ou `id`; `visibility: hide` e
+    `supported_in_api: false` ficam de fora."""
+    itens = (data.get("models") or data.get("data") or []) if isinstance(data, dict) else data
+    out: list[str] = []
+    for m in itens if isinstance(itens, list) else []:
+        if not isinstance(m, dict):
+            continue
+        slug = str(m.get("slug") or m.get("id") or "").strip()
+        if not slug or m.get("visibility") in ("hide", "hidden") or m.get("supported_in_api") is False:
+            continue
+        if slug not in out:
+            out.append(slug)
+    return out
+
+
+async def available_models(user_id: str) -> list[str]:
+    """TODOS os modelos que a assinatura libera, perguntando ao ChatGPT (cache de 1h).
+    Sem resposta útil, cai na lista salva (ou na padrão) — nunca levanta."""
+    uid = str(user_id)
+    hit = _models_cache.get(uid)
+    if hit and time.time() - hit[0] < _MODELS_TTL:
+        return hit[1]
+    try:
+        access, account_id = await get_access(uid)
+        headers = {"Authorization": f"Bearer {access}", "originator": "codex_cli_rs"}
+        if account_id:
+            headers["chatgpt-account-id"] = account_id
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(_MODELS_URL, params={"client_version": "0.99.0"}, headers=headers)
+        if r.status_code == 200:
+            slugs = _parse_models(r.json())
+            if slugs:
+                _models_cache[uid] = (time.time(), slugs)
+                return slugs
+    except Exception as exc:  # noqa: BLE001 - lista de modelos é best-effort
+        logger.info("lista de modelos do ChatGPT indisponível: %s", exc)
+    row = await _load_row(uid)
+    salvos = (row or {}).get("models") if isinstance(row, dict) else None
+    return list(salvos or DEFAULT_MODELS)
 
 
 async def is_connected(db: AsyncSession, user_id: str) -> bool:

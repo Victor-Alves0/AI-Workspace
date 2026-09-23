@@ -103,6 +103,9 @@ services:
       # Anexos do chat: o arquivo fica no disco e a mensagem guarda só a referência
       # (models/upload.py). Sem este volume, todo anexo some a cada recriação.
       - uploads_data:/data/uploads
+      # Atualização pelo painel: o servidor só grava o PEDIDO aqui; quem roda o
+      # update.sh é o agente do host (sudo ./scripts/update-agent.sh install).
+      - ./data/control:/data/control
       # Cookies do yt-dlp (anti-bloqueio da transcrição). Descomente e ajuste o
       # caminho do host; depois no .env: TRANSCRIBE_COOKIES_DIR=/data/yt-cookies
       # - ./secrets/yt-cookies:/data/yt-cookies:ro

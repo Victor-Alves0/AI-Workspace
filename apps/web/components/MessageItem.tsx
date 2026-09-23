@@ -14,6 +14,7 @@ import StockCard from "./StockCard";
 import ChartView from "./ChartView";
 import DeepResearchCard from "./DeepResearchCard";
 import TextAttachmentModal from "./TextAttachmentModal";
+import DiceRollCard, { parseDiceRoll } from "./DiceRollCard";
 import { isTextAttachment } from "./PromptBox";
 
 // artefatos visuais que uma ferramenta pode emitir (resultado compacto → o front
@@ -1574,6 +1575,10 @@ function MessageItem({
       </div>
     </div>
   );
+
+  // rolagem do //roll: cartão no centro (evento da mesa), não bolha do usuário
+  const diceRoll = parseDiceRoll(message);
+  if (diceRoll) return <DiceRollCard roll={diceRoll} onDelete={() => onDelete(message.id)} />;
 
   // mensagem do usuário: bolha compacta à direita
   if (isUser) {
