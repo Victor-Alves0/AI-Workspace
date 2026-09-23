@@ -28,7 +28,7 @@ import Sidebar from "@/components/Sidebar";
 import Controls from "@/components/Controls";
 import ModelPicker from "@/components/ModelPicker";
 import type { PaletteItem } from "@/components/CommandPalette";
-import PromptBox, { type MiniAppId, type ReasoningEffort, type RefDoc } from "@/components/PromptBox";
+import PromptBox, { parseReasoningEffort, type MiniAppId, type ReasoningEffort, type RefDoc } from "@/components/PromptBox";
 import MessageItem from "@/components/MessageItem";
 import type { Section as WorkspaceSection } from "@/components/WorkspaceView";
 import type { ChatActions } from "@/components/ChatItem";
@@ -57,20 +57,12 @@ type RoundtableStream = { speaker: Speaker; content: string; reasoning: string }
 // Override reservado do composer, persistido no Chat sem alterar o preset do
 // modelo. O backend consome e remove esta chave antes de chamar o provider.
 const CHAT_REASONING_EFFORT_PARAM = "_chat_reasoning_effort";
-const REASONING_EFFORTS = new Set<ReasoningEffort>(["off", "minimal", "low", "medium", "high", "xhigh"]);
-
 function reasoningFromParams(params: Record<string, unknown> | null | undefined): ReasoningEffort | null {
-  const effort = (params?.reasoning as { effort?: unknown } | undefined)?.effort;
-  return typeof effort === "string" && REASONING_EFFORTS.has(effort as ReasoningEffort)
-    ? effort as ReasoningEffort
-    : null;
+  return parseReasoningEffort((params?.reasoning as { effort?: unknown } | undefined)?.effort);
 }
 
 function chatReasoningOverride(params: Record<string, unknown> | null | undefined): ReasoningEffort | null {
-  const effort = params?.[CHAT_REASONING_EFFORT_PARAM];
-  return typeof effort === "string" && REASONING_EFFORTS.has(effort as ReasoningEffort)
-    ? effort as ReasoningEffort
-    : null;
+  return parseReasoningEffort(params?.[CHAT_REASONING_EFFORT_PARAM]);
 }
 
 // varre os resultados de ferramenta em busca de um artefato "kind:ask" (o seletor
@@ -886,23 +878,33 @@ export default function ChatPage() {
   // "Ler em voz alta": usa a voz do modelo que PRODUZIU a mensagem (casa o nome do
   // modelo da resposta com um modelo custom), caindo no modelo atual do chat. Sem
   // isto o botão usava só o modelo selecionado, ignorando a voz configurada.
-  const voiceSettingsFor = useCallback((m: Message): { voice?: string; modelConfigId?: string; enabled: boolean } => {
+  // Modelo custom que PRODUZIU a mensagem (pelo id gravado no usage; mensagens antigas
+  // só têm o nome — aí vale só se houver UMA correspondência, nomes repetidos jamais
+  // escolhem outro preset por acidente). undefined = não identificado.
+  const producerOf = useCallback((m: Message) => {
     const configId = m.usage?.model_config_id;
     const byId = configId ? customModels.find((c) => c.id === configId) : undefined;
     const name = m.usage?.model_name;
-    // Mensagens antigas não têm model_config_id. Só usa nome como fallback se
-    // houver UMA correspondência; nomes repetidos jamais devem escolher a voz de
-    // outro preset por acidente.
     const sameName = name ? customModels.filter((c) => c.name === name) : [];
-    const legacyByName = sameName.length === 1 ? sameName[0] : undefined;
-    const selected = byId ?? legacyByName ?? curCustom;
+    return byId ?? (sameName.length === 1 ? sameName[0] : undefined);
+  }, [customModels]);
+  // Foto ao lado da resposta = a do modelo que a escreveu, não a do selecionado agora
+  // (trocar de modelo no meio da conversa trocava a foto das respostas antigas, com o
+  // nome certo). Sem usage ainda (resposta em andamento) = modelo atual; usage de um
+  // modelo base (sem preset) = sem foto.
+  const avatarFor = useCallback((m: Message): string | null => {
+    if (!m.usage?.model_name && !m.usage?.model_config_id) return curCustom?.avatar_url ?? null;
+    return producerOf(m)?.avatar_url ?? null;
+  }, [producerOf, curCustom]);
+  const voiceSettingsFor = useCallback((m: Message): { voice?: string; modelConfigId?: string; enabled: boolean } => {
+    const selected = producerOf(m) ?? curCustom;
     const voiceConfig = selected?.filter_config?.voice as { tts_enabled?: boolean } | undefined;
     return {
       voice: selected?.tts_voice ?? undefined,
       modelConfigId: selected?.id,
       enabled: voiceConfig?.tts_enabled !== false,
     };
-  }, [customModels, curCustom]);
+  }, [producerOf, curCustom]);
   const stopMessageSpeech = useCallback(() => {
     const current = messageSpeechRef.current;
     messageSpeechRef.current = { id: null, run: current.run + 1 };
@@ -2576,7 +2578,7 @@ export default function ChatPage() {
                         modelName={m.speaker?.name ?? modelLabel}
                         nameColor={isRt ? (m.speaker?.color ?? null) : null}
                         toolsEnabled={iface.chat_tools !== false}
-                        modelAvatar={isRt ? null : (showAv ? (curCustom?.avatar_url ?? null) : null)}
+                        modelAvatar={isRt || !showAv ? null : avatarFor(m)}
                         chatArtifacts={chatArtifacts}
                         onOpenArtifact={setArtifactOpen}
                         onSpeak={m.role === "assistant" && voiceSettingsFor(m).enabled ? toggleMessageSpeech : undefined}

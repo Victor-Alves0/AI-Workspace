@@ -55,11 +55,16 @@ import { matchCommands, type ChatCommand } from "@/lib/commands";
 import { MenuItem, finePointer, useClickOutside } from "./ui";
 import { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME } from "./CodespaceFileBrowser";
 import { toolCategoryIcon, toolCategoryTitle } from "./toolCategory";
+import TextAttachmentModal from "./TextAttachmentModal";
 
 // docs binários com extração server-side (integração "Extração de Texto")
 const DOC_RE = /\.(pdf|docx|xlsx|xlsm|pptx|csv)$/i;
 // arquivos de texto lidos direto no cliente
 const TEXT_RE = /\.(txt|md|markdown|json|ya?ml|log|tsv|xml|html?|py|js|ts|tsx|jsx|css|sh)$/i;
+/** Anexo cujo conteúdo é texto puro: abre na janela de ver/editar em vez de outra aba. */
+export function isTextAttachment(a: { type?: string; name?: string; mime?: string; url?: string }): boolean {
+  return a.type === "file" && !!a.url && (TEXT_RE.test(a.name ?? "") || (a.mime ?? "").startsWith("text/"));
+}
 // teto generoso de anexos por mensagem (evita payloads absurdos, mas não atrapalha o uso)
 // 20 anexos por mensagem — o mesmo teto do Claude. O tamanho de cada arquivo é
 // decidido pelo servidor (500MB; imagem 20MB, áudio 25MB), que recusa com a mensagem
@@ -129,10 +134,9 @@ function ContextMeter({
   );
 }
 
-export type ReasoningEffort = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+export type ReasoningEffort = "off" | "low" | "medium" | "high" | "xhigh";
 const REASONING_LABELS: Record<ReasoningEffort, string> = {
   off: "Desligado",
-  minimal: "Mínimo",
   low: "Baixo",
   medium: "Médio",
   high: "Alto",
@@ -144,11 +148,17 @@ const REASONING_LABELS: Record<ReasoningEffort, string> = {
 // recusar o nível, o backend cai um degrau sozinho e emite `reasoning_effort` — o
 // seletor então reflete o nível que de fato funcionou (ver useGeneration).
 export function reasoningLevelsFor(_modelId?: string): ReasoningEffort[] {
-  return ["minimal", "low", "medium", "high", "xhigh"];
+  return ["low", "medium", "high", "xhigh"];
+}
+
+/** Lê um nível salvo (preset, chat, evento do servidor). "minimal" saiu da escada:
+ *  chats e presets antigos que o tinham passam a valer como "low". */
+export function parseReasoningEffort(v: unknown): ReasoningEffort | null {
+  if (v === "minimal") return "low";
+  return v === "off" || v === "low" || v === "medium" || v === "high" || v === "xhigh" ? v : null;
 }
 
 // Seletor de nível de raciocínio (thinking) do modelo. Fica à esquerda do Ditar.
-// As opções seguem o modelo ativo (`modelId`): alguns têm "Mínimo"/"Máximo", outros não.
 function ThinkingSelect({
   value,
   onChange,
@@ -597,6 +607,17 @@ export default function PromptBox({
   }
   function removeAttachment(i: number) {
     onAttachmentsChange?.(attachments.filter((_, idx) => idx !== i));
+  }
+  // anexo de texto aberto na janela de ver/editar (índice em `attachments`)
+  const [viewing, setViewing] = useState<number | null>(null);
+  /** Salvar a edição = subir o texto novo com o mesmo nome e trocar a referência. */
+  async function saveTextAttachment(i: number, text: string) {
+    const atual = attachments[i];
+    if (!atual) return;
+    const ref = await uploadFile(new File([text], atual.name || "texto.txt", { type: "text/plain" }));
+    onAttachmentsChange?.(attachments.map((a, idx) => idx === i
+      ? { type: ref.kind, name: ref.name, upload_id: ref.id, url: API_URL + ref.url, mime: ref.mime, size: ref.size }
+      : a));
   }
   function openFilePicker(capture: boolean) {
     setPlusOpen(false);
@@ -1064,10 +1085,18 @@ export default function PromptBox({
                       </button>
                     </span>
                   ) : (
-                    <span key={i} className="flex max-w-[200px] items-center gap-1.5 rounded-lg border border-border bg-surface2 px-2.5 py-1 text-xs text-ink">
+                    <span key={i} className="flex max-w-[220px] items-center gap-1.5 rounded-lg border border-border bg-surface2 px-2.5 py-1 text-xs text-ink">
                       {a.type === "audio" ? <Mic size={13} className="shrink-0 text-accent-hover" /> : <FileText size={13} className="shrink-0 text-muted" />}
-                      <span className="truncate">{a.name}</span>
-                      <button onClick={() => removeAttachment(i)} className="text-muted transition-colors hover:text-red-300">
+                      {/* min-w-0: sem ele o nome longo ("Texto colado 23/09/2026, 14:30.txt")
+                          não encolhe e empurra o ✕ para fora do chip — onde a lista o corta */}
+                      {isTextAttachment(a) ? (
+                        <button onClick={() => setViewing(i)} title="Ver e editar" className="min-w-0 truncate text-left hover:underline">
+                          {a.name}
+                        </button>
+                      ) : (
+                        <span className="min-w-0 truncate">{a.name}</span>
+                      )}
+                      <button onClick={() => removeAttachment(i)} title="Remover" className="shrink-0 text-muted transition-colors hover:text-red-300">
                         <X size={12} />
                       </button>
                     </span>
@@ -1077,6 +1106,15 @@ export default function PromptBox({
             )}
             {attachErr && <p className="text-[11px] text-red-400">{attachErr}</p>}
           </div>
+        )}
+        {viewing !== null && attachments[viewing]?.url && (
+          <TextAttachmentModal
+            name={attachments[viewing].name}
+            url={attachments[viewing].url!}
+            editable
+            onClose={() => setViewing(null)}
+            onSave={(t) => saveTextAttachment(viewing, t)}
+          />
         )}
         {/* mensagens enviadas DURANTE a geração: chips (fila/steer) até o turno acabar */}
         {queued.length > 0 && (
@@ -1179,15 +1217,25 @@ export default function PromptBox({
               </button>
               {plusOpen && (
                 <div className={`animate-pop absolute left-0 z-50 min-w-[240px] rounded-xl border border-border bg-surface p-1.5 shadow-menu ${menuUp ? "bottom-11" : "top-11"}`}>
+                    {/* modelo sem a capacidade: diz o porquê (antes o menu só fechava,
+                        e parecia que o botão estava quebrado) */}
                     <MenuItem
                       icon={<Upload size={16} />}
-                      onClick={() => canAttach ? openFilePicker(false) : setPlusOpen(false)}
+                      onClick={() => {
+                        if (canAttach) { openFilePicker(false); return; }
+                        setPlusOpen(false);
+                        setAttachErr("Este modelo não aceita anexos. Habilite Visão ou Upload de Arquivos nas Capacidades do modelo (Modelos → editar).");
+                      }}
                     >
                       Carregar Arquivos
                     </MenuItem>
                     <MenuItem
                       icon={<Camera size={16} />}
-                      onClick={() => canVision ? openFilePicker(true) : setPlusOpen(false)}
+                      onClick={() => {
+                        if (canVision) { openFilePicker(true); return; }
+                        setPlusOpen(false);
+                        setAttachErr("Este modelo não vê imagens. Habilite Visão (ou o Vision Router) nas Capacidades do modelo.");
+                      }}
                     >
                       Enviar Captura
                     </MenuItem>

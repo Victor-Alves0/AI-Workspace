@@ -225,8 +225,17 @@ export interface ChatInfo {
   model: string;
   tags: string[];
   message_count: number;
+  /** SOMA do que foi enviado em todas as chamadas (≠ tamanho do contexto) */
   tokens_in: number;
   tokens_out: number;
+  /** parte de tokens_in lida do cache do provedor (sai mais barata) */
+  tokens_cached?: number;
+  /** chamadas ao modelo (1 por resposta + 1 por passo de ferramenta) */
+  llm_calls?: number;
+  /** tamanho atual do contexto (o mesmo do medidor) */
+  context_tokens?: number;
+  /** true = estimado pelos caracteres (respostas antigas não têm o número real) */
+  context_estimated?: boolean;
   cost: number;
   artifacts: { id: string; identifier: string; title: string; kind: string; version: number }[];
   memory_count: number;

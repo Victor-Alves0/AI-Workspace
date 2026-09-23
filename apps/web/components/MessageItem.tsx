@@ -13,6 +13,8 @@ import ExcalidrawCanvas from "./ExcalidrawCanvas";
 import StockCard from "./StockCard";
 import ChartView from "./ChartView";
 import DeepResearchCard from "./DeepResearchCard";
+import TextAttachmentModal from "./TextAttachmentModal";
+import { isTextAttachment } from "./PromptBox";
 
 // artefatos visuais que uma ferramenta pode emitir (resultado compacto → o front
 // desenha). O modelo pode chamar via `execute_tool` (resultado no topo) ou via
@@ -1496,6 +1498,8 @@ function MessageItem({
 }) {
   const isUser = message.role === "user";
   const [editing, setEditing] = useState(false);
+  // anexo de texto aberto na janela de leitura (índice em message.attachments)
+  const [viewingAtt, setViewingAtt] = useState<number | null>(null);
   const [draft, setDraft] = useState(message.content);
   const [showCost, setShowCost] = useState(false);
   const [showTools, setShowTools] = useState(false);
@@ -1593,6 +1597,17 @@ function MessageItem({
                       // nota de voz/áudio anexado → player nativo compacto
                       // eslint-disable-next-line jsx-a11y/media-has-caption
                       <audio key={i} src={attachmentSrc(a.url)} controls preload="none" className="h-9 max-w-[240px]" />
+                    ) : isTextAttachment(a) ? (
+                      // texto (ex.: "Texto colado"): abre na janela, sem sair da conversa
+                      <button
+                        key={i}
+                        onClick={() => setViewingAtt(i)}
+                        title={a.name}
+                        className="flex items-center gap-1.5 rounded-lg border border-border bg-surface2 px-2.5 py-1 text-xs text-ink-soft transition-colors hover:border-accent/40 hover:text-ink"
+                      >
+                        <FileText size={13} className="shrink-0 text-muted" />
+                        <span className="max-w-[220px] truncate">{a.name || "arquivo"}</span>
+                      </button>
                     ) : (
                       <a
                         key={i}
@@ -1608,6 +1623,13 @@ function MessageItem({
                     ),
                   )}
                 </div>
+              )}
+              {viewingAtt !== null && atts[viewingAtt]?.url && (
+                <TextAttachmentModal
+                  name={atts[viewingAtt].name || "arquivo"}
+                  url={attachmentSrc(atts[viewingAtt].url!)}
+                  onClose={() => setViewingAtt(null)}
+                />
               )}
               {message.content && (
                 <div

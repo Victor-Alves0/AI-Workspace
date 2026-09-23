@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import {
-  Blocks, Brain, Code2, Coins, FileText, Hash, Info, Loader2, MessageSquare, X,
+  ArrowDownToLine, ArrowUpFromLine, Blocks, Brain, Code2, Coins, FileText, Gauge, Info, Loader2, MessageSquare, Repeat, X,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ChatInfo as ChatInfoData } from "@/lib/types";
@@ -66,8 +66,26 @@ export default function ChatInfoModal({
             <div className="grid grid-cols-2 gap-2">
               <Stat icon={<MessageSquare size={15} />} label="Mensagens" value={String(info.message_count)} />
               <Stat icon={<Coins size={15} />} label="Custo" value={`$${info.cost.toFixed(4)}`} />
-              <Stat icon={<Hash size={15} />} label="Tokens entrada" value={fmtNum(info.tokens_in)} />
-              <Stat icon={<Hash size={15} />} label="Tokens saída" value={fmtNum(info.tokens_out)} />
+              <Stat
+                icon={<Gauge size={15} />}
+                label="Contexto atual"
+                value={`${info.context_estimated ? "~" : ""}${fmtNum(info.context_tokens ?? 0)}`}
+                title="Quanto o modelo recebe de uma vez a cada chamada (o mesmo do medidor)"
+              />
+              <Stat
+                icon={<Repeat size={15} />}
+                label="Chamadas ao modelo"
+                value={fmtNum(info.llm_calls ?? 0)}
+                title="Uma por resposta, mais uma por passo de ferramenta"
+              />
+              <Stat
+                icon={<ArrowUpFromLine size={15} />}
+                label="Tokens enviados (soma)"
+                value={fmtNum(info.tokens_in)}
+                sub={info.tokens_cached ? `${fmtNum(info.tokens_cached)} do cache` : undefined}
+                title="Soma do que foi enviado em todas as chamadas — cada uma reenvia o contexto inteiro"
+              />
+              <Stat icon={<ArrowDownToLine size={15} />} label="Tokens recebidos" value={fmtNum(info.tokens_out)} />
               <Stat icon={<Brain size={15} />} label="Memórias" value={String(info.memory_count)} />
               <Stat icon={<Blocks size={15} />} label="Artefatos" value={String(info.artifacts.length)} />
             </div>
@@ -119,13 +137,18 @@ export default function ChatInfoModal({
   );
 }
 
-function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function Stat({ icon, label, value, sub, title }: {
+  icon: React.ReactNode; label: string; value: string; sub?: string; title?: string;
+}) {
   return (
-    <div className="flex items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-2.5">
+    <div title={title} className="flex items-center gap-2.5 rounded-xl border border-border bg-surface px-3 py-2.5">
       <span className="text-muted">{icon}</span>
       <div className="min-w-0">
         <p className="truncate text-[11px] text-muted">{label}</p>
-        <p className="truncate text-sm font-semibold text-ink tabular-nums">{value}</p>
+        <p className="truncate text-sm font-semibold text-ink tabular-nums">
+          {value}
+          {sub && <span className="ml-1.5 text-[11px] font-normal text-muted">{sub}</span>}
+        </p>
       </div>
     </div>
   );

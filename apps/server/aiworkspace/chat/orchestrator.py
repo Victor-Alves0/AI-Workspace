@@ -1349,6 +1349,10 @@ def _system_message(
 
 def _merge_usage(total: dict[str, float], usage: dict) -> None:
     """Soma um bloco de usage (tokens/custo) ao acumulado do turno."""
+    # cada bloco com prompt_tokens é UMA chamada ao modelo (os de só custo, dos
+    # subagentes, não): é o que explica a entrada somada ser N× o tamanho do contexto
+    if isinstance(usage.get("prompt_tokens"), (int, float)):
+        total["llm_calls"] = total.get("llm_calls", 0) + 1
     for k in ("prompt_tokens", "completion_tokens", "total_tokens"):
         v = usage.get(k)
         if isinstance(v, (int, float)):

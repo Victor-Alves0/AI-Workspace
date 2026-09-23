@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { streamResume } from "@/lib/sse";
 import type { ActivityStep, Chat, ToolEvent } from "@/lib/types";
 import { splitStreamArtifacts, type StreamArtifact } from "@/lib/artifacts";
+import { parseReasoningEffort } from "@/components/PromptBox";
 
 export interface GuardNote {
   name: string;
@@ -247,7 +248,8 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         maybeFlush();
       } else if (ev.type === "reasoning_effort") {
         // provider recusou o nível pedido; o backend rebaixou → o seletor reflete
-        if (paint()) deps.onReasoningEffort?.(ev.effort);
+        const effort = parseReasoningEffort(ev.effort);
+        if (effort && paint()) deps.onReasoningEffort?.(effort);
       } else if (ev.type === "tool_call") {
         // pinta imediatamente o último trecho de texto/raciocínio antes de trocar
         // para a fase de ferramenta (que pode levar vários segundos).

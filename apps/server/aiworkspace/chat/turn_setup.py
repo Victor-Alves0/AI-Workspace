@@ -178,7 +178,14 @@ def _usage_record(usage: dict | None, model: str, model_config: ModelConfig | No
         "reasoning_tokens": int(u.get("reasoning_tokens", 0) or 0),
         "cached_tokens": int(u.get("cached_tokens", 0) or 0),
         "cost": float(u.get("cost", 0.0) or 0.0),
+        # chamadas ao modelo no turno (1 + uma por passo de ferramenta)
+        "llm_calls": int(u.get("llm_calls", 0) or 0),
     }
+    # tamanho REAL do contexto (prompt da 1ª chamada). Não era copiado: depois de
+    # recarregar, o medidor caía numa estimativa e a auto-compactação lia o
+    # prompt_tokens — a SOMA das chamadas —, achando o contexto N× maior.
+    if u.get("context_tokens"):
+        rec["context_tokens"] = int(u["context_tokens"])
     # TODOS os detalhamentos do turno (ver orchestrator._finalize_usage). Copiados por
     # sufixo em vez de um a um: a lista explícita já tinha esquecido o `extra_breakdown`,
     # e o painel de uso mostrava as sub-linhas de "Instruções extras" sempre vazias.
@@ -1097,39 +1104,6 @@ _MAX_ATTACH_TOTAL = 20 * 1024 * 1024
 # teto de QUANTIDADE de anexos por turno — bate com o schema SendMessageIn (max_length)
 # e com `upload_max_per_message` (config/front).
 _MAX_ATTACH_COUNT = 50
-
-
-def _clean_attachments(raw: Any) -> list[dict]:
-    """Normaliza os anexos JÁ resolvidos (imagem|arquivo-texto) — sem `data` bruto.
-
-    Usado ao reprocessar anexos salvos (ex.: regenerar), que já têm texto extraído."""
-    if not isinstance(raw, list):
-        return []
-    out: list[dict] = []
-    total = 0
-    for a in raw[:_MAX_ATTACH_COUNT]:
-        if not isinstance(a, dict):
-            continue
-        t = a.get("type")
-        if a.get("upload_id"):          # referência: o binário está no disco
-            out.append({
-                "type": t if t in ("image", "audio", "file") else "file",
-                "name": str(a.get("name") or "")[:255],
-                "upload_id": str(a["upload_id"]),
-            })
-            continue
-        if t in ("image", "audio") and isinstance(a.get("url"), str) and a["url"].startswith("data:"):
-            total += len(a["url"])
-            if total > _MAX_ATTACH_TOTAL:
-                break
-            out.append({"type": t, "name": str(a.get("name") or "")[:255], "url": a["url"]})
-        elif t == "file" and isinstance(a.get("text"), str) and a["text"]:
-            text = a["text"][:200_000]
-            total += len(text)
-            if total > _MAX_ATTACH_TOTAL:
-                break
-            out.append({"type": "file", "name": str(a.get("name") or "")[:255], "text": text})
-    return out
 
 
 async def _resolve_upload(a: dict, ex_cfg: dict) -> dict | None:

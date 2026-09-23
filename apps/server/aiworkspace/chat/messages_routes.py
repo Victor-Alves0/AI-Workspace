@@ -33,7 +33,6 @@ from .turn_setup import (
     _artifacts_enabled,
     _artifacts_kwargs,
     _brain_setup,
-    _clean_attachments,
     _code_mode,
     _effective_chat_model,
     _final_message_fields,
@@ -584,7 +583,9 @@ async def regenerate_message(
         source_user_message = rows[idx]
         user_text = source_user_message.content
         turn_key = str(source_user_message.id)
-        user_attachments = _clean_attachments(source_user_message.attachments or [])
+        # os anexos gravados são REFERÊNCIAS (upload_id): precisam ser resolvidos (texto
+        # extraído / imagem) como no envio — senão o modelo recebe o anexo vazio
+        user_attachments = await _prepare_attachments(source_user_message.attachments or [], model_config)
         if not user_text and not user_attachments:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mensagem vazia")
         history = [
@@ -606,10 +607,11 @@ async def regenerate_message(
                 source_user_message = prior[i]
                 user_text = source_user_message.content
                 turn_key = str(source_user_message.id)
-                user_attachments = _clean_attachments(source_user_message.attachments or [])
+                user_attachments = await _prepare_attachments(
+                    source_user_message.attachments or [], model_config)
                 cut = i
                 break
-        if not user_text:
+        if not user_text and not user_attachments:  # mensagem só com anexo também refaz
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sem prompt do usuário para refazer")
         history = [
             _reasoning_details.history_entry(m)

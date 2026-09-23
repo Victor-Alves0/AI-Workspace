@@ -319,15 +319,36 @@ async def chat_info(
     custo total, artefatos e quantas memórias estão vinculadas a esta conversa."""
     chat = await _get_owned_chat(db, chat_id, user)
 
-    msgs = list(await db.scalars(select(Message).where(Message.chat_id == chat_id)))
-    tokens_in = tokens_out = 0
+    msgs = list(await db.scalars(
+        select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at)
+    ))
+    # tokens_in é a SOMA do que foi enviado em todas as chamadas: cada mensagem e cada
+    # passo de ferramenta reenviam o contexto inteiro, então ela passa fácil de N× o
+    # contexto. O painel mostra os dois lado a lado, mais as chamadas e o cache.
+    tokens_in = tokens_out = tokens_cached = llm_calls = 0
     cost = 0.0
     for m in msgs:
         u = m.usage or {}
-        tokens_in += int(u.get("prompt_tokens", 0) or 0)
+        prompt = int(u.get("prompt_tokens", 0) or 0)
+        tokens_in += prompt
         tokens_out += int(u.get("completion_tokens", 0) or 0)
+        tokens_cached += int(u.get("cached_tokens", 0) or 0)
+        # mensagens de antes da contagem: ao menos a chamada que as gerou
+        llm_calls += int(u.get("llm_calls", 0) or 0) or (1 if prompt else 0)
         cost += float(u.get("cost", 0.0) or (m.cost or 0.0))
     convo_count = sum(1 for m in msgs if m.role in ("user", "assistant") and not m.is_summary)
+
+    # contexto atual = o que o medidor mostra: o da última resposta fora da parte
+    # compactada; sem o número real (respostas antigas), estima pelos caracteres
+    em_contexto = [m for m in msgs if not m.compacted]
+    context_tokens = next(
+        (int(m.usage["context_tokens"]) + int(m.usage.get("completion_tokens", 0) or 0)
+         for m in reversed(em_contexto) if (m.usage or {}).get("context_tokens")),
+        None,
+    )
+    context_estimated = context_tokens is None
+    if context_tokens is None:
+        context_tokens = sum(len(m.content or "") for m in em_contexto) // 4
 
     arts = list(await db.scalars(
         select(Artifact).where(Artifact.chat_id == chat_id).order_by(Artifact.updated_at.desc())
@@ -368,6 +389,10 @@ async def chat_info(
         "message_count": convo_count,
         "tokens_in": tokens_in,
         "tokens_out": tokens_out,
+        "tokens_cached": tokens_cached,
+        "llm_calls": llm_calls,
+        "context_tokens": context_tokens,
+        "context_estimated": context_estimated,
         "cost": round(cost, 6),
         "artifacts": artifacts,
         "memory_count": memory_count,

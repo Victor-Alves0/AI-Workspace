@@ -20,7 +20,10 @@ logger = logging.getLogger(__name__)
 # UI (o OpenRouter não diz quais níveis cada modelo aceita); se o provider recusar o
 # nível pedido (ex.: "xhigh" num modelo que só vai até "high"), o fallback automático
 # desce um degrau e refaz — avisando a UI p/ o seletor refletir o que funcionou.
-_EFFORT_LADDER = ["xhigh", "high", "medium", "low", "minimal"]
+# "minimal" saiu da UI (Baixo é o menor nível oferecido), mas ainda chega pela API
+# pública e de chats antigos: se for recusado, desliga direto.
+_EFFORT_LADDER = ["xhigh", "high", "medium", "low"]
+_ACCEPTED_EFFORTS = (*_EFFORT_LADDER, "minimal")
 
 
 def _lower_effort(payload: dict[str, Any], body: str) -> str | None:
@@ -32,13 +35,13 @@ def _lower_effort(payload: dict[str, Any], body: str) -> str | None:
     if not any(k in low for k in ("effort", "reasoning", "xhigh", "minimal", "verbosity")):
         return None
     reasoning = payload.get("reasoning")
-    if isinstance(reasoning, dict) and reasoning.get("effort") in _EFFORT_LADDER:
+    if isinstance(reasoning, dict) and reasoning.get("effort") in _ACCEPTED_EFFORTS:
         cur, where = reasoning["effort"], "obj"
-    elif payload.get("reasoning_effort") in _EFFORT_LADDER:
+    elif payload.get("reasoning_effort") in _ACCEPTED_EFFORTS:
         cur, where = payload["reasoning_effort"], "flat"
     else:
         return None
-    idx = _EFFORT_LADDER.index(cur)
+    idx = _EFFORT_LADDER.index(cur) if cur in _EFFORT_LADDER else len(_EFFORT_LADDER)
     if idx + 1 < len(_EFFORT_LADDER):
         nxt = _EFFORT_LADDER[idx + 1]
         if where == "obj":
