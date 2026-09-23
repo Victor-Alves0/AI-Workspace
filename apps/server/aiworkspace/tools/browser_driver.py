@@ -237,7 +237,7 @@ class _LocalBrowser:
             self.job.adopt(self.proc)
         # com --remote-debugging-port=0 o navegador escolhe a porta e a grava aqui
         arquivo = Path(self.profile) / "DevToolsActivePort"
-        fim = time.monotonic() + 20
+        fim = time.monotonic() + 30
         while time.monotonic() < fim:
             codigo = self.proc.poll()
             if codigo not in (None, 0):  # 0 = repassou a outro processo
@@ -245,6 +245,12 @@ class _LocalBrowser:
                 self.stop()
                 raise CDPError(f"o navegador local encerrou ao iniciar (código {codigo})"
                                + (f": {motivo}" if motivo else ""))
+            # Linux sem sandbox utilizável: o Chrome loga FATAL mas o processo principal
+            # nem sempre sai — esperar o prazo inteiro comia o tempo da 2ª tentativa
+            if sandbox and "No usable sandbox" in self._log_tail(log_path):
+                motivo = self._log_tail(log_path)
+                self.stop()
+                raise CDPError(f"sandbox indisponível: {motivo}")
             try:
                 linhas = arquivo.read_text(encoding="utf-8").split()
                 if len(linhas) >= 2:
