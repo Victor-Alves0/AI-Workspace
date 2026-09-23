@@ -109,6 +109,9 @@ async def delete_user(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Você não pode excluir a si mesmo")
     await db.delete(u)
     await db.commit()
+    # as memórias não têm FK para users (o CASCADE não as alcança): apaga à parte
+    from .memory import memory_service
+    await run_in_threadpool(memory_service.delete_user_memories, str(user_id))
     return {"ok": True}
 
 

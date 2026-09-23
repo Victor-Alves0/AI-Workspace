@@ -1030,7 +1030,7 @@ export function ToolEventsPanel({
   );
 }
 
-/** Memórias (mem0) injetadas nesta resposta — com desativar/excluir inline. */
+/** Memórias injetadas nesta resposta — com desativar/excluir inline. */
 function MemoriesUsedPanel({ items }: { items: { id: string; text: string; scope?: string }[] }) {
   const ref = useRef<HTMLDivElement>(null);
   const [gone, setGone] = useState<Record<string, "disabled" | "deleted">>({});
@@ -1373,7 +1373,7 @@ function UsagePanel({ u }: { u: NonNullable<Message["usage"]> }) {
     ] : []),
     { label: "Instruções extras (artefatos/canal/guardas)", value: inb?.extra ?? 0 },
     ...(full ? perExtra.map(([k, v]) => ({ label: EXTRA_LABELS[k] ?? k, value: v, sub: true })) : []),
-    { label: "Memória (mem0)", value: inb?.memory ?? 0 },
+    { label: "Memória", value: inb?.memory ?? 0 },
     { label: "Ferramentas (instruções + schemas)", value: inb?.tools ?? 0 },
     ...(full && tpb ? [
       { label: "Instruções da SIFT + catálogo", value: tpb.instructions ?? 0, sub: true },

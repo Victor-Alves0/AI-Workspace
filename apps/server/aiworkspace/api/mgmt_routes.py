@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..budget_service import budget_state
 from ..knowledge import ingest
-from ..memory import mem0_service
+from ..memory import memory_service
 from ..models import ApiRequest, KnowledgeBase, KnowledgeDoc, User
 from ..secrets_service import OPENROUTER_KEY, get_secret
 from . import keys_service, limits
@@ -86,7 +86,7 @@ async def list_memories(
     flt = _memory_filter(ctx, user)
     key = await _mem_key(ctx.db, ctx.user)
     rows = await run_in_threadpool(
-        lambda: mem0_service.list_memories(
+        lambda: memory_service.list_memories(
             key, str(ctx.user.id), query=q, limit=limit, **flt
         )
     )
@@ -112,7 +112,7 @@ async def add_memory(body: MemoryIn, ctx: ApiContext = Depends(scoped("memory:wr
 
     if max_items:
         existing = await run_in_threadpool(
-            lambda: mem0_service.list_memories(key, str(ctx.user.id), limit=max_items + 1, **flt)
+            lambda: memory_service.list_memories(key, str(ctx.user.id), limit=max_items + 1, **flt)
         )
         if len(existing) >= max_items:
             raise ApiError(
@@ -122,7 +122,7 @@ async def add_memory(body: MemoryIn, ctx: ApiContext = Depends(scoped("memory:wr
 
     scope = flt.get("scope") or ("chat" if flt.get("chat_id") else "model")
     ok = await run_in_threadpool(
-        lambda: mem0_service.add_manual(
+        lambda: memory_service.add_manual(
             key, str(ctx.user.id), text, scope=scope,
             chat_id=flt.get("chat_id"), agent_id=flt.get("agent_id"),
         )
@@ -145,13 +145,13 @@ async def delete_memory(
     # mem0 é global do usuário, então sem esta checagem uma chave restrita poderia
     # apagar memória de outra aplicação só sabendo o id.
     rows = await run_in_threadpool(
-        lambda: mem0_service.list_memories(key, str(ctx.user.id), limit=500, **flt)
+        lambda: memory_service.list_memories(key, str(ctx.user.id), limit=500, **flt)
     )
     if memory_id not in {str(r["id"]) for r in rows}:
         raise ApiError("Memória não encontrada no escopo desta chave.", status=404,
                        code="memory_not_found")
     ok = await run_in_threadpool(
-        mem0_service.delete_memory, key, memory_id, str(ctx.user.id))
+        memory_service.delete_memory, key, memory_id, str(ctx.user.id))
     return {"ok": bool(ok)}
 
 
@@ -163,12 +163,12 @@ async def clear_memories(
     flt = _memory_filter(ctx, user)
     key = await _mem_key(ctx.db, ctx.user)
     rows = await run_in_threadpool(
-        lambda: mem0_service.list_memories(key, str(ctx.user.id), limit=500, **flt)
+        lambda: memory_service.list_memories(key, str(ctx.user.id), limit=500, **flt)
     )
     removed = 0
     for r in rows:
         if await run_in_threadpool(
-                mem0_service.delete_memory, key, str(r["id"]), str(ctx.user.id)):
+                memory_service.delete_memory, key, str(r["id"]), str(ctx.user.id)):
             removed += 1
     return {"ok": True, "deleted": removed}
 
@@ -181,7 +181,7 @@ async def export_memories(
     flt = _memory_filter(ctx, user)
     key = await _mem_key(ctx.db, ctx.user)
     rows = await run_in_threadpool(
-        lambda: mem0_service.list_memories(key, str(ctx.user.id), limit=500, **flt)
+        lambda: memory_service.list_memories(key, str(ctx.user.id), limit=500, **flt)
     )
     return {
         "object": "memory.export",
@@ -209,7 +209,7 @@ async def import_memories(
         if not text:
             continue
         ok = await run_in_threadpool(
-            lambda t=text: mem0_service.add_manual(
+            lambda t=text: memory_service.add_manual(
                 key, str(ctx.user.id), t, scope=scope,
                 chat_id=flt.get("chat_id"), agent_id=flt.get("agent_id"),
             )

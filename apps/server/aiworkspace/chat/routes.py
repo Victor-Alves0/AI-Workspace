@@ -26,7 +26,7 @@ from .. import crypto
 from ..auth.deps import require_approved
 from ..auth.security import hash_password
 from ..db import get_db
-from ..memory import mem0_service
+from ..memory import memory_service
 from ..models import Artifact, Chat, CodespaceProject, Message, User
 from ..schemas.chat import (
     ChatCreate,
@@ -82,9 +82,9 @@ async def _delete_chat_memory_scopes(
     def cleanup() -> None:
         ids = chat_ids
         if ids is None:
-            ids = list(mem0_service.scope_summary(key, str(user.id)).get("chats", {}).keys())
+            ids = list(memory_service.scope_summary(key, str(user.id)).get("chats", {}).keys())
         for memory_chat_id in ids:
-            mem0_service.delete_scope(
+            memory_service.delete_scope(
                 key,
                 str(user.id),
                 scope="chat",
@@ -341,10 +341,10 @@ async def chat_info(
     # memórias vinculadas a este chat (escopo "chat") — melhor-esforço
     memory_count = 0
     try:
-        from ..memory import mem0_service
+        from ..memory import memory_service
         key = (await get_secret(db, user.id, OPENROUTER_KEY)) or "x"
         rows = await run_in_threadpool(
-            lambda: mem0_service.list_memories(key, str(user.id), scope="chat", chat_id=str(chat_id))
+            lambda: memory_service.list_memories(key, str(user.id), scope="chat", chat_id=str(chat_id))
         )
         memory_count = len(rows)
     except Exception:  # noqa: BLE001

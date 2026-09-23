@@ -23,7 +23,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 
 from ..db import SessionLocal
-from ..memory import mem0_service
+from ..memory import memory_service
 from ..models import Message, SkillProposal, User
 from ..providers import openrouter
 
@@ -238,7 +238,7 @@ async def _review(
             scope = "global"  # sem agente → cai p/ global
         try:
             await run_in_threadpool(
-                lambda text=mem["text"], sc=scope, a=aid: mem0_service.add_manual(
+                lambda text=mem["text"], sc=scope, a=aid: memory_service.add_manual(
                     api_key, user_id, text, scope=sc, chat_id=chat_id, agent_id=a, pending=True
                 )
             )

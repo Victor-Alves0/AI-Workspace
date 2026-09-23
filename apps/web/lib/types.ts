@@ -411,7 +411,7 @@ export interface Message {
   usage?: MessageUsage | null;
   reasoning?: MessageReasoning | null;
   tool_events?: ToolEvent[] | null;
-  /** memórias (mem0) injetadas nesta resposta */
+  /** memórias injetadas nesta resposta */
   memories_used?: { id: string; text: string; scope?: string }[] | null;
   attachments?: Attachment[] | null;
   /** divisor de compactação: renderizado como uma linha "Contexto compactado" */

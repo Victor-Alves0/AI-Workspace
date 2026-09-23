@@ -25,7 +25,7 @@ desktop app with a tray icon.
 
 > **Stack:** [FastAPI](https://fastapi.tiangolo.com/) (async) · [SQLAlchemy 2](https://www.sqlalchemy.org/) ·
 > **Postgres 16 + [pgvector](https://github.com/pgvector/pgvector)** · [Next.js 14](https://nextjs.org/) (App Router) + Tailwind ·
-> [SIFT](https://github.com/Victor-Alves0/SIFT) (tool calling) · [mem0](https://github.com/mem0ai/mem0) (memory) ·
+> [SIFT](https://github.com/Victor-Alves0/SIFT) (tool calling) ·
 > [OpenRouter](https://openrouter.ai/) · all in **Docker Compose**.
 
 ## Table of contents
@@ -92,7 +92,7 @@ desktop app with a tray icon.
 </td><td valign="top" width="50%">
 
 **Memory & knowledge**
-- **Memory (mem0)** with global/model/chat scopes and shareable stores
+- **Memory** with global/model/chat scopes and shareable stores
 - **Knowledge Base (RAG)** — upload documents, pgvector search, citations
 - **Second brain**: interlinked notes with a graph; the AI proposes skills and memories
 - **Proactive learning**: a background review suggests skills/memories (with approval)
@@ -128,7 +128,7 @@ flowchart LR
     subgraph Backend["Server — FastAPI"]
         O["Turn orchestrator<br/>tool-calling · guards"]
         SIFT["SIFT<br/>tools"]
-        MEM["mem0<br/>memory"]
+        MEM["Memory<br/>pgvector"]
         RAG["Knowledge Base<br/>(RAG)"]
     end
     DB[("Postgres 16<br/>+ pgvector")]
@@ -143,7 +143,7 @@ flowchart LR
 The code is organized as a monorepo:
 
 ```
-apps/server    FastAPI — auth, chat orchestrator, SIFT, mem0, RAG, integrations, /v1 API
+apps/server    FastAPI — auth, chat orchestrator, SIFT, memory, RAG, integrations, /v1 API
 apps/web       Next.js (App Router) — chat interface, workspace, settings
 desktop        Desktop shell (Tauri) — native window, tray, autostart
 infra/         Configs for optional services (SearXNG etc.)

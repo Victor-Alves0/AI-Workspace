@@ -1,6 +1,6 @@
 """Controlador de Memória (mem0): visualizar, editar e excluir o que a IA lembra.
 
-Três escopos (ver `memory/mem0_service`): **global** (compartilhado por tudo),
+Três escopos (ver `memory/memory_service`): **global** (compartilhado por tudo),
 **model** (por modelo/agente) e **chat** (por conversa). Aqui ficam a listagem
 por escopo, edição/adição/exclusão manual e as configurações do usuário
 (memória ligada + padrões de leitura/escrita para novos chats).
@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .auth.deps import require_approved
 from .db import get_db
-from .memory import mem0_service
+from .memory import memory_service
 from .models import Chat, Folder, MemoryBank, ModelConfig, User
 from .secrets_service import OPENROUTER_KEY, get_secret
 
@@ -187,7 +187,7 @@ async def list_banks(user: User = Depends(require_approved), db: AsyncSession = 
         select(MemoryBank).where(MemoryBank.user_id == user.id).order_by(MemoryBank.created_at)
     ))
     key = await _key(db, user)
-    counts = await run_in_threadpool(mem0_service.bank_counts, key, str(user.id))
+    counts = await run_in_threadpool(memory_service.bank_counts, key, str(user.id))
     return [
         BankOut(id=str(b.id), name=b.name, description=b.description or "", count=counts.get(str(b.id), 0))
         for b in rows
@@ -215,7 +215,7 @@ async def delete_bank(
     key = await _key(db, user)
     # apaga as memórias do banco no mem0 (agent_id "bank:<id>") e o registro
     await run_in_threadpool(
-        lambda: mem0_service.delete_scope(key, str(user.id), scope="bank", agent_id=f"bank:{bank_id}")
+        lambda: memory_service.delete_scope(key, str(user.id), scope="bank", agent_id=f"bank:{bank_id}")
     )
     await db.delete(b)
     await db.commit()
@@ -245,7 +245,7 @@ async def put_settings(
 async def scopes(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
     """Resumo p/ os seletores: contagem global + listas de modelos/chats com memória."""
     key = await _key(db, user)
-    summary = await run_in_threadpool(mem0_service.scope_summary, key, str(user.id))
+    summary = await run_in_threadpool(memory_service.scope_summary, key, str(user.id))
     mnames = await _model_names(db, user, list(summary["models"].keys()))
     memory_chat_ids = list(summary["chats"].keys())
     ctitles = await _existing_chat_titles(db, user, memory_chat_ids)
@@ -255,12 +255,12 @@ async def scopes(user: User = Depends(require_approved), db: AsyncSession = Depe
     if orphan_chat_ids:
         def cleanup_orphans() -> None:
             for chat_id in orphan_chat_ids:
-                mem0_service.delete_scope(
+                memory_service.delete_scope(
                     key, str(user.id), scope="chat", chat_id=chat_id
                 )
 
         await run_in_threadpool(cleanup_orphans)
-        summary = await run_in_threadpool(mem0_service.scope_summary, key, str(user.id))
+        summary = await run_in_threadpool(memory_service.scope_summary, key, str(user.id))
         memory_chat_ids = list(summary["chats"].keys())
         ctitles = await _existing_chat_titles(db, user, memory_chat_ids)
     bnames = await _bank_names(db, user, list(summary.get("banks", {}).keys()))
@@ -286,7 +286,7 @@ async def list_pending(
 ):
     """Memórias aguardando revisão (quando 'Revisar antes de salvar' está ligado)."""
     key = await _key(db, user)
-    rows = await run_in_threadpool(lambda: mem0_service.list_memories(key, str(user.id)))
+    rows = await run_in_threadpool(lambda: memory_service.list_memories(key, str(user.id)))
     rows = [r for r in rows if r.get("pending")]
     mids = {r["model_id"] for r in rows if r["model_id"]}
     cids = {r["chat_id"] for r in rows if r["chat_id"]}
@@ -317,7 +317,7 @@ async def list_memories(
 ):
     key = await _key(db, user)
     rows = await run_in_threadpool(
-        lambda: mem0_service.list_memories(
+        lambda: memory_service.list_memories(
             key, str(user.id), scope=scope, chat_id=chat_id, agent_id=model_id,
             bank_id=bank_id, project_id=project_id, query=q,
         )
@@ -359,7 +359,7 @@ async def add_memory(
         else body.model_id
     )
     ok = await run_in_threadpool(
-        lambda: mem0_service.add_manual(
+        lambda: memory_service.add_manual(
             key, str(user.id), body.text, scope=body.scope,
             chat_id=body.chat_id, agent_id=agent,
         )
@@ -377,7 +377,7 @@ async def update_memory(
     key = await _key(db, user)
     # str(user.id) é o ESCOPO de posse (o `key` é a chave do LLM, não autoriza nada)
     ok = await run_in_threadpool(
-        mem0_service.update_memory, key, memory_id, body.text, str(user.id))
+        memory_service.update_memory, key, memory_id, body.text, str(user.id))
     if not ok:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Memória não encontrada")
     return {"ok": ok}
@@ -391,7 +391,7 @@ async def delete_memory(
 ):
     key = await _key(db, user)
     ok = await run_in_threadpool(
-        mem0_service.delete_memory, key, memory_id, str(user.id))
+        memory_service.delete_memory, key, memory_id, str(user.id))
     if not ok:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Memória não encontrada")
     return {"ok": ok}
@@ -410,11 +410,11 @@ async def bulk(
         return {"ok": True, "affected": 0}
     if body.action == "delete":
         def _del() -> int:
-            return sum(1 for m in ids if mem0_service.delete_memory(key, m, str(user.id)))
+            return sum(1 for m in ids if memory_service.delete_memory(key, m, str(user.id)))
         n = await run_in_threadpool(_del)
     elif body.action in ("disable", "enable"):
         n = await run_in_threadpool(
-            mem0_service.set_disabled, str(user.id), ids, body.action == "disable"
+            memory_service.set_disabled, str(user.id), ids, body.action == "disable"
         )
     else:
         n = 0

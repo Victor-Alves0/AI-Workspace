@@ -35,7 +35,7 @@ async def test_delete_chat_also_deletes_its_memory_scope(monkeypatch):
 
     monkeypatch.setattr(routes, "_get_owned_chat", owned)
     monkeypatch.setattr(routes, "get_secret", secret)
-    monkeypatch.setattr(routes.mem0_service, "delete_scope", delete_scope)
+    monkeypatch.setattr(routes.memory_service, "delete_scope", delete_scope)
 
     assert await routes.delete_chat(chat_id, user=user, db=Database()) == {"ok": True}
     assert events == [

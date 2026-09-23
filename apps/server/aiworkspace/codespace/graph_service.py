@@ -390,6 +390,14 @@ async def _index_project(project_id: uuid.UUID, reclone: bool = True) -> None:
         await eng.dispose()
 
 
+def refine_available() -> bool:
+    """O refinamento L1 precisa do jedi, que é opcional (extra `graph-refine`): a
+    imagem Docker instala, o app desktop não (são ~5,6 mil arquivos no instalador)."""
+    import importlib.util
+
+    return importlib.util.find_spec("jedi") is not None
+
+
 def spawn_refine(project_id: uuid.UUID, user_id: str) -> None:
     """Resolução L1 (jedi p/ Python): promove arestas 'inferred'/'possible' a
     'certain'. Fica FORA do fluxo padrão de indexação — é caro (dezenas de

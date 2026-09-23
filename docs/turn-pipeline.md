@@ -63,7 +63,7 @@ sequenceDiagram
     loop guard attempts (≤ max_retries, hard cap)
         GEN->>G: run_turn_guarded
         G->>T: run_turn(**kw, extra_system=reinforce?)
-        T->>T: _gather_context (mem0 + KB-auto + #refs + ledger)
+        T->>T: _gather_context (memory + KB-auto + #refs + ledger)
         T->>T: _assemble_tools_and_prompt (SIFT catalog/schemas)
         T->>T: _system_message (cached prefix + per-turn tail + PRIORITY last)
         loop agentic loop (≤ max_iters fuse)
@@ -148,7 +148,7 @@ discards the rejected attempt). Budget: per-guard `max_retries` (1–3) + a glob
    `user_profile`, `current_codespace_project_id/worktree` (isolated per async task).
 2. **reasoning default**: absent `reasoning` key ⇒ injected `{"enabled": False}` (hybrid
    models must not silently think).
-3. **`_gather_context`** → mem0 memories + KB-auto snippets + `#`-refs + ref-chats.
+3. **`_gather_context`** → memories + KB-auto snippets + `#`-refs + ref-chats.
 4. **`_assemble_tools_and_prompt`** → the announced tools array + SIFT prompt section
    (`TOOL_ACTION_GUARD` always appended; catalog only in list mode; pins inject full
    schemas). Builds the `_ToolDispatcher`.
@@ -193,7 +193,7 @@ confirmation card or an error, short-circuiting execution):
 
 ### 6. Post-turn & persistence
 
-Inside `run_turn`, after the loop: spawn background **memory write** (mem0, only if
+Inside `run_turn`, after the loop: spawn background **memory write** (only if
 answered), **Curator** review (every N turns, opt-in), `_finalize_usage` (per-source
 char attribution), set real `context_tokens`, emit `done`.
 

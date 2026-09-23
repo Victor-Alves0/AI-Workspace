@@ -19,7 +19,7 @@ flowchart TB
         AUTH["Auth<br/>JWT httpOnly · 2FA"]
         ORQ["Turn orchestrator<br/>tool-calling · guards · streaming"]
         SIFT["SIFT<br/>tool discovery and execution"]
-        MEM["mem0<br/>long-term memory"]
+        MEM["Memory<br/>long-term, pgvector"]
         RAG["Knowledge Base<br/>RAG (pgvector)"]
         AUTO["Automations<br/>schedules · monitors"]
         OBS["Observability<br/>traces/spans"]
@@ -51,7 +51,7 @@ Async FastAPI, served by Uvicorn. Responsibilities:
   closing the browser does not cancel generation.
 - **SIFT** — tool-calling library (3 meta-tools: search, execute, run code). Native tools are
   injected directly; the catalog is discovered on demand to save tokens.
-- **mem0** — long-term memory with scopes (global/model/chat) and shareable stores, using the
+- **Memory** (`memory/memory_service.py`) — long-term memory with scopes (global/model/chat) and shareable stores, using the
   same Postgres + pgvector as the vector store.
 - **Knowledge Base (RAG)** — documents indexed with FastEmbed (384 dim) in pgvector; automatic
   mode (injects snippets + cites) or tool mode (`search_knowledge`).
@@ -96,7 +96,7 @@ every send.
 ### Database
 
 A single **Postgres 16 + pgvector** holds everything: relational data (users, chats, messages,
-models, automations…), the **mem0 vectors** and the **RAG embeddings**. The schema evolves
+models, automations…), the **memory vectors** and the **RAG embeddings**. The schema evolves
 through **74 Alembic migrations**, applied automatically on server startup.
 
 ## Lifecycle of a chat turn
@@ -105,7 +105,7 @@ through **74 Alembic migrations**, applied automatically on server startup.
 sequenceDiagram
     participant U as User
     participant S as Server (orchestrator)
-    participant M as mem0 / RAG
+    participant M as Memory / RAG
     participant L as LLM (OpenRouter)
     participant T as Tools (SIFT)
 

@@ -281,32 +281,15 @@ async def _purge_upload_orphans() -> None:
 
 
 async def _prewarm_memory() -> None:
-    """Aquece o cliente mem0 de cada usuário ativo que tem chave do OpenRouter.
+    """Carrega o modelo de embedding da memória antes do primeiro turno (~1-3s).
     Best-effort e em background: falhas viram log, nunca afetam o boot."""
     try:
-        from sqlalchemy import select
         from fastapi.concurrency import run_in_threadpool
 
-        from .db import SessionLocal
-        from .memory import mem0_service
-        from .models import User
-        from .secrets_service import OPENROUTER_KEY, get_secret
+        from .memory import memory_service
 
-        async with SessionLocal() as db:
-            users = list(await db.scalars(
-                select(User).where(User.is_active.is_(True), User.status == "active")
-            ))
-            keys: set[str] = set()
-            for u in users:
-                k = await get_secret(db, u.id, OPENROUTER_KEY)
-                if k:
-                    keys.add(k)
-        warmed = 0
-        for k in keys:
-            if await run_in_threadpool(mem0_service.warm, k):
-                warmed += 1
-        if warmed:
-            logger.info("mem0 pré-aquecido para %d usuário(s)", warmed)
+        if await run_in_threadpool(memory_service.warm):
+            logger.info("memória pré-aquecida")
     except Exception as exc:  # noqa: BLE001
         logger.warning("pré-aquecimento da memória falhou (%s)", exc)
 

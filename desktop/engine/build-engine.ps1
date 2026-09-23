@@ -84,16 +84,11 @@ if ($LASTEXITCODE -ne 0) { throw "pip install do backend falhou" }
 # O tempo de instalação é dominado pela QUANTIDADE de arquivos (o instalador e o
 # antivírus tratam um por um), não pelo tamanho. Suítes de teste dos pacotes não
 # rodam em produção. Só pastas "tests"/"test": "testing" (numpy.testing,
-# sqlalchemy.testing) pode ser importada em tempo de execução. O jedi fica inteiro
-# (os .pyi dele são os stubs que ele usa).
+# sqlalchemy.testing) pode ser importada em tempo de execução.
 Get-ChildItem $Site -Directory -Recurse -Include "tests", "test" |
-    Where-Object { $_.FullName -notlike "*\jedi\*" } |
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 Get-ChildItem $Site -Directory -Recurse -Filter "__pycache__" |
     Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-# stubs de bibliotecas de TERCEIROS do jedi (~4,3 mil arquivos): sem eles o jedi
-# analisa o código-fonte da biblioteca; os stubs da stdlib ficam
-Remove-Item -Recurse -Force (Join-Path $Site "jedi\third_party\typeshed\stubs") -ErrorAction SilentlyContinue
 
 # Os pacotes só-Python (~10 mil arquivos) viram UM arquivo: site-packages.zip, de onde
 # o Python importa direto (ver pack_site.py). Roda com o Python embarcado para o .pyc
@@ -110,7 +105,7 @@ $env:APP_SECRET = "build-only-" + ("x" * 32)
 & (Join-Path $PyDir "python.exe") -c @"
 import importlib
 for m in ('aiworkspace.main', 'aiworkspace.desktop', 'fastembed', 'onnxruntime', 'neonize',
-          'mem0', 'langchain_community', 'yt_dlp', 'phonenumbers', 'PIL', 'jedi'):
+          'aiworkspace.memory.memory_service', 'yt_dlp', 'phonenumbers', 'PIL', 'codegraph'):
     importlib.import_module(m)
 "@
 if ($LASTEXITCODE -ne 0) { throw "o backend não importa com o Python embarcado" }

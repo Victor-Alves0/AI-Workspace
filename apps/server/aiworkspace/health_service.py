@@ -1,7 +1,7 @@
 """Auto-observabilidade: a saúde das CAPACIDADES do harness (ver models/health_event).
 
 `record(...)` é SÍNCRONO (psycopg2, fire-and-forget, NUNCA levanta) de propósito —
-os pontos de degradação vivem tanto em código sync (mem0_service via psycopg2) quanto
+os pontos de degradação vivem tanto em código sync (memory_service via psycopg2) quanto
 async (orchestrator), e um evento de saúde jamais pode derrubar o caminho que estava
 tentando observar. Eventos raros (degradações), então conectar por evento é barato.
 
@@ -219,16 +219,15 @@ def self_check() -> dict:
         results["database"] = False
         record("database", "down", severity="error", detail={"error": str(exc)})
 
-    # mem0: CONSTRUIR o cliente é o teste — é exatamente aqui que degradou silencioso
-    # p/ no-op (config inválida rejeitada pelo MemoryConfig). `warm` valida o schema +
-    # pgvector + embedder; a chave sentinela só exercita a construção (o LLM é lazy).
+    # memória: `warm` carrega o modelo de embedding e lê a tabela — as duas coisas
+    # sem as quais a memória roda como no-op sem ninguém ver
     try:
-        from .memory import mem0_service
-        ok = bool(mem0_service.warm("healthcheck"))
+        from .memory import memory_service
+        ok = bool(memory_service.warm())
         results["memory"] = ok
         if not ok:
             record("memory", "no_op", severity="degraded",
-                   detail={"reason": "mem0 não construiu no boot (config/pgvector/embedder)"})
+                   detail={"reason": "memória indisponível no boot (tabela/pgvector/embedding)"})
     except Exception as exc:  # noqa: BLE001
         results["memory"] = False
         record("memory", "no_op", severity="degraded", detail={"error": str(exc)})

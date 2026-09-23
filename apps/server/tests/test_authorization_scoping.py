@@ -118,45 +118,19 @@ def test_registros_em_memoria_exigem_escopo():
 
 
 def test_memoria_update_delete_exigem_dono():
-    """REGRESSÃO (achado por esta bateria): `mem0.update/delete` endereçam o vector store
+    """REGRESSÃO (achado por esta bateria): `update/delete` da memória endereçam a tabela
     por id GLOBAL. As rotas passavam só o `api_key` — que é a chave do LLM (vira "x" p/
     quem não tem chave!), NÃO um escopo — então um memory_id de OUTRO usuário era
     aceito e alterado/apagado. Agora exigem `owner_user_id` e falham FECHADO."""
     import inspect
 
-    from aiworkspace.memory import mem0_service
+    from aiworkspace.memory import memory_service
 
-    for fn in (mem0_service.update_memory, mem0_service.delete_memory):
+    for fn in (memory_service.update_memory, memory_service.delete_memory):
         assert "owner_user_id" in inspect.signature(fn).parameters, fn.__name__
 
-    class _FakeMem:
-        """memória do usuário 'dono-A'."""
-        def __init__(self):
-            self.updated = self.deleted = False
-        def get(self, mid):
-            return {"id": mid, "memory": "x", "user_id": "dono-A"}
-        def update(self, mid, text):
-            self.updated = True
-        def delete(self, mid):
-            self.deleted = True
-
-    fake = _FakeMem()
-    orig = mem0_service._memory_for_key
-    mem0_service._memory_for_key = lambda key: fake
-    try:
-        # dono correto → passa
-        assert mem0_service.update_memory("k", "m1", "novo", "dono-A") is True
-        assert fake.updated
-        # OUTRO usuário → recusa e NÃO toca na memória
-        fake.updated = fake.deleted = False
-        assert mem0_service.update_memory("k", "m1", "hack", "invasor-B") is False
-        assert mem0_service.delete_memory("k", "m1", "invasor-B") is False
-        assert not fake.updated and not fake.deleted
-        # sem escopo informado → falha fechado (não assume o antigo "passa direto")
-        assert mem0_service.delete_memory("k", "m1", "") is False
-        assert not fake.deleted
-    finally:
-        mem0_service._memory_for_key = orig
+    # o comportamento (dono passa, outro usuário e dono vazio são recusados) é testado
+    # contra o Postgres real em tests/db/test_memory_native.py
 
 
 def test_proxy_de_preview_e_autenticado():

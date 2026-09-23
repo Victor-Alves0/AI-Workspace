@@ -1,1 +1,1 @@
-"""Camada de memória de longo prazo baseada em mem0."""
+"""Memória de longo prazo do usuário (nativa, sobre o pgvector)."""

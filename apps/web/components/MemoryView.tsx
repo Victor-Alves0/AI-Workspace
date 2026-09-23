@@ -96,7 +96,7 @@ function ChatMemoryPicker({
   );
 }
 
-/** Controlador de Memória (mem0): configurações + visão por escopo (Global / Por
+/** Controlador de Memória: configurações + visão por escopo (Global / Por
  *  modelo / Por chat) com editar, adicionar e excluir. Fica em Espaço → Memória. */
 export default function MemoryView() {
   const confirm = useConfirm();
@@ -175,7 +175,7 @@ export default function MemoryView() {
       await api.put(`/memory/${id}`, { text: editText.trim() });
       setEditing(null);
     } catch {
-      // o servidor pode recusar (memória inexistente/de outro dono, mem0 fora do ar).
+      // o servidor pode recusar (memória inexistente/de outro dono, memória fora do ar).
       // Recarrega p/ mostrar o estado REAL em vez de morrer numa promise rejeitada.
       setEditing(null);
     } finally {

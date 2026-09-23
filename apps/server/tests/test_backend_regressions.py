@@ -33,8 +33,8 @@ async def test_delete_end_user_memory_uses_requested_scope(monkeypatch):
         return "key"
 
     monkeypatch.setattr(mgmt_routes, "_mem_key", mem_key)
-    monkeypatch.setattr(mgmt_routes.mem0_service, "list_memories", list_memories)
-    monkeypatch.setattr(mgmt_routes.mem0_service, "delete_memory", delete_memory)
+    monkeypatch.setattr(mgmt_routes.memory_service, "list_memories", list_memories)
+    monkeypatch.setattr(mgmt_routes.memory_service, "delete_memory", delete_memory)
 
     ctx = SimpleNamespace(
         key=SimpleNamespace(id="key-1", memory={"mode": "end_user"}),

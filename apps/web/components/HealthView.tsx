@@ -3,7 +3,7 @@
 /**
  * Painel de Saúde (admin): a COMPETÊNCIA do sistema, não a latência (isso é a
  * Observabilidade). Mostra o self-check de infra (banco, pgvector) e o snapshot das
- * capacidades nas últimas 24h — quando uma degradou (mem0 em no-op, síntese caindo
+ * capacidades nas últimas 24h — quando uma degradou (memória em no-op, síntese caindo
  * p/ a camada C, watchdog abortando tool, codegraph truncando por deadline).
  */
 
@@ -39,7 +39,7 @@ const SEV_LABEL: Record<Sev, string> = {
   info: "info", warn: "atenção", degraded: "degradado", error: "erro",
 };
 const CAP_LABEL: Record<string, string> = {
-  memory: "Memória (mem0)", synthesis: "Síntese final", tool_watchdog: "Watchdog de tools",
+  memory: "Memória", synthesis: "Síntese final", tool_watchdog: "Watchdog de tools",
   codegraph: "Grafo de código", output_guard: "Guarda de saída", guard_judge: "Guarda-juiz",
   compaction: "Compactação", database: "Banco", embedder: "Embedder", browser: "Navegador",
   steering: "Steering (intervenção)", anti_spin: "Anti-spin", queue: "Fila de mensagens",

@@ -41,13 +41,11 @@ dependencies = [
     # tipos nos params e hooks observer/on_risky/on_result.
     # Integração em tools/sift_service.py + tools/loader.py.
     "sift-tools>=0.8.2,<0.9",
-    # fixado na linha 0.1.x: é a API (Memory.from_config + config de provider)
-    # contra a qual o serviço de memória foi escrito.
-    "mem0ai>=0.1.40,<0.2",
-    # embedder local do mem0: provider "langchain" embrulhando FastEmbedEmbeddings
-    # (mesmo motor fastembed da SIFT — 100% local, sem torch, sem chave extra)
-    "langchain>=0.3",
-    "langchain-community>=0.3",
+    # Memória do usuário e Base de Conhecimento: nativas sobre o pgvector
+    # (memory/memory_service, knowledge/embeddings), com o fastembed que a SIFT já
+    # traz. Substituíram o mem0 + LangChain (36 pacotes, ~65 MB). Declarado aqui
+    # porque o código importa o fastembed direto.
+    "fastembed>=0.4.2",
     # Integração Google Workspace (Gmail + Agenda): REST direto por httpx (já
     # presente) — o google-api-python-client pesava ~110 MB para ~10 chamadas. O
     # state OAuth é assinado com pyjwt (já presente).
@@ -89,7 +87,11 @@ dependencies = [
     # complementando o watchdog de 120s por-tool ([[tool-call-watchdog]]): a taint
     # que pendurou o turno no Metabase agora respeita um teto de tempo/nós. API
     # de host 100% compatível com 2234959.
-    "graphcodemap[l1] @ https://github.com/Victor-Alves0/graphcodemap/archive/4eba4c9ac393afe48c13d48d551b5e3ec68f63c0.tar.gz",
+    # SEM o extra [l1]: ele só traz o jedi (~5,6 mil arquivos), usado apenas pelo
+    # refinamento L1 sob demanda (POST /codespace/projects/{id}/refine). Grafo, busca
+    # e tools de código não precisam dele. Quem quiser o refinamento instala o extra
+    # `graph-refine` abaixo (a imagem Docker instala; o app desktop não).
+    "graphcodemap @ https://github.com/Victor-Alves0/graphcodemap/archive/4eba4c9ac393afe48c13d48d551b5e3ec68f63c0.tar.gz",
 ]
 
 [project.optional-dependencies]
@@ -97,6 +99,10 @@ dependencies = [
 # desktop (build-engine.ps1); a imagem Docker segue com a Evolution e não instala isto.
 whatsapp-local = [
     "neonize>=0.5.2,<0.6",
+]
+# refinamento L1 do grafo de código (jedi resolve chamadas Python: inferred → certain)
+graph-refine = [
+    "jedi>=0.19",
 ]
 dev = [
     "pytest>=8.3",

@@ -11,7 +11,7 @@ apps/
       chat/               Turn orchestrator, chat routes, guards
       api/                Public API (/v1): routes, keys, limits, webhooks
       integrations/       Google, Tuya, GitHub, channels, transcription…
-      memory/             mem0
+      memory/             long-term memory (pgvector)
       knowledge/          Knowledge Base (RAG)
       codespace/          Code graph, projects
       tracing/            Observability (traces/spans)

@@ -89,7 +89,7 @@ Tools live under **Workspace → Tools** and are attachable per model.
 
 ## Memory and knowledge
 
-- **Memory (mem0)** with **global / per model / per chat** scopes and **shareable memory
+- **Memory** with **global / per model / per chat** scopes and **shareable memory
   stores** across models. Reads union the scopes; writes go per scope; optional review before
   saving. Controllable under Workspace → Memory, per chat and per model.
 - **Knowledge Base (RAG)**: upload documents → indexed in pgvector (FastEmbed, 384 dim) →

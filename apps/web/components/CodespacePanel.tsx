@@ -570,7 +570,7 @@ function ProjectMemoryTab({ bankId }: { bankId: string }) {
       .then(setItems).catch(() => setItems([]));
   }
 
-  // com `q`, cada requisição é uma busca SEMÂNTICA no mem0 (embedding) — debounce
+  // com `q`, cada requisição é uma busca SEMÂNTICA na memória (embedding) — debounce
   // pra não disparar uma por tecla digitada; sem `q`, carrega na hora.
   useEffect(() => {
     if (!q.trim()) { load(); return; }

@@ -48,7 +48,7 @@ COPY pyproject.toml ./
 # Um stub do pacote (só __init__.py) faz o setuptools resolver; assim as deps
 # ficam em cache e NÃO são reinstaladas/rebaixadas quando só o código muda.
 RUN mkdir -p aiworkspace && touch aiworkspace/__init__.py \
-    && pip install --upgrade pip && pip install .
+    && pip install --upgrade pip && pip install ".[graph-refine]"
 
 # agora o código real; reinstala só o pacote (sem tocar nas deps, sem rede)
 COPY aiworkspace ./aiworkspace

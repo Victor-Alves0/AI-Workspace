@@ -39,7 +39,7 @@ from ..db import SessionLocal
 from ..knowledge import brain as brain_service
 from ..knowledge import retrieval as kb_retrieval
 from ..knowledge.links import sign_doc_url
-from ..memory import mem0_service
+from ..memory import memory_service
 from ..models import GeneratedImage, Message
 from ..providers import image_gen, openrouter, reasoning_details
 from ..tools import sift_service, toolctx
@@ -328,7 +328,7 @@ def _spawn_memory_write(
     async def _write() -> None:
         try:
             await run_in_threadpool(
-                lambda: mem0_service.add_scoped(
+                lambda: memory_service.add_scoped(
                     api_key,
                     [
                         {"role": "user", "content": user_text},
@@ -1543,11 +1543,11 @@ async def _gather_context(
 
     # 1. memória — UNIÃO dos escopos ligados em `memory.read` ({global, model, chat}).
     # Leak-safe: só global (compartilhado) + as do modelo atual + as deste chat —
-    # nunca de outros chats/modelos. Ver memory/mem0_service.search_for_turn.
+    # nunca de outros chats/modelos. Ver memory/memory_service.search_for_turn.
     if (memory.read and any(memory.read.values())) or memory.banks:
         with tracing.span("memory:search", kind="memory"):
             g.mem_items = await run_in_threadpool(
-                lambda: mem0_service.search_for_turn(
+                lambda: memory_service.search_for_turn(
                     api_key, user_text, user_id,
                     chat_id=chat_id, agent_id=agent_id,
                     read=memory.read or {}, banks=memory.banks,

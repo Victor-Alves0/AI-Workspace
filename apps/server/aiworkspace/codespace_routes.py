@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth.deps import require_approved
 from .codespace import graph_service, preview_service, worktree_service
 from .db import get_db
-from .memory import mem0_service
+from .memory import memory_service
 from .models import Chat, CodespaceProject, GithubAccount, MemoryBank, User
 from .secrets_service import OPENROUTER_KEY, get_secret
 
@@ -638,6 +638,11 @@ async def refine_project(
     """Resolução L1 (jedi): promove arestas 'inferred'/'possible' a 'certain'.
     Rodada à parte da indexação normal — é lenta mesmo em repos pequenos."""
     p = await _owned_project(db, user, project_id)
+    if not graph_service.refine_available():
+        raise HTTPException(
+            status.HTTP_501_NOT_IMPLEMENTED,
+            "Refinamento indisponível nesta instalação (instale o extra graph-refine)",
+        )
     if p.index_status != "ready":
         raise HTTPException(status.HTTP_409_CONFLICT, "Projeto precisa estar indexado (ready) primeiro")
     _spawn_refine(p.id, str(p.user_id))
@@ -727,7 +732,7 @@ async def delete_project(
         bank_id = p.memory_bank_id
         key = await get_secret(db, user.id, OPENROUTER_KEY) or "x"
         await run_in_threadpool(
-            lambda: mem0_service.delete_scope(key, str(user.id), scope="bank", agent_id=f"bank:{bank_id}")
+            lambda: memory_service.delete_scope(key, str(user.id), scope="bank", agent_id=f"bank:{bank_id}")
         )
         bank = await db.get(MemoryBank, bank_id)
         if bank is not None:

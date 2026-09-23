@@ -1,9 +1,13 @@
-"""Embeddings locais para RAG.
+"""Embeddings locais (FastEmbed `BAAI/bge-small-en-v1.5`, 384 dims, ONNX, sem chave).
 
-Reusa o MESMO modelo/cache do mem0 (FastEmbed `BAAI/bge-small-en-v1.5`, 384 dims,
-ONNX, sem chave de API) — ver `memory/mem0_service._fastembed_embedder`. Assim o
-volume de cache (`FASTEMBED_CACHE_PATH`) é compartilhado e não baixamos o modelo
-duas vezes. Tudo é bloqueante (CPU) → chamar via `run_in_threadpool`.
+Uma instância só, usada pela Base de Conhecimento e pela memória do usuário
+(`memory/memory_service`), que guardam vetores no pgvector. Tudo é bloqueante (CPU)
+→ chamar via `run_in_threadpool`.
+
+Compatibilidade com os vetores já gravados: antes o modelo passava pelo LangChain
+(`FastEmbedEmbeddings`), que cria o `TextEmbedding` com max_length=512 e usa `embed`
+para documentos e `query_embed` para consultas. Aqui é a MESMA chamada, direto no
+fastembed — vetores idênticos, nada a recalcular.
 """
 
 from __future__ import annotations
@@ -13,27 +17,28 @@ from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
+MODEL = "BAAI/bge-small-en-v1.5"
 DIMS = 384
+_BATCH = 256
 
 
 @lru_cache(maxsize=1)
-def _embedder():
-    """FastEmbed (via LangChain) cacheado. Mesma instância do mem0."""
-    from ..memory.mem0_service import _fastembed_embedder
+def _model():
+    from fastembed import TextEmbedding
 
-    return _fastembed_embedder()
+    return TextEmbedding(model_name=MODEL, max_length=512)
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
     """Embeddings de vários textos (documentos). Bloqueante."""
     if not texts:
         return []
-    return _embedder().embed_documents(texts)
+    return [v.tolist() for v in _model().embed(texts, batch_size=_BATCH)]
 
 
 def embed_query(text: str) -> list[float]:
     """Embedding de uma consulta. Bloqueante."""
-    return _embedder().embed_query(text or "")
+    return next(iter(_model().query_embed(text or "", batch_size=_BATCH))).tolist()
 
 
 def to_pgvector(vec: list[float]) -> str:

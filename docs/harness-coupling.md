@@ -32,7 +32,7 @@ Read this before adding a new tool, service, guard, or background worker. The
 | **Generation driver** | `chat/generation.py::start` | decouples generation from the HTTP request | yes (background task) |
 | **exec_jobs** | `codespace/exec_jobs.py` | long background commands + wake | yes (subprocess + DB) |
 | **Health / observability** | `health_service.py`, `models/health_event.py` | watches every layer's degradation | yes (DB) |
-| **mem0 (memory)** | `memory/mem0_service.py` | reads/writes long-term memory | background write |
+| **memory** | `memory/memory_service.py` | reads/writes long-term memory | background write |
 | **codegraph** | `codespace/graph_service.py` (taint/reaches) | static analysis with time budget | thread |
 
 ---
@@ -50,7 +50,7 @@ graph TD
     LOOP -->|stuck| SYN[final synthesis A/B/C]
     LOOP -->|repeat sig| SPIN[anti-spin]
     RT --> CTX[_gather_context]
-    CTX --> MEM[mem0]
+    CTX --> MEM[memory]
     CTX --> LED[ledger]
     GUARD -->|judge| LED
     REQ -->|pre-turn| COMP[compaction]
@@ -60,7 +60,7 @@ graph TD
     JOBS[exec_jobs reaper] -->|job done| RESUME
     JOBS -->|waits for idle| GEN
     RT -->|after done| CUR[curator]
-    RT -->|after done| MEMW[mem0 write]
+    RT -->|after done| MEMW[memory write]
 
     WD -. degraded .-> H[(health_events)]
     SYN -. tier_c .-> H
@@ -102,7 +102,7 @@ reuses a connection bound to another loop → crash.
   Used by `codespace/graph_service.py`, `chat/ledger_service.py` (tool path),
   `investigation_service.py::_session`.
 - or use **sync psycopg2** (no event loop at all): `health_service.py`,
-  `codespace/exec_jobs.py` persistence, `mem0_service.py` flag writes.
+  `codespace/exec_jobs.py` persistence, `memory_service.py` flag writes.
 
 > The `ledger_service.load` docstring is the canonical note: same module uses the global
 > `SessionLocal` when called from the main loop (`run_turn`) and an **ephemeral** engine
@@ -127,7 +127,7 @@ Health instrumentation and durable-state persistence are **fire-and-forget**:
   no main loop there to protect, and tests rely on its synchronous completion.
 - **lazy import at the call site** — `from .. import health_service` *inside* the
   degradation branch, not at module top. `health_service.self_check` imports
-  `mem0_service` lazily; `mem0_service` records health lazily → no import cycle.
+  `memory_service` lazily; `memory_service` records health lazily → no import cycle.
 - **rare by design** — events fire on degradation/primitive-action, not per-token.
 
 Consequence: if you add a degradation point, the health call goes in the `except`/fallback
@@ -156,7 +156,6 @@ These are the interactions to keep in your head — none is a single-layer bug.
 
 | Interaction | What can go wrong | What contains it |
 |---|---|---|
-| **config field × mem0 build** | one layer adds a param the mem0 `MemoryConfig` rejects → mem0 falls to no-op **silently** | boot self-check + `memory/no_op` alarm (frente 1); the `_build_config` filters `connect_timeout` before passing to mem0 |
 | **output guard × final synthesis** | guard re-runs the WHOLE turn; if synthesis always falls to tier C and the guard always triggers, retries burn | `_GUARD_HARD_CAP` + per-guard `max_retries`; tier_c is alarmed so you SEE it |
 | **watchdog × anti-spin** | a hung tool aborts with an error result; the error feeds the anti-spin signature and can trip "stop" if it repeats | intended — repeated identical failure *should* stop; both emit health events |
 | **watchdog thread leak × executor** | an abandoned tool thread keeps running (Python can't kill threads); N hangs could exhaust the default executor | far rarer than the old "1 tool hangs the turn forever"; codegraph now self-bounds via `deadline_ms` so it rarely reaches the watchdog |
@@ -221,6 +220,3 @@ When you add to the harness, honor the couplings:
   message — never in the cached prefix (breaks prompt caching; see turn-pipeline).
 - **Anything that must survive compaction?** Put it in the **Ledger**, not the message
   history.
-- **Touching mem0 config?** The `MemoryConfig` rejects unknown fields — filter before
-  passing (the `connect_timeout` lesson). The boot self-check will alarm if you break it,
-  but catch it in review.
