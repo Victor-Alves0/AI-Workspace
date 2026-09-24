@@ -12,8 +12,8 @@ com três diferenças de natureza:
     (a conexão é achada pelo nome da instância, que é único);
   - o server religa as sessões salvas ao subir (`resume_all`) — a Evolution é um serviço
     à parte e se religava sozinha;
-  - o whatsmeow não guarda histórico: "ler a conversa" usa as mensagens recentes em
-    memória e, depois de um restart, o histórico que já gravamos no Chat da conversa.
+  - o whatsmeow não guarda histórico: o app guarda (`whatsapp_history`, no Postgres)
+    tudo o que passa pela sessão, mais o histórico que o WhatsApp manda ao parear.
 
 Aviso honesto (o mesmo da Evolution): integração não oficial viola os termos do
 WhatsApp e pode banir o número — a UI avisa; use um número secundário.
@@ -25,16 +25,18 @@ import base64
 import io
 import logging
 import time
-from collections import OrderedDict, deque
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
 from ..config import get_settings
+from . import whatsapp_history
 
 logger = logging.getLogger(__name__)
 
-_RECENT_PER_CHAT = 100     # mensagens lembradas por conversa (ler histórico)
-_MEDIA_CACHE = 300         # mensagens com mídia guardadas para download posterior
+_MEDIA_CACHE = 300         # mídias recentes em memória (o banco é a fonte; isto é atalho)
+_HIST_PER_CHAT = 300       # mensagens importadas por conversa no histórico do pareamento
+_MEDIA_KINDS = {"audio", "image", "video", "document", "sticker"}
 _QR_WAIT = 12.0            # espera pelo 1º QR ao pedir um
 
 
@@ -92,6 +94,75 @@ def _text_of(msg: Any) -> str:
         if isinstance(alvo, str) and alvo.strip():
             return alvo.strip()
     return ""
+
+
+def describe(msg: Any) -> tuple[str, str]:
+    """(texto, tipo) de uma mensagem: tipo = text|audio|image|video|document|sticker."""
+    text = _text_of(msg)
+    tem = getattr(msg, "HasField", None)
+    if msg is not None and tem is not None:
+        for campo, tipo in (("audioMessage", "audio"), ("imageMessage", "image"),
+                            ("videoMessage", "video"), ("documentMessage", "document"),
+                            ("stickerMessage", "sticker")):
+            try:
+                if tem(campo):
+                    return text, tipo
+            except ValueError:
+                continue
+    return text, "text"
+
+
+def _row(jid: str, msg: Any, *, msg_id: str, from_me: bool, sender: str,
+         sender_name: str, ts: Any) -> dict[str, Any] | None:
+    """Linha do histórico; None quando não há o que guardar (reação, aviso de sistema…)."""
+    if not jid or not msg_id or jid.endswith(("@broadcast", "@newsletter")):
+        return None
+    text, kind = describe(msg)
+    if not text and kind == "text":
+        return None
+    media = None
+    if kind in _MEDIA_KINDS:
+        try:
+            media = msg.SerializeToString()
+        except Exception:  # noqa: BLE001
+            media = None
+    return {"jid": jid, "msg_id": msg_id, "from_me": from_me, "sender": sender,
+            "sender_name": sender_name, "text": text, "kind": kind, "ts": _ts(ts), "media": media}
+
+
+def record_of(ev: Any) -> dict[str, Any] | None:
+    """MessageEv → linha do histórico (inclui mídia sem legenda e o que VOCÊ mandou)."""
+    info = getattr(ev, "Info", None)
+    src = getattr(info, "MessageSource", None)
+    if info is None or src is None:
+        return None
+    return _row(_jid_str(getattr(src, "Chat", None)), getattr(ev, "Message", None),
+                msg_id=getattr(info, "ID", "") or "", from_me=bool(getattr(src, "IsFromMe", False)),
+                sender=_jid_str(getattr(src, "Sender", None)),
+                sender_name=getattr(info, "Pushname", "") or "", ts=getattr(info, "Timestamp", 0))
+
+
+def history_rows(data: Any) -> tuple[list[dict[str, Any]], dict[str, tuple[str, bool]]]:
+    """HistorySync (enviado ao parear) → (linhas, {jid: (nome, é_grupo)})."""
+    rows: list[dict[str, Any]] = []
+    names: dict[str, tuple[str, bool]] = {}
+    apelidos = {p.ID: p.pushname for p in getattr(data, "pushnames", []) if p.ID and p.pushname}
+    for conv in getattr(data, "conversations", []):
+        jid = conv.ID
+        if not jid or jid.endswith(("@broadcast", "@newsletter")):
+            continue
+        grupo = jid.endswith("@g.us")
+        nome = conv.name or conv.displayName or ("" if grupo else apelidos.get(jid, ""))
+        names[jid] = (nome, grupo)
+        for hm in list(conv.messages)[-_HIST_PER_CHAT:]:
+            w = hm.message
+            k = w.key
+            remetente = (k.participant or w.participant) if grupo else ("" if k.fromMe else jid)
+            linha = _row(jid, w.message, msg_id=k.ID, from_me=bool(k.fromMe), sender=remetente,
+                         sender_name=w.pushName or "", ts=w.messageTimestamp)
+            if linha is not None:
+                rows.append(linha)
+    return rows, names
 
 
 def normalize(ev: Any) -> dict[str, Any] | None:
@@ -165,15 +236,7 @@ class _Session:
         self.state = "connecting"      # open | connecting | close
         self.qr = ""
         self.qr_event = asyncio.Event()
-        self.recent: dict[str, deque[dict[str, Any]]] = {}
         self.media: OrderedDict[str, Any] = OrderedDict()
-        self.names: dict[str, str] = {}
-
-    def remember(self, m: dict[str, Any]) -> None:
-        fila = self.recent.setdefault(m["jid"], deque(maxlen=_RECENT_PER_CHAT))
-        fila.append(m)
-        if m.get("sender_name") and not m.get("from_me"):
-            self.names[m["jid"]] = m["sender_name"]
 
 
 _SESSIONS: dict[str, _Session] = {}
@@ -219,7 +282,7 @@ async def _start(instance: str) -> _Session:
         if sess is not None and sess.client is not None:
             return sess
         from neonize.aioze.client import NewAClient
-        from neonize.events import ConnectedEv, LoggedOutEv, MessageEv, PairStatusEv
+        from neonize.events import ConnectedEv, HistorySyncEv, LoggedOutEv, MessageEv, PairStatusEv
 
         logging.getLogger("whatsmeow").setLevel(logging.WARNING)
         sess = sess or _Session(instance)
@@ -243,22 +306,29 @@ async def _start(instance: str) -> _Session:
             await _set_state(instance, "close")
 
         async def on_message(_c, ev) -> None:
+            linha = record_of(ev)
+            if linha is not None:
+                if linha["media"] is not None:
+                    sess.media[linha["msg_id"]] = ev.Message
+                    while len(sess.media) > _MEDIA_CACHE:
+                        sess.media.popitem(last=False)
+                await whatsapp_history.record(instance, [linha])
             m = normalize(ev)
-            if m is None:
-                return
-            if m["has_audio"]:
-                sess.media[m["msg_id"]] = ev.Message
-                while len(sess.media) > _MEDIA_CACHE:
-                    sess.media.popitem(last=False)
-            sess.remember(m)
-            if not m["from_me"]:
+            if m is not None and not m["from_me"]:
                 await _deliver(instance, m)
+
+        async def on_history(_c, ev) -> None:
+            linhas, nomes = history_rows(ev.Data)
+            n = await whatsapp_history.record(instance, linhas, nomes)
+            logger.info("whatsapp local: histórico de %s: %d conversa(s), %d mensagem(ns) nova(s)",
+                        instance, len(nomes), n)
 
         client.qr(on_qr)
         client.event(ConnectedEv)(on_connected)
         client.event(PairStatusEv)(on_pair)
         client.event(LoggedOutEv)(on_logout)
         client.event(MessageEv)(on_message)
+        client.event(HistorySyncEv)(on_history)
         await client.connect()
         sess.client = client
         _SESSIONS[instance] = sess
@@ -376,8 +446,9 @@ async def send_text(instance: str, jid: str, text: str, delay_ms: int = 0) -> di
         await send_presence(instance, jid, "composing", delay_ms)
         await asyncio.sleep(delay_ms / 1000)
     r = await client.send_message(to, text)
-    sess.remember({"jid": jid, "text": text, "from_me": True, "sender_name": "",
-                   "ts": int(time.time()), "msg_id": getattr(r, "ID", "")})
+    await whatsapp_history.record(instance, [{
+        "jid": jid, "msg_id": getattr(r, "ID", ""), "from_me": True, "text": text,
+        "kind": "text", "ts": int(time.time())}])
     return {"key": {"id": getattr(r, "ID", "")}}
 
 
@@ -396,6 +467,10 @@ async def send_media(instance: str, jid: str, data: bytes, mime: str,
     else:
         r = await client.send_document(to, data, caption=caption or None,
                                        filename=filename, mimetype=mime)
+    tipo = next((t for t in ("image", "video", "audio") if mime.startswith(t + "/")), "document")
+    await whatsapp_history.record(instance, [{
+        "jid": jid, "msg_id": getattr(r, "ID", ""), "from_me": True,
+        "text": caption or (filename if tipo == "document" else ""), "kind": tipo, "ts": int(time.time())}])
     return {"key": {"id": getattr(r, "ID", "")}}
 
 
@@ -416,6 +491,7 @@ async def send_presence(instance: str, jid: str, presence: str = "composing", de
 
 async def delete_instance(instance: str) -> None:
     """Desconecta, desvincula o aparelho e apaga a sessão (ao excluir a conexão)."""
+    whatsapp_history.forget(instance)
     sess = _SESSIONS.pop(instance, None)
     if sess is not None and sess.client is not None:
         if sess.state == "open":
@@ -452,7 +528,13 @@ async def get_media_base64(instance: str, msg_id: str) -> tuple[str, str]:
     sess = await _session(instance)
     msg = sess.media.get(msg_id)
     if msg is None:
-        raise RuntimeError("a mídia desta mensagem não está mais disponível")
+        guardada = await whatsapp_history.media(instance, msg_id)
+        if guardada is None:
+            raise RuntimeError("a mídia desta mensagem não está disponível")
+        from neonize.events import MessageEv
+
+        msg = type(MessageEv().Message)()
+        msg.ParseFromString(guardada)
     dados = await sess.client.download_any(msg)
     mime = "audio/ogg"
     for campo in ("audioMessage", "imageMessage", "videoMessage", "documentMessage"):
@@ -463,15 +545,32 @@ async def get_media_base64(instance: str, msg_id: str) -> tuple[str, str]:
 
 
 async def find_chats(instance: str, limit: int = 50) -> list[dict[str, str]]:
-    """Conversas conhecidas: as que já viraram thread no app + as recentes em memória."""
-    out: dict[str, dict[str, Any]] = {}
+    """Conversas do número (histórico gravado), mais as que já viraram chat no app."""
+    await _name_groups(instance)
+    out: dict[str, dict[str, Any]] = {c["jid"]: c for c in await whatsapp_history.chats(instance, limit)}
     for t in await _threads(instance):
-        out[t.jid] = {"jid": t.jid, "name": t.contact_name or "", "is_group": t.jid.endswith("@g.us")}
-    sess = _SESSIONS.get(instance)
-    if sess is not None:
-        for jid in sess.recent:
-            out.setdefault(jid, {"jid": jid, "name": sess.names.get(jid, ""), "is_group": jid.endswith("@g.us")})
+        c = out.setdefault(t.jid, {"jid": t.jid, "name": "", "is_group": t.jid.endswith("@g.us")})
+        c["name"] = c["name"] or t.contact_name or ""
     return list(out.values())[: max(1, limit)]
+
+
+async def _name_groups(instance: str, maximo: int = 10) -> None:
+    """Grupos sem nome (vieram só de mensagens): pergunta o nome ao WhatsApp."""
+    sess = _SESSIONS.get(instance)
+    if sess is None or sess.state != "open":
+        return
+    nomes: dict[str, tuple[str, bool]] = {}
+    for jid in (await whatsapp_history.unnamed_groups(instance))[:maximo]:
+        try:
+            info = await sess.client.get_group_info(_to_jid(jid))
+            nome = getattr(getattr(info, "GroupName", None), "Name", "") or ""
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("whatsapp local: nome do grupo %s indisponível: %s", jid, exc)
+            continue
+        if nome:
+            nomes[jid] = (nome, True)
+    if nomes:
+        await whatsapp_history.record(instance, [], nomes)
 
 
 async def find_contacts(instance: str, query: str = "", limit: int = 30) -> list[dict[str, str]]:
@@ -498,15 +597,11 @@ async def find_contacts(instance: str, query: str = "", limit: int = 30) -> list
 
 
 async def find_messages(instance: str, jid: str, limit: int = 20) -> list[dict[str, Any]]:
-    """Últimas mensagens da conversa: as recentes em memória; depois de um restart,
-    o histórico já gravado no Chat da conversa (entrada = contato, saída = você)."""
+    """Últimas mensagens da conversa, do histórico gravado. Conversas anteriores ao
+    histórico (sem nenhuma linha) caem no que já foi gravado no Chat da conversa."""
     limite = int(max(1, min(limit, 100)))
-    sess = _SESSIONS.get(instance)
-    recentes = list(sess.recent.get(jid, [])) if sess is not None else []
-    if recentes:
-        return [{"from_me": m["from_me"], "text": m["text"], "sender_name": m.get("sender_name", ""),
-                 "ts": m["ts"], "msg_id": m.get("msg_id", "")} for m in recentes[-limite:]]
-    return await _history_from_chat(instance, jid, limite)
+    return await whatsapp_history.messages(instance, jid, limite) or \
+        await _history_from_chat(instance, jid, limite)
 
 
 async def _threads(instance: str):

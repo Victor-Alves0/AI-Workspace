@@ -17,7 +17,7 @@ from .slack_account import SlackAccount
 from .slack_channel import SlackChannelConnection, SlackChannelThread
 from .generated_image import GeneratedImage
 from .usage_event import UsageEvent
-from .whatsapp import WhatsAppConnection, WhatsAppThread
+from .whatsapp import WhatsAppChat, WhatsAppConnection, WhatsAppMessage, WhatsAppThread
 from .telegram import TelegramConnection, TelegramThread
 from .discord import DiscordConnection, DiscordThread
 from .push import PushSubscription
@@ -77,6 +77,8 @@ __all__ = [
     "UsageEvent",
     "WhatsAppConnection",
     "WhatsAppThread",
+    "WhatsAppChat",
+    "WhatsAppMessage",
     "TelegramConnection",
     "TelegramThread",
     "DiscordConnection",

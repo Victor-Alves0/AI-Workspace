@@ -12,7 +12,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Boolean, DateTime, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -96,3 +98,50 @@ class WhatsAppThread(Base):
     last_message_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+class WhatsAppChat(Base):
+    """Uma conversa do número (contato ou grupo), com o nome que o WhatsApp informou.
+
+    Só o motor embutido (whatsmeow) usa: ele não guarda histórico nem a lista de
+    conversas, então o app guarda (a Evolution tinha banco próprio para isso)."""
+
+    __tablename__ = "whatsapp_chats"
+    __table_args__ = (UniqueConstraint("connection_id", "jid", name="uq_whatsapp_chat_jid"),)
+
+    connection_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("whatsapp_connections.id", ondelete="CASCADE"), index=True
+    )
+    jid: Mapped[str] = mapped_column(String(128))
+    name: Mapped[str] = mapped_column(String(255), default="")
+    is_group: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_message_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class WhatsAppMessage(Base):
+    """Uma mensagem do número (recebida, enviada pelo app ou pelo celular, ou vinda do
+    histórico sincronizado ao parear). Motor embutido apenas; ver WhatsAppChat."""
+
+    __tablename__ = "whatsapp_messages"
+    __table_args__ = (
+        UniqueConstraint("connection_id", "jid", "msg_id", name="uq_whatsapp_message_id"),
+        Index("ix_whatsapp_messages_conversa", "connection_id", "jid", "sent_at"),
+    )
+
+    connection_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("whatsapp_connections.id", ondelete="CASCADE")
+    )
+    jid: Mapped[str] = mapped_column(String(128))
+    msg_id: Mapped[str] = mapped_column(String(128))
+    from_me: Mapped[bool] = mapped_column(Boolean, default=False)
+    sender: Mapped[str] = mapped_column(String(128), default="")
+    sender_name: Mapped[str] = mapped_column(String(255), default="")
+    text: Mapped[str] = mapped_column(Text, default="")
+    # text | audio | image | video | document | sticker
+    kind: Mapped[str] = mapped_column(String(16), default="text")
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # a mensagem protobuf serializada (chaves + URL da mídia): permite baixar a mídia
+    # depois. Só para mídia; texto não precisa.
+    media: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
