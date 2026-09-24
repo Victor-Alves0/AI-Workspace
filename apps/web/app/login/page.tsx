@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { KeyRound, Mail, ShieldCheck } from "lucide-react";
+import AuthShell, { AuthButton, AuthField } from "@/components/AuthShell";
 import { api, ApiError } from "@/lib/api";
 import { measure } from "@/lib/trace";
 import type { User } from "@/lib/types";
@@ -18,7 +20,13 @@ export default function LoginPage() {
   const [allowSignups, setAllowSignups] = useState(false);
 
   useEffect(() => {
-    api.get<{ allow_signups: boolean }>("/auth/config").then((c) => setAllowSignups(c.allow_signups)).catch(() => {});
+    api.get<{ allow_signups: boolean; needs_setup?: boolean }>("/auth/config")
+      .then((c) => {
+        // instalação sem usuários: o assistente cria o administrador
+        if (c.needs_setup) router.replace("/setup");
+        else setAllowSignups(c.allow_signups);
+      })
+      .catch(() => {});
     api
       .get<User>("/auth/me")
       .then((u) => router.replace(u.status === "active" ? "/chat" : "/pending"))
@@ -53,88 +61,52 @@ export default function LoginPage() {
     }
   }
 
+  const alternar = () => { setMode(mode === "login" ? "register" : "login"); setError(null); setNeed2fa(false); };
+
   return (
-    <div className="relative flex h-full items-center justify-center overflow-hidden px-4">
-      {/* glow sutil da marca ao fundo */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute left-1/2 top-1/3 h-[480px] w-[480px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent/10 blur-[120px]"
-      />
-
-      <form
-        onSubmit={submit}
-        className="animate-fade-up relative w-full max-w-sm space-y-4 rounded-2xl border border-border bg-surface/80 p-8 shadow-modal backdrop-blur"
-      >
-        <div className="flex flex-col items-center text-center">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="" className="mb-3 h-12 w-12 rounded-xl" />
-          <h1 className="text-xl font-semibold tracking-tight text-ink">AI Workspace</h1>
-          <p className="mt-1 text-sm text-muted">
-            {mode === "login" ? "Entre na sua conta" : "Crie sua conta"}
-          </p>
-        </div>
-
-        <input
-          type="email"
-          required
-          placeholder="email@exemplo.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          className="w-full rounded-xl border border-border bg-surface2/70 px-3.5 py-2.5 text-sm text-ink outline-none transition-colors placeholder:text-muted focus:border-accent/60"
-        />
-        <input
-          type="password"
-          required
-          minLength={8}
-          placeholder="senha (mín. 8 caracteres)"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded-xl border border-border bg-surface2/70 px-3.5 py-2.5 text-sm text-ink outline-none transition-colors placeholder:text-muted focus:border-accent/60"
-        />
-
-        {mode === "login" && need2fa && (
-          <div className="space-y-1.5">
-            <p className="text-xs text-muted">Digite o código de 6 dígitos do seu app autenticador.</p>
-            <input
-              inputMode="numeric"
-              autoFocus
-              required
-              placeholder="000000"
-              value={totp}
-              onChange={(e) => setTotp(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              className="w-full rounded-xl border border-border bg-surface2/70 px-3.5 py-2.5 text-center font-mono text-lg tracking-widest text-ink outline-none transition-colors placeholder:text-muted focus:border-accent/60"
-            />
-          </div>
-        )}
-
-        {error && <p className="text-sm text-red-400">{error}</p>}
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full rounded-xl bg-accent py-2.5 text-sm font-medium text-ink transition-colors hover:bg-accent-hover disabled:opacity-60"
-        >
-          {loading ? "…" : mode === "login" ? "Entrar" : "Cadastrar"}
-        </button>
-
-        {allowSignups && (
+    <AuthShell
+      corner={allowSignups && (
+        <div className="flex items-center gap-3">
+          <span className="hidden text-xs text-muted sm:inline">{mode === "login" ? "Ainda não tem conta?" : "Já tem conta?"}</span>
           <button
             type="button"
-            onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(null); }}
-            className="w-full text-center text-xs text-muted transition-colors hover:text-ink-soft"
+            onClick={alternar}
+            className="rounded-lg bg-white px-3.5 py-1.5 text-xs font-medium text-black transition-opacity hover:opacity-90"
           >
-            {mode === "login" ? "Não tem conta? Cadastre-se" : "Já tem conta? Entrar"}
+            {mode === "login" ? "Criar conta" : "Entrar"}
           </button>
-        )}
+        </div>
+      )}
+    >
+      <form onSubmit={submit} className="space-y-7">
+        <h1 className="text-xl font-semibold tracking-tight text-ink">
+          {mode === "login" ? "Entre no seu AI Workspace" : "Crie sua conta"}
+        </h1>
 
-        {/* Exigido pelos consoles de OAuth (Google/Notion/Slack) e, mais que isso,
-            é onde o usuário espera achar: na tela em que ele cria a conta. */}
-        <p className="pt-1 text-center text-[11px] text-muted">
-          <a href="/privacy" className="transition-colors hover:text-ink-soft">Privacidade</a>
-          {" · "}
-          <a href="/terms" className="transition-colors hover:text-ink-soft">Termos</a>
-        </p>
+        <div className="space-y-6">
+          <AuthField icon={<Mail size={16} />} type="email" required autoFocus autoComplete="email"
+            placeholder="E-mail" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <AuthField icon={<KeyRound size={16} />} type="password" required minLength={8}
+            autoComplete={mode === "login" ? "current-password" : "new-password"}
+            placeholder={mode === "login" ? "Senha" : "Senha (mín. 8 caracteres)"}
+            value={password} onChange={(e) => setPassword(e.target.value)} />
+          {mode === "login" && need2fa && (
+            <AuthField icon={<ShieldCheck size={16} />} inputMode="numeric" autoFocus required
+              placeholder="Código do app autenticador" value={totp}
+              onChange={(e) => setTotp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              className="[&_input]:font-mono [&_input]:tracking-widest" />
+          )}
+        </div>
+
+        {mode === "register" && (
+          <p className="text-xs text-muted">Sua conta fica pendente até um administrador aprovar.</p>
+        )}
+        {error && <p className="text-sm text-red-400">{error}</p>}
+
+        <AuthButton type="submit" disabled={loading}>
+          {loading ? "…" : mode === "login" ? "Entrar" : "Criar conta"}
+        </AuthButton>
       </form>
-    </div>
+    </AuthShell>
   );
 }

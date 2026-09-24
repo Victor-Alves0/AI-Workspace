@@ -9,11 +9,11 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import audit_service, twofa_service
-from ..app_config import signups_allowed
+from ..app_config import ALLOW_SIGNUPS, set_setting, signups_allowed, user_count
 from ..config import get_settings
 from ..db import get_db
 from ..models import User
-from ..schemas.auth import ChangePasswordIn, LoginIn, RegisterIn, UserOut
+from ..schemas.auth import ChangePasswordIn, LoginIn, RegisterIn, SetupIn, UserOut
 from .deps import ACCESS_COOKIE, REFRESH_COOKIE, current_user
 from .ratelimit import check_login_rate
 from .security import (
@@ -86,8 +86,41 @@ async def _lock_registration(db: AsyncSession) -> None:
 
 @router.get("/config")
 async def auth_config(db: AsyncSession = Depends(get_db)):
-    """Config pública usada pela tela de login (ex.: mostrar ou não 'Cadastrar')."""
-    return {"allow_signups": await signups_allowed(db)}
+    """Config pública da tela de login. `needs_setup`: instalação sem nenhum usuário —
+    a UI leva ao assistente de primeiro uso em vez de oferecer "Cadastrar"."""
+    if await user_count(db) == 0:
+        return {"allow_signups": False, "needs_setup": True}
+    return {"allow_signups": await signups_allowed(db), "needs_setup": False}
+
+
+@router.post("/setup", response_model=UserOut)
+async def first_run_setup(
+    body: SetupIn,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    """Assistente de primeiro uso: cria o ADMINISTRADOR e define se outras pessoas podem
+    se cadastrar. Só existe enquanto não há nenhum usuário — depois, 409."""
+    check_login_rate(request, body.email)
+    await _lock_registration(db)  # duas abas no assistente: só uma cria o admin
+    if await user_count(db) > 0:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Esta instalação já foi configurada")
+    user = User(
+        email=body.email,
+        hashed_password=hash_password(body.password),
+        role="admin",
+        status="active",
+        profile={"name": body.name},
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    await set_setting(db, ALLOW_SIGNUPS, body.allow_signups)
+    await audit_service.record("setup", user_id=user.id, request=request,
+                               detail={"allow_signups": body.allow_signups})
+    _set_auth_cookies(response, user, request)
+    return user
 
 
 def _is_https(request: Request | None) -> bool:

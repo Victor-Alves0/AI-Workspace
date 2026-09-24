@@ -25,6 +25,20 @@ class RegisterIn(BaseModel):
         return v
 
 
+class SetupIn(RegisterIn):
+    """Assistente de primeiro uso: a conta do administrador + a política de cadastro."""
+    name: str = Field(min_length=1, max_length=80)
+    allow_signups: bool = False
+
+    @field_validator("name")
+    @classmethod
+    def _clean_name(cls, v: str) -> str:
+        v = " ".join(v.split())
+        if not v:
+            raise ValueError("informe seu nome")
+        return v
+
+
 class LoginIn(BaseModel):
     email: str
 

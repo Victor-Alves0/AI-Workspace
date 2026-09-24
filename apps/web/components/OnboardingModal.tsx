@@ -14,7 +14,13 @@ export default function OnboardingModal({ user, onClose, onDone }: {
   onClose: () => void;
   onDone: () => void;
 }) {
-  const [step, setStep] = useState(0);
+  // vindo do assistente de primeiro uso: as boas-vindas já foram dadas lá
+  const [step, setStep] = useState(() => {
+    try {
+      if (sessionStorage.getItem("aiw:from-setup")) { sessionStorage.removeItem("aiw:from-setup"); return 1; }
+    } catch { /* sem storage: começa do início */ }
+    return 0;
+  });
   const [key, setKey] = useState("");
   const [savingKey, setSavingKey] = useState(false);
   const [keyErr, setKeyErr] = useState<string | null>(null);
