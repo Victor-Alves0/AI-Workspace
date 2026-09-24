@@ -453,8 +453,8 @@ function UpdateSection() {
           )}
           {disponivel && !podeAtualizar && (
             <p className="text-xs text-muted">
-              Para atualizar por aqui, instale o agente no servidor:{" "}
-              <span className="font-mono text-ink-soft">sudo ./scripts/update-agent.sh install</span>
+              Para atualizar por aqui, suba o atualizador no servidor:{" "}
+              <span className="font-mono text-ink-soft">docker compose up -d updater</span>
             </p>
           )}
           {msg && <p className={`text-sm ${msg.ok ? "text-green-400" : "text-red-400"}`}>{msg.text}</p>}

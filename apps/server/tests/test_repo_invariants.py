@@ -127,8 +127,14 @@ def test_todo_volume_do_server_existe_e_pertence_ao_app_na_imagem():
     # bloco do serviço `server` (até o próximo serviço no mesmo nível)
     bloco = re.search(r"(?ms)^  server:\n(.*?)(?=^  [a-z0-9_-]+:\n)", compose)
     assert bloco, "serviço `server` não encontrado no docker-compose.yml"
-    # só volumes NOMEADOS (`nome:/caminho`); bind mounts do host (./x:/y) não contam
-    montagens = re.findall(r"- ([a-z0-9_]+):(/[^\s:]+)", bloco.group(1))
+    # só volumes NOMEADOS (`nome:/caminho`); bind mounts do host (./x:/y) não contam, nem
+    # os só-leitura (`:ro`): o server não escreve neles (ex.: o token do updater, que o
+    # próprio updater grava como root)
+    montagens = [
+        (nome, destino)
+        for nome, destino, modo in re.findall(r"- ([a-z0-9_]+):(/[^\s:]+)(:ro)?", bloco.group(1))
+        if not modo
+    ]
     assert montagens, "nenhum volume nomeado no serviço `server` (regex desatualizada?)"
 
     criadas = " ".join(re.findall(r"mkdir -p ([^\\\n]+)", dockerfile)).split()

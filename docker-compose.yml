@@ -103,9 +103,8 @@ services:
       # Anexos do chat: o arquivo fica no disco e a mensagem guarda só a referência
       # (models/upload.py). Sem este volume, todo anexo some a cada recriação.
       - uploads_data:/data/uploads
-      # Atualização pelo painel: o servidor só grava o PEDIDO aqui; quem roda o
-      # update.sh é o agente do host (sudo ./scripts/update-agent.sh install).
-      - ./data/control:/data/control
+      # token do updater (só leitura): é assim que o painel pede "Atualizar agora"
+      - updater_state:/run/updater:ro
       # Cookies do yt-dlp (anti-bloqueio da transcrição). Descomente e ajuste o
       # caminho do host; depois no .env: TRANSCRIBE_COOKIES_DIR=/data/yt-cookies
       # - ./secrets/yt-cookies:/data/yt-cookies:ro
@@ -252,6 +251,19 @@ services:
       - "${HTTPS_PORT:-443}:443"
       - "${HTTP_PORT:-80}:80"
 
+  # "Atualizar agora" do painel do admin. É o ÚNICO container com o socket do Docker:
+  # o `server` executa código decidido pela IA e por isso nunca recebe o socket (seria
+  # root no host). Este só aceita uma ação — puxar o último commit, reconstruir, subir
+  # e migrar (infra/updater/run-update.sh) — autenticada por um token que ele gera no
+  # volume `updater_state`. Sem porta publicada: só a rede interna o alcança.
+  updater:
+    build: ./infra/updater
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/project
+      - updater_state:/run/updater
+
 volumes:
   pgdata:
   mlcache:
@@ -260,3 +272,4 @@ volumes:
   uploads_data:
   caddy_data:
   caddy_config:
+  updater_state:

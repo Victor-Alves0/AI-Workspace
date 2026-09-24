@@ -210,48 +210,47 @@ async def _github_auth_header(db: AsyncSession, user_id) -> tuple[dict[str, str]
 OFFICIAL_REPO = "Victor-Alves0/AI-Workspace"
 
 
-def _control_dir() -> Path:
-    return Path(get_settings().update_control_dir)
-
-
-def _update_agent_installed() -> bool:
-    """O `scripts/update-agent.sh install` deixa este marcador na pasta de controle."""
-    return (_control_dir() / "agent").is_file()
-
-
-def _update_status() -> dict | None:
-    """Estado do último pedido, escrito pelo agente do host (update-status.json)."""
-    import json
-
+def _updater_token() -> str | None:
+    """Token que o container `updater` gera ao subir (volume updater_state, só leitura
+    aqui). Sem o arquivo = não há updater nesta instalação (desktop, dev)."""
     try:
-        return json.loads((_control_dir() / "update-status.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        return Path(get_settings().updater_token_file).read_text(encoding="utf-8").strip() or None
+    except OSError:
         return None
+
+
+async def _updater(method: str, path: str) -> tuple[int, dict]:
+    token = _updater_token()
+    if not token:
+        return 0, {}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.request(method, get_settings().updater_url.rstrip("/") + path,
+                                     headers={"Authorization": f"Bearer {token}"})
+        return r.status_code, (r.json() if r.content else {})
+    except (httpx.HTTPError, ValueError):
+        return 0, {}
+
+
+async def _update_status() -> dict | None:
+    code, body = await _updater("GET", "/status")
+    return body if code == 200 else None
 
 
 @router.post("/update")
 async def request_update(admin: User = Depends(require_admin)):
-    """Pede ao agente do HOST que rode o update.sh (puxa, reconstrói, sobe, migra). O
-    container não roda nada disso: só grava o pedido na pasta montada do host."""
-    import json
-
-    if not _update_agent_installed():
+    """Pede ao container `updater` (o único com o socket do Docker) que puxe o último
+    commit, reconstrua, suba e migre. Este processo nunca toca no Docker."""
+    code, body = await _updater("POST", "/update")
+    if code == 0:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "Agente de atualização não instalado no servidor "
-            "(sudo ./scripts/update-agent.sh install)",
+            "Atualizador indisponível — o serviço `updater` não está rodando nesta instalação.",
         )
-    atual = _update_status() or {}
-    if atual.get("state") == "running":
+    if code == 409:
         raise HTTPException(status.HTTP_409_CONFLICT, "Já há uma atualização em andamento")
-    pedido = {"requested_at": datetime.utcnow().isoformat() + "Z", "by": admin.email}
-    try:
-        (_control_dir() / "update-request").write_text(json.dumps(pedido), encoding="utf-8")
-    except OSError as exc:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR,
-            f"Não consegui gravar o pedido na pasta de controle: {exc}",
-        ) from exc
+    if code >= 400:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"O atualizador recusou o pedido ({code}).")
     await audit_service.record("update_requested", user_id=admin.id)
     return {"ok": True}
 
@@ -279,9 +278,9 @@ async def update_check(
         "commits_behind": None,   # True/False; None = imagem sem GIT_COMMIT (desconhecido)
         "authenticated": False,
         "error": None,
-        # atualização pelo painel: há agente no host? e como foi o último pedido?
-        "agent": _update_agent_installed(),
-        "update_status": _update_status(),
+        # atualização pelo painel: o updater está de pé? e como foi o último pedido?
+        "agent": _updater_token() is not None,
+        "update_status": await _update_status(),
     }
     try:
         auth, has_token = await _github_auth_header(db, admin.id)

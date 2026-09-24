@@ -47,8 +47,6 @@ Thumbs.db
 
 # Data
 pgdata/
-# pasta de controle do agente de atualização (scripts/update-agent.sh)
-/data/
 *.sqlite
 *.db
 

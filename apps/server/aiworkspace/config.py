@@ -173,10 +173,11 @@ class Settings(BaseSettings):
     # 20MB. Imagem e áudio têm teto PRÓPRIO, menor, porque precisam caber inteiros
     # na requisição ao provedor (a imagem vai embutida; o áudio vai ao STT).
     uploads_dir: str = "/data/uploads"
-    # Atualização pelo painel (servidor Docker): o container NÃO tem acesso ao Docker;
-    # ele só grava um pedido nesta pasta, montada do host (./data/control). O agente do
-    # host (scripts/update-agent.sh, unidade systemd) vê o pedido e roda o update.sh.
-    update_control_dir: str = "/data/control"
+    # "Atualizar agora" do painel (servidor Docker): este container NÃO tem acesso ao
+    # Docker; ele pede ao serviço `updater` (infra/updater), o único com o socket, com o
+    # token que o updater grava no volume compartilhado.
+    updater_url: str = "http://updater:8080"
+    updater_token_file: str = "/run/updater/token"
     upload_max_bytes: int = 500 * 1024 * 1024
     upload_max_per_message: int = 20
     upload_image_max_bytes: int = 20 * 1024 * 1024
