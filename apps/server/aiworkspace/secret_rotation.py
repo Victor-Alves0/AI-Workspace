@@ -36,9 +36,9 @@ from dataclasses import dataclass
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
-from . import models  # noqa: F401  — popula o registry (todas as tabelas)
+from . import models, pgsync  # noqa: F401  — popula o registry (todas as tabelas)
 from .config import get_settings
 from .crypto import EncryptedText, _FIELD_PREFIX
 from .db import Base
@@ -151,58 +151,71 @@ def rotate(old_secret: str, new_secret: str, *, dry_run: bool) -> dict:
 
 def rotate_keys(old: Fernet, new: Fernet, *, dry_run: bool, database_url: str | None = None) -> dict:
     """Recifra tudo o que a chave `old` cifrou para a chave `new`. Usado pela rotação
-    do APP_SECRET e pela restauração de um backup de OUTRA instalação (migração)."""
+    do APP_SECRET e pela restauração de um backup de OUTRA instalação (migração).
+    Uma transação só; o corpo é síncrono e roda sobre o asyncpg via `run_sync`."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    async def _go() -> dict:
+        eng = create_async_engine(pgsync.sqlalchemy_url(database_url), poolclass=NullPool)
+        try:
+            async with eng.begin() as conn:
+                return await conn.run_sync(_rotate_all, old, new, dry_run)
+        finally:
+            await eng.dispose()
+
+    return pgsync.run_sync(_go)
+
+
+def _rotate_all(conn, old: Fernet, new: Fernet, dry_run: bool) -> dict:
     import json as _json
 
-    eng = create_engine(database_url or get_settings().sync_database_url)
     summary: dict[str, dict] = {}
     total_changed = total_skipped = total_failed = 0
-    with eng.begin() as conn:
-        for tg in _discover_targets():
-            rows = conn.execute(
-                text(f'SELECT "{tg.pk}" AS id, "{tg.column}" AS val FROM "{tg.table}" '
-                     f'WHERE "{tg.column}" IS NOT NULL AND "{tg.column}" <> \'\'')
-            ).all()
-            changed = skipped = failed = 0
-            for rid, val in rows:
-                try:
-                    newval = _rotate_value(val, old, new, tg.prefixed)
-                except InvalidToken:
-                    failed += 1  # não decifra com nenhuma das chaves — deixa como está
-                    continue
-                if newval is None:
-                    skipped += 1
-                    continue
-                if not dry_run:
-                    conn.execute(
-                        text(f'UPDATE "{tg.table}" SET "{tg.column}" = :v WHERE "{tg.pk}" = :id'),
-                        {"v": newval, "id": rid},
-                    )
-                changed += 1
-            summary[f"{tg.table}.{tg.column}"] = {"changed": changed, "skipped": skipped, "failed": failed}
-            total_changed += changed; total_skipped += skipped; total_failed += failed
-        # segredos dentro de JSON: o LIKE deixa de fora as linhas sem nenhum token
-        for table, column, pk, kind in _json_targets():
-            rows = conn.execute(
-                text(f'SELECT "{pk}" AS id, "{column}" AS val FROM "{table}" '
-                     f'WHERE "{column}"::text LIKE :p'),
-                {"p": f"%{_FERNET_PREFIX}%"},
-            ).all()
-            st = {"changed": 0, "skipped": 0, "failed": 0}
-            for rid, val in rows:
-                antes = st["changed"]
-                novo = _rotate_json(val, old, new, st)
-                if st["changed"] > antes and not dry_run:
-                    conn.execute(
-                        text(f'UPDATE "{table}" SET "{column}" = CAST(:v AS {kind}) WHERE "{pk}" = :id'),
-                        {"v": _json.dumps(novo), "id": rid},
-                    )
-            if any(st.values()):
-                summary[f"{table}.{column}"] = st
-            total_changed += st["changed"]; total_skipped += st["skipped"]; total_failed += st["failed"]
-        if dry_run:
-            conn.rollback()  # garante que nada foi escrito no dry-run
-    eng.dispose()
+    for tg in _discover_targets():
+        rows = conn.execute(
+            text(f'SELECT "{tg.pk}" AS id, "{tg.column}" AS val FROM "{tg.table}" '
+                 f'WHERE "{tg.column}" IS NOT NULL AND "{tg.column}" <> \'\'')
+        ).all()
+        changed = skipped = failed = 0
+        for rid, val in rows:
+            try:
+                newval = _rotate_value(val, old, new, tg.prefixed)
+            except InvalidToken:
+                failed += 1  # não decifra com nenhuma das chaves — deixa como está
+                continue
+            if newval is None:
+                skipped += 1
+                continue
+            if not dry_run:
+                conn.execute(
+                    text(f'UPDATE "{tg.table}" SET "{tg.column}" = :v WHERE "{tg.pk}" = :id'),
+                    {"v": newval, "id": rid},
+                )
+            changed += 1
+        summary[f"{tg.table}.{tg.column}"] = {"changed": changed, "skipped": skipped, "failed": failed}
+        total_changed += changed; total_skipped += skipped; total_failed += failed
+    # segredos dentro de JSON: o LIKE deixa de fora as linhas sem nenhum token
+    for table, column, pk, kind in _json_targets():
+        rows = conn.execute(
+            text(f'SELECT "{pk}" AS id, "{column}" AS val FROM "{table}" '
+                 f'WHERE "{column}"::text LIKE :p'),
+            {"p": f"%{_FERNET_PREFIX}%"},
+        ).all()
+        st = {"changed": 0, "skipped": 0, "failed": 0}
+        for rid, val in rows:
+            antes = st["changed"]
+            novo = _rotate_json(val, old, new, st)
+            if st["changed"] > antes and not dry_run:
+                conn.execute(
+                    text(f'UPDATE "{table}" SET "{column}" = CAST(:v AS {kind}) WHERE "{pk}" = :id'),
+                    {"v": _json.dumps(novo), "id": rid},
+                )
+        if any(st.values()):
+            summary[f"{table}.{column}"] = st
+        total_changed += st["changed"]; total_skipped += st["skipped"]; total_failed += st["failed"]
+    if dry_run:
+        conn.rollback()  # garante que nada foi escrito no dry-run
     return {"targets": summary, "changed": total_changed, "skipped": total_skipped, "failed": total_failed}
 
 

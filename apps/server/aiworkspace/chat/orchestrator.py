@@ -2551,7 +2551,7 @@ class _ToolDispatcher:
             try:
                 from .. import health_service
                 from ..tools import toolctx as _tc
-                # record_bg: _dispatch_tp roda no MAIN loop → offloada o psycopg2 p/ não
+                # record_bg: _dispatch_tp roda no MAIN loop → offloada a escrita síncrona p/ não
                 # travar o loop no connect_timeout bem quando uma tool já pendurou.
                 health_service.record_bg("tool_watchdog", "abort", severity="degraded",
                                          detail={"tool": str(call[0]), "timeout_s": t},
@@ -2778,7 +2778,7 @@ async def _final_synthesis(
 
 def _health(capability: str, event: str, severity: str, detail: dict, chat_id: str | None) -> None:
     """Registra um evento de saúde sem nunca derrubar NEM BLOQUEAR o caminho observado.
-    `record_bg` offloada o psycopg2 síncrono p/ um thread — este helper roda no main loop
+    `record_bg` offloada a escrita síncrona p/ um thread — este helper roda no main loop
     (dentro dos geradores de run_turn), então um `record()` direto poderia travá-lo até o
     connect_timeout se o banco engasgasse, e bem na hora em que algo já está degradando."""
     try:

@@ -27,11 +27,10 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from fastapi.concurrency import run_in_threadpool
 
-from .. import bg
+from .. import bg, pgsync
 from ..config import get_settings
 from . import exec_service
 
@@ -40,31 +39,19 @@ logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
 # Persistência (durabilidade): espelha o ciclo de vida em disco SÓ p/ a recuperação
-# no boot. Sync psycopg2, fire-and-forget, NUNCA levanta — um erro de persistência
+# no boot. Sync (pgsync), fire-and-forget, NUNCA levanta — um erro de persistência
 # jamais pode derrubar a execução do job. Ver models/exec_job.py.
 # --------------------------------------------------------------------------- #
-def _pg():
-    import psycopg2
-    url = urlparse(get_settings().sync_database_url)
-    return psycopg2.connect(
-        dbname=url.path.lstrip("/"), user=url.username, password=url.password,
-        host=url.hostname, port=url.port or 5432, connect_timeout=10,
-    )
-
-
 def _db_insert(job: "Job") -> None:
     try:
-        conn = _pg()
-        with conn, conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO codespace_exec_jobs (id, job_key, user_id, chat_id, "
-                "project_id, worktree, command, status, settled, output_tail, "
-                "created_at, updated_at) VALUES "
-                "(%s,%s,%s,%s,%s,%s,%s,'running',false,'', now(), now())",
-                (str(uuid.uuid4()), job.id, job.user_id, job.chat_id or None,
-                 job.project_id or None, job.worktree, job.command[:20000]),
-            )
-        conn.close()
+        pgsync.execute(
+            "INSERT INTO codespace_exec_jobs (id, job_key, user_id, chat_id, "
+            "project_id, worktree, command, status, settled, output_tail, "
+            "created_at, updated_at) VALUES "
+            "($1,$2,$3,$4,$5,$6,$7,'running',false,'', now(), now())",
+            uuid.uuid4(), job.id, job.user_id, job.chat_id or None,
+            job.project_id or None, job.worktree, job.command[:20000],
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("exec_jobs._db_insert falhou (%s): %s", job.id, exc)
 
@@ -73,14 +60,12 @@ def _db_update(job_key: str, **fields: Any) -> None:
     if not fields:
         return
     try:
-        cols = ", ".join(f"{k} = %s" for k in fields)
-        conn = _pg()
-        with conn, conn.cursor() as cur:
-            cur.execute(
-                f"UPDATE codespace_exec_jobs SET {cols}, updated_at = now() WHERE job_key = %s",
-                (*fields.values(), job_key),
-            )
-        conn.close()
+        cols = ", ".join(f"{k} = ${i}" for i, k in enumerate(fields, 1))
+        pgsync.execute(
+            f"UPDATE codespace_exec_jobs SET {cols}, updated_at = now() "
+            f"WHERE job_key = ${len(fields) + 1}",
+            *fields.values(), job_key,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("exec_jobs._db_update falhou (%s): %s", job_key, exc)
 
@@ -290,7 +275,7 @@ async def _maybe_wake(job: Job) -> None:
 
     async def _settle() -> None:
         job.dispatched = True
-        # roda no main loop (reaper) → offloada o psycopg2 síncrono p/ não travar o loop
+        # roda no main loop (reaper) → offloada a escrita síncrona p/ não travar o loop
         # até o connect_timeout se o banco engasgar. Desfecho entregue → não é órfão.
         await run_in_threadpool(_db_update, job.id, settled=True)
 

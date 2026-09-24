@@ -6,7 +6,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# dependências de sistema (psycopg2, build de wheels nativas) + OCR:
+# dependências de sistema (build de wheels nativas) + OCR:
 # tesseract (motor OCR local, idiomas pt+en) e poppler (rasteriza PDF p/ OCR).
 # git: clona os projetos do Codespace (tool code.graph/code.files) via HTTPS/SSH.
 # openssh-client: `ssh`/`ssh-keygen` — projetos Codespace por SSH (deploy key

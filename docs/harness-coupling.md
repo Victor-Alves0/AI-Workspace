@@ -89,7 +89,7 @@ There are **three** DB-access regimes and mixing them causes
 |---|---|---|
 | The **request** (FastAPI handler) | the injected `db: AsyncSession` (`get_db`) | routes |
 | The **main loop**, no request session | global `SessionLocal` / `engine` (`db.py`) | `run_turn`, generation driver, `ledger_service.load`, `recover_orphans` |
-| A **tool** (SIFT threadpool + `asyncio.run`) | an **ephemeral `NullPool` engine per call**, OR **sync psycopg2** | see below |
+| A **tool** (SIFT threadpool + `asyncio.run`) | an **ephemeral `NullPool` engine per call**, OR **sync `pgsync`** (asyncpg on a private loop) | see below |
 
 Why: the global async `engine` binds its pooled connections to the loop that created
 them (the main loop). A SIFT tool runs in a threadpool and calls `asyncio.run(...)`,
@@ -101,7 +101,7 @@ reuses a connection bound to another loop → crash.
   `create_async_engine(url, poolclass=NullPool)` → `async_sessionmaker` → use → `dispose`.
   Used by `codespace/graph_service.py`, `chat/ledger_service.py` (tool path),
   `investigation_service.py::_session`.
-- or use **sync psycopg2** (no event loop at all): `health_service.py`,
+- or use **sync `pgsync`** (asyncpg on its own private loop, never the caller's): `health_service.py`,
   `codespace/exec_jobs.py` persistence, `memory_service.py` flag writes.
 
 > The `ledger_service.load` docstring is the canonical note: same module uses the global
@@ -115,7 +115,7 @@ Health instrumentation and durable-state persistence are **fire-and-forget**:
 - **sync, never raises** — `health_service.record` and `exec_jobs._db_insert/_db_update`
   wrap everything in `try/except` and only `logger.warning` on failure. A failed
   health write must never break the tool that was degrading.
-- **never blocks the event loop** — the write is **sync psycopg2** (connect+insert,
+- **never blocks the event loop** — the write is **sync `pgsync`** (asyncpg on a private loop) (connect+insert,
   `connect_timeout=10s`). Called **from the main loop** that's a stall risk: a slow DB
   freezes the loop up to the timeout, *precisely* when health events fire (degradation).
   So main-loop async call sites use **`health_service.record_bg`** — it offloads the
@@ -197,7 +197,7 @@ already had this (shielded shutdown); exec_jobs got it; preview is acceptable to
 When you add to the harness, honor the couplings:
 
 - **New SIFT tool that touches the DB?** Use an ephemeral `NullPool` engine or sync
-  psycopg2 — **never** the global `SessionLocal` from the tool's `asyncio.run`
+  `pgsync` — **never** the global `SessionLocal` from the tool's `asyncio.run`
   (coupling #1).
 - **Changing how a tool is offloaded to a thread?** `run_in_threadpool` copies the
   `contextvars.Context`; `run_in_executor` does **not**. Any swap to `run_in_executor`
@@ -205,7 +205,7 @@ When you add to the harness, honor the couplings:
   every `toolctx` value reverts to its default inside the tool — silently.
 - **New degradation / fallback path?** Instrument it in the `except`/fallback branch,
   **lazily imported**, never raising (coupling #2). On the **main loop** use
-  `health_service.record_bg` (offloads the sync psycopg2 write); only in a sync/worker
+  `health_service.record_bg` (offloads the sync `pgsync` write); only in a sync/worker
   context use plain `record`. If it's a primitive, add its name to
   `health_service._PRIMITIVES`.
 - **New output guard or wrapper?** Remember it sees only the **final** text and re-runs

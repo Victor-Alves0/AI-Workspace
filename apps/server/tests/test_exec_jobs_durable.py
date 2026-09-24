@@ -20,7 +20,7 @@ from aiworkspace.codespace import exec_jobs as ej
 def test_persistencia_nunca_levanta_sem_db(monkeypatch):
     def boom():
         raise RuntimeError("db fora")
-    monkeypatch.setattr(ej, "_pg", boom)
+    monkeypatch.setattr(ej.pgsync, "execute", lambda *a, **k: boom())
     ej._db_update("qualquer", status="done")           # não levanta
     ej._db_insert(type("J", (), {"id": "x", "user_id": str(uuid.uuid4()),
                                  "chat_id": None, "project_id": None,
@@ -32,18 +32,13 @@ def test_persistencia_nunca_levanta_sem_db(monkeypatch):
 # --------------------------------------------------------------------------- #
 def _ping() -> bool:
     try:
-        c = ej._pg(); c.close(); return True
+        ej.pgsync.fetch("SELECT 1"); return True
     except Exception:  # noqa: BLE001
         return False
 
 
 def _sql(q, args=()):
-    c = ej._pg()
-    with c, c.cursor() as cur:
-        cur.execute(q, args)
-        rows = cur.fetchall() if cur.description else None
-    c.close()
-    return rows
+    return ej.pgsync.fetch(ej.pgsync.from_pyformat(q), *args)
 
 
 def test_recover_orphans_destrava_e_poupa_o_processo_atual():

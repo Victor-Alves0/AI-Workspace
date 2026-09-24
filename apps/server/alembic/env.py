@@ -1,12 +1,17 @@
-"""Ambiente do Alembic (modo síncrono via psycopg2)."""
+"""Ambiente do Alembic. Online: asyncpg (o único driver do app); a bateria de
+testes injeta uma conexão síncrona própria."""
 
 from __future__ import annotations
 
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+import asyncio
 
+from sqlalchemy import pool
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from aiworkspace import pgsync
 from aiworkspace.config import get_settings
 from aiworkspace.db import Base
 import aiworkspace.models  # noqa: F401  (registra todas as tabelas no metadata)
@@ -15,7 +20,6 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-config.set_main_option("sqlalchemy.url", get_settings().sync_database_url)
 target_metadata = Base.metadata
 
 
@@ -39,16 +43,22 @@ def run_migrations_online() -> None:
         with context.begin_transaction():
             context.run_migrations()
         return
+    asyncio.run(_run_async())
 
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
-    with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
-        with context.begin_transaction():
-            context.run_migrations()
+
+def _migrate(connection) -> None:
+    context.configure(connection=connection, target_metadata=target_metadata)
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+async def _run_async() -> None:
+    engine = create_async_engine(pgsync.sqlalchemy_url(), poolclass=pool.NullPool)
+    try:
+        async with engine.connect() as connection:
+            await connection.run_sync(_migrate)
+    finally:
+        await engine.dispose()
 
 
 if context.is_offline_mode():

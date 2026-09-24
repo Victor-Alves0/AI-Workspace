@@ -1,5 +1,5 @@
 """Auto-observabilidade (health_service): registro de eventos, agregação do snapshot
-e o alerta de log com cooldown. O `record()` é sync (psycopg2) e nunca levanta; o
+e o alerta de log com cooldown. O `record()` é sync (pgsync) e nunca levanta; o
 `snapshot()` é async. Fluxo de DB pula com graça se o Postgres não estiver acessível."""
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ def test_record_nunca_levanta_mesmo_sem_db(monkeypatch):
     # caminho que estava tentando observar.
     def boom():
         raise RuntimeError("db fora")
-    monkeypatch.setattr(hs, "_conn", boom)
+    monkeypatch.setattr(hs.pgsync, "execute", lambda *a, **k: boom())
     hs.record("memory", "no_op", severity="degraded", detail={"error": "x"})  # não levanta
 
 
@@ -37,7 +37,7 @@ def test_primeiro_alarme_dispara_mesmo_com_o_processo_recem_subido(monkeypatch):
     inseridos: list = []
     # O alerta não abre uma segunda conexão nem cria Notification: a saúde já foi
     # persistida em health_events pelo record().
-    monkeypatch.setattr(hs, "_conn", lambda: (_ for _ in ()).throw(AssertionError("chegou no DB")))
+    monkeypatch.setattr(hs.pgsync, "execute", lambda *a, **k: (_ for _ in ()).throw(AssertionError("chegou no DB")))
     monkeypatch.setattr(hs, "logger", _LoggerEspiao(inseridos))
     monkeypatch.setattr(hs.time, "monotonic", lambda: 42.0)  # processo com 42s de vida
     hs._last_alarm.clear()
@@ -74,7 +74,7 @@ def test_record_bg_sem_loop_roda_inline(monkeypatch):
 
 
 def test_record_bg_com_loop_offloada_pra_outra_thread(monkeypatch):
-    # dentro do loop, record_bg NÃO deve rodar o psycopg2 no thread do loop (bloquearia):
+    # dentro do loop, record_bg NÃO deve rodar a escrita síncrona no thread do loop (bloquearia):
     # ele offloada p/ o executor → o record roda numa thread DIFERENTE e o loop segue.
     import threading
     ran: list = []
@@ -98,29 +98,23 @@ def test_record_bg_com_loop_offloada_pra_outra_thread(monkeypatch):
 # --------------------------------------------------------------------------- #
 def _run_db_ping() -> bool:
     try:
-        c = hs._conn(); c.close(); return True
+        hs.pgsync.fetch("SELECT 1"); return True
     except Exception:  # noqa: BLE001
         return False
 
 
 def _mk_admin() -> str:
     uid = str(uuid.uuid4())
-    c = hs._conn()
-    with c, c.cursor() as cur:
-        cur.execute(
-            "INSERT INTO users (id,email,hashed_password,role,is_active,status,"
-            "token_version,created_at,updated_at) VALUES "
-            "(%s,%s,'x','admin',true,'active',0,now(),now())",
-            (uid, f"admin-{uid[:8]}@x.test"))
-    c.close()
+    hs.pgsync.execute(
+        "INSERT INTO users (id,email,hashed_password,role,is_active,status,"
+        "token_version,created_at,updated_at) VALUES "
+        "($1,$2,'x','admin',true,'active',0,now(),now())",
+        uid, f"admin-{uid[:8]}@x.test")
     return uid
 
 
 def _drop_user(uid: str) -> None:
-    c = hs._conn()
-    with c, c.cursor() as cur:
-        cur.execute("DELETE FROM users WHERE id=%s", (uid,))
-    c.close()
+    hs.pgsync.execute("DELETE FROM users WHERE id=$1", uid)
 
 
 def test_record_snapshot_e_alarme_com_cooldown():
@@ -163,11 +157,8 @@ def test_record_snapshot_e_alarme_com_cooldown():
         asyncio.run(_flow())
     finally:
         # limpa eventos/notualizações do teste + o admin (CASCADE/SET NULL nos eventos)
-        c = hs._conn()
-        with c, c.cursor() as cur:
-            cur.execute("DELETE FROM notifications WHERE user_id=%s", (admin,))
-            cur.execute("DELETE FROM health_events WHERE capability='memory' AND event='no_op'")
-        c.close()
+        hs.pgsync.execute("DELETE FROM notifications WHERE user_id=$1", admin)
+        hs.pgsync.execute("DELETE FROM health_events WHERE capability='memory' AND event='no_op'")
         _drop_user(admin)
 
 
@@ -196,7 +187,4 @@ def test_primitive_metrics_agrega_uso_e_desfecho():
                 await engine.dispose()
         asyncio.run(_flow())
     finally:
-        c = hs._conn()
-        with c, c.cursor() as cur:
-            cur.execute("DELETE FROM health_events WHERE event LIKE %s", (f"%{marker}",))
-        c.close()
+        hs.pgsync.execute("DELETE FROM health_events WHERE event LIKE $1", f"%{marker}")

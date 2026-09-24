@@ -381,7 +381,7 @@ class Settings(BaseSettings):
 
     @property
     def sync_database_url(self) -> str:
-        """URL síncrona (psycopg) usada pelo Alembic."""
+        """URL libpq pura (sem driver): pg_dump/psql e o modo offline do Alembic."""
         return self.database_url.replace("+asyncpg", "")
 
 

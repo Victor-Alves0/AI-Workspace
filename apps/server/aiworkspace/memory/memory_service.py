@@ -6,7 +6,7 @@ jsonb)`, payload com data/hash/user_id/run_id/agent_id/created_at/updated_at —
 mesmo modelo de embedding (`knowledge/embeddings`), então as memórias existentes
 continuam valendo sem migração de dados.
 
-  - vetores   -> Postgres + pgvector da aplicação (psycopg2, síncrono)
+  - vetores   -> Postgres + pgvector da aplicação (asyncpg via pgsync, síncrono)
   - embedding -> FastEmbed local (sem chave)
   - extração  -> LLM pelo OpenRouter com a chave do PRÓPRIO usuário (só em `add`)
 
@@ -31,7 +31,6 @@ import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urlparse
 
 from ..config import get_settings
 
@@ -51,34 +50,24 @@ _PROJECT_PREFIX = "project:"
 # --------------------------------------------------------------------------- #
 # Conexão
 # --------------------------------------------------------------------------- #
-def _pg_conn_params() -> dict[str, Any]:
-    url = urlparse(get_settings().sync_database_url)
-    return {
-        "dbname": url.path.lstrip("/"),
-        "user": url.username,
-        "password": url.password,
-        "host": url.hostname,
-        "port": url.port or 5432,
-        # nunca pendurar: banco inacessível falha em 10s em vez de travar a thread
-        "connect_timeout": 10,
-    }
+def _run(sql: str, params: Any = None, *, fetch: bool = True) -> list[Any]:
+    """Executa uma instrução numa conexão própria. SQL no estilo `%s` (convertido para
+    o asyncpg por `pgsync.from_pyformat`). Linhas = asyncpg.Record (índice ou nome)."""
+    from .. import pgsync
+
+    q = pgsync.from_pyformat(sql)
+    args = tuple(params or ())
+    if fetch:
+        return pgsync.fetch(q, *args)
+    pgsync.execute(q, *args)
+    return []
 
 
-def _connect():
-    import psycopg2
+def _exec(sql: str, params: Any = None) -> int:
+    """Executa e devolve o nº de linhas afetadas."""
+    from .. import pgsync
 
-    return psycopg2.connect(**_pg_conn_params())
-
-
-def _run(sql: str, params: Any = None, *, fetch: bool = True) -> list[tuple]:
-    """Executa uma instrução numa conexão própria (commit ao sair)."""
-    conn = _connect()
-    try:
-        with conn, conn.cursor() as cur:
-            cur.execute(sql, params)
-            return cur.fetchall() if fetch and cur.description else []
-    finally:
-        conn.close()
+    return pgsync.execute(pgsync.from_pyformat(sql), *tuple(params or ()))
 
 
 def _vec(text: str) -> str:
@@ -110,11 +99,11 @@ def _flag_ids(user_id: str, status: str | None = None) -> set[str]:
     try:
         if status:
             rows = _run(
-                "SELECT memory_id FROM disabled_memories WHERE user_id = %s AND status = %s",
-                (user_id, status),
+                "SELECT memory_id FROM disabled_memories WHERE user_id::text = %s AND status = %s",
+                (str(user_id), status),
             )
         else:
-            rows = _run("SELECT memory_id FROM disabled_memories WHERE user_id = %s", (user_id,))
+            rows = _run("SELECT memory_id FROM disabled_memories WHERE user_id::text = %s", (str(user_id),))
         return {r[0] for r in rows}
     except Exception as exc:  # noqa: BLE001
         logger.warning("disabled_memories indisponível: %s", exc)
@@ -126,16 +115,15 @@ def _set_flag(user_id: str, memory_ids: list[str], status: str) -> int:
     if not ids:
         return 0
     try:
-        conn = _connect()
-        try:
-            with conn, conn.cursor() as cur:
-                cur.executemany(
-                    "INSERT INTO disabled_memories (user_id, memory_id, status) VALUES (%s, %s, %s) "
-                    "ON CONFLICT (user_id, memory_id) DO UPDATE SET status = EXCLUDED.status",
-                    [(user_id, m, status) for m in ids],
-                )
-        finally:
-            conn.close()
+        from .. import pgsync
+
+        pgsync.executemany(
+            pgsync.from_pyformat(
+                "INSERT INTO disabled_memories (user_id, memory_id, status) "
+                "VALUES (%s::text::uuid, %s, %s) "
+                "ON CONFLICT (user_id, memory_id) DO UPDATE SET status = EXCLUDED.status"),
+            [(str(user_id), m, status) for m in ids],
+        )
         return len(ids)
     except Exception as exc:  # noqa: BLE001
         logger.warning("_set_flag falhou: %s", exc)
@@ -147,8 +135,8 @@ def _clear_flag(user_id: str, memory_ids: list[str]) -> int:
     if not ids:
         return 0
     try:
-        _run("DELETE FROM disabled_memories WHERE user_id = %s AND memory_id = ANY(%s)",
-             (user_id, ids), fetch=False)
+        _run("DELETE FROM disabled_memories WHERE user_id::text = %s AND memory_id = ANY(%s::text[])",
+             (str(user_id), ids), fetch=False)
         return len(ids)
     except Exception as exc:  # noqa: BLE001
         logger.warning("_clear_flag falhou: %s", exc)
@@ -299,7 +287,7 @@ def search_for_turn(
         params.append(_PROJECT_PREFIX + project_id)
     bank_aids = [_BANK_PREFIX + b for b in (banks or []) if b]
     if bank_aids:
-        ors.append(f"({_RUN} IS NULL AND {_AGENT} = ANY(%s))")
+        ors.append(f"({_RUN} IS NULL AND {_AGENT} = ANY(%s::text[]))")
         params.append(bank_aids)
     if not ors:
         return []
@@ -309,7 +297,7 @@ def search_for_turn(
                 WHERE payload->>'user_id' = %s AND ({' OR '.join(ors)})
                   AND NOT EXISTS (SELECT 1 FROM disabled_memories d
                                   WHERE d.user_id::text = %s AND d.memory_id = t.id::text)
-                ORDER BY vector <=> %s::vector LIMIT %s""",
+                ORDER BY vector <=> %s::text::vector LIMIT %s""",
             [user_id, *params, user_id, _vec(query), limit],
         )
     except Exception as exc:  # noqa: BLE001
@@ -338,7 +326,7 @@ def list_memories(
     try:
         if query.strip():
             rows = _run(f"SELECT id, payload FROM {_TABLE} WHERE {where} "
-                        f"ORDER BY vector <=> %s::vector LIMIT %s",
+                        f"ORDER BY vector <=> %s::text::vector LIMIT %s",
                         [user_id, *params, _vec(query), limit])
         else:
             rows = _run(f"SELECT id, payload FROM {_TABLE} WHERE {where} "
@@ -407,38 +395,26 @@ def _insert(user_id: str, text: str, *, run_id: str | None, agent_id: str | None
         payload["agent_id"] = agent_id
     if role:
         payload["role"] = role
-    _run(f"INSERT INTO {_TABLE} (id, vector, payload) VALUES (%s, %s::vector, %s::jsonb)",
+    _run(f"INSERT INTO {_TABLE} (id, vector, payload) VALUES (%s::text::uuid, %s::text::vector, %s::text::jsonb)",
          (mem_id, _vec(text), json.dumps(payload, ensure_ascii=False)), fetch=False)
     return mem_id
 
 
 def _update(user_id: str, memory_id: str, text: str) -> bool:
     patch = {"data": text, "hash": hashlib.md5(text.encode()).hexdigest(), "updated_at": _now()}
-    conn = _connect()
-    try:
-        with conn, conn.cursor() as cur:
-            cur.execute(
-                f"UPDATE {_TABLE} SET vector = %s::vector, payload = payload || %s::jsonb "
-                f"WHERE id = %s AND payload->>'user_id' = %s",
-                (_vec(text), json.dumps(patch, ensure_ascii=False), memory_id, user_id),
-            )
-            return cur.rowcount == 1
-    finally:
-        conn.close()
+    return _exec(
+        f"UPDATE {_TABLE} SET vector = %s::text::vector, payload = payload || %s::text::jsonb "
+        f"WHERE id::text = %s AND payload->>'user_id' = %s",
+        (_vec(text), json.dumps(patch, ensure_ascii=False), memory_id, user_id),
+    ) == 1
 
 
 def _delete(user_id: str, memory_id: str) -> bool:
-    conn = _connect()
-    try:
-        with conn, conn.cursor() as cur:
-            cur.execute(f"DELETE FROM {_TABLE} WHERE id = %s AND payload->>'user_id' = %s",
-                        (memory_id, user_id))
-            apagou = cur.rowcount == 1
-            if apagou:
-                cur.execute("DELETE FROM disabled_memories WHERE memory_id = %s", (memory_id,))
-            return apagou
-    finally:
-        conn.close()
+    apagou = _exec(f"DELETE FROM {_TABLE} WHERE id::text = %s AND payload->>'user_id' = %s",
+                   (memory_id, user_id)) == 1
+    if apagou:
+        _exec("DELETE FROM disabled_memories WHERE memory_id = %s", (memory_id,))
+    return apagou
 
 
 _FACTS_PROMPT = """You extract durable facts about the user from a conversation, so a \
@@ -529,7 +505,7 @@ def add(
         for fato in facts:
             for i, p in _run(
                 f"SELECT id, payload FROM {_TABLE} WHERE payload->>'user_id' = %s AND {cond} "
-                f"ORDER BY vector <=> %s::vector LIMIT %s",
+                f"ORDER BY vector <=> %s::text::vector LIMIT %s",
                 [user_id, *params, _vec(fato), _SIMILAR_PER_FACT],
             ):
                 existentes[str(i)] = p.get("data") or ""
@@ -676,20 +652,15 @@ def delete_memory(api_key: str, memory_id: str, owner_user_id: str = "") -> bool
 
 
 def _delete_where(user_id: str, cond: list[str], params: list) -> int:
-    conn = _connect()
-    try:
-        with conn, conn.cursor() as cur:
-            cur.execute(
-                f"DELETE FROM {_TABLE} WHERE " + " AND ".join(["payload->>'user_id' = %s", *cond])
-                + " RETURNING id::text",
-                [user_id, *params],
-            )
-            ids = [r[0] for r in cur.fetchall()]
-            if ids:
-                cur.execute("DELETE FROM disabled_memories WHERE memory_id = ANY(%s)", (ids,))
-            return len(ids)
-    finally:
-        conn.close()
+    rows = _run(
+        f"DELETE FROM {_TABLE} WHERE " + " AND ".join(["payload->>'user_id' = %s", *cond])
+        + " RETURNING id::text",
+        [user_id, *params],
+    )
+    ids = [r[0] for r in rows]
+    if ids:
+        _exec("DELETE FROM disabled_memories WHERE memory_id = ANY(%s::text[])", (ids,))
+    return len(ids)
 
 
 def delete_scope(

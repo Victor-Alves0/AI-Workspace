@@ -1,7 +1,7 @@
 """Auto-observabilidade: a saúde das CAPACIDADES do harness (ver models/health_event).
 
-`record(...)` é SÍNCRONO (psycopg2, fire-and-forget, NUNCA levanta) de propósito —
-os pontos de degradação vivem tanto em código sync (memory_service via psycopg2) quanto
+`record(...)` é SÍNCRONO (pgsync, fire-and-forget, NUNCA levanta) de propósito —
+os pontos de degradação vivem tanto em código sync (memory_service via pgsync) quanto
 async (orchestrator), e um evento de saúde jamais pode derrubar o caminho que estava
 tentando observar. Eventos raros (degradações), então conectar por evento é barato.
 
@@ -19,12 +19,10 @@ import logging
 import time
 import uuid
 from typing import Any
-from urllib.parse import urlparse
 
-import psycopg2
-from psycopg2.extras import Json
 from sqlalchemy import func, select
 
+from . import pgsync
 from .config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -36,14 +34,6 @@ _ALARM_COOLDOWN_S = 900
 _last_alarm: dict[str, float] = {}
 
 
-def _conn():
-    url = urlparse(get_settings().sync_database_url)
-    return psycopg2.connect(
-        dbname=url.path.lstrip("/"), user=url.username, password=url.password,
-        host=url.hostname, port=url.port or 5432, connect_timeout=10,
-    )
-
-
 def record(capability: str, event: str, *, severity: str = "info",
            detail: dict[str, Any] | None = None, user_id: str | None = None,
            chat_id: str | None = None) -> None:
@@ -52,16 +42,13 @@ def record(capability: str, event: str, *, severity: str = "info",
     try:
         uid = str(user_id) if user_id else None
         cid = str(chat_id) if chat_id else None
-        conn = _conn()
-        with conn, conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO health_events (id, capability, event, severity, user_id, "
-                "chat_id, detail, created_at, updated_at) "
-                "VALUES (%s,%s,%s,%s,%s,%s,%s, now(), now())",
-                (str(uuid.uuid4()), capability[:32], event[:48], severity[:12],
-                 uid, cid, Json(detail or {})),
-            )
-        conn.close()
+        pgsync.execute(
+            "INSERT INTO health_events (id, capability, event, severity, user_id, "
+            "chat_id, detail, created_at, updated_at) "
+            "VALUES ($1,$2,$3,$4,$5,$6,$7, now(), now())",
+            uuid.uuid4(), capability[:32], event[:48], severity[:12],
+            uid, cid, detail or {},
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("health.record falhou (%s/%s): %s", capability, event, exc)
         return
@@ -78,8 +65,8 @@ def record_bg(capability: str, event: str, *, severity: str = "info",
               detail: dict[str, Any] | None = None, user_id: str | None = None,
               chat_id: str | None = None) -> None:
     """Versão NÃO-BLOQUEANTE de `record()` p/ call sites em contexto async no MAIN loop
-    (orchestrator `_health`, compactação, reaper). `record()` é psycopg2 síncrono
-    (connect+insert, connect_timeout=10s) — chamá-lo direto no event loop o TRAVA até 10s
+    (orchestrator `_health`, compactação, reaper). `record()` é síncrono
+    (connect+insert, timeout=10s) — chamá-lo direto no event loop o TRAVA até 10s
     se o banco engasgar, e eventos de saúde disparam justamente quando algo já degrada.
     Aqui a escrita vai p/ um thread do executor: o loop nunca bloqueia. Fire-and-forget.
     Sem loop rodando (contexto sync — threads do mem0/exec, self-check do boot), cai no
@@ -204,16 +191,13 @@ async def primitive_metrics(db, days: int = 7) -> dict:
 # --------------------------------------------------------------------------- #
 def self_check() -> dict:
     """Verifica no boot se as capacidades centrais estão de pé e grava um evento
-    (down/degraded se caíram). SÍNCRONO (psycopg2 + mem0.warm bloqueiam) — chamado do
+    (down/degraded se caíram). SÍNCRONO (pgsync + memória bloqueiam) — chamado do
     lifespan via run_in_threadpool p/ não travar o loop. Nunca levanta."""
     results: dict[str, bool] = {}
 
     # banco
     try:
-        conn = _conn()
-        with conn, conn.cursor() as cur:
-            cur.execute("SELECT 1")
-        conn.close()
+        pgsync.fetch("SELECT 1")
         results["database"] = True
     except Exception as exc:  # noqa: BLE001
         results["database"] = False
