@@ -2,10 +2,16 @@
 
 Thanks for your interest! This guide covers the basics for proposing changes.
 
-> **License note:** this repository does **not** yet define a license (see
-> [README](README.md#license)). Until that is resolved, use and redistribution by third parties
-> are not formally authorized. If you plan to contribute from outside, open an issue first to
-> align.
+AI Workspace is licensed under **AGPL-3.0**. By contributing, you agree that your contribution is
+licensed under the same terms. Please follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Ways to help
+
+- **Try it and report what breaks** — bug reports with clear steps are gold.
+- **Translate the interface** — it's in Portuguese (pt-BR) today; English is the most wanted.
+- **Pick a [`good first issue`](https://github.com/Victor-Alves0/AI-Workspace/labels/good%20first%20issue)**.
+- **Improve the docs** — some pages are still in Portuguese only.
+- **Share how you use it** in [Discussions](https://github.com/Victor-Alves0/AI-Workspace/discussions).
 
 ## Before you start
 
@@ -20,7 +26,7 @@ Thanks for your interest! This guide covers the basics for proposing changes.
 3. Run the suite and the type-check:
    ```bash
    cd apps/server && pytest -q
-   cd ../web && npm run build     # frontend type-check
+   cd ../web && npx tsc --noEmit  # frontend type-check (npm run build for a full build)
    ```
 4. Open a Pull Request describing **what** and **why**.
 

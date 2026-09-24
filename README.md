@@ -4,10 +4,20 @@
 
 **A self-hosted, local-first AI workspace — multi-model chat with tools, long-term memory, automations, integrations and a desktop app, all running on _your_ infrastructure.**
 
+[![Release](https://img.shields.io/github/v/release/Victor-Alves0/AI-Workspace?color=7c6bff)](https://github.com/Victor-Alves0/AI-Workspace/releases/latest)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+[![Tests](https://github.com/Victor-Alves0/AI-Workspace/actions/workflows/tests.yml/badge.svg)](https://github.com/Victor-Alves0/AI-Workspace/actions/workflows/tests.yml)
+[![Stars](https://img.shields.io/github/stars/Victor-Alves0/AI-Workspace?style=flat&color=yellow)](https://github.com/Victor-Alves0/AI-Workspace/stargazers)
+[![Discussions](https://img.shields.io/github/discussions/Victor-Alves0/AI-Workspace?color=7c6bff)](https://github.com/Victor-Alves0/AI-Workspace/discussions)
+
 [![Stack](https://img.shields.io/badge/backend-FastAPI%20%C2%B7%20Postgres%2016%20%2B%20pgvector-009688)](#architecture)
-[![Frontend](https://img.shields.io/badge/frontend-Next.js%2014%20%C2%B7%20Tailwind-000000)](#architecture)
+[![Frontend](https://img.shields.io/badge/frontend-Next.js%2016%20%C2%B7%20React%2019-000000)](#architecture)
 [![Deploy](https://img.shields.io/badge/deploy-Docker%20Compose-2496ED)](#quick-start)
 [![Desktop](https://img.shields.io/badge/desktop-Windows%20(Tauri)-6f42c1)](docs/desktop.md)
+
+<br>
+
+<img src="docs/assets/chat.webp" alt="AI Workspace: the main assistant splits a trip-planning task between two agents it created; each agent's work shows up as an expandable card" width="900">
 
 </div>
 
@@ -24,7 +34,7 @@ memory, a knowledge base (RAG), scheduled automations, messaging channels
 desktop app with a tray icon.
 
 > **Stack:** [FastAPI](https://fastapi.tiangolo.com/) (async) · [SQLAlchemy 2](https://www.sqlalchemy.org/) ·
-> **Postgres 16 + [pgvector](https://github.com/pgvector/pgvector)** · [Next.js 14](https://nextjs.org/) (App Router) + Tailwind ·
+> **Postgres 16 + [pgvector](https://github.com/pgvector/pgvector)** · [Next.js 16](https://nextjs.org/) (App Router) + Tailwind ·
 > [SIFT](https://github.com/Victor-Alves0/SIFT) (tool calling) ·
 > [OpenRouter](https://openrouter.ai/) · all in **Docker Compose**.
 
@@ -39,6 +49,7 @@ desktop app with a tray icon.
 - [Documentation](#documentation)
 - [Security](#security)
 - [Development](#development)
+- [Community](#community)
 - [License](#license)
 
 ## Highlights
@@ -47,6 +58,9 @@ desktop app with a tray icon.
   is the model provider and whatever your tools reach. Keys are encrypted in the database.
 - 🧠 **Custom models.** Prompt, parameters, tools, capabilities, filters, voice, memory and
   sub-agents — all configurable **per model**, like your own "GPT".
+- 🤖 **Sub-agents, Claude Code style.** The AI delegates to agents you configured **or creates
+  its own** for the task, runs them in parallel or **in the background**, and shows each agent's
+  steps and report in the chat.
 - 🛠️ **Real tools.** Web search, page reading, headless browser, charts, quotes, Gmail/Calendar,
   smart home, GitHub, and **Python code you write**, running in an isolated sandbox.
 - ♾️ **Long-term memory** with scopes (global / per model / per chat) and shareable stores, plus
@@ -72,7 +86,8 @@ desktop app with a tray icon.
 - Resumable streaming (F5/close doesn't cancel) with a **stop** button
 - **Custom models** with their own prompt, parameters, tools, voice and memory
 - **Round table**: several models talking to each other, with you steering
-- **Sub-agents**: an orchestrator delegates to worker models (sequential/parallel)
+- **Sub-agents**: delegate to your agents or let the AI create its own; parallel, background
+  and isolated git worktrees, with each agent's work visible in the chat
 - **Temporary chat**, non-destructive context **compaction** and **reference chats**
 
 **Tools (SIFT)**
@@ -192,10 +207,12 @@ docker compose up -d --build
 ```
 
 Open **https://localhost** (the browser warns about the certificate on the first visit — the
-stack issues its own; see [docs/https.md](docs/https.md)). The **first user to register becomes
-admin**. Then, under
-**⚙ Settings → Connections → APIs**, paste your **[OpenRouter](https://openrouter.ai/keys) key**
-(it's encrypted), pick a model and start chatting.
+stack issues its own; see [docs/https.md](docs/https.md)). A **first-run wizard** creates your
+admin account and asks whether other people may sign up; then the in-app setup asks for your
+**[OpenRouter](https://openrouter.ai/keys) key** (stored encrypted) and a model, and you're
+chatting.
+
+<p align="center"><img src="docs/assets/login.webp" alt="AI Workspace sign-in screen" width="760"></p>
 
 > Database migrations (Alembic) **run automatically** on server startup. To update later, run
 > `./update.sh` (or `git pull && docker compose up -d --build`).
@@ -214,14 +231,14 @@ docker compose --profile browser up -d
 
 ## Desktop app (Windows)
 
-A native app that opens the interface in its own window, with a **tray icon**, **"run in the
-background"** and **"start with Windows"**.
+The whole AI Workspace in a native Windows app — **no Docker, no server to run**. The installer
+ships the database (Postgres + pgvector) and the backend; everything runs on one local port, with
+a **tray icon**, **"run in the background"**, **"start with Windows"** and in-app updates.
 
 **⬇️ Download the installer from the [Releases](https://github.com/Victor-Alves0/AI-Workspace/releases/latest) page**
-(file `AI.Workspace_x64-setup.exe`, built by CI on every release).
-
-In this version the app does **not** embed the server — keep the stack running
-(`docker compose up -d`) and open the app. Full guide in **[docs/desktop.md](docs/desktop.md)**.
+(file `AI.Workspace_x.y.z_x64-setup.exe`, built by CI on every release). Installing over an
+existing version updates it in place and keeps your data. Full guide in
+**[docs/desktop.md](docs/desktop.md)**.
 
 ## Documentation
 
@@ -258,10 +275,23 @@ Local setup guide (without Docker), tests and code organization in
 **[docs/development.md](docs/development.md)**. To contribute, start with
 **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
+## Community
+
+AI Workspace is built in the open and contributions of every size are welcome.
+
+- 💬 **Questions, ideas and show-and-tell:** [GitHub Discussions](https://github.com/Victor-Alves0/AI-Workspace/discussions)
+- 🐛 **Bugs and feature requests:** [open an issue](https://github.com/Victor-Alves0/AI-Workspace/issues/new/choose)
+- 🌱 **First contribution?** Look for [`good first issue`](https://github.com/Victor-Alves0/AI-Workspace/labels/good%20first%20issue)
+  and read [CONTRIBUTING.md](CONTRIBUTING.md)
+- 🌍 **Language:** the interface is currently in **Portuguese (pt-BR)**; English and other
+  translations are one of the most wanted contributions
+- ⭐ If AI Workspace is useful to you, a star helps other people find it
+
+Everyone taking part is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
-> ⚠️ **This repository does not yet define a license.** Without a `LICENSE` file, the legal
-> default is "all rights reserved": third parties have no permission to use, copy or modify it.
-> If the intent is to open the project, add a license
-> ([choose one here](https://choosealicense.com/)) — MIT/Apache-2.0 for permissive, AGPL-3.0
-> for strong copyleft (common in self-hosted apps).
+AI Workspace is licensed under the **[GNU Affero General Public License v3.0](LICENSE)**
+(AGPL-3.0). You can use, study, modify and self-host it freely; if you run a **modified** version
+as a network service for other people, you must make your changes available under the same
+license.

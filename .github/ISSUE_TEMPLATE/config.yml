@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/Victor-Alves0/AI-Workspace/discussions
+    about: Ask questions, share how you use AI Workspace and discuss ideas.
+  - name: Security vulnerability
+    url: https://github.com/Victor-Alves0/AI-Workspace/security/advisories/new
+    about: Report security issues privately, never in a public issue.

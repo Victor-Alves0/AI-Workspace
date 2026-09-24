@@ -55,7 +55,7 @@ sudo ufw allow 80/tcp
 
 > On AWS/GCP/Oracle, also open 443 and 80 in the **Security Group** in the console.
 
-Visit **https://YOUR_IP**, register (you become admin) and paste the OpenRouter key. The first
+Visit **https://YOUR_IP**, create the admin account in the first-run wizard and paste the OpenRouter key. The first
 visit warns about the certificate (internal CA) until you trust it — [https.md](https.md).
 
 > Ports **41414** (web) and **8000** (API) stay on loopback: they are the plain-HTTP way in, kept for local

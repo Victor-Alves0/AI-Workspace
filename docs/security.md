@@ -10,8 +10,9 @@ model-generated code. This page describes the security model and the operational
   refresh token (days). The frontend renews on its own on a `401`.
 - **Global revocation** via `token_version`: a bump invalidates all of a user's sessions.
 - Optional **2FA (TOTP)**, with a QR and a login challenge.
-- **RBAC** admin/user. The first user to register becomes admin; close registration with
-  `ENABLE_SIGNUP=false`.
+- **RBAC** admin/user. A fresh install opens a **first-run wizard** that creates the admin and
+  asks whether others may sign up; registration is closed by default and can be opened later in
+  **Admin**. New accounts wait for the admin's approval.
 
 ## Secrets at rest
 
@@ -82,7 +83,7 @@ See [remote-terminal.md](remote-terminal.md).
 
 - `APP_ENV=production` makes the server **refuse to start** with a weak/short `APP_SECRET`.
 - HTTPS with a reverse proxy + `TRUST_PROXY=true`.
-- `ENABLE_SIGNUP=false` after creating your account.
+- Keep registration **closed** (the wizard's default) unless you really want others signing up.
 - Regular backups (see [deployment.md](deployment.md#backup-and-restore)).
 - Observability: `OBS_CAPTURE_CONTENT` is **off** by default (it does not record message/prompt
   text) — only enable it to debug.

@@ -74,7 +74,7 @@ shadow and a boot recovery, so a restart never swallows it silently — see
 
 ### Frontend (`apps/web`)
 
-Next.js 14 (App Router) + React 18 + Tailwind. It's a **built image** (`next start`), not a dev
+Next.js 16 (App Router) + React 19 + Tailwind. It's a **built image** (`next start`), not a dev
 server — UI changes require `docker compose build web`. The API URL is derived from the page
 host by default (`window.location:8000`), so the same build works over localhost, LAN IP and
 VPS without a rebuild. It's also a **PWA** with a responsive mobile layout.
