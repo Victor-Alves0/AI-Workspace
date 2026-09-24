@@ -20,6 +20,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential libpq-dev curl ca-certificates git openssh-client ripgrep ffmpeg \
         tesseract-ocr tesseract-ocr-por tesseract-ocr-eng poppler-utils \
+        libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
 # postgresql-client-16 (pg_dump/pg_restore do backup completo no painel admin).
@@ -48,7 +49,7 @@ COPY pyproject.toml ./
 # Um stub do pacote (só __init__.py) faz o setuptools resolver; assim as deps
 # ficam em cache e NÃO são reinstaladas/rebaixadas quando só o código muda.
 RUN mkdir -p aiworkspace && touch aiworkspace/__init__.py \
-    && pip install --upgrade pip && pip install ".[graph-refine]"
+    && pip install --upgrade pip && pip install ".[graph-refine,whatsapp-local]"
 
 # agora o código real; reinstala só o pacote (sem tocar nas deps, sem rede)
 COPY aiworkspace ./aiworkspace
@@ -68,8 +69,8 @@ RUN chmod +x entrypoint.sh
 # processo (não-root) não consegue escrever. Foi o que derrubou os anexos —
 # /data/uploads faltava nesta linha e todo upload virava erro interno.
 RUN useradd --create-home --uid 10001 app \
-    && mkdir -p /home/app/.cache /data/codespace /data/uploads \
-    && chown -R app:app /home/app /data/codespace /data/uploads
+    && mkdir -p /home/app/.cache /data/codespace /data/uploads /data/whatsapp \
+    && chown -R app:app /home/app /data/codespace /data/uploads /data/whatsapp
 USER app
 # HOME/caches de modelos (fastembed→/tmp por padrão; redirecionados p/ o volume mlcache).
 # mise: dirs no volume codespace_data (persistem os toolchains instalados); MISE_YES

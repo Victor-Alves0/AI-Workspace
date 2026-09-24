@@ -138,14 +138,13 @@ class Settings(BaseSettings):
     github_device_client_id: str = ""
 
     # Integração WhatsApp
-    # Evolution API (caminho NÃO oficial, QR Code): serviço opt-in do compose
-    # (`--profile whatsapp`). Vazio = caminho não oficial indisponível (o oficial
-    # via Meta Cloud API funciona sem nada disso).
+    # Evolution API EXTERNA (opcional): o WhatsApp por QR agora é embutido (neonize) no
+    # Docker e no desktop; a Evolution só entra com WHATSAPP_QR_BACKEND=evolution.
     evolution_api_url: str = ""
     evolution_api_key: str = ""
-    # Motor do WhatsApp por QR Code: "evolution" (serviço do compose), "local" (whatsmeow
-    # embutido via neonize — o app desktop) ou "auto" (Evolution se configurada; senão o
-    # local, se instalado). Ver integrations/whatsapp_qr.py.
+    # Motor do WhatsApp por QR Code: "local" (whatsmeow embutido via neonize), "evolution"
+    # (API externa) ou "auto" (o embutido; a Evolution só sem o neonize).
+    # Ver integrations/whatsapp_qr.py.
     whatsapp_qr_backend: str = "auto"
     # Onde o motor local guarda as sessões (um .db por conexão). Vazio = <uploads>/../whatsapp.
     whatsapp_local_dir: str = ""

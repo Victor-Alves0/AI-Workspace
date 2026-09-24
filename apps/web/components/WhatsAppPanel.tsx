@@ -42,7 +42,7 @@ function statusDot(c: WhatsAppConnection): { color: string; label: string } {
 }
 
 /** Tela "WhatsApp" (aberta pelo card em Integrações): conecta números (QR não
- *  oficial via Evolution / Meta Cloud API oficial), associa cada número a um
+ *  oficial por QR Code / Meta Cloud API oficial), associa cada número a um
  *  modelo e configura filtros + memória por conexão. */
 export default function WhatsAppPanel({ onBack }: { onBack: () => void }) {
   const [conns, setConns] = useState<WhatsAppConnection[] | null>(null);
@@ -171,7 +171,7 @@ function AddMenu({ evoAvailable, onPick }: { evoAvailable: boolean; onPick: (p: 
             <span>
               <span className="block text-sm text-ink">Número pessoal (QR Code)</span>
               <span className="block text-[11px] leading-4 text-muted">
-                {evoAvailable ? "Escaneie como no WhatsApp Web (não oficial)" : "Suba o serviço: docker compose --profile whatsapp up -d"}
+                {evoAvailable ? "Escaneie como no WhatsApp Web (não oficial)" : "Indisponível nesta instalação"}
               </span>
             </span>
           </button>

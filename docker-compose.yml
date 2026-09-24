@@ -8,10 +8,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-aiworkspace}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # cria bancos extras (ex.: "evolution") no PRIMEIRO init do volume. Em
-      # volumes já existentes não roda — crie na mão: `docker compose exec db
-      # createdb -U aiworkspace evolution`
-      - ./infra/db-init:/docker-entrypoint-initdb.d:ro
     # Por padrão o Postgres NÃO é publicado no host — a aplicação o acessa pela rede
     # interna do compose (db:5432), então não há como colidir com um Postgres que
     # você já rode no PC. Para acessar com um cliente externo (psql/DBeaver), copie
@@ -64,9 +60,9 @@ services:
       # p/ intfloat/multilingual-e5-large (~2.2GB; o cache .npz inclui o modelo
       # no hash → a troca auto-invalida índices antigos).
       SIFT_EMBED_MODEL: ${SIFT_EMBED_MODEL:-BAAI/bge-small-en-v1.5}
-      # Integração WhatsApp (caminho não oficial via Evolution; vazio = desabilitado)
-      EVOLUTION_API_URL: ${EVOLUTION_API_URL:-http://evolution:8080}
-      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-}
+      # WhatsApp por QR Code: motor embutido (neonize/whatsmeow) — as sessões pareadas
+      # ficam no volume whatsapp_data. Sem serviço separado (a Evolution API saiu).
+      WHATSAPP_LOCAL_DIR: /data/whatsapp
       # base das URLs de webhook (Cloud API oficial exige uma URL pública https)
       WHATSAPP_WEBHOOK_BASE: ${WHATSAPP_WEBHOOK_BASE:-http://server:8000}
       # Navegador headless (tool "web.browser.use"): serviço opt-in `browser`
@@ -103,6 +99,8 @@ services:
       # Anexos do chat: o arquivo fica no disco e a mensagem guarda só a referência
       # (models/upload.py). Sem este volume, todo anexo some a cada recriação.
       - uploads_data:/data/uploads
+      # sessões do WhatsApp por QR (parear de novo se este volume se perder)
+      - whatsapp_data:/data/whatsapp
       # token do updater (só leitura): é assim que o painel pede "Atualizar agora"
       - updater_state:/run/updater:ro
       # Cookies do yt-dlp (anti-bloqueio da transcrição). Descomente e ajuste o
@@ -146,34 +144,6 @@ services:
   # OPT-IN: `docker compose --profile search up -d searxng`. Depois, no .env:
   #   WEB_SEARCH_PROVIDER=searxng   (o server já aponta p/ http://searxng:8080)
   # Config em infra/searxng/settings.yml (formato JSON ligado, limiter desligado).
-  # WhatsApp NÃO oficial (QR Code) — Evolution API (Baileys).
-  # OPT-IN: só sobe com `docker compose --profile whatsapp up -d`.
-  # Requer o banco "evolution" no Postgres (criado automaticamente em volumes
-  # novos via infra/db-init; em volumes existentes: `docker compose exec db
-  # createdb -U aiworkspace evolution`) e EVOLUTION_API_KEY no .env.
-  # O caminho OFICIAL (Meta Cloud API) NÃO precisa deste serviço.
-  evolution:
-    image: evoapicloud/evolution-api:v2.3.7
-    profiles: ["whatsapp"]
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?set EVOLUTION_API_KEY in .env}
-      DATABASE_ENABLED: "true"
-      DATABASE_PROVIDER: postgresql
-      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USER:-aiworkspace}:${POSTGRES_PASSWORD:-aiworkspace}@db:5432/evolution?schema=public
-      DATABASE_CONNECTION_CLIENT_NAME: evolution
-      CACHE_LOCAL_ENABLED: "true"
-      CACHE_REDIS_ENABLED: "false"
-      CONFIG_SESSION_PHONE_CLIENT: AI Workspace
-      LOG_LEVEL: ERROR
-    volumes:
-      - evolution_instances:/evolution/instances
-    ports:
-      - "${EVOLUTION_BIND:-127.0.0.1}:${EVOLUTION_PORT:-8081}:8080"
-
   # Navegador headless (Chromium) — browserless v2, para a tool "web.browser.use".
   # OPT-IN: só sobe com `docker compose --profile browser up -d browser`. O server
   # o dirige por Playwright via CDP (ws://browser:3000). Defina BROWSER_TOKEN no .env
@@ -255,7 +225,7 @@ services:
 volumes:
   pgdata:
   mlcache:
-  evolution_instances:
+  whatsapp_data:
   codespace_data:
   uploads_data:
   caddy_data:

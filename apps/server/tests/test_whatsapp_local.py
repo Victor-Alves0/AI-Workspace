@@ -18,8 +18,9 @@ from aiworkspace.integrations import whatsapp_evolution, whatsapp_local, whatsap
 # Escolha do motor                                                              #
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("modo,evolution,local,esperado", [
-    ("auto", True, True, "evolution"),     # Docker com a Evolution configurada
-    ("auto", False, True, "local"),        # desktop: sem Evolution, com neonize
+    ("auto", True, True, "local"),         # .env antigo com EVOLUTION_API_KEY: o embutido manda
+    ("auto", False, True, "local"),        # Docker e desktop: neonize
+    ("auto", True, False, "evolution"),    # sem neonize: cai na Evolution externa
     ("auto", False, False, ""),            # nada disponível → a UI mostra o motivo
     ("local", True, True, "local"),
     ("local", True, False, ""),            # pediu local sem o neonize instalado
