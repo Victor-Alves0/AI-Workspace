@@ -19,6 +19,7 @@ export interface SubagentChip {
   ctx?: boolean;
   mem?: boolean;
   adhoc?: boolean;
+  tool?: string;     // o que o agente está fazendo agora (última ferramenta)
 }
 
 /** Fase visível da geração. Os nomes descrevem apenas o que o cliente sabe; o
@@ -290,7 +291,8 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         // identificado pela chamada (dois agentes de mesmo nome podem rodar juntos)
         const sid = String(ev.id || ev.agent || "");
         if (ev.status === "start") setSubagents((s) => (sid && !s.some((x) => x.id === sid) ? [...s, { id: sid, name: ev.agent || "Agente", ctx: ev.ctx, mem: ev.mem, adhoc: ev.adhoc }] : s));
-        else if (ev.status === "done") setSubagents((s) => s.filter((x) => x.id !== sid));
+        else if (ev.status === "progress") setSubagents((s) => s.map((x) => (x.id === sid ? { ...x, tool: ev.tool } : x)));
+        else if (ev.status === "done" || ev.status === "background") setSubagents((s) => s.filter((x) => x.id !== sid));
       } else if (ev.type === "guard") {
         // um Guarda de saída detectou algo e vai refazer a resposta
         if (paint()) {

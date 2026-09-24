@@ -733,7 +733,7 @@ def _view_skill_tool() -> dict[str, Any]:
 
 
 def _delegate_tool(agents: list[dict[str, Any]], adhoc: bool = False,
-                   isolation: bool = False) -> dict[str, Any]:
+                   isolation: bool = False, background: bool = False) -> dict[str, Any]:
     """Tool injetada quando o modelo pode usar SUBAGENTES. `agent` = a chave de um
     agente do usuário (ModelConfig) ou "new" (a IA cria um agente para a tarefa, com
     nome + instruções). `isolated` só existe com o worktree ligado."""
@@ -769,6 +769,14 @@ def _delegate_tool(agents: list[dict[str, Any]], adhoc: bool = False,
                            "(own branch, result becomes a task to review). Use for code changes "
                            "that could collide with parallel work; not for read-only work.",
         }
+    if background:
+        props["background"] = {
+            "type": "boolean",
+            "description": "true: start the agent detached and continue (or end your turn); you "
+                           "will get its report in a new turn when it finishes, so do not wait or "
+                           "poll. Use for long work the user need not wait for. Default false: "
+                           "wait for the report now.",
+        }
     return {
         "type": "function",
         "function": {
@@ -777,6 +785,37 @@ def _delegate_tool(agents: list[dict[str, Any]], adhoc: bool = False,
             "parameters": {"type": "object", "properties": props, "required": ["agent", "task"]},
         },
     }
+
+
+async def _stream_subagents(
+    calls: list[tuple[str, Any]],
+) -> AsyncGenerator[tuple[str, str, Any], None]:
+    """Roda subagentes concorrentemente, repassando o progresso de cada um.
+    `calls` = [(id da chamada, fn(progress) -> awaitable do resultado)]. Emite
+    ("progress", id, evento) enquanto trabalham e ("result", id, resultado) ao fim.
+    Se o turno for cancelado (usuário parou), os subagentes são cancelados junto."""
+    q: asyncio.Queue = asyncio.Queue()
+
+    async def _um(cid: str, fn: Any) -> None:
+        try:
+            res = await fn(lambda ev, _c=cid: q.put_nowait(("progress", _c, ev)))
+        except Exception as exc:  # noqa: BLE001 - a falha vira o resultado da tool
+            logger.warning("Subagente falhou: %s", exc)
+            res = {"error": f"o subagente falhou: {exc}"}
+        q.put_nowait(("result", cid, res))
+
+    tarefas = [asyncio.ensure_future(_um(cid, fn)) for cid, fn in calls]
+    faltam = len(tarefas)
+    try:
+        while faltam:
+            item = await q.get()
+            if item[0] == "result":
+                faltam -= 1
+            yield item
+    finally:
+        for t in tarefas:
+            if not t.done():
+                t.cancel()
 
 
 def _delegate_target(args: dict, by_key: dict[str, dict[str, Any]], adhoc: bool,
@@ -1526,6 +1565,7 @@ class SubagentOpts:
     worker_memory: bool = False
     adhoc: bool = False       # a IA pode criar agentes (agent="new")
     isolation: bool = False   # worktree ligado: agentes novos podem pedir `isolated`
+    background: bool = False  # há chat para acordar: a IA pode soltar agentes (`background`)
 
 
 @dataclass
@@ -1749,6 +1789,7 @@ def _assemble_tools_and_prompt(
     kb_present: bool = False,
     subagent_adhoc: bool = False,
     subagent_isolation: bool = False,
+    subagent_background: bool = False,
 ) -> _AssembledTools:
     """Fase 2 — monta a lista de tools anunciadas ao modelo e a seção de
     ferramentas do system prompt (SIFT + skills + genimage + KB-tool + delegate)."""
@@ -1875,7 +1916,8 @@ def _assemble_tools_and_prompt(
     a.subagents_by_key = {str(x.get("key")): x for x in subagents}
     a.subagents_on = bool((subagents or subagent_adhoc) and run_subagent is not None)
     if a.subagents_on:
-        a.tools = list(a.tools) + [_delegate_tool(subagents, subagent_adhoc, subagent_isolation)]
+        a.tools = list(a.tools) + [_delegate_tool(subagents, subagent_adhoc, subagent_isolation,
+                                                  subagent_background)]
         native_names.append("delegate")
 
     # Ferramentas de domínio fornecidas pelo chamador do turno. O runner recebe
@@ -2176,6 +2218,7 @@ class _ToolDispatcher:
     run_subagent: Any
     subagent_adhoc: bool = False
     subagent_isolation: bool = False
+    subagent_background: bool = False
     native_tool_names: frozenset[str] = field(default_factory=frozenset)
     native_tool_runner: Any = None
     # docs explicitamente enviados em turnos anteriores; usados quando o usuário pede
@@ -2553,16 +2596,31 @@ class _ToolDispatcher:
         if erro:
             self.result = {"error": erro}
             return
+        self.delegations_used += 1
+        starter = getattr(self.run_subagent, "start_background", None)
+        if args.get("background") and self.subagent_background and starter is not None:
+            job = starter(key, task, new, label)
+            yield {"type": "subagent", "status": "background", "id": tcid, "agent": label,
+                   "adhoc": new is not None}
+            self.result = {
+                "kind": "subagent_started", "agent": label, "task": task, "job_id": job,
+                "adhoc": new is not None,
+                "note": "Running in the background. Do not wait or poll: its report arrives in a "
+                        "new turn when it finishes. Tell the user it is running, then continue "
+                        "or end your turn.",
+            }
+            return
         yield {"type": "subagent", "status": "start", "id": tcid, "agent": label, "task": task[:200],
                "adhoc": new is not None, "ctx": self.subagent_pass_context,
                "mem": self.subagent_worker_memory and new is None}
-        self.delegations_used += 1
-        try:
-            self.result = await (self.run_subagent(key, task, new) if new is not None
-                                 else self.run_subagent(key, task))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Subagente falhou: %s", exc)
-            self.result = {"error": f"o subagente falhou: {exc}"}
+        run = self.run_subagent
+        fn = (lambda prog: run(key, task, new, progress=prog)) if new is not None \
+            else (lambda prog: run(key, task, progress=prog))
+        async for kind, _cid, data in _stream_subagents([(tcid, fn)]):
+            if kind == "progress":
+                yield {"type": "subagent", "status": "progress", "id": tcid, "agent": label, **data}
+            else:
+                self.result = data
         yield {"type": "subagent", "status": "done", "id": tcid, "agent": (self.result.get("agent") if isinstance(self.result, dict) else None) or label}
 
     async def _dispatch_tp(self, *call: Any) -> Any:
@@ -2672,6 +2730,10 @@ def _shape_tool_result(result: Any) -> tuple[str, Any]:
             "note": "An editable email draft was shown to the user to review and send. "
                     "Do NOT claim the email was sent; the user will send it from the composer.",
         })
+    elif isinstance(event_result, dict) and event_result.get("kind") == "subagent":
+        # passos e tarefa são para o card da UI; o modelo já sabe a tarefa
+        content = json.dumps({k: v for k, v in event_result.items() if k not in ("steps", "task")},
+                             ensure_ascii=False, default=str)
     elif isinstance(event_result, dict) and event_result.get("kind") == "skill_proposal":
         content = json.dumps({
             "ok": True,
@@ -2893,6 +2955,8 @@ async def run_turn(
     subagent_mode, subagent_max_calls = _sa.mode, _sa.max_calls
     subagent_pass_context, subagent_worker_memory = _sa.pass_context, _sa.worker_memory
     subagent_adhoc, subagent_isolation = _sa.adhoc, _sa.isolation
+    # canal/automação (toolctx.background) não tem UI para acordar: agente sempre inline
+    subagent_background = _sa.background and not toolctx.background.get()
 
     # marca o trace corrente (aberto pelo middleware, ou pelo chamador de background)
     # com o contexto do turno. Sem trace ativo, annotate é no-op.
@@ -2956,6 +3020,7 @@ async def run_turn(
         subagents=subagents, run_subagent=run_subagent,
         native=_native,
         subagent_adhoc=subagent_adhoc, subagent_isolation=subagent_isolation,
+        subagent_background=subagent_background,
     )
     tools: Any = asm.tools
     _base_tools = asm.tools  # tools originais: p/ reabrir após um corte (ex.: steer)
@@ -2985,6 +3050,7 @@ async def run_turn(
         subagent_pass_context=subagent_pass_context,
         subagent_worker_memory=subagent_worker_memory, run_subagent=run_subagent,
         subagent_adhoc=subagent_adhoc, subagent_isolation=subagent_isolation,
+        subagent_background=subagent_background,
         native_tool_names=frozenset(
             str((spec.get("function") or {}).get("name") or "")
             for spec in (_native.specs or []) if isinstance(spec, dict)
@@ -3474,6 +3540,8 @@ async def run_turn(
                                                              subagent_isolation)
                     if erro:
                         continue  # o despacho sequencial devolve o erro ao modelo
+                    if a.get("background") and subagent_background:
+                        continue  # soltar em segundo plano é instantâneo: fica com o sequencial
                     task = str(a.get("task") or "")
                     yield {"type": "subagent", "status": "start", "id": tc["id"], "agent": label,
                            "task": task[:200], "parallel": True, "adhoc": new is not None,
@@ -3481,13 +3549,21 @@ async def run_turn(
                     disp.delegations_used += 1
                     picked.append((tc["id"], key, task, new))
                 if picked:
-                    results = await asyncio.gather(
-                        *[run_subagent(k, t, n) if n is not None else run_subagent(k, t)
-                          for (_i, k, t, n) in picked],
-                        return_exceptions=True,
-                    )
-                    for (tcid, _k, _t, _n), res in zip(picked, results):
-                        disp.delegate_pre[tcid] = {"error": str(res)} if isinstance(res, Exception) else res
+                    def _fn(k: str, t: str, n: dict | None) -> Any:
+                        if n is not None:
+                            return lambda prog: run_subagent(k, t, n, progress=prog)
+                        return lambda prog: run_subagent(k, t, progress=prog)
+
+                    nomes = {i: (n or {}).get("name") or subagents_by_key.get(k, {}).get("name", k)
+                             for (i, k, _t, n) in picked}
+                    async for kind, cid, data in _stream_subagents(
+                        [(i, _fn(k, t, n)) for (i, k, t, n) in picked]
+                    ):
+                        if kind == "progress":
+                            yield {"type": "subagent", "status": "progress", "id": cid,
+                                   "agent": nomes.get(cid), **data}
+                        else:
+                            disp.delegate_pre[cid] = data
 
         def _args_of(tc: dict) -> dict:
             try:

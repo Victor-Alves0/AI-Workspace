@@ -15,6 +15,7 @@ import ChartView from "./ChartView";
 import DeepResearchCard from "./DeepResearchCard";
 import TextAttachmentModal from "./TextAttachmentModal";
 import DiceRollCard, { parseDiceRoll } from "./DiceRollCard";
+import SubagentCard, { BackgroundNote, isBackgroundNote, type SubagentResult } from "./SubagentCard";
 import { isTextAttachment } from "./PromptBox";
 
 // artefatos visuais que uma ferramenta pode emitir (resultado compacto → o front
@@ -33,7 +34,8 @@ type Artifact =
   | { kind: "email_draft"; data: EmailDraft }
   | { kind: "skill_proposal"; data: SkillProposal }
   | { kind: "prompt_proposal"; data: PromptProposal }
-  | { kind: "brain_note"; data: BrainNoteEvent };
+  | { kind: "brain_note"; data: BrainNoteEvent }
+  | { kind: "subagent"; data: SubagentResult };
 
 type PromptProposal = {
   proposal_id: string; command: string; title: string;
@@ -97,6 +99,12 @@ function collect(node: unknown, out: Artifact[], seen: Set<string>, depth = 0): 
   if (kind === "brain_note" && typeof o.doc_id === "string") {
     const key = "bn:" + o.doc_id + ":" + (o.action ?? "") + ":" + String(o.preview ?? "").slice(0, 60);
     if (!seen.has(key)) { seen.add(key); out.push({ kind, data: o as unknown as BrainNoteEvent }); }
+    return;
+  }
+  if ((kind === "subagent" || kind === "subagent_started") && typeof o.agent === "string") {
+    // o relatório do agente pode conter artefatos, mas eles são do agente: não recursa
+    const key = "sa:" + o.agent + ":" + String(o.job_id ?? "") + ":" + String(o.task ?? "").slice(0, 80);
+    if (!seen.has(key)) { seen.add(key); out.push({ kind: "subagent", data: o as unknown as SubagentResult }); }
     return;
   }
   for (const v of Object.values(o)) collect(v, out, seen, depth + 1);
@@ -244,6 +252,8 @@ function renderArtifact(a: Artifact, key: React.Key) {
     <PromptProposalCard key={key} proposal={a.data} />
   ) : a.kind === "brain_note" ? (
     <BrainNoteCard key={key} note={a.data} />
+  ) : a.kind === "subagent" ? (
+    <SubagentCard key={key} data={a.data} />
   ) : (
     <ChartView key={key} spec={a.data} />
   );
@@ -1581,6 +1591,16 @@ function MessageItem({
   if (diceRoll) return <DiceRollCard roll={diceRoll} onDelete={() => onDelete(message.id)} />;
 
   // mensagem do usuário: bolha compacta à direita
+  // trabalho em segundo plano que acordou o chat (agente/comando): nota compacta,
+  // não uma fala do usuário
+  if (isUser && isBackgroundNote(message.content)) {
+    return (
+      <div className="mx-auto w-full max-w-3xl">
+        <BackgroundNote content={message.content} />
+      </div>
+    );
+  }
+
   if (isUser) {
     const atts = message.attachments ?? [];
     return (

@@ -180,7 +180,7 @@ async def test_delegate_unauthorized_agent():
 
 
 async def test_delegate_runs_and_counts():
-    async def fake_runner(key, task):
+    async def fake_runner(key, task, **_kw):
         return {"kind": "subagent", "agent": "A", "output": f"fez: {task}"}
 
     d = _mk(subagents_on=True, subagents_by_key={"a": {"name": "A"}}, run_subagent=fake_runner)

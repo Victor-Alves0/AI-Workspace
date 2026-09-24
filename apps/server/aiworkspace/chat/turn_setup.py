@@ -14,6 +14,7 @@ import binascii
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -475,6 +476,7 @@ def _subagent_opts(sub_specs: list[dict], sub_conf: dict, sub_runner) -> Subagen
         worker_memory=sub_conf.get("worker_memory", False),
         adhoc=bool(sub_conf.get("adhoc")),
         isolation=bool(sub_conf.get("worktree")),
+        background=getattr(sub_runner, "start_background", None) is not None,
     )
 
 
@@ -1002,6 +1004,21 @@ async def _recent_history(db: AsyncSession, chat_id: uuid.UUID, limit: int = 20)
     return convo[-limit:]
 
 
+_DISCOVERY_TOOLS = {"search_tools", "get_tool_schema"}
+
+
+def _step_of(name: str, args: Any) -> tuple[str, str] | None:
+    """(ferramenta legível, detalhe curto) de uma chamada do subagente; None = ruído
+    de descoberta, que não vira passo."""
+    if name in _DISCOVERY_TOOLS:
+        return None
+    a = args if isinstance(args, dict) else {}
+    if name == "execute_tool":
+        name, a = str(a.get("path") or "execute_tool"), a.get("params") or {}
+    detalhe = next((v for v in (a.values() if isinstance(a, dict) else []) if isinstance(v, str) and v.strip()), "")
+    return name.replace("__", "."), " ".join(detalhe.split())[:120]
+
+
 _ADHOC_PREAMBLE = (
     "You are {name}, a subagent the main assistant created for one task. Work on it "
     "autonomously with your tools. Your final message goes back to the main assistant, "
@@ -1029,7 +1046,8 @@ def _make_subagent_runner(
     async def _execute(*, label: str, model: str, api_key: str, base_url: str, task: str,
                        system: str, params: dict, sift: Any, skills: list, code_mode: bool,
                        agent_id: str, memory: MemoryOpts, sub_opts: SubagentOpts | None,
-                       isolated: bool, usage_mc: ModelConfig | None) -> dict:
+                       isolated: bool, usage_mc: ModelConfig | None,
+                       progress: Callable[[dict], None] | None = None) -> dict:
         history = await _recent_history(db, chat_id) if (pass_context and chat_id) else []
         # worktree isolado: branch própria do projeto do chat; o resultado vira uma
         # tarefa `awaiting_review` que o humano aprova/descarta na UI
@@ -1045,6 +1063,9 @@ def _make_subagent_runner(
             wt_task_id = opened.get("id")
         collected = ""
         usage = None
+        # passos do subagente (ferramenta + detalhe + deu certo): vão só para a UI
+        steps: list[dict[str, Any]] = []
+        abertos: dict[str, list[dict[str, Any]]] = {}
         try:
             async for ev in run_turn(
                 api_key=api_key, model=model, history=history, user_text=task,
@@ -1065,6 +1086,19 @@ def _make_subagent_runner(
                 elif t == "done":
                     collected = ev.get("content") or collected
                     usage = ev.get("usage")
+                elif t == "tool_call":
+                    passo = _step_of(str(ev.get("name") or ""), ev.get("arguments"))
+                    if passo is not None and len(steps) < 60:
+                        item = {"tool": passo[0], "detail": passo[1], "ok": None}
+                        steps.append(item)
+                        abertos.setdefault(str(ev.get("name")), []).append(item)
+                        if progress is not None:
+                            progress({"tool": passo[0], "detail": passo[1]})
+                elif t == "tool_result":
+                    fila = abertos.get(str(ev.get("name")))
+                    if fila:
+                        res = ev.get("result")
+                        fila.pop(0)["ok"] = not (isinstance(res, dict) and res.get("error"))
         except Exception as exc:  # noqa: BLE001
             if wt_task_id:
                 from ..codespace import worktree_service
@@ -1091,14 +1125,15 @@ def _make_subagent_runner(
                         await s.commit()
             except Exception:  # noqa: BLE001 - ledger é best-effort
                 pass
-        out = {"kind": "subagent", "agent": label, "output": collected or "(sem resposta)"}
+        out = {"kind": "subagent", "agent": label, "task": task,
+               "output": collected or "(sem resposta)", "steps": steps}
         if wt_task_id:
             out["task_id"] = wt_task_id
             out["note"] = ("O trabalho ficou num worktree isolado (tarefa a revisar) — "
                            "NÃO foi mesclado ainda; o usuário aprova/descarta na aba Tarefas.")
         return out
 
-    async def _run_new(new: dict, task: str) -> dict:
+    async def _run_new(new: dict, task: str, progress: Callable[[dict], None] | None) -> dict:
         if parent is None or not parent.base_model:
             return {"error": "agentes criados pela IA precisam de um modelo custom como orquestrador"}
         model = adhoc_model or parent.base_model
@@ -1113,15 +1148,16 @@ def _make_subagent_runner(
             params=parent.params or {}, sift=await get_sift_for_user(db, user.id, parent),
             skills=await _load_skills(db, user, parent), code_mode=_code_mode(parent),
             agent_id=_mem_agent_id(parent, model), memory=MemoryOpts(read=None, write="off"),
-            sub_opts=None, isolated=bool(new.get("isolated")), usage_mc=parent,
+            sub_opts=None, isolated=bool(new.get("isolated")), usage_mc=parent, progress=progress,
         )
         if "error" not in out:
             out["adhoc"] = True
         return out
 
-    async def run_subagent(key: str, task: str, new: dict | None = None) -> dict:
+    async def run_subagent(key: str, task: str, new: dict | None = None,
+                           progress: Callable[[dict], None] | None = None) -> dict:
         if new is not None:
-            return await _run_new(new, task)
+            return await _run_new(new, task, progress)
         if key in ancestry:
             return {"error": "ciclo de subagentes detectado; delegação abortada"}
         try:
@@ -1166,9 +1202,34 @@ def _make_subagent_runner(
             sift=await get_sift_for_user(db, user.id, mc), skills=await _load_skills(db, user, mc),
             code_mode=_code_mode(mc), agent_id=_mem_agent_id(mc, mc.base_model),
             memory=MemoryOpts(read=mem_read, write=mem_write, review=mem_review),
-            sub_opts=sub_opts, isolated=key in isolate_keys, usage_mc=mc,
+            sub_opts=sub_opts, isolated=key in isolate_keys, usage_mc=mc, progress=progress,
         )
 
+    def start_background(key: str, task: str, new: dict | None, label: str) -> str:
+        """Solta o subagente em segundo plano; o chat é acordado com o relatório. Roda
+        numa sessão de banco PRÓPRIA: a do turno fecha quando o turno acaba."""
+        from . import subagent_jobs
+
+        user_id, parent_id = user.id, (parent.id if parent is not None else None)
+
+        async def _job() -> dict:
+            async with SessionLocal() as s:
+                u = await s.get(User, user_id)
+                p = await s.get(ModelConfig, parent_id) if parent_id else None
+                if u is None:
+                    return {"error": "usuário não encontrado"}
+                runner = _make_subagent_runner(
+                    s, u, chat_id, max_depth, pass_context=pass_context,
+                    worker_memory=worker_memory, depth=depth, ancestry=ancestry,
+                    project_id=project_id, isolate_keys=isolate_keys,
+                    parent=p, adhoc_model=adhoc_model,
+                )
+                return await runner(key, task, new)
+
+        return subagent_jobs.start(str(chat_id), label, task, _job)
+
+    # segundo plano só com um chat para acordar
+    run_subagent.start_background = start_background if chat_id else None  # type: ignore[attr-defined]
     return run_subagent
 
 

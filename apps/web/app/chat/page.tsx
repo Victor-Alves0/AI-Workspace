@@ -2639,7 +2639,8 @@ export default function ChatPage() {
                     <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-1.5">
                       {subagents.map((a) => (
                         <span key={a.id} className="flex items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-2.5 py-1 text-xs text-accent-hover">
-                          {a.adhoc ? <Sparkles size={13} className="animate-pulse" /> : <Users size={13} className="animate-pulse" />} {a.name} trabalhando…
+                          {a.adhoc ? <Sparkles size={13} className="animate-pulse" /> : <Users size={13} className="animate-pulse" />} {a.name}
+                          <span className="max-w-[200px] truncate font-mono text-[10px] text-accent-hover/70">{a.tool || "trabalhando…"}</span>
                           {a.ctx && <span title="Com o contexto do chat" className="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium">contexto</span>}
                           {a.mem && <span title="Com memória própria" className="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium">memória</span>}
                         </span>
