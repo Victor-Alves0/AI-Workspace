@@ -1,3 +1,32 @@
+# --- build: compila as wheels nativas num venv; o compilador NÃO vai para a imagem final
+FROM python:3.12-slim AS build
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m venv /opt/venv
+ENV PATH=/opt/venv/bin:${PATH}
+WORKDIR /app
+
+COPY pyproject.toml ./
+# instala só as DEPENDÊNCIAS numa camada própria, chaveada apenas pelo pyproject.
+# Um stub do pacote (só __init__.py) faz o setuptools resolver; assim as deps
+# ficam em cache e NÃO são reinstaladas/rebaixadas quando só o código muda.
+RUN mkdir -p aiworkspace && touch aiworkspace/__init__.py \
+    && pip install --upgrade pip && pip install ".[graph-refine,whatsapp-local]"
+
+# agora o código real; reinstala só o pacote (sem tocar nas deps, sem rede). O
+# `build/` da camada anterior guarda o __init__.py VAZIO do stub, mais novo que o
+# código copiado, e o setuptools o reaproveitaria: apaga antes.
+COPY aiworkspace ./aiworkspace
+RUN rm -rf build *.egg-info && pip install --no-deps --force-reinstall .
+
+
+# --- imagem final
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -6,7 +35,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# dependências de sistema (build de wheels nativas) + OCR:
+# dependências de sistema + OCR:
 # tesseract (motor OCR local, idiomas pt+en) e poppler (rasteriza PDF p/ OCR).
 # git: clona os projetos do Codespace (tool code.graph/code.files) via HTTPS/SSH.
 # openssh-client: `ssh`/`ssh-keygen` — projetos Codespace por SSH (deploy key
@@ -18,7 +47,7 @@ WORKDIR /app
 # baixado (16 kHz mono) p/ caber no teto do STT. Sem ele só o caminho de legendas roda.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        build-essential libpq-dev curl ca-certificates git openssh-client ripgrep ffmpeg \
+        curl ca-certificates git openssh-client ripgrep ffmpeg \
         tesseract-ocr tesseract-ocr-por tesseract-ocr-eng poppler-utils \
         libmagic1 \
     && rm -rf /var/lib/apt/lists/*
@@ -41,19 +70,25 @@ RUN install -d /usr/share/postgresql-common/pgdg \
 # java@17 maven`) sem root; ficam num cache PERSISTENTE dentro do volume codespace_data
 # (ver MISE_DATA_DIR abaixo), sobrevivendo a rebuild/restart. É o que permite "baixar,
 # instalar e usar" um JDK como Codex/Claude fazem, mas isolado do resto do server.
-RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh \
+# Versão FIXA e conferida por sha256 (atualizar = trocar as três linhas do ARG).
+ARG MISE_VERSION=v2026.9.12
+ARG MISE_SHA256_AMD64=e79ae57945034903aee8aa2ea66b4c7ca9cd4f4edd5a8a78a589cbae6d0f428a
+ARG MISE_SHA256_ARM64=f344c6961190ed2f68e595ed7cb4f03c36c17812bd608886bec799a3082180ff
+RUN case "$(dpkg --print-architecture)" in \
+        amd64) arch=x64; sum="$MISE_SHA256_AMD64" ;; \
+        arm64) arch=arm64; sum="$MISE_SHA256_ARM64" ;; \
+        *) echo "arquitetura sem mise: $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSLo /usr/local/bin/mise \
+        "https://github.com/jdx/mise/releases/download/${MISE_VERSION}/mise-${MISE_VERSION}-linux-${arch}" \
+    && echo "${sum}  /usr/local/bin/mise" | sha256sum -c - \
     && chmod 0755 /usr/local/bin/mise
 
+COPY --from=build /opt/venv /opt/venv
+# o código também fica em /app: é de onde o uvicorn/alembic importam (cwd no
+# sys.path) e o que `_app_root()` usa para achar alembic.ini e as migrações
 COPY pyproject.toml ./
-# instala só as DEPENDÊNCIAS numa camada própria, chaveada apenas pelo pyproject.
-# Um stub do pacote (só __init__.py) faz o setuptools resolver; assim as deps
-# ficam em cache e NÃO são reinstaladas/rebaixadas quando só o código muda.
-RUN mkdir -p aiworkspace && touch aiworkspace/__init__.py \
-    && pip install --upgrade pip && pip install ".[graph-refine,whatsapp-local]"
-
-# agora o código real; reinstala só o pacote (sem tocar nas deps, sem rede)
 COPY aiworkspace ./aiworkspace
-RUN pip install --no-deps --force-reinstall .
 
 COPY alembic.ini ./
 COPY alembic ./alembic
@@ -87,7 +122,7 @@ ENV HOME=/home/app \
     MISE_CACHE_DIR=/data/codespace/.mise/cache \
     MISE_STATE_DIR=/data/codespace/.mise/state \
     MISE_YES=1 \
-    PATH=/data/codespace/.mise/data/shims:/home/app/.local/bin:/usr/local/bin:${PATH}
+    PATH=/data/codespace/.mise/data/shims:/home/app/.local/bin:/opt/venv/bin:/usr/local/bin:${PATH}
 
 # Commit de onde esta imagem foi construída. Fica no FIM de propósito: muda a cada
 # build e invalidaria o cache das camadas pesadas se viesse antes.
