@@ -63,12 +63,13 @@ export async function startWakeWord(opts: WakeOptions, onWake: () => void): Prom
 }
 
 // URLs padrão dos 2 modelos COMPARTILHADOS do OpenWakeWord (melspectrograma +
-// embedding). Precisam de CORS liberado; o usuário pode trocar por um espelho
-// próprio se estas falharem. O modelo de wake em si é treinado pelo usuário.
-export const OWW_MELSPEC_DEFAULT =
-  "https://huggingface.co/onnx-community/openwakeword/resolve/main/melspectrogram.onnx";
-export const OWW_EMBEDDING_DEFAULT =
-  "https://huggingface.co/onnx-community/openwakeword/resolve/main/embedding_model.onnx";
+// embedding). Precisam de CORS liberado, e o release oficial no GitHub não tem:
+// espelho no HF fixado num COMMIT, com os mesmos bytes do release v0.5.1 (sha256
+// conferido). O usuário pode trocar por um espelho próprio. O modelo de wake em
+// si é treinado pelo usuário.
+const OWW_MIRROR = "https://huggingface.co/harvestsu/openwakeword-onnx/resolve/93d1bd6f4f48750cb6a76206ce5bd92d846820c8";
+export const OWW_MELSPEC_DEFAULT = `${OWW_MIRROR}/melspectrogram.onnx`;
+export const OWW_EMBEDDING_DEFAULT = `${OWW_MIRROR}/embedding_model.onnx`;
 
 // Pré-carrega/valida os 3 modelos ONNX do OpenWakeWord (sem mic). Usado pelo
 // "Confirmar modelo" e reaproveitado pela escuta. Lança em erro (URL/CORS/formato).
@@ -230,13 +231,20 @@ async function startVosk(opts: WakeOptions, onWake: () => void): Promise<WakeHan
 // falar, transcreve o trecho e casa a palavra. On-device; o modelo baixa do HF na
 // 1ª vez e fica no cache do navegador (offline depois).
 // --------------------------------------------------------------------------- //
+// transformers.js e onnxruntime-web vêm do CDN, com versão fixa, e não do bundle:
+// o webpack do Next emite os .mjs do ORT como assets e o minificador os rejeita
+// (import.meta fora de módulo). Os modelos e o wasm já vinham da rede mesmo.
+const TRANSFORMERS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0/dist/transformers.min.js";
+const ORT_VERSION = "1.30.0";
+const ORT_BASE = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_VERSION}/dist/`;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _whisperPipe: Promise<any> | null = null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function getWhisperPipe(model: string): Promise<any> {
   if (!_whisperPipe) {
     _whisperPipe = (async () => {
-      const { pipeline, env } = await import("@xenova/transformers");
+      const { pipeline, env } = await import(/* webpackIgnore: true */ TRANSFORMERS_URL);
       env.allowLocalModels = false; // busca do HF CDN (cacheado pelo navegador)
       return pipeline("automatic-speech-recognition", model);
     })();
@@ -372,19 +380,13 @@ type OrtSession = any;
 let _ort: any = null;
 const _owwCache = new Map<string, Promise<OrtSession>>();
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-// versão pinada no package.json — usada no caminho do wasm do CDN
-const ORT_VERSION = "1.14.0";
-
 async function getOrt(): Promise<any> {
   if (!_ort) {
-    _ort = await import("onnxruntime-web");
-    // wasm servido pelo CDN (evita ter que emitir os .wasm no build do Next). Sem
-    // CSP no app, o fetch cross-origin é permitido. Usa a versão detectada se houver,
-    // senão a pinada. Single-thread (sem SharedArrayBuffer/COOP-COEP no app).
+    _ort = await import(/* webpackIgnore: true */ `${ORT_BASE}ort.min.mjs`);
+    // wasm do mesmo CDN. Sem CSP no app, o fetch cross-origin é permitido.
+    // Single-thread (sem SharedArrayBuffer/COOP-COEP no app).
     try {
-      const v = _ort.env?.versions?.common || _ort.version || ORT_VERSION;
-      _ort.env.wasm.wasmPaths = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${v}/dist/`;
+      _ort.env.wasm.wasmPaths = ORT_BASE;
       _ort.env.wasm.numThreads = 1;
     } catch { /* usa o default do ort */ }
   }
