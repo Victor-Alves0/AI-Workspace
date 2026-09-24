@@ -123,6 +123,7 @@ registered in each provider's console — on a public domain all five change. Se
 | `GITHUB_DEVICE_CLIENT_ID` | empty — public client id of "Sign in with GitHub" (device flow); empty falls back to a Personal Access Token |
 | `BROWSER_WS_URL` | `ws://browser:3000` in compose — CDP endpoint of the headless browser; `local` drives the Edge/Chrome installed on the machine (the desktop app uses this); empty disables the tool |
 | `EVOLUTION_API_URL` | empty — only to keep using an external Evolution API instance |
+| `EVOLUTION_API_KEY` | empty — API key of that external Evolution instance |
 | `WHATSAPP_QR_BACKEND` | `auto` — QR-code WhatsApp engine: `local` (whatsmeow embedded, the default in Docker and desktop), `evolution` (external instance at `EVOLUTION_API_URL`), or `auto` (local when installed, else Evolution when configured) |
 | `WHATSAPP_LOCAL_DIR` | empty = `<uploads>/../whatsapp` — where the local engine keeps one session file per connection |
 | `WHATSAPP_WEBHOOK_BASE` | `http://server:8000` — public https URL for Meta's official Cloud API webhooks |
