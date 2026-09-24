@@ -1991,7 +1991,7 @@ function ShortcutsTab({ profile, set }: { profile: Record<string, any>; set: (k:
   );
 }
 
-function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefObject<HTMLInputElement>; onArchived: () => void; onManageShared: () => void }) {
+function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefObject<HTMLInputElement | null>; onArchived: () => void; onManageShared: () => void }) {
   const [busy, setBusy] = useState(false);
   const confirm = useConfirm();
   const prompt = usePrompt();

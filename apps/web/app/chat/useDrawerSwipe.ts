@@ -34,9 +34,9 @@ export function useDrawerSwipe({
   enabled: boolean;
   open: boolean;
   setOpen: (open: boolean) => void;
-  rootRef: React.RefObject<HTMLElement>;
-  drawerRef: React.RefObject<HTMLElement>;
-  backdropRef: React.RefObject<HTMLElement>;
+  rootRef: React.RefObject<HTMLElement | null>;
+  drawerRef: React.RefObject<HTMLElement | null>;
+  backdropRef: React.RefObject<HTMLElement | null>;
 }) {
   const gesture = useRef<Gesture | null>(null);
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

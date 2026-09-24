@@ -1,5 +1,8 @@
 import type { MetadataRoute } from "next";
 
+// gerado no build (o export estático do desktop exige rota estática explícita)
+export const dynamic = "force-static";
+
 // PWA: instalado pelo "Adicionar à tela de início" (Android/iOS), o app abre em
 // janela própria (standalone), sem a barra do navegador — cara de app nativo.
 export default function manifest(): MetadataRoute.Manifest {

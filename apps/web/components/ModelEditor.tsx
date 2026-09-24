@@ -12,7 +12,7 @@ import { AnchoredMenu, finePointer, Toggle } from "./ui";
 import { WebSearchPanel, FinancePanel, TextExtractionPanel, DeepSearchPanel, GooglePanel, TuyaToolPanel, GithubToolPanel, MessagingToolPanel, RemoteTerminalToolPanel } from "./toolPanels";
 
 // ferramentas internas com painel de config (engrenagem em "Ferramentas Ativas")
-const TOOL_CFG: Record<string, { key: string; Panel: (p: any) => JSX.Element; needsStatus: boolean }> = {
+const TOOL_CFG: Record<string, { key: string; Panel: (p: any) => React.JSX.Element; needsStatus: boolean }> = {
   "builtin:web.search.query": { key: "web_search", Panel: WebSearchPanel, needsStatus: true },
   "builtin:finance.quote.get": { key: "finance", Panel: FinancePanel, needsStatus: true },
   "builtin:research.deep.run": { key: "deep_search", Panel: DeepSearchPanel, needsStatus: false },
