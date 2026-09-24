@@ -163,7 +163,7 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Alterar Senha", cat: "account" },
   { label: "APIs", cat: "connections", view: "apis" },
   { label: "Voz Local", cat: "connections", view: "voice" },
-  { label: "Kokoro", cat: "connections", view: "voice" },
+  { label: "Servidor de voz", cat: "connections", view: "voice" },
   { label: "Assistente de voz", cat: "connections", view: "assistant-voice" },
   { label: "Wake word", cat: "connections", view: "assistant-voice" },
   { label: "AccessKey Picovoice", cat: "connections", view: "assistant-voice" },

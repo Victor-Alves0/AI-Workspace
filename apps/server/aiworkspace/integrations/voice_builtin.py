@@ -1,7 +1,6 @@
 """Voz EMBUTIDA (TTS) — Kokoro-82M rodando no próprio processo (kokoro-onnx).
 
-Substitui o container do Kokoro-FastAPI (~3,8 GB): o mesmo modelo, pelo onnxruntime
-que o app já tem (fastembed). Os pesos (fp16, ~169 MB + ~27 MB de vozes) são baixados
+Roda pelo onnxruntime que o app já tem (fastembed), sem serviço à parte. Os pesos (fp16, ~169 MB + ~27 MB de vozes) são baixados
 no PRIMEIRO uso para o cache, como os modelos de embedding — nada no instalador.
 
 A língua sai do prefixo da voz (convenção do Kokoro): a=inglês EUA, b=inglês UK,
@@ -31,7 +30,7 @@ VOICES_FILE = "voices-v1.0.bin"
 DEFAULT_VOICE = "pf_dora"
 SAMPLE_RATE = 24000
 # id nos seletores: "builtin:pf_dora" — o prefixo roteia para este motor (como "el:"
-# para o ElevenLabs); um servidor Kokoro externo usa os mesmos nomes SEM prefixo
+# para o ElevenLabs)
 PREFIX = "builtin:"
 
 # Vozes do Kokoro v1.0 (fixas): listar NÃO pode baixar ~200 MB de modelo
@@ -107,15 +106,39 @@ def lang_for(voice: str) -> str:
     return _LANG_BY_PREFIX.get((voice or "")[:1].lower(), "en-us")
 
 
+def parse_blend(spec: str) -> list[tuple[str, float]]:
+    """"af_bella(2)+af_sky(1)" → [("af_bella", 2.0), ("af_sky", 1.0)]; peso padrão 1.
+    Vozes desconhecidas e pesos inválidos saem; vazio = voz padrão."""
+    out: list[tuple[str, float]] = []
+    for parte in (spec or "").removeprefix(PREFIX).split("+"):
+        parte = parte.strip()
+        nome, peso = parte, 1.0
+        if parte.endswith(")") and "(" in parte:
+            nome, _, resto = parte[:-1].partition("(")
+            try:
+                peso = float(resto)
+            except ValueError:
+                continue
+        nome = nome.strip()
+        if nome in VOICES and peso > 0:
+            out.append((nome, peso))
+    return out or [(DEFAULT_VOICE, 1.0)]
+
+
 def synthesize(text: str, voice: str = "", speed: float = 1.0) -> tuple[bytes, str]:
-    """(áudio WAV, mime). Bloqueante (CPU) — chamar em threadpool."""
+    """(áudio WAV, mime). Bloqueante (CPU) — chamar em threadpool. `voice` aceita uma
+    voz ou uma mistura com pesos ("af_bella(2)+af_sky(1)"); a língua vem da 1ª voz.
+    Voz desconhecida (ex.: "alloy" da OpenAI no caminho automático) = voz padrão."""
     import numpy as np
 
     eng = _engine()
-    nome = (voice or "").removeprefix(PREFIX) or DEFAULT_VOICE
-    if nome not in VOICES:  # ex.: uma voz da OpenAI ("alloy") no caminho automático
-        nome = DEFAULT_VOICE
-    samples, rate = eng.create(text, voice=nome, speed=float(speed or 1.0), lang=lang_for(nome))
+    partes = parse_blend(voice)
+    if len(partes) == 1:
+        estilo = partes[0][0]
+    else:
+        total = sum(p for _, p in partes)
+        estilo = sum(eng.get_voice_style(n) * (p / total) for n, p in partes)
+    samples, rate = eng.create(text, voice=estilo, speed=float(speed or 1.0), lang=lang_for(partes[0][0]))
     pcm = (np.clip(samples, -1.0, 1.0) * 32767).astype("<i2").tobytes()
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:

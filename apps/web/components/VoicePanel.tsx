@@ -13,7 +13,6 @@ interface VoiceConfig {
   voices: string[];
 }
 
-const DEFAULT_BASE = "http://localhost:8880/v1";
 
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
   return (
@@ -23,8 +22,9 @@ function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
   );
 }
 
-/** Conexão "Voz Local": aponta um servidor de voz OpenAI-compatível (Kokoro-FastAPI
- *  ou um servidor de clonagem) e as vozes ficam disponíveis por-modelo. */
+/** Conexão "Voz Local": aponta um servidor de voz OpenAI-compatível próprio (ex.:
+ *  clonagem de voz) e as vozes ficam disponíveis por-modelo. A voz embutida não
+ *  precisa desta conexão. */
 export default function VoicePanel({ onBack, onChanged }: { onBack: () => void; onChanged?: () => void }) {
   const [st, setSt] = useState<VoiceConfig | null>(null);
 
@@ -32,7 +32,7 @@ export default function VoicePanel({ onBack, onChanged }: { onBack: () => void; 
     try {
       setSt(await api.get<VoiceConfig>("/voice/config"));
     } catch {
-      setSt({ configured: false, base_url: DEFAULT_BASE, tts_model: "kokoro", has_key: false, enabled: true, voices: [] });
+      setSt({ configured: false, base_url: "", tts_model: "", has_key: false, enabled: true, voices: [] });
     }
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -49,7 +49,7 @@ export default function VoicePanel({ onBack, onChanged }: { onBack: () => void; 
         </span>
         <div>
           <p className="text-sm font-semibold text-ink">Voz Local</p>
-          <p className="text-xs text-muted">Kokoro ou servidor de clonagem (voz da IA local)</p>
+          <p className="text-xs text-muted">Servidor de voz próprio (OpenAI-compatível)</p>
         </div>
       </div>
 
@@ -63,8 +63,8 @@ export default function VoicePanel({ onBack, onChanged }: { onBack: () => void; 
 }
 
 function VoiceBody({ st, reload, onChanged }: { st: VoiceConfig; reload: () => Promise<void>; onChanged?: () => void }) {
-  const [baseUrl, setBaseUrl] = useState(st.base_url || DEFAULT_BASE);
-  const [ttsModel, setTtsModel] = useState(st.tts_model || "kokoro");
+  const [baseUrl, setBaseUrl] = useState(st.base_url || "");
+  const [ttsModel, setTtsModel] = useState(st.tts_model || "");
   const [apiKey, setApiKey] = useState("");
   const [enabled, setEnabled] = useState(st.enabled);
   const [busy, setBusy] = useState<"save" | "test" | null>(null);
@@ -112,13 +112,13 @@ function VoiceBody({ st, reload, onChanged }: { st: VoiceConfig; reload: () => P
         <input
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
-          placeholder={DEFAULT_BASE}
+          placeholder="http://192.168.1.50:8000/v1"
           className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
         />
         <p className="text-xs text-muted">
           O endereço é acessado pelo <b>servidor</b> (não pelo navegador) e deve terminar em{" "}
           <span className="font-mono">/v1</span>. Servidor no seu PC (host):{" "}
-          <span className="font-mono">http://host.docker.internal:8880/v1</span> ou o IP da LAN.
+          <span className="font-mono">http://host.docker.internal:&lt;porta&gt;/v1</span> ou o IP da LAN.
         </p>
       </div>
 
@@ -128,7 +128,7 @@ function VoiceBody({ st, reload, onChanged }: { st: VoiceConfig; reload: () => P
           <input
             value={ttsModel}
             onChange={(e) => setTtsModel(e.target.value)}
-            placeholder="kokoro"
+            placeholder="tts-1"
             className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
           />
         </div>
@@ -180,10 +180,7 @@ function VoiceBody({ st, reload, onChanged }: { st: VoiceConfig; reload: () => P
               <span key={v} className="rounded-full border border-border bg-surface px-2.5 py-0.5 font-mono text-xs text-ink-soft">{v}</span>
             ))}
           </div>
-          <p className="mt-2 text-xs text-muted">
-            Escolha a voz por modelo em Espaço → Modelos. Dá para misturar vozes com pesos, ex.:{" "}
-            <span className="font-mono">af_bella(2)+af_sky(1)</span>.
-          </p>
+          <p className="mt-2 text-xs text-muted">Escolha a voz por modelo em Espaço → Modelos.</p>
         </div>
       )}
     </div>

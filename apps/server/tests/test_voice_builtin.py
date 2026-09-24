@@ -81,3 +81,14 @@ def test_sintese_devolve_wav_e_troca_voz_desconhecida(monkeypatch):
     assert mime == "audio/wav" and chamadas == [("pf_dora", "pt-br")]
     with wave.open(io.BytesIO(data)) as w:
         assert w.getframerate() == 24000 and w.getnframes() == 2400
+
+
+def test_mistura_de_vozes_com_pesos():
+    from aiworkspace.integrations import voice_builtin as vb
+
+    assert vb.parse_blend("builtin:af_bella(2)+af_sky(1)") == [("af_bella", 2.0), ("af_sky", 1.0)]
+    assert vb.parse_blend("pf_dora+pm_alex") == [("pf_dora", 1.0), ("pm_alex", 1.0)]
+    # voz desconhecida e peso inválido saem; nada sobrou = voz padrão
+    assert vb.parse_blend("af_bella(x)+nao_existe(3)+pm_alex(0.5)") == [("pm_alex", 0.5)]
+    assert vb.parse_blend("alloy") == [(vb.DEFAULT_VOICE, 1.0)]
+    assert vb.parse_blend("") == [(vb.DEFAULT_VOICE, 1.0)]

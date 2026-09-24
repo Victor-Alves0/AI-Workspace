@@ -214,13 +214,14 @@ const OPENROUTER_STT_FALLBACK: AudioChoice = {
 };
 
 function SearchChoice({
-  label, value, options, placeholder, onChange,
+  label, value, options, placeholder, onChange, searchPlaceholder = "Buscar por nome, ID ou provedor",
 }: {
   label: string;
   value: string;
   options: AudioChoice[];
   placeholder: string;
   onChange: (value: string, choice?: AudioChoice) => void;
+  searchPlaceholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -258,7 +259,7 @@ function SearchChoice({
               autoFocus={finePointer()}
               value={q}
               onChange={(event) => setQ(event.target.value)}
-              placeholder="Buscar por nome, ID ou provedor"
+              placeholder={searchPlaceholder}
               className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
             />
           </div>
@@ -364,7 +365,6 @@ function VoiceStudio({
   const ttsOptions = unique([
     ...(ttsProvider === "openrouter" || ttsProvider === "auto" ? (catalog?.tts_models ?? []) : []),
     ...(ttsProvider === "api" || ttsProvider === "auto" ? API_TTS_MODELS : []),
-    ...(ttsProvider === "local" || ttsProvider === "auto" ? [{ id: "kokoro", name: "Kokoro", provider: "Local" }] : []),
   ]);
   const sttOptions = unique([
     ...(sttProvider === "openrouter" || sttProvider === "auto" ? [OPENROUTER_STT_FALLBACK, ...(catalog?.stt_models ?? [])] : []),
@@ -447,7 +447,7 @@ function VoiceStudio({
           </div>
           <ProviderPicker kind="tts" value={ttsProvider} catalog={catalog} onChange={(value) => onConfigChange({ tts_provider: value, tts_model: "" })} />
           <SearchChoice label="Modelo de voz" value={config.tts_model ?? ""} options={ttsOptions} placeholder="Usar modelo padrão do provedor" onChange={(value, choice) => onConfigChange({ tts_model: value, tts_provider: ttsProvider === "auto" ? choiceProvider(choice) : ttsProvider })} />
-          <SearchChoice label="Voz" value={voice} options={voiceOptions} placeholder="Escolher uma voz" onChange={onVoiceChange} />
+          <SearchChoice label="Voz" value={voice} options={voiceOptions} placeholder="Escolher uma voz" onChange={onVoiceChange} searchPlaceholder="Buscar ou misturar: builtin:pf_dora(2)+pm_alex(1)" />
           <button
             type="button"
             onClick={testVoice}

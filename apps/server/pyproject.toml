@@ -46,8 +46,8 @@ dependencies = [
     # porque o código importa o fastembed direto.
     "fastembed>=0.4.2",
     # Voz embutida (TTS): Kokoro-82M no próprio processo, pelo onnxruntime que o
-    # fastembed já traz (integrations/voice_builtin). Substituiu o container do
-    # Kokoro-FastAPI (~3,8 GB); acrescenta ~19 MB (espeak-ng). Pesos baixados no 1º uso.
+    # fastembed já traz (integrations/voice_builtin); acrescenta ~19 MB (espeak-ng).
+    # Pesos baixados no 1º uso.
     "kokoro-onnx>=0.6,<0.7",
     # Integração Google Workspace (Gmail + Agenda): REST direto por httpx (já
     # presente) — o google-api-python-client pesava ~110 MB para ~10 chamadas. O

@@ -1,7 +1,7 @@
 """Voz LOCAL (TTS) — config POR-USUÁRIO.
 
-O usuário aponta a URL de um servidor de voz compatível com OpenAI (ex.: Kokoro-FastAPI
-em http://localhost:8880/v1, ou um servidor de clonagem que exponha /audio/speech).
+O usuário aponta a URL de um servidor de voz compatível com OpenAI (ex.: um servidor
+de clonagem de voz que exponha /audio/speech).
 Guardado em app_settings sob `voice:{user_id}`. Quando ligado, o `/voice/tts` roteia
 para esse servidor em vez do provedor global (OpenAI via env).
 
@@ -20,17 +20,9 @@ from ..app_config import get_setting, set_setting
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BASE_URL = "http://localhost:8880/v1"
-DEFAULT_TTS_MODEL = "kokoro"
+DEFAULT_BASE_URL = ""
+DEFAULT_TTS_MODEL = "tts-1"
 
-# Vozes preset do Kokoro (fallback quando o servidor não expõe /audio/voices).
-# a=American, b=British; f=female, m=male. O Kokoro-FastAPI aceita mistura com
-# pesos, ex.: "af_bella(2)+af_sky(1)".
-FALLBACK_KOKORO_VOICES = [
-    "af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky", "af_nova", "af_aoede", "af_kore",
-    "am_adam", "am_michael", "am_echo", "am_eric", "am_fenrir", "am_liam", "am_onyx", "am_puck",
-    "bf_emma", "bf_isabella", "bf_alice", "bf_lily", "bm_george", "bm_lewis", "bm_daniel", "bm_fable",
-]
 
 
 def _key(user_id: str) -> str:
@@ -124,7 +116,7 @@ def _norm_voices(data: Any) -> list[str]:
 
 async def list_voices(base_url: str, api_key: str = "local") -> list[str]:
     """Vozes disponíveis no servidor (`GET {base}/audio/voices`). Se o servidor não
-    expõe o endpoint, cai no conjunto preset do Kokoro."""
+    expõe o endpoint, a lista fica vazia (a voz ainda pode ser digitada)."""
     base = _norm_base(base_url)
     if not base:
         return []
@@ -139,8 +131,8 @@ async def list_voices(base_url: str, api_key: str = "local") -> list[str]:
             if voices:
                 return sorted(voices)
     except Exception as exc:  # noqa: BLE001
-        logger.info("Voz local /audio/voices falhou (%s); usando fallback Kokoro", exc)
-    return list(FALLBACK_KOKORO_VOICES)
+        logger.info("Voz local /audio/voices falhou (%s)", exc)
+    return []
 
 
 async def list_user_voices(db: AsyncSession, user_id) -> list[str]:

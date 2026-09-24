@@ -1,10 +1,10 @@
 """Voz: TTS (texto→áudio) e STT (áudio→texto).
 
 Proxia para um endpoint compatível com OpenAI (/audio/speech, /audio/transcriptions).
-O TTS pode usar uma **conexão de Voz Local por-usuário** (Kokoro-FastAPI ou um servidor
+O TTS pode usar uma **conexão de Voz Local por-usuário** (um servidor
 de clonagem OpenAI-compatível — ver `integrations/voice_service`); se não houver, cai no
 provedor global (OpenAI via VOICE_BASE_URL + segredo voice_api_key). O STT continua no
-provedor global (Kokoro não faz STT).
+provedor global (muitos servidores de voz só fazem TTS).
 """
 
 from __future__ import annotations
@@ -185,7 +185,7 @@ async def tts(
 
 async def _try_transcribe(base_url: str, key: str, model: str, filename: str, audio: bytes, mime: str):
     """Uma tentativa de transcrição OpenAI-compat. Retorna o JSON ou None quando o
-    servidor não faz STT (404/405/501 — ex.: Kokoro só faz TTS) ou está fora do ar."""
+    servidor não faz STT (404/405/501 — muitos só fazem TTS) ou está fora do ar."""
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
@@ -280,7 +280,7 @@ async def stt(
         )
 
     # 1º a conexão de voz LOCAL do usuário (stacks como speaches/faster-whisper
-    # expõem /audio/transcriptions; Kokoro devolve 404 e caímos adiante)…
+    # expõem /audio/transcriptions; quem só faz TTS devolve 404 e caímos adiante)…
     prov = await voice_service.get_provider(db, user.id)
     if provider == "local" and not prov:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Configure e ative o servidor de voz local primeiro")
@@ -364,7 +364,7 @@ async def voice_catalog(
 
 
 # --------------------------------------------------------------------------- #
-# Conexão de Voz Local (Kokoro / servidor de clonagem OpenAI-compatível)
+# Conexão de Voz Local (servidor de voz próprio, OpenAI-compatível)
 # --------------------------------------------------------------------------- #
 async def _elevenlabs_voice_names(db: AsyncSession, user: User) -> list[str]:
     """Vozes ElevenLabs do usuário como strings 'el:<nome>' p/ o seletor por-modelo

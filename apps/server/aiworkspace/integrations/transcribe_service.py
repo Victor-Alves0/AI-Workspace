@@ -150,7 +150,7 @@ async def _http_get_text(url: str) -> str:
 
 async def _stt_one(cand: dict[str, str], filename: str, audio: bytes) -> str | None:
     """Uma tentativa de transcrição OpenAI-compat. None quando o servidor não faz
-    STT (404/405/501 — ex.: Kokoro) ou está fora do ar; texto quando transcreve."""
+    STT (404/405/501 — servidor que só faz TTS) ou está fora do ar; texto quando transcreve."""
     try:
         async with httpx.AsyncClient(timeout=180) as client:
             resp = await client.post(
