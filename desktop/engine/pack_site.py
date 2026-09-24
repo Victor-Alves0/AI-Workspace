@@ -33,6 +33,7 @@ KEEP_OUT = {
     "certifi",  # cacert.pem entregue como caminho a httpx/requests
     "win32com", "pythonwin", "adodbapi", "pywin32_system32", "win32", "win32comext",
     "codegraph",  # ts_service.js executado pelo node
+    "kokoro_onnx", "phonemizer",  # voz embutida: config.json aberto por caminho; dados g2p
     "pywin32_bootstrap",  # importado pelo pywin32.pth na inicialização
     "cffi", "pycparser",
     "bin", "share", "include",

@@ -105,7 +105,8 @@ $env:APP_SECRET = "build-only-" + ("x" * 32)
 & (Join-Path $PyDir "python.exe") -c @"
 import importlib
 for m in ('aiworkspace.main', 'aiworkspace.desktop', 'fastembed', 'onnxruntime', 'neonize',
-          'aiworkspace.memory.memory_service', 'yt_dlp', 'phonenumbers', 'PIL', 'codegraph'):
+          'aiworkspace.memory.memory_service', 'yt_dlp', 'phonenumbers', 'PIL', 'codegraph',
+          'aiworkspace.integrations.voice_builtin', 'kokoro_onnx'):
     importlib.import_module(m)
 "@
 if ($LASTEXITCODE -ne 0) { throw "o backend não importa com o Python embarcado" }

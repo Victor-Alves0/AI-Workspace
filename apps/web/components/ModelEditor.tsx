@@ -179,7 +179,8 @@ function ManageBtn({ icon, label, onClick }: { icon: React.ReactNode; label: str
   );
 }
 
-type VoiceProvider = "auto" | "openrouter" | "api" | "local";
+// "builtin" = voz embutida (Kokoro no próprio servidor), só para fala (TTS)
+type VoiceProvider = "auto" | "openrouter" | "api" | "local" | "builtin";
 type AudioChoice = { id: string; name: string; provider: string };
 type VoiceCatalog = {
   providers: Record<Exclude<VoiceProvider, "auto">, { configured: boolean; label: string }>;
@@ -313,11 +314,12 @@ function ProviderPicker({
     { id: "openrouter", label: "OpenRouter" },
     { id: "api", label: "API de voz" },
     { id: "local", label: "Local" },
+    ...(kind === "tts" ? [{ id: "builtin" as VoiceProvider, label: "Embutida" }] : []),
   ];
   return (
     <div>
       <p className="mb-1.5 text-xs font-medium text-muted">Origem do {kind === "tts" ? "áudio" : "transcrito"}</p>
-      <div className="grid grid-cols-2 gap-1 rounded-xl border border-border bg-bg p-1 sm:grid-cols-4">
+      <div className={`grid grid-cols-2 gap-1 rounded-xl border border-border bg-bg p-1 ${entries.length > 4 ? "sm:grid-cols-5" : "sm:grid-cols-4"}`}>
         {entries.map((entry) => {
           const ready = entry.id === "auto" || catalog?.providers[entry.id]?.configured;
           return (
@@ -373,7 +375,8 @@ function VoiceStudio({
   const choiceProvider = (choice?: AudioChoice): VoiceProvider =>
     choice?.provider === "OpenRouter" ? "openrouter"
       : choice?.provider === "Local" ? "local"
-        : choice?.provider === "API de voz" ? "api" : "auto";
+        : choice?.provider === "Embutida" ? "builtin"
+          : choice?.provider === "API de voz" ? "api" : "auto";
 
   const stopPreview = useCallback(() => {
     previewRequestRef.current?.abort();
@@ -1215,7 +1218,7 @@ export default function ModelEditor({
     if (filterConfig.voice) {
       const vc = filterConfig.voice;
       const provider = (value: unknown): VoiceProvider =>
-        value === "openrouter" || value === "api" || value === "local" ? value : "auto";
+        value === "openrouter" || value === "api" || value === "local" || value === "builtin" ? value : "auto";
       cleanFilterConfig.voice = {
         tts_enabled: vc.tts_enabled !== false,
         tts_provider: provider(vc.tts_provider),

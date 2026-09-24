@@ -117,8 +117,7 @@ function VoiceBody({ st, reload, onChanged }: { st: VoiceConfig; reload: () => P
         />
         <p className="text-xs text-muted">
           O endereço é acessado pelo <b>servidor</b> (não pelo navegador) e deve terminar em{" "}
-          <span className="font-mono">/v1</span>. Serviço embutido:{" "}
-          <span className="font-mono">http://kokoro:8880/v1</span>. Servidor no seu PC (host):{" "}
+          <span className="font-mono">/v1</span>. Servidor no seu PC (host):{" "}
           <span className="font-mono">http://host.docker.internal:8880/v1</span> ou o IP da LAN.
         </p>
       </div>

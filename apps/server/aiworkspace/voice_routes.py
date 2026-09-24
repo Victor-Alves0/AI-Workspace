@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .auth.deps import require_approved
 from .config import get_settings
 from .db import get_db
-from .integrations import elevenlabs_service, voice_service
+from .integrations import elevenlabs_service, voice_builtin, voice_service
 from .models import Chat, Folder, ModelConfig, User
 from .providers import openrouter
 from .secrets_service import OPENROUTER_KEY, VOICE_KEY, WAKE_CONFIG_KEY, get_secret, set_secret
@@ -105,6 +105,18 @@ async def _resolve_tts(
     return s.voice_base_url, await _global_key(db, user), model or s.tts_model
 
 
+async def _use_builtin(db: AsyncSession, user: User, provider: str, voice: str) -> bool:
+    if voice.startswith(voice_builtin.PREFIX) or provider == "builtin":
+        if not voice_builtin.available():
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Voz embutida indisponível nesta instalação")
+        return True
+    if provider != "auto" or not voice_builtin.available():
+        return False
+    if await voice_service.get_provider(db, user.id):
+        return False
+    return not await get_secret(db, user.id, VOICE_KEY)
+
+
 @router.post("/tts")
 async def tts(
     body: TTSIn, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
@@ -134,6 +146,15 @@ async def tts(
         return Response(content=data, media_type=mime)
 
     provider = body.provider or str(voice_cfg.get("tts_provider") or "auto")
+    # Voz EMBUTIDA (Kokoro no próprio processo): pedida pela voz "builtin:…"/provedor, ou
+    # no automático quando não há servidor local nem chave de API de voz — quem não
+    # configurou nada passa a ter voz em vez de erro.
+    if await _use_builtin(db, user, provider, voice):
+        try:
+            data, mime = await run_in_threadpool(voice_builtin.synthesize, body.text, voice)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Falha na voz embutida: {exc}") from None
+        return Response(content=data, media_type=mime)
     requested_model = body.model or str(voice_cfg.get("tts_model") or "") or None
     base_url, key, model = await _resolve_tts(
         db, user, provider=provider, model=requested_model
@@ -329,12 +350,14 @@ async def voice_catalog(
             "openrouter": {"configured": bool(key), "label": "OpenRouter API"},
             "api": {"configured": bool(await get_secret(db, user.id, VOICE_KEY)), "label": "API de voz"},
             "local": {"configured": bool(local_cfg["configured"] and local_cfg["enabled"]), "label": "Servidor local"},
+            "builtin": {"configured": voice_builtin.available(), "label": "Voz embutida"},
         },
         "tts_models": tts_models,
         "stt_models": stt_models,
         "voices": [
             *[{"id": v, "name": v.title(), "provider": "OpenAI/API"} for v in _OPENAI_VOICES],
             *[{"id": v, "name": v, "provider": "Local"} for v in local_voices],
+            *[{"id": voice_builtin.PREFIX + v, "name": v, "provider": "Embutida"} for v in voice_builtin.voices()],
             *[{"id": v, "name": v.removeprefix(elevenlabs_service.EL_VOICE_PREFIX), "provider": "ElevenLabs"} for v in eleven_voices],
         ],
     }
@@ -382,7 +405,8 @@ async def voice_config_save(
 async def voice_list(user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)):
     """Vozes disponíveis (conexão de Voz Local + ElevenLabs) p/ o seletor por-modelo."""
     local = await voice_service.list_user_voices(db, user.id)
-    return {"voices": [*local, *await _elevenlabs_voice_names(db, user)]}
+    embutidas = [voice_builtin.PREFIX + v for v in voice_builtin.voices()]
+    return {"voices": [*local, *embutidas, *await _elevenlabs_voice_names(db, user)]}
 
 
 @router.post("/test")

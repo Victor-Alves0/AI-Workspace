@@ -43,7 +43,6 @@ services:
       # Cadastro NÃO tem chave de ambiente: quem decide é o admin no painel
       # (app_config.signups_allowed — fechado por padrão). Ver docs/trust-model.md.
       WEB_SEARCH_PROVIDER: ${WEB_SEARCH_PROVIDER:-duckduckgo}
-      SEARXNG_URL: ${SEARXNG_URL:-http://searxng:8080}
       VOICE_BASE_URL: ${VOICE_BASE_URL:-https://api.openai.com/v1}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-aiworkspace}:${POSTGRES_PASSWORD:-aiworkspace}@db:5432/${POSTGRES_DB:-aiworkspace}
       OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
@@ -128,22 +127,6 @@ services:
       # aceitar previews abertos na sua rede. Ver docs/trust-model.md.
       - "${PREVIEW_BIND:-127.0.0.1}:${PREVIEW_PORT_MIN:-4001}-${PREVIEW_PORT_MAX:-4010}:${PREVIEW_PORT_MIN:-4001}-${PREVIEW_PORT_MAX:-4010}"
 
-  # Voz local (TTS) — Kokoro-FastAPI, endpoint OpenAI-compatível em :8880/v1.
-  # OPT-IN: só sobe com `docker compose --profile voice up -d kokoro`.
-  # CPU por padrão (baixa os pesos ~350MB no 1º start). Para GPU NVIDIA, troque a
-  # imagem por `-gpu` e adicione o runtime de GPU (ver docs). O server acessa em
-  # http://kokoro:8880/v1 (use esse endereço na conexão "Voz Local").
-  kokoro:
-    image: ghcr.io/remsky/kokoro-fastapi-cpu:latest
-    profiles: ["voice"]
-    restart: unless-stopped
-    ports:
-      - "${KOKORO_BIND:-127.0.0.1}:${KOKORO_PORT:-8880}:8880"
-
-  # SearXNG — metabuscador self-hosted para a Pesquisa na Web (sem chave de API).
-  # OPT-IN: `docker compose --profile search up -d searxng`. Depois, no .env:
-  #   WEB_SEARCH_PROVIDER=searxng   (o server já aponta p/ http://searxng:8080)
-  # Config em infra/searxng/settings.yml (formato JSON ligado, limiter desligado).
   # Navegador headless (Chromium) — browserless v2, para a tool "web.browser.use".
   # OPT-IN: só sobe com `docker compose --profile browser up -d browser`. O server
   # o dirige por Playwright via CDP (ws://browser:3000). Defina BROWSER_TOKEN no .env
