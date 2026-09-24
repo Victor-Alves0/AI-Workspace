@@ -182,6 +182,48 @@ Copy-Item (Join-Path $PSScriptRoot "Start-AIWorkspace.ps1") $Out
 Copy-Item (Join-Path $PSScriptRoot "README.txt") $Out -ErrorAction SilentlyContinue
 
 # ----------------------------------------------------------------------------- #
+# 5a) banco PRONTO: initdb + pgvector + todas as migracoes, feito uma vez aqui.
+#
+# Na 1a abertura o launcher so' extrai este zip, em vez de initdb (~13 s) e das
+# migracoes do zero (~15 s). Mesmas opcoes do initdb do launcher. Uma atualizacao
+# leve do app depois aplica so' as migracoes novas por cima.
+# ----------------------------------------------------------------------------- #
+Write-Host "==> banco pre-migrado (pgdata-template.zip)"
+$PgBinOut = Join-Path $Out "pgsql\bin"
+$TplData  = Join-Path $Work "_pgtemplate"
+$TplPort  = 55499
+Remove-Item -Recurse -Force $TplData -ErrorAction SilentlyContinue
+& (Join-Path $PgBinOut "initdb.exe") -D $TplData -U aiworkspace -A trust -E UTF8 --locale=C | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "initdb do template falhou" }
+# sem canalizar a saida do pg_ctl start (ver o launcher: o pipe prende o PowerShell)
+& (Join-Path $PgBinOut "pg_ctl.exe") -D $TplData -w -s -l (Join-Path $Work "pgtemplate.log") `
+    -o "-p $TplPort -c listen_addresses=127.0.0.1" start
+try {
+    & (Join-Path $PgBinOut "createdb.exe") -h 127.0.0.1 -p $TplPort -U aiworkspace aiworkspace
+    & (Join-Path $PgBinOut "psql.exe") -h 127.0.0.1 -p $TplPort -U aiworkspace -d aiworkspace `
+        -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector" | Out-Null
+    $env:DATABASE_URL = "postgresql+asyncpg://aiworkspace:aiworkspace@127.0.0.1:$TplPort/aiworkspace"
+    $env:APP_SECRET = "build-only-" + ("x" * 32)
+    Push-Location $AppOut
+    & (Join-Path $PyDir "python.exe") -m alembic upgrade head
+    $migrou = $LASTEXITCODE
+    Pop-Location
+    if ($migrou -ne 0) { throw "migracoes do template falharam" }
+}
+finally {
+    Remove-Item Env:DATABASE_URL, Env:APP_SECRET -ErrorAction SilentlyContinue
+    & (Join-Path $PgBinOut "pg_ctl.exe") -D $TplData -w -s -m fast stop
+}
+Remove-Item (Join-Path $TplData "postmaster.opts") -ErrorAction SilentlyContinue
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$TplZip = Join-Path $Out "pgdata-template.zip"
+Remove-Item $TplZip -ErrorAction SilentlyContinue
+# SEM compressao: descomprimir no .NET custa ~3 s a mais na 1a abertura, e o
+# instalador ja' comprime tudo (o download nao cresce)
+[IO.Compression.ZipFile]::CreateFromDirectory($TplData, $TplZip, [IO.Compression.CompressionLevel]::NoCompression, $false)
+Remove-Item -Recurse -Force $TplData
+
+# ----------------------------------------------------------------------------- #
 # 5b) carimbo de versoes (auto-atualizacao em 2 camadas)
 #
 # engine-version.txt = camada PESADA (Python/deps/Postgres). So muda quando

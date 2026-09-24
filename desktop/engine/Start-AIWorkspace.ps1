@@ -144,7 +144,11 @@ try { Update-AppCode } catch { Write-Host "==> Auto-update ignorado: $_" }
 #     segredos por-usuario no banco; trocar tornaria o banco ilegivel) ---
 $SecretFile = Join-Path $Data "secret.txt"
 if (-not (Test-Path $SecretFile)) {
-    (& $Py -c "import secrets;print(secrets.token_urlsafe(48))").Trim() |
+    # 48 bytes aleatorios em base64url (o mesmo que secrets.token_urlsafe(48)), sem
+    # subir um processo Python so' para isso
+    $bytes = New-Object byte[] 48
+    [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+    ([Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')) |
         Out-File -Encoding ascii -NoNewline $SecretFile
 }
 
@@ -179,10 +183,24 @@ $env:PATH                = "$PgBin;$env:PATH"
 function Pg($exe) { Join-Path $PgBin $exe }
 $procs = @()
 
-# --- 1) initdb na primeira execucao (superusuario = aiworkspace, sem senha local) ---
+# --- 1) banco na primeira execucao (superusuario = aiworkspace, sem senha local) ---
+# O motor traz o banco pronto e migrado (pgdata-template.zip, feito no build): extrair
+# e' bem mais rapido que initdb + todas as migracoes. Sem o zip, cai no initdb.
 if (-not (Test-Path (Join-Path $PgData "PG_VERSION"))) {
-    Write-Host "==> Inicializando o banco (primeira execucao)"
-    & (Pg "initdb.exe") -D $PgData -U aiworkspace -A trust -E UTF8 --locale=C | Out-Null
+    $Tpl = Join-Path $Root "pgdata-template.zip"
+    if (Test-Path $Tpl) {
+        Write-Host "==> Preparando o banco (primeira execucao)"
+        # extrai numa pasta ao lado e troca: uma extracao interrompida nao deixa um
+        # pgdata pela metade que pareca pronto
+        $tmp = "$PgData.tmp"
+        Remove-Item -Recurse -Force $tmp, $PgData -ErrorAction SilentlyContinue
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [IO.Compression.ZipFile]::ExtractToDirectory($Tpl, $tmp)
+        Move-Item $tmp $PgData
+    } else {
+        Write-Host "==> Inicializando o banco (primeira execucao)"
+        & (Pg "initdb.exe") -D $PgData -U aiworkspace -A trust -E UTF8 --locale=C | Out-Null
+    }
 }
 
 # --- 2) sobe o Postgres so no loopback, numa porta propria ---

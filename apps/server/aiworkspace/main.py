@@ -380,6 +380,9 @@ def create_app() -> FastAPI:
         "Access-Control-Max-Age": "600",
     }
 
+    # rotas que recebem arquivo grande aos pedaços, direto para o disco (sem teto do corpo)
+    _STREAMED_BODY_PATHS = frozenset({"/admin/restore"})
+
     @app.middleware("http")
     async def observe_and_harden(request: Request, call_next):
         start = time.perf_counter()
@@ -398,8 +401,10 @@ def create_app() -> FastAPI:
         # Teto do CORPO: um JSON gigante é lido inteiro na memória antes de qualquer
         # validação — era assim que um anexo enorme derrubava o processo em vez de
         # receber um "não". Arquivo grande tem rota própria (/uploads, streaming p/ o
-        # disco), então nenhum outro endpoint precisa aceitar dezenas de MB.
-        if not request.url.path.startswith("/uploads"):
+        # disco), então nenhum outro endpoint precisa aceitar dezenas de MB. A restauração
+        # de backup (só admin) também grava o arquivo no disco aos pedaços — e um backup
+        # passa fácil de gigabytes.
+        if not (request.url.path.startswith("/uploads") or request.url.path in _STREAMED_BODY_PATHS):
             declarado = request.headers.get("content-length")
             if declarado and declarado.isdigit() and int(declarado) > settings.max_json_body_bytes:
                 metrics.record(request.method, request.url.path, 413, 0.0)

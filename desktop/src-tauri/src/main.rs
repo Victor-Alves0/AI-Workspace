@@ -318,6 +318,16 @@ fn desktop_open_external(url: String) -> Result<(), String> {
     res.map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// Texto da área de transferência do sistema — o "Colar" do menu do botão direito.
+/// Pelo `navigator.clipboard.readText` o WebView2 abriria um pedido de permissão de
+/// navegador, justamente a cara que o app não deve ter. Só texto.
+#[tauri::command]
+fn desktop_clipboard_read() -> Result<String, String> {
+    arboard::Clipboard::new()
+        .and_then(|mut c| c.get_text())
+        .map_err(|e| e.to_string())
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_autostart::init(
@@ -350,7 +360,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             desktop_get_settings,
             desktop_set_settings,
-            desktop_open_external
+            desktop_open_external,
+            desktop_clipboard_read
         ])
         .setup(|app| {
             let handle = app.handle().clone();

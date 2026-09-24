@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
-import NoContextMenu from "@/components/NoContextMenu";
+import DesktopContextMenu from "@/components/DesktopContextMenu";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -43,7 +43,7 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" className={inter.variable}>
       <body>
-        <NoContextMenu />
+        <DesktopContextMenu />
         <ConfirmProvider>{children}</ConfirmProvider>
       </body>
     </html>

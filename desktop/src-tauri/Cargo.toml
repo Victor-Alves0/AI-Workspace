@@ -15,6 +15,9 @@ tauri-plugin-global-shortcut = "2"
 # `process` fornece o relaunch depois de instalar.
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+# área de transferência nativa (texto): o "Colar" do menu do botão direito. Pelo
+# navigator.clipboard, o WebView2 mostraria um pedido de permissão de navegador.
+arboard = { version = "3", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

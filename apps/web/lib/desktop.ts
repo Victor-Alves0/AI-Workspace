@@ -63,6 +63,21 @@ export const getDesktopSettings = () => invoke<DesktopSettings>("desktop_get_set
 export const setDesktopSettings = (patch: DesktopPatch) =>
   invoke<DesktopSettings>("desktop_set_settings", patch as Record<string, unknown>);
 
+/** Texto da área de transferência. No app desktop vem do comando nativo (pelo
+ *  navigator.clipboard o WebView2 mostraria um pedido de permissão de navegador);
+ *  no navegador, pelo navigator.clipboard. null = não deu para ler. */
+export async function readClipboard(): Promise<string | null> {
+  if (isDesktop()) {
+    const texto = await invoke<string>("desktop_clipboard_read");
+    if (texto != null) return texto;
+  }
+  try {
+    return await navigator.clipboard.readText();
+  } catch {
+    return null;
+  }
+}
+
 /** Abre uma URL externa no navegador do sistema.
  *
  *  No navegador é só `window.open`. No app desktop isso é OBRIGATÓRIO: no webview do
