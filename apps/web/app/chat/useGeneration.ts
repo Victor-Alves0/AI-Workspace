@@ -14,9 +14,11 @@ export interface GuardNote {
 }
 
 export interface SubagentChip {
+  id: string;
   name: string;
   ctx?: boolean;
   mem?: boolean;
+  adhoc?: boolean;
 }
 
 /** Fase visível da geração. Os nomes descrevem apenas o que o cliente sabe; o
@@ -285,8 +287,10 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       } else if (ev.type === "subagent") {
         // orquestrador delegou a um operário — mostra/atualiza os chips
         if (!paint()) return;
-        if (ev.status === "start") setSubagents((s) => (ev.agent && !s.some((x) => x.name === ev.agent) ? [...s, { name: ev.agent, ctx: ev.ctx, mem: ev.mem }] : s));
-        else if (ev.status === "done") setSubagents((s) => s.filter((x) => x.name !== ev.agent));
+        // identificado pela chamada (dois agentes de mesmo nome podem rodar juntos)
+        const sid = String(ev.id || ev.agent || "");
+        if (ev.status === "start") setSubagents((s) => (sid && !s.some((x) => x.id === sid) ? [...s, { id: sid, name: ev.agent || "Agente", ctx: ev.ctx, mem: ev.mem, adhoc: ev.adhoc }] : s));
+        else if (ev.status === "done") setSubagents((s) => s.filter((x) => x.id !== sid));
       } else if (ev.type === "guard") {
         // um Guarda de saída detectou algo e vai refazer a resposta
         if (paint()) {

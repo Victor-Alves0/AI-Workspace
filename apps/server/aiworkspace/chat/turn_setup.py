@@ -465,7 +465,7 @@ async def _media_opts(
 
 
 def _subagent_opts(sub_specs: list[dict], sub_conf: dict, sub_runner) -> SubagentOpts | None:
-    if not sub_specs:
+    if sub_runner is None or not (sub_specs or sub_conf.get("adhoc")):
         return None
     return SubagentOpts(
         agents=sub_specs, run=sub_runner,
@@ -473,6 +473,8 @@ def _subagent_opts(sub_specs: list[dict], sub_conf: dict, sub_runner) -> Subagen
         max_calls=sub_conf.get("max_calls", 4),
         pass_context=sub_conf.get("pass_context", False),
         worker_memory=sub_conf.get("worker_memory", False),
+        adhoc=bool(sub_conf.get("adhoc")),
+        isolation=bool(sub_conf.get("worktree")),
     )
 
 
@@ -943,6 +945,13 @@ async def _resolve_subagents(
         isolate = list(team_keys)
     else:
         isolate = []
+    # `worktree` é o interruptor geral (sem ele ninguém isola). Config antiga, sem a
+    # chave: ligado se já havia algum operário isolado.
+    worktree = cfg.get("worktree")
+    if not isinstance(worktree, bool):
+        worktree = bool(isolate)
+    if not worktree:
+        isolate = []
     conf = {
         "mode": "parallel" if cfg.get("mode") == "parallel" else "sequential",
         "max_calls": max(1, min(int(cfg.get("max_calls") or 4), 10)),
@@ -951,8 +960,32 @@ async def _resolve_subagents(
         "pass_context": bool(cfg.get("pass_context")),
         "worker_memory": bool(cfg.get("worker_memory")),
         "isolate": isolate,
+        "worktree": worktree,
+        # a IA pode criar agentes para a tarefa (agent="new"); padrão: sim
+        "adhoc": cfg.get("adhoc") is not False,
+        # modelo dos agentes criados pela IA; vazio = o mesmo do orquestrador
+        "adhoc_model": str(cfg.get("adhoc_model") or "").strip()[:255],
     }
     return specs, conf
+
+
+async def subagents_for_turn(
+    db: AsyncSession, user: User, chat_id: uuid.UUID | None, project_id: str | None,
+    model_config: ModelConfig | None,
+) -> SubagentOpts | None:
+    """Delegação do turno (tool `delegate`), ou None se o modelo não delega."""
+    specs, conf = await _resolve_subagents(db, user, model_config)
+    if not specs and not conf.get("adhoc"):
+        return None
+    runner = _make_subagent_runner(
+        db, user, chat_id, conf.get("max_depth", 2),
+        pass_context=conf.get("pass_context", False),
+        worker_memory=conf.get("worker_memory", False),
+        project_id=project_id,
+        isolate_keys=frozenset(conf.get("isolate") or []),
+        parent=model_config, adhoc_model=conf.get("adhoc_model", ""),
+    )
+    return _subagent_opts(specs, {**conf, "worktree": conf.get("worktree") and bool(project_id)}, runner)
 
 
 async def _recent_history(db: AsyncSession, chat_id: uuid.UUID, limit: int = 20) -> list[dict]:
@@ -969,68 +1002,42 @@ async def _recent_history(db: AsyncSession, chat_id: uuid.UUID, limit: int = 20)
     return convo[-limit:]
 
 
+_ADHOC_PREAMBLE = (
+    "You are {name}, a subagent the main assistant created for one task. Work on it "
+    "autonomously with your tools. Your final message goes back to the main assistant, "
+    "not to the user: make it a complete, concise report of what you found or did."
+)
+
+
 def _make_subagent_runner(
     db: AsyncSession, user: User, chat_id: uuid.UUID | None, max_depth: int,
     pass_context: bool = False, worker_memory: bool = False,
     depth: int = 0, ancestry: frozenset[str] = frozenset(),
     project_id: str | None = None, isolate_keys: frozenset[str] = frozenset(),
+    parent: ModelConfig | None = None, adhoc_model: str = "",
 ):
-    """Closure que executa um operário: resolve o ModelConfig e roda um turno aninhado.
-    Opções: `pass_context` (dá o histórico do chat ao operário), `worker_memory` (o
-    operário lê/escreve na PRÓPRIA memória) e `isolate_keys` (o conjunto de operários
-    que trabalham num worktree ISOLADO do `project_id` — cada um numa branch própria,
-    sem colidir com os outros; o resultado vira uma tarefa a revisar. Quem não está no
-    conjunto — ex.: um revisor só-leitura — escreve/lê no `src` normal e NÃO abre
-    tarefa). Blinda contra ciclos e recursão profunda."""
-    async def run_subagent(key: str, task: str) -> dict:
-        if key in ancestry:
-            return {"error": "ciclo de subagentes detectado; delegação abortada"}
-        try:
-            wid = uuid.UUID(str(key))
-        except (ValueError, TypeError):
-            return {"error": "subagente inválido"}
-        mc = await db.get(ModelConfig, wid)
-        if mc is None or mc.user_id != user.id or not mc.enabled or not mc.base_model:
-            return {"error": "subagente não encontrado ou desabilitado"}
-        try:
-            api_key, base_url = await _resolve_provider(db, user, mc.base_model)
-        except HTTPException as exc:
-            return {"error": f"provedor do subagente indisponível: {exc.detail}"}
-        sift = await get_sift_for_user(db, user.id, mc)
-        skills = await _load_skills(db, user, mc)
-        # delegação em cadeia: só se ainda houver profundidade. Os flags de contexto/
-        # memória do operário-de-2º-nível vêm da config DELE (ele vira o orquestrador).
-        sub_specs: list[dict] = []
-        sub_conf: dict = {}
-        nested_runner = None
-        if depth + 1 < max_depth:
-            sub_specs, sub_conf = await _resolve_subagents(db, user, mc)
-            if sub_specs:
-                nested_runner = _make_subagent_runner(
-                    db, user, chat_id, max_depth,
-                    pass_context=sub_conf.get("pass_context", False),
-                    worker_memory=sub_conf.get("worker_memory", False),
-                    depth=depth + 1, ancestry=ancestry | {key},
-                    project_id=project_id,
-                    isolate_keys=frozenset(sub_conf.get("isolate") or []),
-                )
-        # contexto do chat (opt-in)
+    """Closure que executa um subagente num turno aninhado. Dois tipos:
+      - agente do usuário (`key` = id de um ModelConfig): prompt/tools/skills dele;
+        pode delegar de novo enquanto houver profundidade (flags da config DELE);
+      - agente criado pela IA (`new` = {name, instructions, isolated}): roda com as
+        tools/skills do orquestrador (`parent`), no `adhoc_model` ou no modelo dele,
+        sem memória e sem delegar (como no Claude Code).
+    Opções: `pass_context` (histórico do chat), `worker_memory` (memória própria, só
+    agentes do usuário) e worktree isolado — `isolate_keys` para os do usuário,
+    `new["isolated"]` para os criados. Blinda contra ciclos e recursão profunda."""
+
+    async def _execute(*, label: str, model: str, api_key: str, base_url: str, task: str,
+                       system: str, params: dict, sift: Any, skills: list, code_mode: bool,
+                       agent_id: str, memory: MemoryOpts, sub_opts: SubagentOpts | None,
+                       isolated: bool, usage_mc: ModelConfig | None) -> dict:
         history = await _recent_history(db, chat_id) if (pass_context and chat_id) else []
-        # memória própria do operário (opt-in): usa a config do modelo do operário
-        mem_read: dict | None = None
-        mem_write = "off"
-        mem_review = False
-        if worker_memory and chat_id:
-            _stub = SimpleNamespace(memory_config=None)
-            mem_read, mem_write, mem_review = _resolve_memory(_stub, mc, user)  # type: ignore[arg-type]
-        # worktree isolado (opt-in): o operário trabalha numa branch própria do projeto
-        # do chat, sem colidir com o `src` nem com operários paralelos. O resultado vira
-        # uma tarefa `awaiting_review` que o humano aprova/descarta na UI.
+        # worktree isolado: branch própria do projeto do chat; o resultado vira uma
+        # tarefa `awaiting_review` que o humano aprova/descarta na UI
         wt_task_id: str | None = None
-        if key in isolate_keys and project_id:
+        if isolated and project_id:
             from ..codespace import worktree_service
             opened = await worktree_service.open_task(
-                str(user.id), project_id, title=task[:200], agent=mc.name,
+                str(user.id), project_id, title=task[:200], agent=label,
                 chat_id=str(chat_id) if chat_id else None,
             )
             if opened.get("error"):
@@ -1040,20 +1047,17 @@ def _make_subagent_runner(
         usage = None
         try:
             async for ev in run_turn(
-                api_key=api_key, model=mc.base_model, history=history, user_text=task,
-                chat_system_prompt=mc.system_prompt, params=mc.params or {},
-                base_url=base_url, sift=sift, code_mode=_code_mode(mc),
+                api_key=api_key, model=model, history=history, user_text=task,
+                chat_system_prompt=system, params=params,
+                base_url=base_url, sift=sift, code_mode=code_mode,
                 session=TurnSession(
                     user_id=str(user.id),
                     chat_id=str(chat_id) if chat_id else None,
-                    agent_id=_mem_agent_id(mc, mc.base_model),
-                    # com worktree isolado, o operário ganha o projeto + a branch própria
+                    agent_id=agent_id,
                     codespace_project_id=project_id if wt_task_id else None,
                     codespace_worktree=wt_task_id,
                 ),
-                memory=MemoryOpts(read=mem_read, write=mem_write, review=mem_review),
-                skills=skills, use_context=True,
-                subagent=_subagent_opts(sub_specs, sub_conf, nested_runner),
+                memory=memory, skills=skills, use_context=True, subagent=sub_opts,
             ):
                 t = ev.get("type")
                 if t == "token":
@@ -1076,10 +1080,10 @@ def _make_subagent_runner(
                 await worktree_service.mark_awaiting(wt_task_id)
             except Exception:  # noqa: BLE001
                 pass
-        # analítica por-agente: registra o uso do operário no ledger
+        # analítica por-agente: registra o uso do subagente no ledger
         if usage:
             try:
-                rec = _usage_record(usage, mc.base_model, mc)
+                rec = _usage_record(usage, model, usage_mc)
                 async with SessionLocal() as s:
                     uev = usage_event_from_record(user.id, chat_id, uuid.uuid4(), rec)
                     if uev is not None:
@@ -1087,12 +1091,83 @@ def _make_subagent_runner(
                         await s.commit()
             except Exception:  # noqa: BLE001 - ledger é best-effort
                 pass
-        out = {"kind": "subagent", "agent": mc.name, "output": collected or "(sem resposta)"}
+        out = {"kind": "subagent", "agent": label, "output": collected or "(sem resposta)"}
         if wt_task_id:
             out["task_id"] = wt_task_id
             out["note"] = ("O trabalho ficou num worktree isolado (tarefa a revisar) — "
                            "NÃO foi mesclado ainda; o usuário aprova/descarta na aba Tarefas.")
         return out
+
+    async def _run_new(new: dict, task: str) -> dict:
+        if parent is None or not parent.base_model:
+            return {"error": "agentes criados pela IA precisam de um modelo custom como orquestrador"}
+        model = adhoc_model or parent.base_model
+        try:
+            api_key, base_url = await _resolve_provider(db, user, model)
+        except HTTPException as exc:
+            return {"error": f"provedor do subagente indisponível: {exc.detail}"}
+        name = str(new.get("name") or "Agente")
+        out = await _execute(
+            label=name, model=model, api_key=api_key, base_url=base_url, task=task,
+            system=_ADHOC_PREAMBLE.format(name=name) + "\n\n" + str(new.get("instructions") or ""),
+            params=parent.params or {}, sift=await get_sift_for_user(db, user.id, parent),
+            skills=await _load_skills(db, user, parent), code_mode=_code_mode(parent),
+            agent_id=_mem_agent_id(parent, model), memory=MemoryOpts(read=None, write="off"),
+            sub_opts=None, isolated=bool(new.get("isolated")), usage_mc=parent,
+        )
+        if "error" not in out:
+            out["adhoc"] = True
+        return out
+
+    async def run_subagent(key: str, task: str, new: dict | None = None) -> dict:
+        if new is not None:
+            return await _run_new(new, task)
+        if key in ancestry:
+            return {"error": "ciclo de subagentes detectado; delegação abortada"}
+        try:
+            wid = uuid.UUID(str(key))
+        except (ValueError, TypeError):
+            return {"error": "subagente inválido"}
+        mc = await db.get(ModelConfig, wid)
+        if mc is None or mc.user_id != user.id or not mc.enabled or not mc.base_model:
+            return {"error": "subagente não encontrado ou desabilitado"}
+        try:
+            api_key, base_url = await _resolve_provider(db, user, mc.base_model)
+        except HTTPException as exc:
+            return {"error": f"provedor do subagente indisponível: {exc.detail}"}
+        # delegação em cadeia: só se ainda houver profundidade. Os flags de contexto/
+        # memória do operário-de-2º-nível vêm da config DELE (ele vira o orquestrador).
+        sub_opts: SubagentOpts | None = None
+        if depth + 1 < max_depth:
+            sub_specs, sub_conf = await _resolve_subagents(db, user, mc)
+            if sub_specs or sub_conf.get("adhoc"):
+                nested_runner = _make_subagent_runner(
+                    db, user, chat_id, max_depth,
+                    pass_context=sub_conf.get("pass_context", False),
+                    worker_memory=sub_conf.get("worker_memory", False),
+                    depth=depth + 1, ancestry=ancestry | {key},
+                    project_id=project_id,
+                    isolate_keys=frozenset(sub_conf.get("isolate") or []),
+                    parent=mc, adhoc_model=sub_conf.get("adhoc_model", ""),
+                )
+                sub_opts = _subagent_opts(
+                    sub_specs, {**sub_conf, "worktree": sub_conf.get("worktree") and bool(project_id)},
+                    nested_runner)
+        # memória própria do operário (opt-in): usa a config do modelo do operário
+        mem_read: dict | None = None
+        mem_write = "off"
+        mem_review = False
+        if worker_memory and chat_id:
+            _stub = SimpleNamespace(memory_config=None)
+            mem_read, mem_write, mem_review = _resolve_memory(_stub, mc, user)  # type: ignore[arg-type]
+        return await _execute(
+            label=mc.name, model=mc.base_model, api_key=api_key, base_url=base_url, task=task,
+            system=mc.system_prompt, params=mc.params or {},
+            sift=await get_sift_for_user(db, user.id, mc), skills=await _load_skills(db, user, mc),
+            code_mode=_code_mode(mc), agent_id=_mem_agent_id(mc, mc.base_model),
+            memory=MemoryOpts(read=mem_read, write=mem_write, review=mem_review),
+            sub_opts=sub_opts, isolated=key in isolate_keys, usage_mc=mc,
+        )
 
     return run_subagent
 

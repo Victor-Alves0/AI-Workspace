@@ -898,6 +898,10 @@ export default function ModelEditor({
     setSubCfg({ isolate: isolate.includes(id) ? isolate.filter((x) => x !== id) : [...isolate, id] });
   const teamCandidates = useMemo(() => myModels.filter((m) => m.id !== model?.id), [myModels, model]);
   const [teamModal, setTeamModal] = useState(false);
+  const [subModal, setSubModal] = useState(false);
+  // worktree: interruptor geral (config antiga, sem a chave: ligado se já havia isolados)
+  const worktreeOn: boolean = typeof subCfg.worktree === "boolean" ? subCfg.worktree : isolate.length > 0;
+  const adhocOn: boolean = subCfg.adhoc !== false;
   // itens do seletor de operários (TransferModal): nome + modelo-base como sublabel
   const teamItems: TransferItem[] = useMemo(
     () => teamCandidates.map((m) => ({ key: m.id, label: m.name, sublabel: m.base_model })),
@@ -1129,7 +1133,9 @@ export default function ModelEditor({
     system: c.native, iconTitle: c.native ? "Nativa do modelo" : undefined,
   }));
   const capSelected = useMemo(() => {
-    const sel = Object.keys(caps).filter((k) => caps[k] === true && !k.startsWith("filter:"));
+    // só capacidades conhecidas: outras chaves `true` (ex.: `subagents`, que tem seção
+    // própria) não são itens desta lista
+    const sel = Object.keys(caps).filter((k) => caps[k] === true && CAPS.some((c) => c.key === k));
     // default-on (ex.: chat_context): marcado quando ausente ou true; só some com false explícito
     for (const k of CAPS_DEFAULT_ON) {
       if (caps[k] !== false && !sel.includes(k)) sel.push(k);
@@ -1237,6 +1243,7 @@ export default function ModelEditor({
       // "todos isolados" (mantém o comportamento da config antiga ao reeditá-la).
       const scIsolate: string[] = (Array.isArray(sc.isolate) ? sc.isolate : (sc.worktree_isolation ? scTeam : []))
         .filter((x: string) => scTeam.includes(x));
+      const scWorktree = typeof sc.worktree === "boolean" ? sc.worktree : scIsolate.length > 0;
       cleanFilterConfig.subagents = {
         team: scTeam,
         mode: sc.mode === "parallel" ? "parallel" : "sequential",
@@ -1244,7 +1251,10 @@ export default function ModelEditor({
         max_depth: Math.max(1, Math.min(3, Number(sc.max_depth) || 2)),
         pass_context: !!sc.pass_context,
         worker_memory: !!sc.worker_memory,
-        isolate: scIsolate,
+        worktree: scWorktree,
+        isolate: scWorktree ? scIsolate : [],
+        adhoc: sc.adhoc !== false,
+        adhoc_model: String(sc.adhoc_model ?? "").trim().slice(0, 255),
       };
     }
     // assistente de voz — só persiste quando ligado
@@ -2133,104 +2143,23 @@ export default function ModelEditor({
             </div>
           </div>
 
-          {/* Subagentes — este modelo (orquestrador) pode delegar a outros (operários) */}
+          {/* Subagentes — este modelo delega tarefas a agentes (os do usuário ou criados pela IA) */}
           <div className="mt-8 border-t border-border pt-7">
             <div className="flex items-center justify-between gap-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
                 <span className="text-muted"><Users size={15} /></span>
                 Subagentes
-                <InfoHint text="Permite que este modelo delegue sub-tarefas a outros modelos custom (operários) via a ferramenta 'delegate'. Cada operário roda com o próprio prompt/ferramentas e devolve o resultado para este modelo sintetizar." />
+                <InfoHint text="Este modelo pode delegar tarefas a outros agentes, que trabalham em paralelo ou em sequência e devolvem o resultado para ele juntar. Na conversa, você também chama um agente direto digitando @." />
               </h2>
-              <Toggle on={subOn} onChange={setSubOn} />
-            </div>
-            {subOn && (
-              <div className="mt-3 space-y-3 rounded-xl border border-border bg-surface p-3">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-[11px] font-medium uppercase tracking-wider text-muted">Operários (time)</p>
-                    <button
-                      onClick={() => setTeamModal(true)}
-                      disabled={teamCandidates.length === 0}
-                      className="flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-50"
-                    >
-                      <Users size={13} /> Selecionar
-                    </button>
-                  </div>
-                  {teamCandidates.length === 0 ? (
-                    <p className="text-xs text-muted">Crie outros modelos custom para usá-los como operários.</p>
-                  ) : team.length === 0 ? (
-                    <p className="text-xs text-muted">Nenhum operário no time. Clique em “Selecionar”.</p>
-                  ) : (
-                    <div className="max-h-44 space-y-1.5 overflow-y-auto pr-1">
-                      {team.map((tid) => (
-                        <div key={tid} className="flex items-center gap-2 rounded-lg border border-border bg-surface2 px-3 py-1.5">
-                          <Box size={13} className="shrink-0 text-accent-hover" />
-                          <span className="flex-1 truncate text-sm text-ink">{teamLabel(tid)}</span>
-                          <button
-                            onClick={() => toggleIsolate(tid)}
-                            title={isolate.includes(tid)
-                              ? "Worktree isolado: LIGADO — trabalha numa branch própria (sem colidir em paralelo); o resultado vira uma tarefa a revisar"
-                              : "Worktree isolado: desligado — escreve/lê no projeto direto (ideal para operários de revisão/leitura)"}
-                            className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[10px] font-medium transition-colors ${isolate.includes(tid) ? "bg-accent/15 text-accent-hover" : "text-muted hover:text-ink"}`}
-                          >
-                            <GitBranch size={12} /> worktree
-                          </button>
-                          <button
-                            onClick={() => setSubCfg({ team: team.filter((x) => x !== tid), isolate: isolate.filter((x) => x !== tid) })}
-                            title="Remover do time"
-                            className="rounded-md p-1 text-muted transition-colors hover:text-red-300"
-                          >
-                            <X size={14} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <label className="space-y-1">
-                    <span className="text-[11px] text-muted">Execução</span>
-                    <select value={subCfg.mode === "parallel" ? "parallel" : "sequential"} onChange={(e) => setSubCfg({ mode: e.target.value })} className={selCls}>
-                      <option value="sequential">Sequencial</option>
-                      <option value="parallel">Paralela</option>
-                    </select>
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-[11px] text-muted">Máx. chamadas/turno</span>
-                    <input type="number" min={1} max={10} value={subCfg.max_calls ?? 4} onChange={(e) => setSubCfg({ max_calls: Math.max(1, Math.min(10, Number(e.target.value) || 4)) })} className={inpCls} />
-                  </label>
-                  <label className="space-y-1">
-                    <span className="text-[11px] text-muted">Profundidade</span>
-                    <input type="number" min={1} max={3} value={subCfg.max_depth ?? 2} onChange={(e) => setSubCfg({ max_depth: Math.max(1, Math.min(3, Number(e.target.value) || 2)) })} className={inpCls} />
-                  </label>
-                </div>
-                <div className="space-y-2 border-t border-border pt-2.5">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm text-ink">Operários veem o contexto do chat</p>
-                      <p className="text-[11px] text-muted">Recebem o histórico recente da conversa (senão, só a tarefa).</p>
-                    </div>
-                    <Toggle on={!!subCfg.pass_context} onChange={(v) => setSubCfg({ pass_context: v })} />
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm text-ink">Operários usam memória própria</p>
-                      <p className="text-[11px] text-muted">Cada operário lê/escreve na memória do próprio modelo (config em Memória).</p>
-                    </div>
-                    <Toggle on={!!subCfg.worker_memory} onChange={(v) => setSubCfg({ worker_memory: v })} />
-                  </div>
-                  <div className="flex items-start gap-2 rounded-lg bg-surface2/60 px-3 py-2">
-                    <GitBranch size={13} className="mt-0.5 shrink-0 text-muted" />
-                    <p className="text-[11px] text-muted">
-                      <span className="text-ink-soft">Worktree isolado por-operário:</span> use o botão <span className="font-mono">worktree</span> em cada operário do time acima. Ligado, ele trabalha numa branch própria em projetos do Codespace (sem colidir em paralelo) e o resultado vira uma tarefa a revisar/mesclar. Deixe desligado para revisores (só leitura) — eles não abrem tarefa.
-                    </p>
-                  </div>
-                </div>
-                <p className="text-[11px] text-muted">
-                  Profundidade limita cadeias (operário chamando operário). Na conversa, você também chama um agente direto digitando <span className="font-mono text-ink-soft">@</span>.
-                </p>
+              <div className="flex items-center gap-2">
+                {subOn && (
+                  <button onClick={() => setSubModal(true)} title="Configurar subagentes" className="rounded-md p-1 text-muted transition-colors hover:text-ink">
+                    <Settings size={15} />
+                  </button>
+                )}
+                <Toggle on={subOn} onChange={setSubOn} />
               </div>
-            )}
+            </div>
           </div>
 
           {/* Extração de texto — config POR-MODELO, aplicável quando há Upload de Arquivos */}
@@ -2534,9 +2463,111 @@ export default function ModelEditor({
           </div>
         </CfgModal>
       )}
+      {subModal && (
+        <CfgModal title="Subagentes" onClose={() => setSubModal(false)}>
+          <div className="space-y-5">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">
+                  Seus agentes
+                  <InfoHint text="Modelos custom que você já configurou (prompt, ferramentas, permissões). A IA escolhe o mais adequado para cada tarefa." />
+                </p>
+                <button
+                  onClick={() => setTeamModal(true)}
+                  disabled={teamCandidates.length === 0}
+                  className="flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-50"
+                >
+                  <Users size={13} /> Selecionar
+                </button>
+              </div>
+              {team.length === 0 ? (
+                <p className="text-xs text-muted">{teamCandidates.length === 0 ? "Nenhum outro modelo custom." : "Nenhum agente selecionado."}</p>
+              ) : (
+                <div className="max-h-52 space-y-1.5 overflow-y-auto pr-1">
+                  {team.map((tid) => (
+                    <div key={tid} className="flex items-center gap-2 rounded-lg border border-border bg-surface2 px-3 py-1.5">
+                      <Box size={13} className="shrink-0 text-accent-hover" />
+                      <span className="flex-1 truncate text-sm text-ink">{teamLabel(tid)}</span>
+                      {worktreeOn && (
+                        <button
+                          onClick={() => toggleIsolate(tid)}
+                          title={isolate.includes(tid) ? "Trabalha num worktree próprio" : "Trabalha direto no projeto"}
+                          className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[10px] font-medium transition-colors ${isolate.includes(tid) ? "bg-accent/15 text-accent-hover" : "text-muted hover:text-ink"}`}
+                        >
+                          <GitBranch size={12} /> worktree
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setSubCfg({ team: team.filter((x) => x !== tid), isolate: isolate.filter((x) => x !== tid) })}
+                        title="Remover"
+                        className="rounded-md p-1 text-muted transition-colors hover:text-red-300"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2 border-t border-border pt-4">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="flex items-center gap-1.5 text-sm text-ink">Agentes criados pela IA <InfoHint text="A IA pode criar um agente para uma tarefa específica, dando a ele um nome e instruções. Ele usa as ferramentas e skills deste modelo, sem memória, e não cria outros agentes." /></span>
+                  <Toggle on={adhocOn} onChange={(v) => setSubCfg({ adhoc: v })} />
+                </div>
+              {adhocOn && (
+                <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <ModelField models={baseModels} value={subCfg.adhoc_model || ""} onChange={(v) => setSubCfg({ adhoc_model: v })} placeholder="Mesmo modelo deste" />
+                  </div>
+                  {subCfg.adhoc_model && (
+                    <button onClick={() => setSubCfg({ adhoc_model: "" })} title="Usar o mesmo modelo deste" className="rounded-md p-1 text-muted transition-colors hover:text-ink">
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-3">
+              <label className="space-y-1">
+                <span className="flex items-center gap-1.5 text-[11px] text-muted">Execução <InfoHint text="Paralela: quando a IA delega várias tarefas de uma vez, os agentes trabalham ao mesmo tempo. Sequencial: um de cada vez." /></span>
+                <select value={subCfg.mode === "parallel" ? "parallel" : "sequential"} onChange={(e) => setSubCfg({ mode: e.target.value })} className={selCls}>
+                  <option value="sequential">Sequencial</option>
+                  <option value="parallel">Paralela</option>
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="flex items-center gap-1.5 text-[11px] text-muted">Máx. por resposta <InfoHint text="Quantas delegações a IA pode fazer numa mesma resposta." /></span>
+                <input type="number" min={1} max={10} value={subCfg.max_calls ?? 4} onChange={(e) => setSubCfg({ max_calls: Math.max(1, Math.min(10, Number(e.target.value) || 4)) })} className={inpCls} />
+              </label>
+              <label className="space-y-1">
+                <span className="flex items-center gap-1.5 text-[11px] text-muted">Profundidade <InfoHint text="Até quantos níveis um agente pode delegar para outro (agente chamando agente). 1 = só este modelo delega." /></span>
+                <input type="number" min={1} max={3} value={subCfg.max_depth ?? 2} onChange={(e) => setSubCfg({ max_depth: Math.max(1, Math.min(3, Number(e.target.value) || 2)) })} className={inpCls} />
+              </label>
+            </div>
+
+            <div className="space-y-3 border-t border-border pt-4">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="flex items-center gap-1.5 text-sm text-ink">Contexto da conversa <InfoHint text="Os agentes recebem o histórico recente da conversa. Desligado, recebem só a tarefa." /></span>
+                  <Toggle on={!!subCfg.pass_context} onChange={(v) => setSubCfg({ pass_context: v })} />
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="flex items-center gap-1.5 text-sm text-ink">Memória própria <InfoHint text="Seus agentes leem e gravam na memória do próprio modelo (configurada em Memória). Agentes criados pela IA não usam memória." /></span>
+                  <Toggle on={!!subCfg.worker_memory} onChange={(v) => setSubCfg({ worker_memory: v })} />
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="flex items-center gap-1.5 text-sm text-ink">Worktree isolado <InfoHint text="Em projetos do Codespace, um agente pode trabalhar numa branch própria, sem colidir com outros em paralelo; o resultado vira uma tarefa para você revisar e mesclar. Ligado, cada um dos seus agentes ganha o botão worktree, e a IA decide para os que ela cria. Deixe desligado em agentes só de leitura, como revisores." /></span>
+                  <Toggle on={worktreeOn} onChange={(v) => setSubCfg({ worktree: v })} />
+                </div>
+            </div>
+          </div>
+        </CfgModal>
+      )}
+
       {teamModal && (
         <TransferModal
-          title="Operários (time)"
+          title="Seus agentes"
           items={teamItems}
           selected={team}
           onChange={(ids) => setSubCfg({ team: ids })}

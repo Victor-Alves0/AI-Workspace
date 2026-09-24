@@ -15,13 +15,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..providers import reasoning_details as _reasoning_details
-from .. import budget_service
+from .. import budget_service, uploads_service
 from ..auth.deps import require_approved
-from .. import uploads_service
 from ..config import get_settings
 from ..db import SessionLocal, get_db
 from ..models import Chat, Message, User
+from ..providers import reasoning_details as _reasoning_details
 from ..schemas.chat import MessageEdit, MessageOut, SendMessageIn
 from ..tools.loader import get_sift_for_user
 from ..usage_service import usage_event_from_record
@@ -41,7 +40,6 @@ from .turn_setup import (
     _get_owned_chat,
     _imaginai_turn_kwargs,
     _load_skills,
-    _make_subagent_runner,
     _media_opts,
     _mem_agent_id,
     _memory_opts,
@@ -56,17 +54,16 @@ from .turn_setup import (
     _resolve_guards,
     _resolve_knowledge,
     _resolve_provider,
-    _resolve_subagents,
     _session_tz,
     _skill_learning,
     _sse,
     _sse_stream,
-    _subagent_opts,
     _subscribe,
     _tz_from_header,
     _usage_record,
     _use_context,
     _user_profile_dict,
+    subagents_for_turn,
 )
 
 router = APIRouter()
@@ -404,14 +401,8 @@ async def send_message(
                 await emit({"type": "title", "title": new_title})
 
     guards = await _resolve_guards(db, user, model_config)
-    sub_specs, sub_conf = await _resolve_subagents(db, user, model_config)
-    sub_runner = _make_subagent_runner(
-        db, user, chat_id, sub_conf.get("max_depth", 2),
-        pass_context=sub_conf.get("pass_context", False),
-        worker_memory=sub_conf.get("worker_memory", False),
-        project_id=str(chat.project_id) if chat.project_id else None,
-        isolate_keys=frozenset(sub_conf.get("isolate") or []),
-    ) if sub_specs else None
+    subagent_opts = await subagents_for_turn(
+        db, user, chat_id, str(chat.project_id) if chat.project_id else None, model_config)
     # steer/fila: o loop do turno drena as mensagens de STEER desta geração. A `gen` só
     # existe após generation.start; um box de late-binding liga o drain à gen certa (o
     # driver só chama isto depois do start retornar). on_queue dispara a continuação.
@@ -462,7 +453,7 @@ async def send_message(
         ref_chats=await _ref_chats(db, user, body.ref_chat_ids),
         memory=_memory_opts(chat, model_config, user),
         media=await _media_opts(db, user, model_config, attachments=attachments),
-        subagent=_subagent_opts(sub_specs, sub_conf, sub_runner),
+        subagent=subagent_opts,
     )
     # a geração roda em background (desacoplada da request); a resposta abaixo é
     # só um assinante do buffer. F5/desconexão mata o assinante, não a geração.
@@ -664,14 +655,8 @@ async def regenerate_message(
             await emit({"type": "artifacts", "ids": arts_changed})
 
     guards = await _resolve_guards(db, user, model_config)
-    sub_specs, sub_conf = await _resolve_subagents(db, user, model_config)
-    sub_runner = _make_subagent_runner(
-        db, user, chat_id, sub_conf.get("max_depth", 2),
-        pass_context=sub_conf.get("pass_context", False),
-        worker_memory=sub_conf.get("worker_memory", False),
-        project_id=str(chat.project_id) if chat.project_id else None,
-        isolate_keys=frozenset(sub_conf.get("isolate") or []),
-    ) if sub_specs else None
+    subagent_opts = await subagents_for_turn(
+        db, user, chat_id, str(chat.project_id) if chat.project_id else None, model_config)
     source = run_turn_guarded(
         guards=guards,
         api_key=api_key,
@@ -705,7 +690,7 @@ async def regenerate_message(
         realtime_datetime=_realtime_datetime(model_config),
         memory=_memory_opts(chat, model_config, user),
         media=await _media_opts(db, user, model_config, attachments=user_attachments),
-        subagent=_subagent_opts(sub_specs, sub_conf, sub_runner),
+        subagent=subagent_opts,
     )
     gen = generation.start(
         str(chat_id), source, _finish,
