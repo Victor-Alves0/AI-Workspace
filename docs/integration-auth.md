@@ -80,7 +80,7 @@ Não é limitação nossa; estes serviços não oferecem outro caminho.
 | **Discord** | token de bot (Developer Portal) |
 | **LiteLLM / provedores personalizados** | chave do próprio endpoint |
 
-**WhatsApp** é o caso à parte que já é botão sem OAuth: a conexão pelo Evolution é
+**WhatsApp** é o caso à parte que já é botão sem OAuth: a conexão embutida (whatsmeow) é
 por QR Code.
 
 ## Ao adicionar uma integração nova

@@ -87,7 +87,7 @@ desktop app with a tray icon.
 **Content & media**
 - **Artifacts** (code/docs/HTML/SVG/Mermaid/CSV) in a dedicated window, with versions
 - **Image generation** (native or via a router) and video (Higgsfield)
-- **Voice** OpenAI-compatible TTS/STT, incl. local **Kokoro** and voice cloning
+- **Voice** built-in local TTS (Kokoro, no extra service) plus any OpenAI-compatible TTS/STT, incl. voice cloning
 
 </td><td valign="top" width="50%">
 
@@ -100,7 +100,7 @@ desktop app with a tray icon.
 **Automation & channels**
 - **Automations** (schedules) + **monitors** (price/page/search/RSS)
 - In-app notifications, **Web Push** and delivery through channels
-- **WhatsApp** (Evolution/QR or Cloud API), **Telegram** and **Discord**
+- **WhatsApp** (built-in QR pairing or Cloud API), **Telegram** and **Discord**
 
 **Platform & operations**
 - **OpenAI-compatible public API** + key management, limits and costs
@@ -146,7 +146,7 @@ The code is organized as a monorepo:
 apps/server    FastAPI — auth, chat orchestrator, SIFT, memory, RAG, integrations, /v1 API
 apps/web       Next.js (App Router) — chat interface, workspace, settings
 desktop        Desktop shell (Tauri) — native window, tray, autostart
-infra/         Configs for optional services (SearXNG etc.)
+infra/         Updater sidecar, proxy and optional service configs
 ```
 
 Docker Compose services:
@@ -156,8 +156,7 @@ Docker Compose services:
 | `db`        | ✅      | internal    | Postgres 16 + pgvector (data + vectors)          |
 | `server`    | ✅      | `8000`      | FastAPI API                                       |
 | `web`       | ✅      | `41414`     | Next.js interface                                 |
-| `kokoro`    | opt-in  | `8880`      | `docker compose --profile voice up -d`           |
-| `evolution` | opt-in  | `8081`      | `docker compose --profile whatsapp up -d`        |
+| `updater`   | ✅      | internal    | Applies "Update now" from the admin panel         |
 | `browser`   | opt-in  | `3009`      | `docker compose --profile browser up -d`         |
 
 Details in **[docs/architecture.md](docs/architecture.md)**.
@@ -209,15 +208,6 @@ Accessing over the **local network or a VPS**, with a **domain + HTTPS**, or nee
 Heavy features come up on demand via Compose _profiles_:
 
 ```bash
-# Self-hosted web search (SearXNG, no API key)
-docker compose --profile search up -d searxng
-
-# Local voice (Kokoro-FastAPI, OpenAI-compatible TTS)
-docker compose --profile voice up -d kokoro
-
-# Unofficial WhatsApp (Evolution API, QR Code)
-docker compose --profile whatsapp up -d
-
 # Headless browser (Chromium via browserless) for the browsing tool
 docker compose --profile browser up -d
 ```

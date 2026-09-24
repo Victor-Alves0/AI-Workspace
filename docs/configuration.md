@@ -26,7 +26,6 @@ cp .env.example .env
 | `CADDY_MODE` | `local` | `local` = internal CA, certificate issued on demand for whatever name/IP is used. `public` = Let's Encrypt for the domain in `CADDY_SITE`. See [https.md](https.md). |
 | `WEB_ORIGIN` | `https://localhost` | Extra origins accepted by CORS. Only needed for a **public domain** — the proxy puts frontend and API on the same origin, and any private-network IP over https is already accepted. |
 | `HTTPS_PORT` / `HTTP_PORT` | `443` / `80` | Change when the host already uses those ports. |
-| `EVOLUTION_API_KEY` | — | Shared key of the `whatsapp` profile (Evolution service). |
 | `BROWSER_TOKEN` | — | Shared token of the `browser` profile (headless Chromium over CDP). |
 
 > **`APP_SECRET` does not grant database access** (that's the Postgres password) — it encrypts
@@ -92,7 +91,7 @@ Outside Docker (`uvicorn`, desktop build) `.env` is read directly and every vari
 | `SERVER_BIND` / `SERVER_PORT` | `127.0.0.1` / `8000` | API in plain HTTP, same reasoning. |
 | `TRUST_PROXY` | `true` in compose | Makes the server trust `X-Forwarded-*` (real client IP, http/https). Turn it off if you publish port 8000 straight to the internet. |
 | `NEXT_PUBLIC_API_URL` | empty | Backend URL baked into the web build. **Leave it empty** — the frontend derives the API from the page origin, so one build serves localhost, LAN and VPS. |
-| `SEARXNG_PORT` · `EVOLUTION_PORT` · `KOKORO_PORT` · `BROWSER_PORT` | `8080` · `8081` · `8880` · `3009` | Host ports of the opt-in profiles. |
+| `BROWSER_PORT` | `3009` | Host port of the opt-in `browser` profile. |
 | `CHATGPT_OAUTH_BIND` / `CHATGPT_OAUTH_PORT` | `127.0.0.1` / `1455` | Fixed callback of the ChatGPT/Codex login. |
 | `PREVIEW_BIND` / `PREVIEW_PORT_MIN` / `PREVIEW_PORT_MAX` | `127.0.0.1` / `4001` / `4010` | Codespace own-origin previews. **Unauthenticated ports** — keep them on loopback and use `/codespace/preview/<port>/` from other devices. |
 
@@ -123,8 +122,8 @@ registered in each provider's console — on a public domain all five change. Se
 | `OPENROUTER_REDIRECT_URI` | `http://localhost:8000/integrations/providers/openrouter/callback` |
 | `GITHUB_DEVICE_CLIENT_ID` | empty — public client id of "Sign in with GitHub" (device flow); empty falls back to a Personal Access Token |
 | `BROWSER_WS_URL` | `ws://browser:3000` in compose — CDP endpoint of the headless browser; `local` drives the Edge/Chrome installed on the machine (the desktop app uses this); empty disables the tool |
-| `EVOLUTION_API_URL` | empty = the compose service; set it for a remote Evolution instance |
-| `WHATSAPP_QR_BACKEND` | `auto` — QR-code WhatsApp engine: `evolution` (the compose service), `local` (whatsmeow embedded via the optional `neonize` extra — the desktop app), or `auto` (Evolution when configured, else local when installed) |
+| `EVOLUTION_API_URL` | empty — only to keep using an external Evolution API instance |
+| `WHATSAPP_QR_BACKEND` | `auto` — QR-code WhatsApp engine: `local` (whatsmeow embedded, the default in Docker and desktop), `evolution` (external instance at `EVOLUTION_API_URL`), or `auto` (local when installed, else Evolution when configured) |
 | `WHATSAPP_LOCAL_DIR` | empty = `<uploads>/../whatsapp` — where the local engine keeps one session file per connection |
 | `WHATSAPP_WEBHOOK_BASE` | `http://server:8000` — public https URL for Meta's official Cloud API webhooks |
 

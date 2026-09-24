@@ -29,6 +29,6 @@ Reference guide for AI Workspace. If you just want to get it running, start with
   Compose. The only required external egress is the model provider (OpenRouter).
 - **Per-user secrets** (OpenRouter, Tavily/Brave, voice, bot/OAuth tokens) are saved **in the
   interface**, encrypted at rest — they do **not** go in `.env`.
-- **Infrastructure secrets** (`APP_SECRET`, the Postgres password, the Evolution key) go in
+- **Infrastructure secrets** (`APP_SECRET`, the Postgres password) go in
   `.env`, which must **never** be committed.
 </content>

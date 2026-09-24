@@ -27,7 +27,7 @@ flowchart TB
 
     DB[("Postgres 16 + pgvector")]
     OR["OpenRouter / Ollama"]
-    EXT["Opt-in services<br/>SearXNG · Kokoro · Evolution · browserless"]
+    EXT["Opt-in services<br/>browserless"]
 
     W & D & CH & API --> AUTH --> ORQ
     ORQ --> SIFT & MEM & RAG & OBS
@@ -135,9 +135,6 @@ Heavy features live in separate services that only come up on demand:
 
 | Profile    | Service      | Role                                                    |
 |------------|--------------|---------------------------------------------------------|
-| `search`   | SearXNG      | Self-hosted metasearch for web search                   |
-| `voice`    | Kokoro       | Local OpenAI-compatible TTS/STT                         |
-| `whatsapp` | Evolution    | Unofficial WhatsApp (QR Code)                           |
 | `browser`  | browserless  | AI-controlled headless Chromium (browsing tool)         |
 
 ## Persisted volumes
@@ -147,5 +144,6 @@ Heavy features live in separate services that only come up on demand:
 | `pgdata`               | Postgres data (includes vectors and embeddings)     |
 | `mlcache`              | Embedding models (FastEmbed/HF) + SIFT indexes       |
 | `codespace_data`       | Working copies of Codespace projects + graph         |
-| `evolution_instances`  | Evolution sessions (WhatsApp)                         |
+| `whatsapp_data`        | QR-paired WhatsApp sessions (embedded whatsmeow)     |
+| `updater_state`        | Updater token + status (server mounts it read-only)  |
 </content>
