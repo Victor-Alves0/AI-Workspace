@@ -4803,7 +4803,8 @@ def _signature(
     return (
         rows,
         search_cfg.provider,
-        search_cfg.searxng_url,
+        search_cfg.engines,
+        search_cfg.region,
         tuple(search_cfg.providers),
         search_cfg.multi,
         search_cfg.max_results,
@@ -4992,13 +4993,12 @@ def search_config_from_secrets(
     """Config de busca: prefs do usuário (profile.web_search) sobrepõem o env."""
     s = get_settings()
     prefs = web_prefs or {}
-    provider = (prefs.get("primary") or s.web_search_provider or "duckduckgo")
+    provider = (prefs.get("primary") or s.web_search_provider or "metasearch")
     try:
         max_results = int(prefs.get("max_results") or s.web_search_max_results)
     except (TypeError, ValueError):
         max_results = s.web_search_max_results
     max_results = max(1, min(max_results, 15))
-    searxng_url = (prefs.get("searxng_url") or s.searxng_url)
     providers = tuple(p for p in (prefs.get("providers") or ()) if isinstance(p, str) and p)
     domain_filter = tuple(
         d.strip() for d in str(prefs.get("domain_filter") or "").split(",") if d.strip()
@@ -5006,7 +5006,8 @@ def search_config_from_secrets(
     return SearchConfig(
         provider=provider,
         max_results=max_results,
-        searxng_url=searxng_url,
+        engines=str(prefs.get("engines") or "auto"),
+        region=str(prefs.get("region") or "wt-wt"),
         tavily_api_key=tavily,
         brave_api_key=brave,
         providers=providers,

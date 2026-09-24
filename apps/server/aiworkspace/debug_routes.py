@@ -160,6 +160,4 @@ async def providers(
         result["openrouter"].update(
             await reach(f"{s.openrouter_base_url}/models")
         )
-    if s.web_search_provider == "searxng":
-        result["searxng"] = await reach(s.searxng_url)
     return result

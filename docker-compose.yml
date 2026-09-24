@@ -146,18 +146,6 @@ services:
   # OPT-IN: `docker compose --profile search up -d searxng`. Depois, no .env:
   #   WEB_SEARCH_PROVIDER=searxng   (o server já aponta p/ http://searxng:8080)
   # Config em infra/searxng/settings.yml (formato JSON ligado, limiter desligado).
-  searxng:
-    image: searxng/searxng:latest
-    profiles: ["search"]
-    restart: unless-stopped
-    volumes:
-      - ./infra/searxng:/etc/searxng:rw
-    environment:
-      SEARXNG_BASE_URL: http://localhost:${SEARXNG_PORT:-8080}/
-    ports:
-      # só no host (127.0.0.1): o server acessa pela rede do compose (searxng:8080)
-      - "${SEARXNG_BIND:-127.0.0.1}:${SEARXNG_PORT:-8080}:8080"
-
   # WhatsApp NÃO oficial (QR Code) — Evolution API (Baileys).
   # OPT-IN: só sobe com `docker compose --profile whatsapp up -d`.
   # Requer o banco "evolution" no Postgres (criado automaticamente em volumes

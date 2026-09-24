@@ -58,7 +58,7 @@ the choice belongs to that chat.
 The AI discovers and executes tools on demand. Categories: **native**, **Codespace** and
 **integration**.
 
-- **Web search** (DuckDuckGo, SearXNG, Tavily or Brave) and **deep search** (multi-step, with
+- **Web search** (built-in metasearch — Bing, Brave, DuckDuckGo, Google and more, no key — Tavily or Brave) and **deep search** (multi-step, with
   synthesis).
 - **Page reading** and **headless browser**: the AI controls a real Chromium (navigate, click,
   type, screenshot) in a tab that persists per conversation. With an anti-SSRF guard.

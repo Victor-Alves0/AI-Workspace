@@ -89,9 +89,8 @@ class Settings(BaseSettings):
     openrouter_app_url: str = "https://ai-workspace.app"
 
     # Web search
-    # provider padrão: searxng (self-hosted, sem chave). Alternativas: tavily, brave, duckduckgo
-    web_search_provider: str = "duckduckgo"
-    searxng_url: str = "http://localhost:8080"
+    # provider padrão: metabusca embutida (sem chave, vários motores). Alternativas: tavily, brave
+    web_search_provider: str = "metasearch"
     web_search_max_results: int = 5
 
     # Voz (TTS/STT) — endpoint compatível com OpenAI (/audio/speech, /audio/transcriptions).

@@ -181,7 +181,7 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Provedores", cat: "connections", view: "apis/providers" },
   { label: "LiteLLM", cat: "connections", view: "apis/providers" },
   { label: "Web", cat: "connections", view: "web" },
-  { label: "SearXNG", cat: "connections", view: "web" },
+  { label: "Metabusca", cat: "connections", view: "web" },
   { label: "Pesquisa na web (mecanismo padrão)", cat: "connections", view: "web" },
   { label: "Navegador (Browser)", cat: "connections", view: "web" },
   { label: "Testar conexão (web / navegador)", cat: "connections", view: "web" },
@@ -1819,7 +1819,7 @@ function StatusRow({ label, state, detail, actionLabel, onAction, extra }: {
 
 interface Status {
   openrouter_key: boolean; default_model: string | null;
-  web: { provider: string; searxng_url?: string };
+  web: { provider: string };
   voice: boolean; whatsapp: { count: number; connected: number };
   google: number; tuya: boolean;
   budget: { enabled: boolean; over: boolean; blocked: boolean; spent: number; cap: number; mode: string };
@@ -1867,7 +1867,7 @@ function StatusTab({ user, onGoto }: { user: User | null; onGoto: (cat: Cat, vie
         <StatusRow
           label="Pesquisa na web"
           state="ok"
-          detail={`Mecanismo: ${st.web.provider}${st.web.provider === "searxng" ? ` · ${st.web.searxng_url ?? ""}` : ""}`}
+          detail={`Mecanismo: ${["duckduckgo", "searxng", "metasearch"].includes(st.web.provider) ? "Metabusca" : st.web.provider}`}
           actionLabel="Configurar"
           onAction={() => onGoto("connections", "web")}
         />

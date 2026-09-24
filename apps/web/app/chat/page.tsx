@@ -2259,7 +2259,7 @@ export default function ChatPage() {
     { id: "set-general", group: "Configurações", label: "Configurações", sublabel: "Geral", icon: <SlidersHorizontal size={16} />, run: () => openSettings("general") },
     { id: "set-status", group: "Configurações", label: "Status do sistema", keywords: "saude chave conexao", icon: <SlidersHorizontal size={16} />, run: () => openSettings("status") },
     { id: "set-budget", group: "Configurações", label: "Orçamento mensal", keywords: "conta gasto limite custo", icon: <SlidersHorizontal size={16} />, run: () => openSettings("account") },
-    { id: "set-conn", group: "Configurações", label: "Conexões (APIs, Web, Voz)", keywords: "openrouter chave searxng", icon: <SlidersHorizontal size={16} />, run: () => openSettings("connections") },
+    { id: "set-conn", group: "Configurações", label: "Conexões (APIs, Web, Voz)", keywords: "openrouter chave busca metabusca", icon: <SlidersHorizontal size={16} />, run: () => openSettings("connections") },
     { id: "set-integ", group: "Configurações", label: "Integrações (WhatsApp, Google)", keywords: "whatsapp google tuya", icon: <SlidersHorizontal size={16} />, run: () => openSettings("integrations") },
     ...customModels.map((mc): PaletteItem => ({
       id: `model-${mc.id}`, group: "Modelos", label: mc.name, sublabel: mc.base_model,

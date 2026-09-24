@@ -102,8 +102,7 @@ Outside Docker (`uvicorn`, desktop build) `.env` is read directly and every vari
 |---|---|---|
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Model provider endpoint. |
 | `OPENROUTER_APP_NAME` / `OPENROUTER_APP_URL` | `AI Workspace` / `https://ai-workspace.app` | Identification shown in the OpenRouter dashboard. *(override-only)* |
-| `WEB_SEARCH_PROVIDER` | `duckduckgo` | Fallback when the user has no preference: `duckduckgo` · `searxng` · `tavily` · `brave`. |
-| `SEARXNG_URL` | `http://searxng:8080` | Only for an external SearXNG (needs the JSON format enabled). |
+| `WEB_SEARCH_PROVIDER` | `metasearch` | Fallback when the user has no preference: `metasearch` (built-in, several engines, no key) · `tavily` · `brave`. |
 | `WEB_SEARCH_MAX_RESULTS` | `5` | Results per search. *(override-only)* |
 | `VOICE_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible speech endpoint. Local voice is configured per user in the app. |
 | `TTS_MODEL` / `TTS_VOICE` / `STT_MODEL` | `tts-1` / `alloy` / `whisper-1` | Defaults when the user picked nothing. *(override-only)* |

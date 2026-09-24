@@ -124,9 +124,8 @@ async def search_config(user: User = Depends(require_approved)):
     s = get_settings()
     return {
         "provider": s.web_search_provider,
-        "searxng_url": s.searxng_url,
         "max_results": s.web_search_max_results,
-        "available_providers": ["duckduckgo", "searxng", "tavily", "brave"],
+        "available_providers": ["metasearch", "tavily", "brave"],
     }
 
 
@@ -175,7 +174,7 @@ async def system_status(
 
     uid = user.id
     web = (user.profile or {}).get("web_search") or {}
-    provider = (web.get("primary") or get_settings().web_search_provider or "duckduckgo")
+    provider = (web.get("primary") or get_settings().web_search_provider or "metasearch")
 
     wa_rows = list(await db.scalars(
         select(WhatsAppConnection).where(WhatsAppConnection.user_id == uid)
@@ -188,7 +187,7 @@ async def system_status(
     out: dict = {
         "openrouter_key": await has_secret(db, uid, OPENROUTER_KEY),
         "default_model": user.default_model,
-        "web": {"provider": provider, "searxng_url": web.get("searxng_url") or get_settings().searxng_url},
+        "web": {"provider": provider},
         "voice": (await voice_service.get_provider(db, uid)) is not None,
         "whatsapp": {"count": len(wa_rows), "connected": wa_connected},
         "google": int(google_count or 0),
@@ -207,21 +206,22 @@ async def system_status(
 
 
 class WebTestIn(BaseModel):
-    provider: str = "duckduckgo"
-    searxng_url: str = ""
+    provider: str = "metasearch"
+    engines: str = ""
+    region: str = ""
 
 
 @router.post("/test/web")
 async def test_web_search(
     body: WebTestIn, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
 ):
-    """Testa um mecanismo de busca (SearXNG/DuckDuckGo/Tavily/Brave) com uma consulta
+    """Testa um mecanismo de busca (metabusca/Tavily/Brave) com uma consulta
     de sonda. Devolve {ok, count, error} — sem tocar na config salva."""
-    provider = (body.provider or "duckduckgo").strip().lower()
+    provider = (body.provider or "metasearch").strip().lower()
     tavily = await get_secret(db, user.id, TAVILY_KEY)
     brave = await get_secret(db, user.id, BRAVE_KEY)
     prefs = {"primary": provider, "providers": [provider], "multi": False,
-             "searxng_url": body.searxng_url or ""}
+             "engines": body.engines, "region": body.region}
     cfg = sift_service.search_config_from_secrets(tavily, brave, prefs)
     try:
         from .search import web_search_detailed

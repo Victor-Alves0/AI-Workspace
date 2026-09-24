@@ -76,7 +76,7 @@ desktop app with a tray icon.
 - **Temporary chat**, non-destructive context **compaction** and **reference chats**
 
 **Tools (SIFT)**
-- Web search (DuckDuckGo/SearXNG/Tavily/Brave) and **deep search**
+- Web search (built-in metasearch over several engines, Tavily or Brave) and **deep search**
 - Page reading and **headless browser** (AI-controlled Chromium)
 - Charts, diagrams (Mermaid/Excalidraw), financial quotes, date/time
 - **Video/audio transcription** (YouTube + ~1800 sites)
@@ -156,7 +156,6 @@ Docker Compose services:
 | `db`        | ✅      | internal    | Postgres 16 + pgvector (data + vectors)          |
 | `server`    | ✅      | `8000`      | FastAPI API                                       |
 | `web`       | ✅      | `41414`     | Next.js interface                                 |
-| `searxng`   | opt-in  | `8080`      | `docker compose --profile search up -d`          |
 | `kokoro`    | opt-in  | `8880`      | `docker compose --profile voice up -d`           |
 | `evolution` | opt-in  | `8081`      | `docker compose --profile whatsapp up -d`        |
 | `browser`   | opt-in  | `3009`      | `docker compose --profile browser up -d`         |

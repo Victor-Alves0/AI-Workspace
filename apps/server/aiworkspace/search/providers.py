@@ -1,10 +1,15 @@
 """Providers de pesquisa na web. Todos retornam uma lista normalizada de resultados.
 
 Suportados:
-  - duckduckgo  (sem chave, padrão — via lib ddgs)
-  - searxng     (self-hosted, sem chave — JSON API)
+  - metasearch  (sem chave, padrão) — metabusca DENTRO do processo (lib ddgs): consulta
+                em paralelo Bing, Brave, DuckDuckGo, Google, Mojeek, Startpage, Yahoo,
+                Yandex e Wikipedia, junta, tira duplicados e ordena. Faz o papel que o
+                SearXNG fazia, sem container.
   - tavily      (chave de API)
   - brave       (chave de API)
+
+`duckduckgo` e `searxng` continuam aceitos (preferências antigas): o primeiro vira a
+metabusca só com o DuckDuckGo; o segundo, a metabusca completa.
 
 A escolha do provider e as chaves vêm de `SearchConfig` (montada por chamada,
 considerando env global + segredos do usuário).
@@ -27,9 +32,12 @@ class SearchResult(TypedDict):
 
 @dataclass
 class SearchConfig:
-    provider: str = "duckduckgo"
+    provider: str = "metasearch"
     max_results: int = 5
-    searxng_url: str = "http://localhost:8080"
+    # metabusca: motores da ddgs separados por vírgula ("auto" = todos) e região
+    # ("wt-wt" = sem região; "br-pt" prioriza resultados do Brasil)
+    engines: str = "auto"
+    region: str = "wt-wt"
     tavily_api_key: str | None = None
     brave_api_key: str | None = None
     # multi-mecanismo: consulta vários e mescla os resultados (dedup por URL)
@@ -41,15 +49,17 @@ class SearchConfig:
 
 class SearchProviderError(Exception):
     """O provider respondeu, mas não tem como entregar resultado — e o motivo importa
-    (ex.: SearXNG no ar com todos os motores barrados por CAPTCHA). Sem isto o motivo
+    (ex.: todos os motores da metabusca barrados por CAPTCHA). Sem isto o motivo
     virava "nenhum resultado" e ninguém sabia o que consertar."""
 
 
 _PROVIDERS = {
-    "searxng": lambda q, c: _searxng(q, c),
+    "metasearch": lambda q, c: _metasearch(q, c),
     "tavily": lambda q, c: _tavily(q, c),
     "brave": lambda q, c: _brave(q, c),
-    "duckduckgo": lambda q, c: _duckduckgo(q, c),
+    # preferências antigas
+    "duckduckgo": lambda q, c: _metasearch(q, c, engines="duckduckgo"),
+    "searxng": lambda q, c: _metasearch(q, c),
 }
 
 
@@ -63,7 +73,7 @@ def _blocked(url: str, domains: tuple[str, ...]) -> bool:
 async def _one(
     provider: str, query: str, cfg: SearchConfig
 ) -> tuple[list[SearchResult], str | None]:
-    fn = _PROVIDERS.get((provider or "").lower(), _PROVIDERS["duckduckgo"])
+    fn = _PROVIDERS.get((provider or "").lower(), _PROVIDERS["metasearch"])
     try:
         return await fn(query, cfg), None
     except Exception as exc:  # noqa: BLE001 - um provider falho não derruba a busca
@@ -83,9 +93,9 @@ async def web_search_detailed(
     conexão e a tool dizerem POR QUE veio vazio."""
     # define a lista de mecanismos a consultar
     if cfg.multi and cfg.providers:
-        provs = list(dict.fromkeys(p.lower() for p in cfg.providers if p)) or ["duckduckgo"]
+        provs = list(dict.fromkeys(p.lower() for p in cfg.providers if p)) or ["metasearch"]
     else:
-        provs = [(cfg.provider or "duckduckgo").lower()]
+        provs = [(cfg.provider or "metasearch").lower()]
 
     results: list[SearchResult] = []
     errors: list[str] = []
@@ -112,63 +122,30 @@ async def web_search_detailed(
     return out, errors
 
 
-async def _duckduckgo(query: str, cfg: SearchConfig) -> list[SearchResult]:
+async def _metasearch(query: str, cfg: SearchConfig, engines: str | None = None) -> list[SearchResult]:
+    """Metabusca da ddgs: dispara vários motores em paralelo e agrega/ordena."""
     def _run() -> list[SearchResult]:
         from ddgs import DDGS
+        from ddgs.exceptions import DDGSException
 
-        out: list[SearchResult] = []
-        with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=cfg.max_results):
-                out.append(
-                    {
-                        "title": r.get("title", ""),
-                        "url": r.get("href", r.get("url", "")),
-                        "content": r.get("body", ""),
-                    }
-                )
-        return out
+        try:
+            found = DDGS().text(
+                query,
+                region=cfg.region or "wt-wt",
+                safesearch="moderate",
+                max_results=cfg.max_results,
+                backend=(engines or cfg.engines or "auto"),
+            )
+        except DDGSException as exc:
+            # "No results found" com todos os motores falhando (ex.: CAPTCHA de IP de
+            # servidor): o motivo precisa chegar ao teste de conexão e à tool
+            raise SearchProviderError(f"metabusca sem resultado: {exc}") from exc
+        return [
+            {"title": r.get("title", ""), "url": r.get("href", r.get("url", "")), "content": r.get("body", "")}
+            for r in found or []
+        ]
 
     return await run_in_threadpool(_run)
-
-
-async def _searxng(query: str, cfg: SearchConfig) -> list[SearchResult]:
-    async with httpx.AsyncClient(timeout=20) as client:
-        resp = await client.get(
-            f"{cfg.searxng_url.rstrip('/')}/search",
-            params={"q": query, "format": "json", "safesearch": 1},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    results = data.get("results") or []
-    if not results:
-        # o SearXNG só repassa os motores (Google, DuckDuckGo…); de IP de servidor eles
-        # costumam devolver CAPTCHA. Ele lista quem falhou em `unresponsive_engines`.
-        falhas = _searxng_failures(data)
-        if falhas:
-            raise SearchProviderError(
-                "SearXNG respondeu, mas os motores falharam: " + ", ".join(falhas)
-            )
-    return [
-        {
-            "title": r.get("title", ""),
-            "url": r.get("url", ""),
-            "content": r.get("content", ""),
-        }
-        for r in results[: cfg.max_results]
-    ]
-
-
-def _searxng_failures(data: dict) -> list[str]:
-    """`unresponsive_engines` = [[motor, motivo], ...] → ["duckduckgo (CAPTCHA)", ...]."""
-    out: list[str] = []
-    for item in data.get("unresponsive_engines") or []:
-        if isinstance(item, (list, tuple)) and item:
-            nome = str(item[0])
-            motivo = str(item[1]) if len(item) > 1 and item[1] else ""
-            out.append(f"{nome} ({motivo})" if motivo else nome)
-        elif isinstance(item, str):
-            out.append(item)
-    return out
 
 
 async def _tavily(query: str, cfg: SearchConfig) -> list[SearchResult]:

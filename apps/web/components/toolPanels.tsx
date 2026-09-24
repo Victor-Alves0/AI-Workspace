@@ -96,18 +96,33 @@ function KeyStatus({ label, configured, hint }: { label: string; configured: boo
 
 /* ----------------------------- Pesquisa na Web ---------------------------- */
 const ENGINES: { key: string; label: string; keyed: boolean; note: string }[] = [
-  { key: "duckduckgo", label: "DuckDuckGo", keyed: false, note: "Sem chave" },
-  { key: "searxng", label: "SearXNG", keyed: false, note: "Self-hosted" },
+  { key: "metasearch", label: "Metabusca", keyed: false, note: "Vários motores · sem chave" },
   { key: "tavily", label: "Tavily", keyed: true, note: "Requer chave" },
   { key: "brave", label: "Brave Search", keyed: true, note: "Requer chave" },
 ];
+// motores da metabusca (lib ddgs, roda no próprio servidor); nenhum marcado = todos
+const META_ENGINES: [string, string][] = [
+  ["bing", "Bing"], ["brave", "Brave"], ["duckduckgo", "DuckDuckGo"], ["google", "Google"],
+  ["mojeek", "Mojeek"], ["startpage", "Startpage"], ["yahoo", "Yahoo"], ["yandex", "Yandex"],
+  ["wikipedia", "Wikipedia"],
+];
+const REGIONS: [string, string][] = [
+  ["wt-wt", "Global"], ["br-pt", "Brasil"], ["pt-pt", "Portugal"], ["us-en", "Estados Unidos"],
+];
+// preferências antigas (DuckDuckGo / SearXNG) = a metabusca
+const normEngine = (k: string) => (k === "duckduckgo" || k === "searxng" ? "metasearch" : k);
 
 export function WebSearchPanel({ value, onChange, status, scope = "model" }: PanelProps & { scope?: "model" | "user" }) {
   const ws = value ?? {};
   const wsSet = (k: string, v: any) => onChange({ ...ws, [k]: v });
-  const primary: string = ws.primary ?? "duckduckgo";
+  const primary: string = normEngine(ws.primary ?? "metasearch");
   const multi = !!ws.multi;
-  const providers: string[] = ws.providers ?? [primary];
+  const providers: string[] = Array.from(new Set(((ws.providers as string[] | undefined) ?? [primary]).map(normEngine)));
+  const motores: string[] = String(ws.engines ?? "").split(",").map((x) => x.trim()).filter((x) => x && x !== "auto");
+  const toggleMotor = (k: string) => {
+    const prox = motores.includes(k) ? motores.filter((x) => x !== k) : [...motores, k];
+    wsSet("engines", prox.length ? prox.join(",") : "auto");
+  };
   const toggleProv = (k: string) => wsSet("providers", providers.includes(k) ? providers.filter((x) => x !== k) : [...providers, k]);
   const active = multi ? ENGINES.filter((e) => providers.includes(e.key)) : ENGINES.filter((e) => e.key === primary);
   const maxResults = ws.max_results === "" ? "" : ws.max_results ?? 5;
@@ -152,18 +167,33 @@ export function WebSearchPanel({ value, onChange, status, scope = "model" }: Pan
               <span className="flex items-center gap-2 text-sm font-medium text-ink"><Globe size={14} className="text-accent-hover" /> {e.label}</span>
               <span className="text-[11px] text-muted">{e.note}</span>
             </div>
-            {e.key === "searxng" && (
-              <div className="pt-2">
-                <p className="mb-1 text-xs text-muted">URL do SearXNG</p>
-                <input value={ws.searxng_url ?? ""} onChange={(ev) => wsSet("searxng_url", ev.target.value)} placeholder="http://searxng:8080"
-                  className="w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-xs text-ink outline-none focus:border-accent" />
+            {e.key === "metasearch" && (
+              <div className="space-y-2.5 pt-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs text-muted">Região</p>
+                  <select value={ws.region ?? "wt-wt"} onChange={(ev) => wsSet("region", ev.target.value)}
+                    className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
+                    {REGIONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <p className="mb-1.5 text-xs text-muted">Motores {motores.length === 0 && <span className="text-ink-soft">· todos</span>}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {META_ENGINES.map(([k, l]) => {
+                      const sel = motores.includes(k);
+                      return (
+                        <button key={k} onClick={() => toggleMotor(k)}
+                          className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${sel ? "border-accent/50 bg-accent/15 text-accent-hover" : "border-border text-muted hover:text-ink"}`}>{l}</button>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             )}
             {e.key === "tavily" && <KeyStatus label="Chave Tavily" configured={status?.tavily ?? false} />}
             {e.key === "brave" && <KeyStatus label="Chave Brave Search" configured={status?.brave ?? false} />}
-            {e.key === "duckduckgo" && <p className="pt-1 text-xs text-muted">Não requer configuração.</p>}
             <div className="pt-2">
-              <TestButton run={() => api.post<TestResult>("/settings/test/web", { provider: e.key, searxng_url: ws.searxng_url ?? "" })} />
+              <TestButton run={() => api.post<TestResult>("/settings/test/web", { provider: e.key, engines: ws.engines ?? "", region: ws.region ?? "" })} />
             </div>
           </div>
         ))}
