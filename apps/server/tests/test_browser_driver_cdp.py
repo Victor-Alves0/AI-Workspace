@@ -123,6 +123,27 @@ def test_enter_envia_o_formulario(driver, site):
     assert "recebi teste" in st["text"]
 
 
+def test_alvo_pelo_numero_da_lista(driver, site):
+    """O número que a leitura mostra (`elements[].i`) serve de alvo para clicar e digitar
+    — o mesmo elemento, pela mesma enumeração."""
+    st = driver.goto(bd.LOCAL, "c1", f"{site}/index.html")
+    botao = next(e["i"] for e in st["elements"] if e["text"] == "Mudar texto")
+    assert "texto mudou" in driver.click(bd.LOCAL, "c1", str(botao))["text"]
+
+    st = driver.goto(bd.LOCAL, "c1", f"{site}/form.html")
+    campo = next(e["i"] for e in st["elements"] if e["tag"] == "input")
+    assert "eco:Bia" in driver.type(bd.LOCAL, "c1", str(campo), "Bia", False)["text"]
+
+
+def test_numero_que_nao_e_campo_ou_nao_existe(driver, site):
+    st = driver.goto(bd.LOCAL, "c1", f"{site}/index.html")
+    botao = next(e["i"] for e in st["elements"] if e["text"] == "Mudar texto")
+    with pytest.raises(bd.CDPError, match="not a text field"):
+        driver.type(bd.LOCAL, "c1", str(botao), "x", False)
+    with pytest.raises(bd.CDPError, match="not found"):
+        driver.click(bd.LOCAL, "c1", "99")
+
+
 def test_screenshot_e_png(driver, site):
     driver.goto(bd.LOCAL, "c1", f"{site}/index.html")
 

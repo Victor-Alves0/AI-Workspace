@@ -55,10 +55,15 @@ _UA = (
     "Chrome/125.0.0.0 Safari/537.36"
 )
 
-# Estado da página num Runtime.evaluate só: título, URL, texto e os elementos
-# interativos VISÍVEIS (links/botões/campos) com o texto acessível — a IA clica/digita
-# mirando esse texto (ou um seletor CSS).
-_STATE_JS = """(() => {
+# Declarados DENTRO da função de cada chamada: `const` no escopo global da página
+# quebraria na 2a chamada ("Identifier '__vis' has already been declared").
+# `__list` enumera os elementos interativos VISÍVEIS (links/botões/campos) com o texto
+# acessível — é a lista numerada que a IA vê, e o MESMO número serve de alvo.
+_HELPERS_JS = """
+const __vis = el => { const r = el.getBoundingClientRect(); const st = getComputedStyle(el);
+  return r.width > 1 && r.height > 1 && st.visibility !== 'hidden' && st.display !== 'none'; };
+const __norm = s => (s || '').toLowerCase().replace(/\\s+/g, ' ').trim();
+const __list = () => {
   const out = [];
   const sel = 'a,button,input,select,textarea,[role=button],[role=link],[onclick]';
   const seen = new Set();
@@ -75,27 +80,31 @@ _STATE_JS = """(() => {
     const key = tag + '|' + t;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ i: out.length + 1, tag, text: t });
-    if (out.length >= %d) break;
+    out.push({ el, tag, t });
+    if (out.length >= MAX_ELEMENTS) break;
   }
-  return { title: document.title || '', url: location.href,
-           text: document.body ? document.body.innerText : '', elements: out };
-})()""" % _MAX_ELEMENTS
+  return out;
+};
+const __byNumber = target => /^\\s*#?\\d+\\s*$/.test(target || '')
+  ? (__list()[parseInt(String(target).replace(/\\D/g, ''), 10) - 1] || { missing: true }) : null;
+""".replace("MAX_ELEMENTS", str(_MAX_ELEMENTS))
 
-# Declarados DENTRO da função de cada chamada: `const` no escopo global da página
-# quebraria na 2a chamada ("Identifier '__vis' has already been declared").
-_HELPERS_JS = """
-const __vis = el => { const r = el.getBoundingClientRect(); const st = getComputedStyle(el);
-  return r.width > 1 && r.height > 1 && st.visibility !== 'hidden' && st.display !== 'none'; };
-const __norm = s => (s || '').toLowerCase().replace(/\\s+/g, ' ').trim();
-"""
+# Estado da página num Runtime.evaluate só: título, URL, texto e a lista numerada —
+# a IA clica/digita mirando o número, o texto ou um seletor CSS.
+_STATE_JS = "(() => {" + _HELPERS_JS + """
+return { title: document.title || '', url: location.href,
+         text: document.body ? document.body.innerText : '',
+         elements: __list().map((x, k) => ({ i: k + 1, tag: x.tag, text: x.t })) };
+})()"""
 
 # Alvo de clique: seletor CSS, ou o texto visível — primeiro nos elementos clicáveis
 # (igual exato, depois "contém"), por último o MENOR elemento que contém o texto.
 _CLICK_JS = "(() => {" + _HELPERS_JS + """
 return ((target, css) => {
   let el = null;
-  if (css) { el = [...document.querySelectorAll(target)].find(__vis) || null; }
+  const n = __byNumber(target);
+  if (n) { el = n.el || null; }
+  else if (css) { el = [...document.querySelectorAll(target)].find(__vis) || null; }
   else {
     const t = __norm(target);
     const txt = e => __norm(e.innerText || e.value || e.getAttribute('aria-label')
@@ -123,7 +132,12 @@ _FIELD_JS = "(() => {" + _HELPERS_JS + """
 return ((target, css) => {
   const campos = 'input:not([type=hidden]),textarea,[contenteditable=""],[contenteditable=true]';
   let el = null;
-  if (!target) { el = [...document.querySelectorAll(campos)].find(__vis) || null; }
+  const n = __byNumber(target);
+  if (n) {
+    el = n.el || null;
+    if (el && !el.matches(campos)) return { error: 'element ' + target + ' is not a text field' };
+  }
+  else if (!target) { el = [...document.querySelectorAll(campos)].find(__vis) || null; }
   else if (css) { el = [...document.querySelectorAll(target)].find(__vis) || null; }
   else {
     const t = __norm(target);

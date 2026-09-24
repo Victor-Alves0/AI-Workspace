@@ -1281,8 +1281,9 @@ def _register_builtins(
                 "LIVE tab across calls in this conversation — use it for JS-heavy sites, "
                 "SPAs, logins, and multi-step forms that web.page.read can't handle. "
                 "Actions: 'goto' (open a URL), 'read' (current page's text + a numbered list "
-                "of clickable 'elements'), 'click' (target = the element's visible text OR a "
-                "CSS selector), 'type' (target = a field's label/placeholder/CSS, `text` to "
+                "of clickable 'elements'), 'click' (target = the element's number from that "
+                "list, its visible text, or a CSS selector), 'type' (target = the field's "
+                "number, label/placeholder, or CSS; `text` to "
                 "enter, set submit=true to press Enter), 'scroll' (up/down/top/bottom), "
                 "'back', 'screenshot' (shows the page image to the user), 'close'. After "
                 "goto/click, look at the returned 'elements' to pick your next target."
@@ -1290,7 +1291,7 @@ def _register_builtins(
             params={
                 "action": "string:r::goto | read | click | type | scroll | back | screenshot | close",
                 "url": "string:o::URL for 'goto' (http/https)",
-                "target": "string:o::for click/type: the element's visible text OR a CSS selector",
+                "target": "string:o::for click/type: the element's number from 'elements', its visible text, or a CSS selector",
                 "text": "string:o::for 'type': the text to enter in the field",
                 "submit": "boolean:o:false:for 'type': press Enter after filling",
                 "direction": "string:o:down:for 'scroll': up | down | top | bottom",
