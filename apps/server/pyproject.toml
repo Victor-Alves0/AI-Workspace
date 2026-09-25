@@ -3,7 +3,7 @@ name = "aiworkspace-server"
 # FONTE ÚNICA da versão do produto. `aiworkspace.__version__` deriva daqui (metadados do
 # pacote instalado) e os arquivos do desktop são sincronizados por scripts/set_version.py.
 # O teste tests/test_version_sync.py falha se algum deles divergir.
-version = "0.7.0"
+version = "0.8.0"
 description = "AI Workspace — backend FastAPI (chat, SIFT tools, mem0 memory, OpenRouter)"
 requires-python = ">=3.11"
 dependencies = [
