@@ -19,6 +19,7 @@ from aiworkspace import db_restore
 from .conftest import (
     contagens,
     criar_banco,
+    sync_url,
     dropar_banco,
     migrar,
     pytestmark,  # noqa: F401
@@ -46,7 +47,7 @@ precisa_binarios = pytest.mark.skipif(
 
 def _impressao_digital(url: str) -> dict[str, str]:
     """{tabela: md5 de todas as linhas} — igualdade = mesmo conteúdo, linha a linha."""
-    eng = create_engine(url)
+    eng = create_engine(sync_url(url))
     try:
         with eng.connect() as c:
             return {
@@ -96,7 +97,7 @@ def dois_bancos():
 
 
 def _preparar(url: str, rev: str = "head") -> None:
-    eng = create_engine(url)
+    eng = create_engine(sync_url(url))
     try:
         migrar(eng, rev)
         with eng.begin() as c:
@@ -137,7 +138,7 @@ def test_restore_que_falha_no_meio_nao_toca_no_banco(dois_bancos, tmp_path):
 
     assert r.returncode != 0, "o restore sabotado deveria ter falhado"
     assert _impressao_digital(destino) == antes, "restore que falhou alterou o banco"
-    eng = create_engine(destino)
+    eng = create_engine(sync_url(destino))
     try:
         assert revisao_atual(eng) == revisoes_em_ordem()[-1]
     finally:
@@ -158,7 +159,7 @@ def test_backup_de_versao_antiga_restaura_e_migra_ate_a_cabeca(dois_bancos, tmp_
     r = _restore(destino, arquivo)
     assert r.returncode == 0, r.stderr[-2000:]
 
-    eng = create_engine(destino)
+    eng = create_engine(sync_url(destino))
     try:
         assert revisao_atual(eng) == antiga
         with eng.connect() as c:

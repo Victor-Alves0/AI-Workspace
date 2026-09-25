@@ -28,16 +28,27 @@ pytestmark = pytest.mark.skipif(not ADMIN_URL, reason="TEST_DATABASE_URL não de
 
 
 def _sync(url: str) -> str:
-    return url.replace("+asyncpg", "").replace("+psycopg2", "")
+    """URL SEM driver (libpq puro): serve para pg_dump/psql e para o replace p/ asyncpg
+    dos testes async. NÃO usar direto em create_engine — ver `sync_url`."""
+    return url.replace("+asyncpg", "").replace("+psycopg2", "").replace("+psycopg", "")
+
+
+def sync_url(url: str) -> str:
+    """Driver síncrono EXPLÍCITO (psycopg2). O default de `postgresql://` mudou para
+    psycopg (v3) no SQLAlchemy 2.1, que não instalamos; o driver de teste é o psycopg2.
+    Fixar aqui deixa a bateria de banco imune à versão do SQLAlchemy no CI."""
+    u = _sync(url)
+    return u.replace("postgresql://", "postgresql+psycopg2://", 1) if u.startswith("postgresql://") else u
 
 
 # --------------------------------------------------------------------------- #
 # Banco descartável                                                            #
 # --------------------------------------------------------------------------- #
 def criar_banco() -> str:
-    """Cria um banco vazio (com pgvector) e devolve a URL síncrona dele."""
+    """Cria um banco vazio (com pgvector) e devolve a URL DRIVERLESS dele (libpq) —
+    os testes async convertem p/ +asyncpg, os sync usam `sync_url`, o pg_dump usa como está."""
     nome = f"aiw_test_{uuid.uuid4().hex[:12]}"
-    admin = create_engine(_sync(ADMIN_URL), isolation_level="AUTOCOMMIT")
+    admin = create_engine(sync_url(ADMIN_URL), isolation_level="AUTOCOMMIT")
     with admin.connect() as c:
         c.execute(text(f'CREATE DATABASE "{nome}"'))
     admin.dispose()
@@ -46,7 +57,7 @@ def criar_banco() -> str:
 
 def dropar_banco(url: str) -> None:
     nome = make_url(url).database
-    admin = create_engine(_sync(ADMIN_URL), isolation_level="AUTOCOMMIT")
+    admin = create_engine(sync_url(ADMIN_URL), isolation_level="AUTOCOMMIT")
     with admin.connect() as c:
         c.execute(text(f'DROP DATABASE IF EXISTS "{nome}" WITH (FORCE)'))
     admin.dispose()
@@ -63,7 +74,7 @@ def banco() -> Iterator[str]:
 
 @pytest.fixture
 def engine(banco: str) -> Iterator[Engine]:
-    eng = create_engine(banco)
+    eng = create_engine(sync_url(banco))
     try:
         yield eng
     finally:

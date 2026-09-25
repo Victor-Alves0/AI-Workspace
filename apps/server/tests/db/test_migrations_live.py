@@ -9,6 +9,7 @@ from sqlalchemy import create_engine, inspect, text
 
 from ..test_migration_lint import MARCADOR_DESTRUTIVO
 from .conftest import (
+    sync_url,
     arquivo_da_revisao,
     contagens,
     migrar,
@@ -183,7 +184,7 @@ def test_toda_fk_para_usuario_define_o_que_acontece_na_exclusao(engine):
 
 def test_banco_semeado_sobrevive_ao_boot_duas_vezes(banco):
     """Reinício com tudo em dia (o caso de todo restart): nada roda, nada muda."""
-    eng = create_engine(banco)
+    eng = create_engine(sync_url(banco))
     try:
         migrar(eng, "head")
         with eng.begin() as c:
