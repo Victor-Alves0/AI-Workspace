@@ -20,8 +20,8 @@ from ..auth.deps import require_approved
 from ..config import get_settings
 from ..db import SessionLocal, get_db
 from ..models import Chat, Message, User
-from ..providers import reasoning_details as _reasoning_details
 from ..schemas.chat import MessageEdit, MessageOut, SendMessageIn
+from . import attachment_context
 from ..tools.loader import get_sift_for_user
 from ..usage_service import usage_event_from_record
 from . import artifacts as artifacts_service
@@ -282,11 +282,8 @@ async def send_message(
         )
         .order_by(Message.created_at)
     )
-    history = [
-        _reasoning_details.history_entry(m)
-        for m in rows
-        if m.content
-    ]
+    # os anexos das mensagens anteriores continuam no contexto (ver attachment_context)
+    history = await attachment_context.history(rows)
 
     # "@" no promptbox: roteia ESTE turno a outro agente (ModelConfig) sem alterar o
     # padrão do chat. Passa a valer o modelo/prompt/tools/skills DESSE agente.
@@ -583,11 +580,7 @@ async def regenerate_message(
         user_attachments = await _prepare_attachments(source_user_message.attachments or [], model_config)
         if not user_text and not user_attachments:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Mensagem vazia")
-        history = [
-            _reasoning_details.history_entry(m)
-            for m in rows[:idx]
-            if m.role in ("user", "assistant") and m.content and not m.compacted
-        ]
+        history = await attachment_context.history(rows[:idx])
         for m in rows[idx + 1:]:
             await db.delete(m)
         await db.commit()
@@ -608,11 +601,7 @@ async def regenerate_message(
                 break
         if not user_text and not user_attachments:  # mensagem só com anexo também refaz
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sem prompt do usuário para refazer")
-        history = [
-            _reasoning_details.history_entry(m)
-            for m in prior[:cut]
-            if m.role in ("user", "assistant") and m.content and not m.compacted
-        ]
+        history = await attachment_context.history(prior[:cut])
 
         # remove a resposta e tudo que veio depois
         for m in rows[idx:]:
@@ -725,11 +714,7 @@ async def continue_message(
             status.HTTP_400_BAD_REQUEST, "Só é possível continuar a última resposta"
         )
 
-    history = [
-        _reasoning_details.history_entry(m)
-        for m in rows
-        if m.role in ("user", "assistant") and m.content and not m.compacted
-    ]
+    history = await attachment_context.history(rows)
     user_text = (
         "Continue sua resposta anterior exatamente de onde parou, "
         "sem repetir nada do que já foi escrito e sem preâmbulos."

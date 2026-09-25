@@ -81,7 +81,9 @@ async def _extract_into(db: AsyncSession, row: Upload) -> None:
     if data is None:
         return
     try:
-        text = await run_in_threadpool(extract, row.filename, row.mime, data)
+        # guarda o texto INTEIRO (até o teto do servidor): o limite por modelo vale no
+        # envio, e o resto continua alcançável pelo read_attachment
+        text = await run_in_threadpool(extract, row.filename, row.mime, data, {"max_chars": 0})
     except Exception:  # noqa: BLE001 - anexo sem texto ainda é anexo (o nome vai ao modelo)
         return
     if text:

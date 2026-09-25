@@ -3,7 +3,8 @@
 import { startTransition, useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { api } from "@/lib/api";
 import { streamResume } from "@/lib/sse";
-import type { ActivityStep, Chat, ToolEvent } from "@/lib/types";
+import type { ActivityStep, Chat, SubagentLive, TeamLive, ToolEvent } from "@/lib/types";
+import { applySubagentProgress } from "@/lib/subagent";
 import { splitStreamArtifacts, type StreamArtifact } from "@/lib/artifacts";
 import { parseReasoningEffort } from "@/components/PromptBox";
 
@@ -11,15 +12,6 @@ export interface GuardNote {
   name: string;
   action: string;
   fallback_model?: string | null;
-}
-
-export interface SubagentChip {
-  id: string;
-  name: string;
-  ctx?: boolean;
-  mem?: boolean;
-  adhoc?: boolean;
-  tool?: string;     // o que o agente está fazendo agora (última ferramenta)
 }
 
 /** Fase visível da geração. Os nomes descrevem apenas o que o cliente sabe; o
@@ -88,7 +80,6 @@ export function useGeneration(getDeps: () => GenerationDeps) {
   const [generatingImage, setGeneratingImage] = useState(false);
   const [consultingKnowledge, setConsultingKnowledge] = useState(false);
   const [transcribingAudio, setTranscribingAudio] = useState(false);
-  const [subagents, setSubagents] = useState<SubagentChip[]>([]);
   const [guardNote, setGuardNote] = useState<GuardNote | null>(null);
   const [liveArtifact, setLiveArtifact] = useState<StreamArtifact | null>(null);
   const [sending, setSending] = useState(false);
@@ -150,6 +141,10 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       const selection = window.getSelection();
       return !!selection && !selection.isCollapsed && selection.rangeCount > 0;
     };
+    // passo (chamada de delegate) de um subagente, pelo id da chamada
+    const agentStep = (id: string, name = "delegate") => state.steps.findIndex(
+      (st) => st.kind === "tool" && st.event.kind === "call" && st.event.name === name && st.event.id === id,
+    );
     const archiveCommentary = () => {
       if (state.acc.trim()) state.steps.push({ kind: "commentary", text: state.acc });
       state.acc = "";
@@ -257,7 +252,21 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         // pinta imediatamente o último trecho de texto/raciocínio antes de trocar
         // para a fase de ferramenta (que pode levar vários segundos).
         archiveCommentary();
-        const t: ToolEvent = { kind: "call", name: ev.name, data: ev.arguments };
+        // delegates em paralelo começam ANTES do anúncio: o passo já existe (criado
+        // no "start" do subagente) e só ganha os argumentos
+        const at = ev.id && (ev.name === "delegate" || ev.name === "delegate_team") ? agentStep(ev.id, ev.name) : -1;
+        if (at >= 0) {
+          const prev = (state.steps[at] as { kind: "tool"; event: ToolEvent }).event;
+          const t: ToolEvent = { ...prev, data: ev.arguments };
+          state.steps[at] = { kind: "tool", event: t };
+          const ti = state.tools.indexOf(prev);
+          if (ti >= 0) state.tools[ti] = t;
+          if (paint()) setToolEvents((x) => x.map((e) => (e === prev ? t : e)));
+          flush();
+          if (paint()) setStreamPhase("tool");
+          return;
+        }
+        const t: ToolEvent = { kind: "call", name: ev.name, data: ev.arguments, id: ev.id };
         state.tools.push(t);
         state.steps.push({ kind: "tool", event: t });
         flush();
@@ -266,7 +275,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
           setToolEvents((x) => [...x, t]);
         }
       } else if (ev.type === "tool_result") {
-        const t: ToolEvent = { kind: "result", name: ev.name, data: ev.result };
+        const t: ToolEvent = { kind: "result", name: ev.name, data: ev.result, id: ev.id };
         if (ev.name === "imaginai_world" || ev.name === "imaginai_setup") state.imaginaiChanged = true;
         state.tools.push(t);
         state.steps.push({ kind: "tool", event: t });
@@ -285,14 +294,76 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         if (paint()) setConsultingKnowledge(ev.status === "start");
       } else if (ev.type === "audio_router") {
         if (paint()) setTranscribingAudio(ev.status === "start");
+      } else if (ev.type === "subagent" && ev.team !== undefined) {
+        // equipe (delegate_team): o passo da chamada carrega a equipe e cada membro
+        const sid = String(ev.id || "");
+        if (!sid) return;
+        let at = agentStep(sid, "delegate_team");
+        if (at < 0) {
+          if (ev.status !== "team_start" && ev.status !== "team_background") return;
+          archiveCommentary();
+          const t: ToolEvent = { kind: "call", name: "delegate_team", data: { team_name: ev.team, goal: ev.goal }, id: sid };
+          state.tools.push(t);
+          state.steps.push({ kind: "tool", event: t });
+          if (paint()) setToolEvents((x) => [...x, t]);
+          at = state.steps.length - 1;
+        }
+        const prev = (state.steps[at] as { kind: "tool"; event: ToolEvent }).event;
+        const cur: TeamLive = prev.team ?? { name: ev.team || "Equipe", goal: ev.goal, size: 0, running: true, members: [] };
+        let next: TeamLive = cur;
+        if (ev.status === "team_start") {
+          const ms = (ev.members ?? []) as { name: string; task: string }[];
+          next = { ...cur, goal: ev.goal ?? cur.goal, size: ms.length, running: true, chain: !!ev.chain,
+            members: ms.map((m) => ({ name: m.name, task: m.task, adhoc: true, running: false, state: "queued" as const, timeline: [] })) };
+        } else if (ev.status === "team_background") {
+          next = { ...cur, size: Number(ev.size) || cur.size, running: false, background: true };
+        } else if (ev.status === "team_done") {
+          next = { ...cur, running: false, synthesizing: false };
+        } else if (ev.status === "synthesis") {
+          next = { ...cur, synthesizing: true };
+        } else if (typeof ev.member === "number" && cur.members[ev.member]) {
+          const members = [...cur.members];
+          const m = members[ev.member];
+          members[ev.member] =
+            ev.status === "running" ? { ...m, running: true, state: "running" }
+            : ev.status === "done" ? { ...m, running: false, state: ev.ok === false ? "failed" : "done" }
+            : applySubagentProgress(m, ev);
+          next = { ...cur, members };
+        }
+        const t: ToolEvent = { ...prev, team: next };
+        state.steps[at] = { kind: "tool", event: t };
+        const ti = state.tools.indexOf(prev);
+        if (ti >= 0) state.tools[ti] = t;
+        if (paint()) setToolEvents((x) => x.map((e) => (e === prev ? t : e)));
+        if (ev.status === "progress") maybeFlush(); else flush();
       } else if (ev.type === "subagent") {
-        // orquestrador delegou a um operário — mostra/atualiza os chips
-        if (!paint()) return;
-        // identificado pela chamada (dois agentes de mesmo nome podem rodar juntos)
-        const sid = String(ev.id || ev.agent || "");
-        if (ev.status === "start") setSubagents((s) => (sid && !s.some((x) => x.id === sid) ? [...s, { id: sid, name: ev.agent || "Agente", ctx: ev.ctx, mem: ev.mem, adhoc: ev.adhoc }] : s));
-        else if (ev.status === "progress") setSubagents((s) => s.map((x) => (x.id === sid ? { ...x, tool: ev.tool } : x)));
-        else if (ev.status === "done" || ev.status === "background") setSubagents((s) => s.filter((x) => x.id !== sid));
+        // orquestrador delegou a um operário: o passo do delegate na linha do tempo
+        // carrega o que ele está fazendo agora (identificado pelo id da chamada)
+        const sid = String(ev.id || "");
+        if (!sid) return;
+        let at = agentStep(sid);
+        if (at < 0) {
+          if (ev.status !== "start" && ev.status !== "background") return;
+          archiveCommentary();
+          const t: ToolEvent = { kind: "call", name: "delegate", data: { agent: ev.agent, task: ev.task }, id: sid };
+          state.tools.push(t);
+          state.steps.push({ kind: "tool", event: t });
+          if (paint()) setToolEvents((x) => [...x, t]);
+          at = state.steps.length - 1;
+        }
+        const prev = (state.steps[at] as { kind: "tool"; event: ToolEvent }).event;
+        const cur: SubagentLive = prev.live ?? { name: ev.agent || "Agente", task: ev.task, adhoc: ev.adhoc, running: true, timeline: [] };
+        const next: SubagentLive =
+          ev.status === "progress" ? applySubagentProgress(cur, ev)
+          : ev.status === "background" ? { ...cur, running: false, background: true }
+          : ev.status === "done" ? { ...cur, running: false }
+          : { ...cur, name: ev.agent || cur.name, task: ev.task ?? cur.task, adhoc: ev.adhoc };
+        const t: ToolEvent = { ...prev, live: next };
+        state.steps[at] = { kind: "tool", event: t };
+        const ti = state.tools.indexOf(prev);
+        if (ti >= 0) state.tools[ti] = t;
+        if (paint()) setToolEvents((x) => x.map((e) => (e === prev ? t : e)));
+        if (ev.status === "progress") maybeFlush(); else flush();
       } else if (ev.type === "guard") {
         // um Guarda de saída detectou algo e vai refazer a resposta
         if (paint()) {
@@ -444,7 +515,6 @@ export function useGeneration(getDeps: () => GenerationDeps) {
     generatingImage, setGeneratingImage,
     consultingKnowledge, setConsultingKnowledge,
     transcribingAudio, setTranscribingAudio,
-    subagents, setSubagents,
     guardNote, setGuardNote,
     liveArtifact, setLiveArtifact,
     sending, setSending,

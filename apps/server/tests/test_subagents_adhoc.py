@@ -152,9 +152,12 @@ def test_modelo_nao_recebe_os_passos():
     import json
 
     content, ui = orch._shape_tool_result({"kind": "subagent", "agent": "A", "task": "t", "output": "r",
-                                           "steps": [{"tool": "x"}]})
-    assert "steps" not in json.loads(content) and "task" not in json.loads(content)
+                                           "steps": [{"tool": "x"}],
+                                           "timeline": [{"kind": "reasoning", "text": "pensando"}]})
+    visto = json.loads(content)
+    assert "steps" not in visto and "task" not in visto and "timeline" not in visto
     assert ui["steps"] == [{"tool": "x"}]
+    assert ui["timeline"] == [{"kind": "reasoning", "text": "pensando"}]
 
 
 async def test_agentes_que_terminam_juntos_viram_um_wake_so(monkeypatch):

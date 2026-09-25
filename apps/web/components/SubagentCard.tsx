@@ -1,94 +1,243 @@
 "use client";
 
 import { useState } from "react";
-import { Check, ChevronDown, ChevronRight, Clock, GitBranch, Sparkles, TriangleAlert, Users } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Clock, GitBranch, Loader2, Sparkles, TriangleAlert, Users } from "lucide-react";
+import type { SubagentTimelineItem, ToolEvent } from "@/lib/types";
+import { timelineFromSteps } from "@/lib/subagent";
+import { describeStep } from "@/lib/activity";
 import Markdown from "./Markdown";
-
-export interface SubagentStep {
-  tool: string;
-  detail?: string;
-  ok?: boolean | null;
-}
 
 export interface SubagentResult {
   kind: "subagent" | "subagent_started";
   agent: string;
   task?: string;
   output?: string;
-  steps?: SubagentStep[];
+  steps?: { tool: string; detail?: string; ok?: boolean | null }[];
+  timeline?: SubagentTimelineItem[];
   adhoc?: boolean;
   task_id?: string;
   error?: string;
 }
 
-/** O trabalho de um subagente numa resposta: tarefa, passos e relatório (recolhido). */
-export default function SubagentCard({ data }: { data: SubagentResult }) {
+/** Um subagente na linha do tempo da resposta, no ponto em que a IA o chamou: um
+ *  chip com o que ele está fazendo agora; aberto, mostra tarefa, raciocínio, passos
+ *  e relatório no mesmo formato do bloco de raciocínio da IA. */
+export function SubagentStep({ call, result, live = false }: { call?: ToolEvent; result?: ToolEvent; live?: boolean }) {
   const [open, setOpen] = useState(false);
-  const background = data.kind === "subagent_started";
-  const steps = data.steps ?? [];
-  const falhas = steps.filter((s) => s.ok === false).length;
-  const Icon = data.adhoc ? Sparkles : Users;
+  const args = (call?.data ?? {}) as { agent?: string; name?: string; task?: string };
+  const res = (result?.data && typeof result.data === "object" ? result.data : undefined) as SubagentResult | undefined;
+  const now = call?.live;
+  const name = res?.agent || now?.name || args.name || (args.agent && args.agent !== "new" ? args.agent : "") || "Agente";
+  const task = res?.task || now?.task || args.task || "";
+  const background = res?.kind === "subagent_started" || !!now?.background;
+  const running = !res && !background && (now ? now.running : live);
+  const timeline = res?.timeline ?? (res ? timelineFromSteps(res.steps) : now?.timeline ?? []);
+  const tools = timeline.filter((t) => t.kind === "tool");
+  const failed = tools.filter((t) => t.kind === "tool" && t.ok === false).length;
+  const error = typeof res?.error === "string" ? res.error : "";
+  const adhoc = res?.adhoc ?? now?.adhoc;
+  const Icon = adhoc ? Sparkles : Users;
+
+  const lastItem = timeline[timeline.length - 1];
+  const queued = !res && now?.state === "queued";
+  const status = running
+    ? lastItem?.kind === "tool" ? describeStep(lastItem.tool, lastItem.detail, lastItem.args) : lastItem?.kind === "reasoning" ? "pensando…" : lastItem?.kind === "text" ? "escrevendo…" : "começando…"
+    : queued ? "na fila"
+    : background ? "em segundo plano"
+    : error ? "falhou"
+    : tools.length === 0 ? "concluído" : tools.length === 1 ? "1 passo" : `${tools.length} passos`;
 
   return (
-    <div className="my-2 max-w-2xl overflow-hidden rounded-xl border border-border bg-surface">
+    <div className="min-w-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left transition-colors hover:bg-hover"
+        aria-expanded={open}
+        className={`inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors hover:bg-hover ${running ? "border-accent/40 bg-accent/10 text-accent-hover" : "border-border bg-surface text-ink-soft"}`}
       >
-        <Icon size={15} className="shrink-0 text-accent-hover" />
-        <span className="min-w-0 flex-1 truncate text-sm font-medium text-ink">{data.agent}</span>
-        {background ? (
-          <span className="flex shrink-0 items-center gap-1 text-xs text-muted"><Clock size={12} /> em segundo plano</span>
-        ) : (
-          <span className="shrink-0 text-xs text-muted">
-            {steps.length === 1 ? "1 passo" : `${steps.length} passos`}
-            {falhas > 0 && <span className="text-amber-400"> · {falhas} com erro</span>}
-          </span>
-        )}
-        {open ? <ChevronDown size={14} className="shrink-0 text-muted" /> : <ChevronRight size={14} className="shrink-0 text-muted" />}
+        {running ? <Loader2 size={13} className="shrink-0 animate-spin" /> : <Icon size={13} className={`shrink-0 ${queued ? "text-muted" : "text-accent-hover"}`} />}
+        <span className="shrink-0 font-medium">{name}</span>
+        <span className={`min-w-0 truncate ${running ? "text-accent-hover/75" : "text-muted"}`}>
+          {background && <Clock size={11} className="-mt-px mr-1 inline" />}
+          {status}
+          {failed > 0 && !running && <span className="text-amber-400"> · {failed} com erro</span>}
+        </span>
+        <ChevronDown size={13} className={`shrink-0 text-muted transition-transform duration-150 ${open ? "" : "-rotate-90"}`} />
       </button>
 
       {open && (
-        <div className="space-y-3 border-t border-border px-3.5 py-3">
-          {data.task && (
-            <div>
-              <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted">Tarefa</p>
-              <p className="whitespace-pre-wrap text-sm text-ink-soft">{data.task}</p>
-            </div>
+        <ol className="animate-pop ml-3 mt-3 space-y-3 border-l border-border pb-1 pl-5 text-sm leading-6 text-muted" aria-label={`Trabalho de ${name}`}>
+          {task && (
+            <Item dot="bg-accent">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-muted">Tarefa</p>
+              <p className="whitespace-pre-wrap text-ink-soft">{task}</p>
+            </Item>
           )}
-          {steps.length > 0 && (
-            <div>
-              <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted">Passos</p>
-              <ol className="space-y-1">
-                {steps.map((s, i) => (
-                  <li key={i} className="flex items-start gap-2 text-xs">
-                    {s.ok === false
-                      ? <TriangleAlert size={12} className="mt-0.5 shrink-0 text-amber-400" />
-                      : <Check size={12} className="mt-0.5 shrink-0 text-muted" />}
-                    <span className="shrink-0 font-mono text-ink-soft">{s.tool}</span>
-                    {s.detail && <span className="min-w-0 truncate text-muted" title={s.detail}>{s.detail}</span>}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
-          {data.error ? (
-            <p className="text-sm text-red-400">{data.error}</p>
-          ) : data.output ? (
-            <div>
-              <p className="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted">Relatório</p>
-              <div className="text-sm"><Markdown content={data.output} /></div>
-            </div>
+          {timeline.map((t, i) => (
+            <Item key={i} dot={t.kind === "tool" ? (t.ok === false ? "bg-amber-400" : "bg-emerald-400") : "bg-muted"}>
+              {t.kind === "tool" ? (
+                <div className="flex min-w-0 items-center gap-2 text-xs">
+                  {t.ok === false
+                    ? <TriangleAlert size={12} className="shrink-0 text-amber-400" />
+                    : t.ok == null && running && i === timeline.length - 1
+                      ? <Loader2 size={12} className="shrink-0 animate-spin text-accent-hover" />
+                      : <Check size={12} className="shrink-0 text-green-400" />}
+                  <span className="min-w-0 truncate text-ink-soft" title={[t.tool, t.detail].filter(Boolean).join(" · ")}>
+                    {describeStep(t.tool, t.detail, t.args)}
+                  </span>
+                </div>
+              ) : t.kind === "reasoning" ? (
+                <div className="whitespace-pre-wrap">{t.text}</div>
+              ) : (
+                <Markdown content={t.text} fast={running} />
+              )}
+            </Item>
+          ))}
+          {error ? (
+            <Item dot="bg-red-400"><p className="text-red-400">{error}</p></Item>
+          ) : res?.output && !background ? (
+            <Item dot="bg-accent">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-muted">Relatório</p>
+              <div className="text-ink"><Markdown content={res.output} /></div>
+            </Item>
           ) : null}
-          {data.task_id && (
-            <p className="flex items-center gap-1.5 text-xs text-muted">
-              <GitBranch size={12} /> Trabalho num worktree isolado, aguardando revisão em Tarefas.
-            </p>
+          {res?.task_id && (
+            <Item dot="bg-muted">
+              <p className="flex items-center gap-1.5 text-xs"><GitBranch size={12} /> Worktree isolado, aguardando revisão em Tarefas.</p>
+            </Item>
           )}
-        </div>
+        </ol>
       )}
     </div>
+  );
+}
+
+interface TeamResult {
+  kind: "subagent_team" | "subagent_team_started";
+  team?: string;
+  goal?: string;
+  size?: number;
+  succeeded?: number;
+  failed?: number;
+  report?: string;
+  synthesized?: boolean;
+  chained?: boolean;
+  members?: (SubagentResult & { agent?: string })[];
+  error?: string;
+}
+
+const PAGE = 60;
+
+/** Uma equipe (delegate_team) na linha do tempo: um chip com o placar ao vivo; aberto,
+ *  mostra o objetivo, o progresso, cada membro (o mesmo chip de agente) e o relatório final. */
+export function TeamStep({ call, result, live = false }: { call?: ToolEvent; result?: ToolEvent; live?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [shown, setShown] = useState(PAGE);
+  const args = (call?.data ?? {}) as { team_name?: string; goal?: string; members?: { name?: string; task?: string }[] };
+  const res = (result?.data && typeof result.data === "object" ? result.data : undefined) as TeamResult | undefined;
+  const now = call?.team;
+  const name = res?.team || now?.name || args.team_name || "Equipe";
+  const goal = res?.goal || now?.goal || args.goal || "";
+  const background = res?.kind === "subagent_team_started" || !!now?.background;
+  const running = !res && !background && (now ? now.running : live);
+  const error = typeof res?.error === "string" ? res.error : "";
+
+  // membros: o resultado final quando existe; senão o estado ao vivo
+  const members: { call: ToolEvent; result?: ToolEvent }[] = res?.members?.length
+    ? res.members.map((m, i) => ({
+        call: { kind: "call", name: "delegate", data: { name: m.agent, task: m.task }, id: `${call?.id ?? "t"}:${i}` },
+        result: { kind: "result", name: "delegate", data: { ...m, kind: "subagent" } },
+      }))
+    : (now?.members ?? []).map((m, i) => ({
+        call: { kind: "call", name: "delegate", data: { name: m.name, task: m.task }, id: `${call?.id ?? "t"}:${i}`, live: m },
+      }));
+  const size = res?.size ?? now?.size ?? args.members?.length ?? members.length;
+  const done = res?.kind === "subagent_team"
+    ? size
+    : (now?.members ?? []).filter((m) => m.state === "done" || m.state === "failed").length;
+  const working = (now?.members ?? []).filter((m) => m.state === "running").length;
+  const failed = res?.failed ?? (now?.members ?? []).filter((m) => m.state === "failed").length;
+
+  const chain = res?.chained ?? now?.chain ?? false;
+  const status = error ? "falhou"
+    : background ? `em segundo plano · ${size} agentes`
+    : running ? (now?.synthesizing ? "consolidando relatórios…"
+      : chain ? `etapa ${Math.min(done + 1, size)} de ${size}` : `${done}/${size} · ${working} trabalhando`)
+    : chain ? `${size} etapas` : `${size} agentes`;
+
+  return (
+    <div className="min-w-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className={`inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors hover:bg-hover ${running ? "border-accent/40 bg-accent/10 text-accent-hover" : "border-border bg-surface text-ink-soft"}`}
+      >
+        {running ? <Loader2 size={13} className="shrink-0 animate-spin" /> : <Users size={13} className="shrink-0 text-accent-hover" />}
+        <span className="shrink-0 font-medium">{name}</span>
+        <span className={`min-w-0 truncate ${running ? "text-accent-hover/75" : "text-muted"}`}>
+          {background && <Clock size={11} className="-mt-px mr-1 inline" />}
+          {status}
+          {failed > 0 && !running && <span className="text-amber-400"> · {failed} com erro</span>}
+        </span>
+        <ChevronDown size={13} className={`shrink-0 text-muted transition-transform duration-150 ${open ? "" : "-rotate-90"}`} />
+      </button>
+
+      {open && (
+        <ol className="animate-pop ml-3 mt-3 space-y-3 border-l border-border pb-1 pl-5 text-sm leading-6 text-muted" aria-label={`Trabalho da equipe ${name}`}>
+          {goal && (
+            <Item dot="bg-accent">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-muted">Objetivo</p>
+              <p className="whitespace-pre-wrap text-ink-soft">{goal}</p>
+            </Item>
+          )}
+          {size > 0 && !background && (
+            <Item dot={running ? "bg-accent" : "bg-emerald-400"}>
+              <div className="flex items-center gap-2 text-xs">
+                <div className="h-1.5 max-w-60 flex-1 overflow-hidden rounded-full bg-border">
+                  <div className="h-full rounded-full bg-accent transition-[width] duration-300" style={{ width: `${Math.round((done / size) * 100)}%` }} />
+                </div>
+                <span className="shrink-0 tabular-nums">{done}/{size} concluídos</span>
+              </div>
+            </Item>
+          )}
+          {members.length > 0 && (
+            <Item dot="bg-muted">
+              <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">{chain ? "Etapas, em ordem" : "Agentes"}</p>
+              <div className="space-y-1.5">
+                {members.slice(0, shown).map((m, i) => (
+                  <SubagentStep key={m.call.id ?? i} call={m.call} result={m.result} />
+                ))}
+              </div>
+              {members.length > shown && (
+                <button type="button" onClick={() => setShown((n) => n + PAGE * 3)} className="mt-2 text-xs text-accent-hover hover:underline">
+                  Mostrar mais {Math.min(PAGE * 3, members.length - shown)} de {members.length - shown}
+                </button>
+              )}
+            </Item>
+          )}
+          {error ? (
+            <Item dot="bg-red-400"><p className="text-red-400">{error}</p></Item>
+          ) : res?.report && !background ? (
+            <Item dot="bg-accent">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-muted">
+                Relatório final{res.synthesized ? ` · consolidado de ${size} relatórios` : ""}
+              </p>
+              <div className="text-ink"><Markdown content={res.report} /></div>
+            </Item>
+          ) : null}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function Item({ dot, children }: { dot: string; children: React.ReactNode }) {
+  return (
+    <li className="relative min-w-0 [overflow-wrap:anywhere]">
+      <span aria-hidden className={`absolute -left-[25px] top-2 h-2 w-2 rounded-full ${dot}`} />
+      {children}
+    </li>
   );
 }
 

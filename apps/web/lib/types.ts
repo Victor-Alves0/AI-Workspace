@@ -346,6 +346,36 @@ export interface ToolEvent {
   data: unknown;
   chars?: number;   // tamanho do bloco no contexto
   tokens?: number;  // custo em tokens deste evento (taxa do turno × chars)
+  id?: string;      // id da chamada: liga a chamada ao resultado (e ao progresso do subagente)
+  live?: SubagentLive; // delegate em andamento: o que o subagente está fazendo agora
+  team?: TeamLive;     // delegate_team em andamento: a equipe e cada membro
+}
+
+export type SubagentTimelineItem =
+  | { kind: "reasoning" | "text"; text: string }
+  | { kind: "tool"; tool: string; detail?: string; ok?: boolean | null; args?: Record<string, unknown> };
+
+export interface SubagentLive {
+  name: string;
+  task?: string;
+  adhoc?: boolean;
+  running: boolean;
+  background?: boolean;
+  /** membro de equipe: na fila, trabalhando ou terminado */
+  state?: "queued" | "running" | "done" | "failed";
+  timeline: SubagentTimelineItem[];
+}
+
+export interface TeamLive {
+  name: string;
+  goal?: string;
+  size: number;
+  running: boolean;
+  background?: boolean;
+  synthesizing?: boolean;
+  /** em cadeia: um membro por vez, cada um partindo dos relatórios anteriores */
+  chain?: boolean;
+  members: SubagentLive[];
 }
 
 // anexo de mensagem: imagem (data URL), arquivo de texto, ou doc p/ extração

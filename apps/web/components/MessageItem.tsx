@@ -15,7 +15,7 @@ import ChartView from "./ChartView";
 import DeepResearchCard from "./DeepResearchCard";
 import TextAttachmentModal from "./TextAttachmentModal";
 import DiceRollCard, { parseDiceRoll } from "./DiceRollCard";
-import SubagentCard, { BackgroundNote, isBackgroundNote, type SubagentResult } from "./SubagentCard";
+import { BackgroundNote, isBackgroundNote, SubagentStep, TeamStep } from "./SubagentCard";
 import { isTextAttachment } from "./PromptBox";
 
 // artefatos visuais que uma ferramenta pode emitir (resultado compacto → o front
@@ -35,7 +35,6 @@ type Artifact =
   | { kind: "skill_proposal"; data: SkillProposal }
   | { kind: "prompt_proposal"; data: PromptProposal }
   | { kind: "brain_note"; data: BrainNoteEvent }
-  | { kind: "subagent"; data: SubagentResult };
 
 type PromptProposal = {
   proposal_id: string; command: string; title: string;
@@ -101,12 +100,9 @@ function collect(node: unknown, out: Artifact[], seen: Set<string>, depth = 0): 
     if (!seen.has(key)) { seen.add(key); out.push({ kind, data: o as unknown as BrainNoteEvent }); }
     return;
   }
-  if ((kind === "subagent" || kind === "subagent_started") && typeof o.agent === "string") {
-    // o relatório do agente pode conter artefatos, mas eles são do agente: não recursa
-    const key = "sa:" + o.agent + ":" + String(o.job_id ?? "") + ":" + String(o.task ?? "").slice(0, 80);
-    if (!seen.has(key)) { seen.add(key); out.push({ kind: "subagent", data: o as unknown as SubagentResult }); }
-    return;
-  }
+  // o subagente aparece na linha do tempo (SubagentStep); o relatório dele pode conter
+  // artefatos, mas eles são do agente: não recursa
+  if ((kind === "subagent" || kind === "subagent_started") && typeof o.agent === "string") return;
   for (const v of Object.values(o)) collect(v, out, seen, depth + 1);
 }
 
@@ -252,8 +248,6 @@ function renderArtifact(a: Artifact, key: React.Key) {
     <PromptProposalCard key={key} proposal={a.data} />
   ) : a.kind === "brain_note" ? (
     <BrainNoteCard key={key} note={a.data} />
-  ) : a.kind === "subagent" ? (
-    <SubagentCard key={key} data={a.data} />
   ) : (
     <ChartView key={key} spec={a.data} />
   );
@@ -1194,6 +1188,38 @@ function ToolEventRow({ event, running = false }: { event: ToolEvent; running?: 
   );
 }
 
+type AgentItem = { kind: "agent"; call?: ToolEvent; result?: ToolEvent };
+
+function AgentStep({ item, live }: { item: AgentItem; live: boolean }) {
+  const team = (item.call ?? item.result)?.name === "delegate_team";
+  return team
+    ? <TeamStep call={item.call} result={item.result} live={live} />
+    : <SubagentStep call={item.call} result={item.result} live={live} />;
+}
+
+/** Junta a chamada de `delegate` ao seu resultado num único passo (o subagente),
+ *  no ponto em que a IA o chamou; pareia pelo id da chamada e, sem ele (histórico
+ *  antigo), pela ordem. */
+function pairAgents(steps: ActivityStep[]): (ActivityStep | AgentItem)[] {
+  const out: (ActivityStep | AgentItem)[] = [];
+  const open: AgentItem[] = [];
+  for (const step of steps) {
+    if (step.kind !== "tool" || (step.event.name !== "delegate" && step.event.name !== "delegate_team")) { out.push(step); continue; }
+    const ev = step.event;
+    if (ev.kind === "call") {
+      const item: AgentItem = { kind: "agent", call: ev };
+      open.push(item);
+      out.push(item);
+      continue;
+    }
+    const idx = ev.id ? open.findIndex((a) => a.call?.id === ev.id) : -1;
+    const match = idx >= 0 ? idx : open.findIndex((a) => a.call?.name === ev.name && (!a.call?.id || !ev.id));
+    if (match >= 0) open.splice(match, 1)[0].result = ev;
+    else out.push({ kind: "agent", result: ev });
+  }
+  return out;
+}
+
 function fmtThinkTime(s: number) {
   const v = Math.max(1, Math.round(s));
   if (v < 60) return `${v} segundo${v === 1 ? "" : "s"}`;
@@ -1220,10 +1246,11 @@ export function ReasoningBlock({
 }) {
   const [open, setOpen] = useState(live);
   useEffect(() => { if (openRequested) setOpen(true); }, [openRequested]);
-  const timeline: ActivityStep[] = steps?.length ? steps : [
+  const timeline = pairAgents(steps?.length ? steps : [
     ...(text ? [{ kind: "reasoning" as const, text }] : []),
     ...tools.map((event) => ({ kind: "tool" as const, event })),
-  ];
+  ]);
+  const agents = timeline.filter((s): s is AgentItem => s.kind === "agent");
   const label = live
     ? "Pensando…"
     : seconds && seconds > 0
@@ -1239,12 +1266,19 @@ export function ReasoningBlock({
         {label}
         <ChevronDown size={14} className={`transition-transform duration-150 ${open ? "" : "-rotate-90"}`} />
       </button>
+      {!open && agents.length > 0 && (
+        <div className="mt-2 space-y-1.5">
+          {agents.map((a, i) => <AgentStep key={a.call?.id ?? a.result?.id ?? i} item={a} live={live} />)}
+        </div>
+      )}
       {open && (
         <ol className="ml-1.5 mt-3 space-y-4 border-l border-border pb-2 pl-5 text-sm leading-6 text-muted" aria-label="Etapas da resposta">
           {timeline.map((step, index) => (
-            <li key={index} className="relative min-w-0 [overflow-wrap:anywhere]">
-              <span aria-hidden className={`absolute -left-[25px] top-2 h-2 w-2 rounded-full ${step.kind === "tool" ? "bg-emerald-400" : "bg-muted"}`} />
-              {step.kind === "tool" ? (
+            <li key={step.kind === "agent" ? `a:${step.call?.id ?? step.result?.id ?? index}` : index} className="relative min-w-0 [overflow-wrap:anywhere]">
+              <span aria-hidden className={`absolute -left-[25px] top-2 h-2 w-2 rounded-full ${step.kind === "tool" ? "bg-emerald-400" : step.kind === "agent" ? "bg-accent" : "bg-muted"}`} />
+              {step.kind === "agent" ? (
+                <AgentStep item={step} live={live} />
+              ) : step.kind === "tool" ? (
                 <ToolEventRow event={step.event} running={live && index === timeline.length - 1 && step.event.kind === "call"} />
               ) : step.kind === "reasoning" ? (
                 <div className="whitespace-pre-wrap">{step.text}</div>
@@ -1737,8 +1771,8 @@ function MessageItem({
             </span>
           </p>
         )}
-        {(message.reasoning?.text || message.reasoning?.steps?.length || (usedTools && toolsEnabled)) && (
-          <ReasoningBlock text={message.reasoning?.text ?? ""} seconds={message.reasoning?.seconds} steps={message.reasoning?.steps} tools={toolsEnabled ? toolEvents : []} openRequested={showTools} />
+        {(message.reasoning?.text || message.reasoning?.steps?.length || (usedTools && toolsEnabled) || toolEvents.some((e) => e.name === "delegate" || e.name === "delegate_team")) && (
+          <ReasoningBlock text={message.reasoning?.text ?? ""} seconds={message.reasoning?.seconds} steps={message.reasoning?.steps} tools={toolsEnabled ? toolEvents : toolEvents.filter((e) => e.name === "delegate" || e.name === "delegate_team")} openRequested={showTools} />
         )}
         {editing ? editor : <AssistantBody content={displayContent} artifacts={artifacts} chatArtifacts={chatArtifacts} onOpenArtifact={onOpenArtifact} clampContent={clampContent} />}
         {!editing && sources.length > 0 && <SourcesBar sources={sources} />}

@@ -13,6 +13,7 @@ import base64
 import binascii
 import json
 import logging
+import time
 import uuid
 from collections.abc import Callable
 from types import SimpleNamespace
@@ -25,7 +26,6 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..providers import reasoning_details as _reasoning_details
 from .. import extraction
 from ..config import get_settings
 from ..db import SessionLocal
@@ -35,8 +35,10 @@ from ..secrets_service import IMAGEGEN_KEY, OPENROUTER_KEY, VOICE_KEY, get_secre
 from ..tools.loader import get_sift_for_user, tool_config
 from ..usage_service import usage_event_from_record
 from . import artifacts as artifacts_service
+from . import attachment_context
 from . import generation
 from .orchestrator import MediaOpts, MemoryOpts, SubagentOpts, TurnSession, run_turn
+from .subagent_team import MAX_AGENTS, MAX_CONCURRENCY, SubagentPool
 
 logger = logging.getLogger(__name__)
 
@@ -470,7 +472,7 @@ def _subagent_opts(sub_specs: list[dict], sub_conf: dict, sub_runner) -> Subagen
         return None
     return SubagentOpts(
         agents=sub_specs, run=sub_runner,
-        mode=sub_conf.get("mode", "sequential"),
+        mode=sub_conf.get("mode", "parallel"),
         max_calls=sub_conf.get("max_calls", 4),
         pass_context=sub_conf.get("pass_context", False),
         worker_memory=sub_conf.get("worker_memory", False),
@@ -955,8 +957,13 @@ async def _resolve_subagents(
     if not worktree:
         isolate = []
     conf = {
-        "mode": "parallel" if cfg.get("mode") == "parallel" else "sequential",
-        "max_calls": max(1, min(int(cfg.get("max_calls") or 4), 10)),
+        # padrão paralelo. `execution` é a escolha explícita; o `mode` antigo é ignorado
+        # porque o editor antigo gravava "sequential" em todo modelo, escolhido ou não
+        "mode": "sequential" if cfg.get("execution") == "sequential" else "parallel",
+        # teto de agentes do TURNO (a árvore toda, sub-equipes incluídas) e quantos
+        # rodam ao mesmo tempo; o resto espera na fila
+        "max_calls": max(1, min(int(cfg.get("max_calls") or 4), MAX_AGENTS)),
+        "concurrency": max(1, min(int(cfg.get("concurrency") or 8), MAX_CONCURRENCY)),
         "max_depth": max(1, min(int(cfg.get("max_depth") or 2), 3)),
         # opt-in: operários enxergam o histórico do chat / usam a própria memória
         "pass_context": bool(cfg.get("pass_context")),
@@ -986,6 +993,9 @@ async def subagents_for_turn(
         project_id=project_id,
         isolate_keys=frozenset(conf.get("isolate") or []),
         parent=model_config, adhoc_model=conf.get("adhoc_model", ""),
+        # sequencial = um agente por vez, inclusive dentro de uma equipe
+        pool=SubagentPool(conf.get("max_calls", 4),
+                          conf.get("concurrency", 8) if conf.get("mode") != "sequential" else 1, user.id),
     )
     return _subagent_opts(specs, {**conf, "worktree": conf.get("worktree") and bool(project_id)}, runner)
 
@@ -996,15 +1006,37 @@ async def _recent_history(db: AsyncSession, chat_id: uuid.UUID, limit: int = 20)
     rows = list(await db.scalars(
         select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at)
     ))
-    convo = [
-        _reasoning_details.history_entry(m)
-        for m in rows
-        if m.role in ("user", "assistant") and m.content and not m.compacted
-    ]
-    return convo[-limit:]
+    return (await attachment_context.history(rows))[-limit:]
 
 
 _DISCOVERY_TOOLS = {"search_tools", "get_tool_schema"}
+
+
+_STEP_KEYS = ("action", "path", "query", "url", "command", "cmd", "title", "symbol", "target",
+              "topic", "prompt", "task", "team_name", "name")
+
+
+def _step_args(name: str, args: Any) -> dict[str, Any]:
+    """Os poucos argumentos que dizem O QUE o passo faz (a UI monta a frase: "Editando
+    src/app.ts", "Pesquisando “x”"), curtos; nunca o conteúdo de um arquivo."""
+    a = args if isinstance(args, dict) else {}
+    if name == "execute_tool":
+        a = a.get("params") if isinstance(a.get("params"), dict) else {}
+    out: dict[str, Any] = {}
+    for k in _STEP_KEYS:
+        v = a.get(k)
+        if isinstance(v, str) and v.strip():
+            out[k] = " ".join(v.split())[:120]
+    diff = a.get("diff")
+    if isinstance(diff, str) and diff:
+        files = [ln[4:].strip().removeprefix("b/") for ln in diff.splitlines() if ln.startswith("+++ ")]
+        files = [f for f in files if f and f != "/dev/null"]
+        if files:
+            out["files"] = files[:20]
+    members = a.get("members")
+    if isinstance(members, list):
+        out["members"] = len(members)
+    return out
 
 
 def _step_of(name: str, args: Any) -> tuple[str, str] | None:
@@ -1025,6 +1057,13 @@ _ADHOC_PREAMBLE = (
     "not to the user: make it a complete, concise report of what you found or did."
 )
 
+_SYNTH_PROMPT = (
+    "You merge reports written by a team of agents into one report for the lead. Keep every "
+    "concrete finding, number, file, decision and disagreement; drop repetition and filler. "
+    "Group by theme, say which agents support each point, and flag gaps or conflicts. "
+    "Write in the language of the reports."
+)
+
 
 def _make_subagent_runner(
     db: AsyncSession, user: User, chat_id: uuid.UUID | None, max_depth: int,
@@ -1032,23 +1071,37 @@ def _make_subagent_runner(
     depth: int = 0, ancestry: frozenset[str] = frozenset(),
     project_id: str | None = None, isolate_keys: frozenset[str] = frozenset(),
     parent: ModelConfig | None = None, adhoc_model: str = "",
+    pool: SubagentPool | None = None,
 ):
     """Closure que executa um subagente num turno aninhado. Dois tipos:
       - agente do usuário (`key` = id de um ModelConfig): prompt/tools/skills dele;
         pode delegar de novo enquanto houver profundidade (flags da config DELE);
       - agente criado pela IA (`new` = {name, instructions, isolated}): roda com as
         tools/skills do orquestrador (`parent`), no `adhoc_model` ou no modelo dele,
-        sem memória e sem delegar (como no Claude Code).
+        sem memória; enquanto houver profundidade, pode montar a própria equipe.
+    Todos dividem o `pool` do turno: teto de agentes, fila de concorrência (por nível),
+    orçamento e o lock da sessão de banco (os agentes rodam concorrentes).
     Opções: `pass_context` (histórico do chat), `worker_memory` (memória própria, só
     agentes do usuário) e worktree isolado — `isolate_keys` para os do usuário,
     `new["isolated"]` para os criados. Blinda contra ciclos e recursão profunda."""
+    pool = pool or SubagentPool(4, 8, user.id)
+
+    async def _db(fn):
+        """Uso da sessão do turno: um agente por vez (AsyncSession não é concorrente)."""
+        async with pool.db_lock:
+            return await fn()
 
     async def _execute(*, label: str, model: str, api_key: str, base_url: str, task: str,
                        system: str, params: dict, sift: Any, skills: list, code_mode: bool,
                        agent_id: str, memory: MemoryOpts, sub_opts: SubagentOpts | None,
                        isolated: bool, usage_mc: ModelConfig | None,
-                       progress: Callable[[dict], None] | None = None) -> dict:
-        history = await _recent_history(db, chat_id) if (pass_context and chat_id) else []
+                       progress: Callable[[dict], None] | None = None,
+                       with_history: bool = True) -> dict:
+        history: list[dict] = []
+        if with_history and pass_context and chat_id:
+            if "history" not in pool.cache:
+                pool.cache["history"] = await _db(lambda: _recent_history(db, chat_id))
+            history = pool.cache["history"]
         # worktree isolado: branch própria do projeto do chat; o resultado vira uma
         # tarefa `awaiting_review` que o humano aprova/descarta na UI
         wt_task_id: str | None = None
@@ -1066,6 +1119,37 @@ def _make_subagent_runner(
         # passos do subagente (ferramenta + detalhe + deu certo): vão só para a UI
         steps: list[dict[str, Any]] = []
         abertos: dict[str, list[dict[str, Any]]] = {}
+        # linha do tempo do agente (raciocínio, texto e passos, na ordem): a UI a
+        # desenha como o bloco de raciocínio. O texto final é o relatório (`output`).
+        timeline: list[dict[str, Any]] = []
+        chars = {"reasoning": 0}
+        # texto/raciocínio vão à UI AGRUPADOS (~3 por segundo), não um evento por token:
+        # com dezenas de agentes em paralelo o stream não afoga
+        pend: dict[str, Any] = {"kind": None, "text": "", "at": 0.0}
+
+        def _flush_pend() -> None:
+            if pend["text"] and progress is not None:
+                progress({pend["kind"]: pend["text"]})
+            pend["text"] = ""
+            pend["at"] = time.monotonic()
+
+        def _trilha(kind: str, text: str) -> None:
+            if not text:
+                return
+            if kind == "reasoning":
+                if chars["reasoning"] >= 20000:
+                    return
+                chars["reasoning"] += len(text)
+            if timeline and timeline[-1]["kind"] == kind:
+                timeline[-1]["text"] += text
+            else:
+                timeline.append({"kind": kind, "text": text})
+            if pend["kind"] != kind:
+                _flush_pend()
+                pend["kind"] = kind
+            pend["text"] += text
+            if time.monotonic() - pend["at"] >= 0.3:
+                _flush_pend()
         try:
             async for ev in run_turn(
                 api_key=api_key, model=model, history=history, user_text=task,
@@ -1083,22 +1167,35 @@ def _make_subagent_runner(
                 t = ev.get("type")
                 if t == "token":
                     collected += ev.get("text", "")
+                    _trilha("text", ev.get("text", ""))
+                elif t == "reasoning":
+                    _trilha("reasoning", ev.get("text", ""))
                 elif t == "done":
                     collected = ev.get("content") or collected
                     usage = ev.get("usage")
                 elif t == "tool_call":
+                    _flush_pend()
                     passo = _step_of(str(ev.get("name") or ""), ev.get("arguments"))
                     if passo is not None and len(steps) < 60:
                         item = {"tool": passo[0], "detail": passo[1], "ok": None}
+                        resumo = _step_args(str(ev.get("name") or ""), ev.get("arguments"))
                         steps.append(item)
+                        timeline.append({"kind": "tool", **item, "args": resumo})
                         abertos.setdefault(str(ev.get("name")), []).append(item)
                         if progress is not None:
-                            progress({"tool": passo[0], "detail": passo[1]})
+                            progress({"tool": passo[0], "detail": passo[1], "args": resumo})
                 elif t == "tool_result":
                     fila = abertos.get(str(ev.get("name")))
                     if fila:
                         res = ev.get("result")
-                        fila.pop(0)["ok"] = not (isinstance(res, dict) and res.get("error"))
+                        feito = fila.pop(0)
+                        feito["ok"] = not (isinstance(res, dict) and res.get("error"))
+                        for passo_t in reversed(timeline):
+                            if passo_t["kind"] == "tool" and passo_t["tool"] == feito["tool"] and passo_t["ok"] is None:
+                                passo_t["ok"] = feito["ok"]
+                                break
+                        if progress is not None:
+                            progress({"result": feito["tool"], "ok": feito["ok"]})
         except Exception as exc:  # noqa: BLE001
             if wt_task_id:
                 from ..codespace import worktree_service
@@ -1125,37 +1222,100 @@ def _make_subagent_runner(
                         await s.commit()
             except Exception:  # noqa: BLE001 - ledger é best-effort
                 pass
+        _flush_pend()
+        # o texto que fecha a linha do tempo é o próprio relatório: não duplica
+        if timeline and timeline[-1]["kind"] == "text":
+            timeline.pop()
         out = {"kind": "subagent", "agent": label, "task": task,
-               "output": collected or "(sem resposta)", "steps": steps}
+               "output": collected or "(sem resposta)", "steps": steps, "timeline": timeline}
         if wt_task_id:
             out["task_id"] = wt_task_id
             out["note"] = ("O trabalho ficou num worktree isolado (tarefa a revisar) — "
                            "NÃO foi mesclado ainda; o usuário aprova/descarta na aba Tarefas.")
         return out
 
-    async def _run_new(new: dict, task: str, progress: Callable[[dict], None] | None) -> dict:
+    async def _adhoc_prep() -> dict | str:
+        """Provedor, tools e skills dos agentes criados pela IA: iguais para todos eles,
+        resolvidos UMA vez por turno (mil agentes não viram mil consultas)."""
+        if "adhoc" in pool.cache:
+            return pool.cache["adhoc"]
         if parent is None or not parent.base_model:
-            return {"error": "agentes criados pela IA precisam de um modelo custom como orquestrador"}
+            return "agentes criados pela IA precisam de um modelo custom como orquestrador"
         model = adhoc_model or parent.base_model
         try:
-            api_key, base_url = await _resolve_provider(db, user, model)
+            api_key, base_url = await _db(lambda: _resolve_provider(db, user, model))
         except HTTPException as exc:
-            return {"error": f"provedor do subagente indisponível: {exc.detail}"}
+            return f"provedor do subagente indisponível: {exc.detail}"
+        prep = {
+            "model": model, "api_key": api_key, "base_url": base_url,
+            "sift": await _db(lambda: get_sift_for_user(db, user.id, parent)),
+            "skills": await _db(lambda: _load_skills(db, user, parent)),
+        }
+        pool.cache["adhoc"] = prep
+        return prep
+
+    def _team_opts() -> SubagentOpts | None:
+        """Equipe própria de um agente criado pela IA (líder), se ainda houver profundidade."""
+        if depth + 1 >= max_depth:
+            return None
+        nested = _make_subagent_runner(
+            db, user, chat_id, max_depth, pass_context=pass_context, worker_memory=False,
+            depth=depth + 1, ancestry=ancestry, project_id=project_id,
+            parent=parent, adhoc_model=adhoc_model, pool=pool,
+        )
+        return SubagentOpts(agents=[], run=nested, mode="parallel", max_calls=pool.limit,
+                            adhoc=True, isolation=bool(project_id), background=False)
+
+    async def _run_new(new: dict, task: str, progress: Callable[[dict], None] | None) -> dict:
+        prep = await _adhoc_prep()
+        if isinstance(prep, str):
+            return {"error": prep}
         name = str(new.get("name") or "Agente")
         out = await _execute(
-            label=name, model=model, api_key=api_key, base_url=base_url, task=task,
+            label=name, model=prep["model"], api_key=prep["api_key"], base_url=prep["base_url"], task=task,
             system=_ADHOC_PREAMBLE.format(name=name) + "\n\n" + str(new.get("instructions") or ""),
-            params=parent.params or {}, sift=await get_sift_for_user(db, user.id, parent),
-            skills=await _load_skills(db, user, parent), code_mode=_code_mode(parent),
-            agent_id=_mem_agent_id(parent, model), memory=MemoryOpts(read=None, write="off"),
-            sub_opts=None, isolated=bool(new.get("isolated")), usage_mc=parent, progress=progress,
+            params=parent.params or {}, sift=prep["sift"],
+            skills=prep["skills"], code_mode=_code_mode(parent),
+            agent_id=_mem_agent_id(parent, prep["model"]), memory=MemoryOpts(read=None, write="off"),
+            sub_opts=_team_opts(), isolated=bool(new.get("isolated")), usage_mc=parent, progress=progress,
         )
         if "error" not in out:
             out["adhoc"] = True
         return out
 
+    async def synthesize(goal: str, reports: str) -> str:
+        """Um agente de síntese (sem ferramentas) junta um lote de relatórios."""
+        prep = await _adhoc_prep()
+        if isinstance(prep, str):
+            raise RuntimeError(prep)
+        async with pool.slot(depth):
+            out = await _execute(
+                label="Síntese", model=prep["model"], api_key=prep["api_key"], base_url=prep["base_url"],
+                task=f"Overall goal: {goal}\n\nReports:\n\n{reports}",
+                system=_SYNTH_PROMPT, params=(parent.params if parent else None) or {}, sift=None,
+                skills=[], code_mode=False, agent_id=_mem_agent_id(parent, prep["model"]),
+                memory=MemoryOpts(read=None, write="off"), sub_opts=None, isolated=False,
+                usage_mc=parent, with_history=False,
+            )
+        if out.get("error"):
+            raise RuntimeError(out["error"])
+        return str(out.get("output") or "")
+
     async def run_subagent(key: str, task: str, new: dict | None = None,
                            progress: Callable[[dict], None] | None = None) -> dict:
+        if not pool.take():
+            return {"error": f"limite de {pool.limit} agentes deste turno atingido"}
+        # fila: no máximo `concurrency` agentes deste nível trabalhando ao mesmo tempo. A
+        # vaga vem ANTES de qualquer await, para a fila seguir a ordem da equipe
+        async with pool.slot(depth):
+            if await pool.budget_blocked():
+                return {"error": "orçamento mensal atingido (modo pausar): agente não iniciado"}
+            if progress is not None:
+                progress({"state": "running"})
+            return await _run_subagent(key, task, new, progress)
+
+    async def _run_subagent(key: str, task: str, new: dict | None,
+                            progress: Callable[[dict], None] | None) -> dict:
         if new is not None:
             return await _run_new(new, task, progress)
         if key in ancestry:
@@ -1164,18 +1324,18 @@ def _make_subagent_runner(
             wid = uuid.UUID(str(key))
         except (ValueError, TypeError):
             return {"error": "subagente inválido"}
-        mc = await db.get(ModelConfig, wid)
+        mc = await _db(lambda: db.get(ModelConfig, wid))
         if mc is None or mc.user_id != user.id or not mc.enabled or not mc.base_model:
             return {"error": "subagente não encontrado ou desabilitado"}
         try:
-            api_key, base_url = await _resolve_provider(db, user, mc.base_model)
+            api_key, base_url = await _db(lambda: _resolve_provider(db, user, mc.base_model))
         except HTTPException as exc:
             return {"error": f"provedor do subagente indisponível: {exc.detail}"}
         # delegação em cadeia: só se ainda houver profundidade. Os flags de contexto/
         # memória do operário-de-2º-nível vêm da config DELE (ele vira o orquestrador).
         sub_opts: SubagentOpts | None = None
         if depth + 1 < max_depth:
-            sub_specs, sub_conf = await _resolve_subagents(db, user, mc)
+            sub_specs, sub_conf = await _db(lambda: _resolve_subagents(db, user, mc))
             if sub_specs or sub_conf.get("adhoc"):
                 nested_runner = _make_subagent_runner(
                     db, user, chat_id, max_depth,
@@ -1184,7 +1344,7 @@ def _make_subagent_runner(
                     depth=depth + 1, ancestry=ancestry | {key},
                     project_id=project_id,
                     isolate_keys=frozenset(sub_conf.get("isolate") or []),
-                    parent=mc, adhoc_model=sub_conf.get("adhoc_model", ""),
+                    parent=mc, adhoc_model=sub_conf.get("adhoc_model", ""), pool=pool,
                 )
                 sub_opts = _subagent_opts(
                     sub_specs, {**sub_conf, "worktree": sub_conf.get("worktree") and bool(project_id)},
@@ -1199,7 +1359,8 @@ def _make_subagent_runner(
         return await _execute(
             label=mc.name, model=mc.base_model, api_key=api_key, base_url=base_url, task=task,
             system=mc.system_prompt, params=mc.params or {},
-            sift=await get_sift_for_user(db, user.id, mc), skills=await _load_skills(db, user, mc),
+            sift=await _db(lambda: get_sift_for_user(db, user.id, mc)),
+            skills=await _db(lambda: _load_skills(db, user, mc)),
             code_mode=_code_mode(mc), agent_id=_mem_agent_id(mc, mc.base_model),
             memory=MemoryOpts(read=mem_read, write=mem_write, review=mem_review),
             sub_opts=sub_opts, isolated=key in isolate_keys, usage_mc=mc, progress=progress,
@@ -1222,14 +1383,45 @@ def _make_subagent_runner(
                     s, u, chat_id, max_depth, pass_context=pass_context,
                     worker_memory=worker_memory, depth=depth, ancestry=ancestry,
                     project_id=project_id, isolate_keys=isolate_keys,
-                    parent=p, adhoc_model=adhoc_model,
+                    parent=p, adhoc_model=adhoc_model, pool=bg_pool,
                 )
                 return await runner(key, task, new)
 
+        bg_pool = pool.fork()
         return subagent_jobs.start(str(chat_id), label, task, _job)
+
+    def start_background_team(members: list[dict], goal: str, label: str, chain: bool = False) -> str:
+        """Solta a equipe inteira em segundo plano; o chat acorda com o relatório final."""
+        from . import subagent_jobs
+        from .subagent_team import run_team
+
+        user_id, parent_id = user.id, (parent.id if parent is not None else None)
+        bg_pool = pool.fork()
+
+        async def _job() -> dict:
+            async with SessionLocal() as s:
+                u = await s.get(User, user_id)
+                p = await s.get(ModelConfig, parent_id) if parent_id else None
+                if u is None:
+                    return {"error": "usuário não encontrado"}
+                runner = _make_subagent_runner(
+                    s, u, chat_id, max_depth, pass_context=pass_context,
+                    worker_memory=worker_memory, depth=depth, ancestry=ancestry,
+                    project_id=project_id, isolate_keys=isolate_keys,
+                    parent=p, adhoc_model=adhoc_model, pool=bg_pool,
+                )
+                res = await run_team(runner, members, goal, lambda ev: None, runner.synthesize,
+                                     chain=chain)
+                return {"output": res["report"],
+                        "note": f"{res['succeeded']} of {res['size']} agents succeeded."}
+
+        return subagent_jobs.start(str(chat_id), label, goal, _job)
 
     # segundo plano só com um chat para acordar
     run_subagent.start_background = start_background if chat_id else None  # type: ignore[attr-defined]
+    run_subagent.start_background_team = start_background_team if chat_id else None  # type: ignore[attr-defined]
+    run_subagent.synthesize = synthesize  # type: ignore[attr-defined]
+    run_subagent.pool = pool  # type: ignore[attr-defined]
     return run_subagent
 
 
@@ -1285,16 +1477,30 @@ async def _resolve_upload(a: dict, ex_cfg: dict) -> dict | None:
                     text = await run_in_threadpool(extract, name, row.mime, data, ex_cfg)
                 except extraction.ExtractionError as exc:
                     text = f"[não foi possível extrair '{name}': {exc}]"
-        return {
-            "type": "file", "name": name, "upload_id": str(row.id),
-            # a nota é lida pelo MODELO: sem dizer o que fazer, ele inventa que não
-            # tem ferramenta para ler arquivos e devolve isso ao usuário
-            "text": (text or (
-                f"[O anexo '{name}' chegou ao servidor, mas não foi possível ler texto dele "
-                "(formato não suportado ou arquivo sem texto). Diga isso ao usuário e peça "
-                "o conteúdo colado ou em outro formato — não há ferramenta para abri-lo.]"
-            ))[:200_000],
-        }
+        if not text:
+            return {
+                "type": "file", "name": name, "upload_id": str(row.id),
+                # a nota é lida pelo MODELO: sem dizer o que fazer, ele inventa que não
+                # tem ferramenta para ler arquivos e devolve isso ao usuário
+                "text": (
+                    f"[O anexo '{name}' chegou ao servidor, mas não foi possível ler texto dele "
+                    "(formato não suportado ou arquivo sem texto). Diga isso ao usuário e peça "
+                    "o conteúdo colado ou em outro formato — não há ferramenta para abri-lo.]"
+                ),
+            }
+        # o limite do modelo (text_extraction.max_chars) vale aqui, no envio; o texto
+        # inteiro fica guardado e o modelo lê o resto com read_attachment
+        limite = int(ex_cfg.get("max_chars") or extraction.DEFAULTS["max_chars"])
+        limite = min(limite, 200_000) if limite > 0 else 200_000
+        out = {"type": "file", "name": name, "upload_id": str(row.id), "text": text}
+        if len(text) > limite:
+            out["text"] = text[:limite] + (
+                f"\n\n[… o arquivo continua: {len(text):,} caracteres no total, mostrados os "
+                f"primeiros {limite:,}. Use read_attachment(name=\"{name}\", offset={limite}) para "
+                "ler o resto, ou com `query` para buscar um trecho.]"
+            ).replace(",", ".")
+            out["truncated"] = True
+        return out
 
 
 async def _prepare_attachments(raw: Any, model_config: ModelConfig | None) -> list[dict]:

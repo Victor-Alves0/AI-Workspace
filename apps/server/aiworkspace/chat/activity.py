@@ -28,11 +28,14 @@ class ActivityTrace:
         elif kind in {"tool_call", "tool_result"}:
             if kind == "tool_call":
                 self.archive()
-            self.steps.append({"kind": "tool", "event": {
+            tool = {
                 "kind": "call" if kind == "tool_call" else "result",
                 "name": event.get("name"),
                 "data": event.get("arguments" if kind == "tool_call" else "result"),
-            }})
+            }
+            if event.get("id"):
+                tool["id"] = event["id"]
+            self.steps.append({"kind": "tool", "event": tool})
         elif kind == "reasoning_answer":
             # o último bloco de raciocínio era a resposta: sai das etapas
             if self.steps and self.steps[-1]["kind"] == "reasoning":

@@ -36,6 +36,7 @@ import { SHORTCUTS, eventToCombo, resolveBinding, comboHasModifier, type Shortcu
 import ImaginaiDocks from "@/components/imaginai/ImaginaiDocks";
 import { useImaginaiCampaign } from "@/components/imaginai/useImaginaiCampaign";
 import { useGeneration } from "./useGeneration";
+import { describeToolCall } from "@/lib/activity";
 import { useDrawerSwipe } from "./useDrawerSwipe";
 import { SoundAutoplayContext } from "@/components/SoundChip";
 
@@ -271,7 +272,7 @@ export default function ChatPage() {
     streaming, setStreaming, streamingReasoning, setStreamingReasoning, streamingSteps,
     toolEvents, setToolEvents, preparingTool, generatingImage, setGeneratingImage,
     consultingKnowledge, setConsultingKnowledge, transcribingAudio, setTranscribingAudio,
-    subagents, setSubagents, guardNote, setGuardNote, liveArtifact, setLiveArtifact,
+    guardNote, setGuardNote, liveArtifact, setLiveArtifact,
     sending, setSending, streamPhase, setStreamPhase, stopRef, makeStreamHandler, resumeStream, handleStop,
   } = gen;
   // mantém o espelho do chat ativo em dia (cobre todos os setActive de uma vez)
@@ -1181,7 +1182,6 @@ export default function ChatPage() {
     setGeneratingImage(false);
     setConsultingKnowledge(false);
     setTranscribingAudio(false);
-    setSubagents([]);
     setGuardNote(null);
     setQueued([]);
   }
@@ -1612,7 +1612,6 @@ export default function ChatPage() {
     setStreamingReasoning("");
     setToolEvents([]);
     setGuardNote(null);
-    setSubagents([]);
 
     // chat "dono" deste turno: enquanto ele for o ativo, o stream pinta a tela;
     // se o usuário trocar de chat, o handler para de pintar (ver useGeneration).
@@ -2702,18 +2701,6 @@ export default function ChatPage() {
                       </div>
                     );
                   })}
-                  {sending && subagents.length > 0 && (
-                    <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-1.5">
-                      {subagents.map((a) => (
-                        <span key={a.id} className="flex items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/10 px-2.5 py-1 text-xs text-accent-hover">
-                          {a.adhoc ? <Sparkles size={13} className="animate-pulse" /> : <Users size={13} className="animate-pulse" />} {a.name}
-                          <span className="max-w-[200px] truncate font-mono text-[10px] text-accent-hover/70">{a.tool || "trabalhando…"}</span>
-                          {a.ctx && <span title="Com o contexto do chat" className="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium">contexto</span>}
-                          {a.mem && <span title="Com memória própria" className="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium">memória</span>}
-                        </span>
-                      ))}
-                    </div>
-                  )}
                   {sending && guardNote && <GuardRetry note={guardNote} />}
                   {/* mesa-redonda: fala do participante da vez, em streaming */}
                   {isRoundtable && rtStreaming && (
@@ -3065,6 +3052,10 @@ function prettyTool(name: string): string {
     media__video__transcribe: "transcrevendo o vídeo",
     search_tools: "procurando a ferramenta certa",
     execute_tool: "preparando uma ferramenta",
+    delegate: "preparando a delegação",
+    delegate_team: "montando a equipe",
+    run_code: "escrevendo código",
+    generate_image: "descrevendo a imagem",
   };
   return map[name] ?? name.replace(/__/g, ".").replace(/_/g, " ");
 }
@@ -3084,15 +3075,19 @@ function statusFor(f: {
     // a IA está escrevendo a chamada (ex.: o JSON inteiro de uma expansão de mundo)
     const kb = f.preparingTool.chars >= 1024 ? ` (${(f.preparingTool.chars / 1024).toFixed(1)} KB)` : "";
     const oque = (f.preparingTool.action && ACTION_LABELS[f.preparingTool.action]) || prettyTool(f.preparingTool.name);
-    return `Escrevendo — ${oque}…${kb}`;
+    return `${oque.charAt(0).toUpperCase()}${oque.slice(1)}…${kb}`;
   }
+  // o que ela está fazendo AGORA, dito com o alvo da chamada; fixos só "Pensando" e "Respondendo"
   const last = f.toolEvents.length ? f.toolEvents[f.toolEvents.length - 1] : null;
-  if (last && last.kind === "call") return `Executando — ${prettyTool(last.name)}…`;
-  if (f.phase === "preparing") return "Preparando contexto e aguardando o provider…";
-  if (f.phase === "thinking") return "Raciocinando…";
-  if (f.phase === "tool") return "Executando ferramenta…";
+  if (last && last.kind === "call") {
+    const team = last.team;
+    const done = team?.members.filter((m) => m.state === "done" || m.state === "failed").length;
+    return `${describeToolCall(last.name, last.data, {
+      agent: last.live?.name, team: team?.name, done, size: team?.members.length,
+    })}…`;
+  }
   if (f.phase === "streaming") return "Respondendo…";
-  return "Trabalhando…"; // fallback para retomada de stream sem evento classificável
+  return "Pensando…";
 }
 
 function formatSpeechTime(seconds: number): string {

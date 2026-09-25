@@ -44,6 +44,7 @@ from ..models import GeneratedImage, Message
 from ..providers import image_gen, openrouter, reasoning_details
 from ..tools import sift_service, toolctx
 from . import curator
+from . import attachment_context
 from .activity import with_activity
 
 logger = logging.getLogger(__name__)
@@ -748,6 +749,8 @@ def _delegate_tool(agents: list[dict[str, Any]], adhoc: bool = False,
         "directly. Use it for work that is independent, parallelizable or specialized; do "
         "simple things yourself. Several delegate calls in the same turn may run in parallel."
     )
+    if adhoc:
+        desc += " To start many agents at once, use delegate_team instead."
     if agents:
         desc += f"\n\nUser-defined agents (prefer these when one fits):\n{lines}"
     if adhoc:
@@ -783,6 +786,63 @@ def _delegate_tool(agents: list[dict[str, Any]], adhoc: bool = False,
             "name": "delegate",
             "description": desc,
             "parameters": {"type": "object", "properties": props, "required": ["agent", "task"]},
+        },
+    }
+
+
+def _delegate_team_tool(max_members: int, isolation: bool = False,
+                        background: bool = False) -> dict[str, Any]:
+    """Tool injetada quando a IA pode criar agentes: uma EQUIPE inteira numa chamada só."""
+    desc = (
+        f"Start a team of new agents in one call (up to {max_members} agents per turn, counting "
+        "every level). They run concurrently in a queue; you get back one combined report "
+        "(merged automatically when the team is large), and the user watches each agent work. "
+        "Split the work so members do not overlap: give each a distinct slice (files, topics, "
+        "channels, personas...). Put what all members share in `shared_instructions` and keep "
+        "each member's `task` specific and self-contained. Members run at the same time by "
+        "default; set parallel=false when each step builds on the previous ones (e.g. research "
+        "-> strategy -> copy): members then run in order and each receives the reports of the "
+        "ones before it. For very large efforts, create a few "
+        "lead agents and tell each one to build its own sub-team with delegate_team; leads "
+        "report back to you. Use delegate for a single agent."
+    )
+    member: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "short name shown to the user"},
+            "task": {"type": "string", "description": "this member's specific, self-contained task"},
+            "instructions": {"type": "string", "description": "optional role/focus beyond shared_instructions"},
+        },
+        "required": ["name", "task"],
+    }
+    if isolation:
+        member["properties"]["isolated"] = {
+            "type": "boolean",
+            "description": "in a Codespace project: work on its own git worktree (for code changes)",
+        }
+    props: dict[str, Any] = {
+        "team_name": {"type": "string", "description": "short team name shown to the user"},
+        "goal": {"type": "string", "description": "the overall objective; used to merge the reports"},
+        "shared_instructions": {"type": "string", "description": "role, rules and report format common to every member"},
+        "parallel": {
+            "type": "boolean",
+            "description": "true (default): members work at the same time on independent slices. "
+                           "false: members run in the listed order, each building on the previous reports.",
+        },
+        "members": {"type": "array", "items": member, "maxItems": max_members},
+    }
+    if background:
+        props["background"] = {
+            "type": "boolean",
+            "description": "true: run the team detached; its merged report arrives in a new turn. "
+                           "Use for long efforts the user need not wait for.",
+        }
+    return {
+        "type": "function",
+        "function": {
+            "name": "delegate_team",
+            "description": desc,
+            "parameters": {"type": "object", "properties": props, "required": ["team_name", "goal", "members"]},
         },
     }
 
@@ -1790,6 +1850,7 @@ def _assemble_tools_and_prompt(
     subagent_adhoc: bool = False,
     subagent_isolation: bool = False,
     subagent_background: bool = False,
+    subagent_max_calls: int = 4,
 ) -> _AssembledTools:
     """Fase 2 — monta a lista de tools anunciadas ao modelo e a seção de
     ferramentas do system prompt (SIFT + skills + genimage + KB-tool + delegate)."""
@@ -1919,6 +1980,10 @@ def _assemble_tools_and_prompt(
         a.tools = list(a.tools) + [_delegate_tool(subagents, subagent_adhoc, subagent_isolation,
                                                   subagent_background)]
         native_names.append("delegate")
+        if subagent_adhoc:
+            a.tools = list(a.tools) + [_delegate_team_tool(subagent_max_calls, subagent_isolation,
+                                                           subagent_background)]
+            native_names.append("delegate_team")
 
     # Ferramentas de domínio fornecidas pelo chamador do turno. O runner recebe
     # apenas nome+argumentos; identidade/campanha ficam capturadas no servidor.
@@ -2261,10 +2326,15 @@ class _ToolDispatcher:
         elif name == "brain":
             async for ev in self._brain(args):
                 yield ev
+        elif name == "read_attachment":
+            self.result = await attachment_context.read_attachment(self.user_id, self.chat_id, args)
         elif name == "propose_skill":
             self.result = self._propose_skill(args)
         elif name == "delegate":
             async for ev in self._delegate(args, tc):
+                yield ev
+        elif name == "delegate_team":
+            async for ev in self._delegate_team(args, tc):
                 yield ev
         elif name in self.native_tool_names and self.native_tool_runner is not None:
             self.result = await self.native_tool_runner(name, args)
@@ -2623,6 +2693,68 @@ class _ToolDispatcher:
                 self.result = data
         yield {"type": "subagent", "status": "done", "id": tcid, "agent": (self.result.get("agent") if isinstance(self.result, dict) else None) or label}
 
+    async def _delegate_team(self, args: dict, tc: dict) -> AsyncGenerator[dict[str, Any], None]:
+        from .subagent_team import run_team, team_members
+
+        if not (self.subagents_on and self.subagent_adhoc):
+            self.result = {"error": "equipes exigem que a IA possa criar agentes"}
+            return
+        members, erro = team_members(args)
+        if erro:
+            self.result = {"error": erro}
+            return
+        livre = self.subagent_max_calls - self.delegations_used
+        if len(members) > livre:
+            self.result = {"error": (
+                f"a equipe pede {len(members)} agentes, mas restam {max(livre, 0)} neste turno "
+                f"(limite {self.subagent_max_calls}). Reduza a equipe ou use líderes que montam "
+                "as próprias sub-equipes.")}
+            return
+        if not self.subagent_isolation:
+            for m in members:
+                m["isolated"] = False
+        self.delegations_used += len(members)
+        tcid = tc.get("id")
+        name = " ".join(str(args.get("team_name") or "Equipe").split())[:60]
+        goal = str(args.get("goal") or name)
+        chain = args.get("parallel") is False
+        run = self.run_subagent
+        starter = getattr(run, "start_background_team", None)
+        if args.get("background") and self.subagent_background and starter is not None:
+            job = starter(members, goal, name, chain)
+            yield {"type": "subagent", "status": "team_background", "id": tcid, "team": name,
+                   "goal": goal[:300], "size": len(members)}
+            self.result = {
+                "kind": "subagent_team_started", "team": name, "goal": goal, "size": len(members),
+                "job_id": job,
+                "note": "The team is running in the background. Do not wait or poll: its merged "
+                        "report arrives in a new turn. Tell the user it is running, then continue "
+                        "or end your turn.",
+            }
+            return
+        yield {"type": "subagent", "status": "team_start", "id": tcid, "team": name, "goal": goal[:300],
+               "chain": chain, "members": [{"name": m["name"], "task": m["task"][:200]} for m in members]}
+        q: asyncio.Queue = asyncio.Queue()
+        job = asyncio.ensure_future(run_team(run, members, goal, q.put_nowait,
+                                             getattr(run, "synthesize", None), chain=chain))
+        try:
+            while True:
+                pegar = asyncio.ensure_future(q.get())
+                feito, _ = await asyncio.wait({pegar, job}, return_when=asyncio.FIRST_COMPLETED)
+                if pegar in feito:
+                    yield {"type": "subagent", "id": tcid, "team": name, **pegar.result()}
+                    continue
+                pegar.cancel()
+                while not q.empty():
+                    yield {"type": "subagent", "id": tcid, "team": name, **q.get_nowait()}
+                break
+            res = job.result()
+        finally:
+            if not job.done():
+                job.cancel()
+        self.result = {**res, "team": name}
+        yield {"type": "subagent", "status": "team_done", "id": tcid, "team": name}
+
     async def _dispatch_tp(self, *call: Any) -> Any:
         """Roda a tool sync numa thread com um TETO DE PAREDE. Sem isto, uma builtin que
         gira/explode (ex.: taint sobre uma base enorme) pendura o turno inteiro pra sempre.
@@ -2730,9 +2862,12 @@ def _shape_tool_result(result: Any) -> tuple[str, Any]:
             "note": "An editable email draft was shown to the user to review and send. "
                     "Do NOT claim the email was sent; the user will send it from the composer.",
         })
+    elif isinstance(event_result, dict) and event_result.get("kind") == "subagent_team":
+        from .subagent_team import model_view
+        content = json.dumps(model_view(event_result), ensure_ascii=False, default=str)
     elif isinstance(event_result, dict) and event_result.get("kind") == "subagent":
-        # passos e tarefa são para o card da UI; o modelo já sabe a tarefa
-        content = json.dumps({k: v for k, v in event_result.items() if k not in ("steps", "task")},
+        # passos, linha do tempo e tarefa são para a UI; o modelo já sabe a tarefa
+        content = json.dumps({k: v for k, v in event_result.items() if k not in ("steps", "timeline", "task")},
                              ensure_ascii=False, default=str)
     elif isinstance(event_result, dict) and event_result.get("kind") == "skill_proposal":
         content = json.dumps({
@@ -3020,10 +3155,15 @@ async def run_turn(
         subagents=subagents, run_subagent=run_subagent,
         native=_native,
         subagent_adhoc=subagent_adhoc, subagent_isolation=subagent_isolation,
-        subagent_background=subagent_background,
+        subagent_background=subagent_background, subagent_max_calls=subagent_max_calls,
     )
     tools: Any = asm.tools
-    _base_tools = asm.tools  # tools originais: p/ reabrir após um corte (ex.: steer)
+    # anexos de mensagens anteriores que não voltaram inteiros: a IA os reabre sob demanda
+    # (só num turno que já anuncia tools: injetar tools num modelo sem suporte quebra)
+    cortado_agora = any(isinstance(a, dict) and a.get("truncated") for a in (_md.attachments or []))
+    if tools and chat_id and ((use_context and attachment_context.has_files(history)) or cortado_agora):
+        tools = list(tools) + [attachment_context.read_attachment_tool()]
+    _base_tools = tools  # tools originais: p/ reabrir após um corte (ex.: steer)
     sift_prompt = asm.sift_prompt
     skills_by_slug = asm.skills_by_slug
     genimage_on = asm.genimage_on
@@ -3096,7 +3236,7 @@ async def run_turn(
     # capacidade "Contexto do Chat": quando desligada, o modelo NÃO recebe o
     # histórico (turno stateless — só system + mensagem atual).
     if use_context:
-        messages.extend(_sanitize_history(history))
+        messages.extend(_sanitize_history(attachment_context.for_provider(history, _md.vision)))
 
     # 3. mensagem do usuário + anexos (arquivos, áudio, imagens) — Fase 3
     _att: dict[str, int] = {"attach_chars": 0}
@@ -3571,14 +3711,14 @@ async def run_turn(
             except json.JSONDecodeError:
                 return {}
 
-        def _announce(name: str, args: dict) -> dict[str, Any]:
+        def _announce(name: str, args: dict, cid: str | None = None) -> dict[str, Any]:
             # `chars` = peso do bloco no contexto; vira o badge de tokens no
             # _finalize_usage (a chamada também é reenviada nas voltas seguintes).
             tool_events.append({
-                "kind": "call", "name": name, "data": args,
+                "kind": "call", "name": name, "data": args, "id": cid,
                 "chars": len(json.dumps(args, ensure_ascii=False, default=str)),
             })
-            return {"type": "tool_call", "name": name, "arguments": args}
+            return {"type": "tool_call", "name": name, "arguments": args, "id": cid}
 
         def _absorb(name: str, tc: dict, result: Any) -> dict[str, Any]:
             """Registra o resultado de UMA tool: evento p/ a UI, mensagem p/ o modelo e
@@ -3605,13 +3745,13 @@ async def run_turn(
                             {"tool": name, "repeats": _noprogress[_psig]}, chat_id)
                 _spin["stop"] = True
             tool_events.append({
-                "kind": "result", "name": name, "data": event_result,
+                "kind": "result", "name": name, "data": event_result, "id": tc.get("id"),
                 "chars": len(content),  # o que de fato volta como ENTRADA do modelo
             })
             messages.append({"role": "tool", "tool_call_id": tc["id"], "content": content})
             input_chars["tool_results"] += len(content)  # custo invisível: saída da tool volta como entrada
             tool_result_chars[name] = tool_result_chars.get(name, 0) + len(content)
-            return {"type": "tool_result", "name": name, "result": event_result}
+            return {"type": "tool_result", "name": name, "result": event_result, "id": tc.get("id")}
 
         # PARALELO: o modelo pede várias tools numa mensagem só (parallel tool calling).
         # Executá-las em série não custa tokens nem voltas — custa TEMPO DE PAREDE: ler 4
@@ -3620,11 +3760,11 @@ async def run_turn(
         # compartilhado no dispatcher. Cada chamada ganha uma CÓPIA do dispatcher — ele
         # guarda o resultado em `self.result`, e instâncias concorrentes se atropelariam.
         specs = [(tc, tc["function"]["name"], _args_of(tc)) for tc in tool_calls]
-        parallel = len(specs) > 1 and all(n != "delegate" for _t, n, _a in specs)
+        parallel = len(specs) > 1 and all(n not in ("delegate", "delegate_team") for _t, n, _a in specs)
 
         if parallel:
             for _tc, name, args in specs:
-                yield _announce(name, args)
+                yield _announce(name, args, _tc.get("id"))
 
             sem = asyncio.Semaphore(_MAX_PARALLEL_TOOLS)
 
@@ -3653,7 +3793,7 @@ async def run_turn(
                 yield _absorb(name, tc, res)
         else:
             for tc, name, args in specs:
-                yield _announce(name, args)
+                yield _announce(name, args, tc.get("id"))
                 # despacha a tool (emite os eventos de progresso na ordem certa)
                 async for ev in disp.run(name, args, tc):
                     # custo de tool (ex.: geração de imagem) → soma no uso do turno,

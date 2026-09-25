@@ -1246,8 +1246,9 @@ export default function ModelEditor({
       const scWorktree = typeof sc.worktree === "boolean" ? sc.worktree : scIsolate.length > 0;
       cleanFilterConfig.subagents = {
         team: scTeam,
-        mode: sc.mode === "parallel" ? "parallel" : "sequential",
-        max_calls: Math.max(1, Math.min(10, Number(sc.max_calls) || 4)),
+        execution: sc.execution === "sequential" ? "sequential" : "parallel",
+        max_calls: Math.max(1, Math.min(1000, Number(sc.max_calls) || 4)),
+        concurrency: Math.max(1, Math.min(64, Number(sc.concurrency) || 8)),
         max_depth: Math.max(1, Math.min(3, Number(sc.max_depth) || 2)),
         pass_context: !!sc.pass_context,
         worker_memory: !!sc.worker_memory,
@@ -2529,18 +2530,22 @@ export default function ModelEditor({
               )}
             </div>
 
-            <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-3">
+            <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
               <label className="space-y-1">
-                <span className="flex items-center gap-1.5 text-[11px] text-muted">Execução <InfoHint text="Paralela: quando a IA delega várias tarefas de uma vez, os agentes trabalham ao mesmo tempo. Sequencial: um de cada vez." /></span>
-                <select value={subCfg.mode === "parallel" ? "parallel" : "sequential"} onChange={(e) => setSubCfg({ mode: e.target.value })} className={selCls}>
-                  <option value="sequential">Sequencial</option>
+                <span className="flex items-center gap-1.5 text-[11px] text-muted">Execução <InfoHint text="Paralela: os agentes trabalham ao mesmo tempo, e a IA ainda pode pedir que uma equipe siga em sequência quando cada etapa depende da anterior. Sequencial: sempre um agente por vez." /></span>
+                <select value={subCfg.execution === "sequential" ? "sequential" : "parallel"} onChange={(e) => setSubCfg({ execution: e.target.value })} className={selCls}>
                   <option value="parallel">Paralela</option>
+                  <option value="sequential">Sequencial</option>
                 </select>
               </label>
               <label className="space-y-1">
-                <span className="flex items-center gap-1.5 text-[11px] text-muted">Máx. por resposta <InfoHint text="Quantas delegações a IA pode fazer numa mesma resposta." /></span>
-                <input type="number" min={1} max={10} value={subCfg.max_calls ?? 4} onChange={(e) => setSubCfg({ max_calls: Math.max(1, Math.min(10, Number(e.target.value) || 4)) })} className={inpCls} />
+                <span className="flex items-center gap-1.5 text-[11px] text-muted">Máx. de agentes <InfoHint text="Quantos agentes podem trabalhar numa mesma resposta, contando as equipes e sub-equipes (até 1000). Cada agente é uma conversa própria com o modelo: equipes grandes custam proporcionalmente." /></span>
+                <input type="number" min={1} max={1000} value={subCfg.max_calls ?? 4} onChange={(e) => setSubCfg({ max_calls: Math.max(1, Math.min(1000, Number(e.target.value) || 4)) })} className={inpCls} />
               </label>
+              {subCfg.execution !== "sequential" && <label className="space-y-1">
+                <span className="flex items-center gap-1.5 text-[11px] text-muted">Simultâneos <InfoHint text="Quantos agentes trabalham ao mesmo tempo em cada nível; os demais esperam na fila. Valores altos terminam antes, mas podem esbarrar no limite de requisições do provedor." /></span>
+                <input type="number" min={1} max={64} value={subCfg.concurrency ?? 8} onChange={(e) => setSubCfg({ concurrency: Math.max(1, Math.min(64, Number(e.target.value) || 8)) })} className={inpCls} />
+              </label>}
               <label className="space-y-1">
                 <span className="flex items-center gap-1.5 text-[11px] text-muted">Profundidade <InfoHint text="Até quantos níveis um agente pode delegar para outro (agente chamando agente). 1 = só este modelo delega." /></span>
                 <input type="number" min={1} max={3} value={subCfg.max_depth ?? 2} onChange={(e) => setSubCfg({ max_depth: Math.max(1, Math.min(3, Number(e.target.value) || 2)) })} className={inpCls} />
