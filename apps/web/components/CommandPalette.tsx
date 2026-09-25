@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CornerDownLeft, Search } from "lucide-react";
+import { CornerDownLeft, Search, X } from "lucide-react";
 import { useClickOutside } from "./ui";
 
 export interface PaletteItem {
@@ -75,6 +75,7 @@ export default function CommandPalette({ items, onClose }: {
             className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
           />
           <kbd className="hidden shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted sm:block">Esc</kbd>
+          <button onClick={onClose} title="Fechar" className="shrink-0 rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink sm:hidden"><X size={18} /></button>
         </div>
 
         <div ref={rowsRef} className="min-h-0 flex-1 overflow-y-auto p-1.5">

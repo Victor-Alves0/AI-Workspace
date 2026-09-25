@@ -1278,7 +1278,7 @@ function IconButton({
       onClick={onClick}
       disabled={disabled}
       aria-pressed={active || undefined}
-      className={`rounded-lg p-1.5 transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 ${active ? "bg-accent/15 text-accent-hover" : "text-muted"}`}
+      className={`rounded-lg p-1.5 transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 max-md:p-2.5 max-md:[&_svg]:size-[20px] ${active ? "bg-accent/15 text-accent-hover" : "text-muted"}`}
     >
       {children}
     </button>
@@ -1664,12 +1664,12 @@ function MessageItem({
                   {message.content}
                 </div>
               )}
-              <div data-touch="long-press" className={`mt-1 flex items-center justify-end gap-1.5 pr-1 transition-opacity duration-150 ${touchActions ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+              <div data-touch="long-press" className={`mt-1 flex items-center justify-end gap-1.5 pr-1 transition-opacity duration-150 ${touchActions ? "opacity-100" : "touch-reveal opacity-0 group-hover:opacity-100"}`}>
                 <span className="text-[11px] text-muted">{fmtTime(message.created_at)}</span>
                 <button
                   title="Copiar"
                   onClick={copy}
-                  className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-ink"
+                  className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-ink max-md:p-2 max-md:[&_svg]:size-[19px]"
                 >
                   {copied ? <Check size={13} className="text-green-400" /> : <Copy size={13} />}
                 </button>
@@ -1677,21 +1677,21 @@ function MessageItem({
                   title="Tentar novamente — a IA responde de novo a partir desta mensagem"
                   onClick={() => onRegenerate(message.id)}
                   disabled={busy}
-                  className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 max-md:p-2 max-md:[&_svg]:size-[20px]"
+                  className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 max-md:p-2 max-md:[&_svg]:size-[19px]"
                 >
                   <RotateCcw size={13} />
                 </button>
                 <button
                   title="Editar"
                   onClick={() => { setDraft(message.content); setEditing(true); }}
-                  className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-ink"
+                  className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-ink max-md:p-2 max-md:[&_svg]:size-[19px]"
                 >
                   <Pencil size={13} />
                 </button>
                 <button
                   title="Excluir"
                   onClick={() => onDelete(message.id)}
-                  className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-red-300 max-md:p-2 max-md:[&_svg]:size-[20px]"
+                  className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-red-300 max-md:p-2 max-md:[&_svg]:size-[19px]"
                 >
                   <Trash2 size={13} />
                 </button>
@@ -1746,7 +1746,7 @@ function MessageItem({
         {/* barra de ações — abaixo de toda mensagem da IA */}
         {!editing && (
           <>
-            <div className={`mt-1.5 flex items-center gap-0.5 transition-opacity duration-150 ${speaking ? "opacity-100" : "touch-reveal opacity-0 group-hover:opacity-100"}`}>
+            <div className={`mt-1.5 flex flex-wrap items-center gap-0.5 max-md:gap-1 transition-opacity duration-150 ${speaking ? "opacity-100" : "touch-reveal opacity-0 group-hover:opacity-100"}`}>
               <IconButton title="Editar" onClick={() => { setDraft(message.content); setEditing(true); }} disabled={busy}>
                 <Pencil size={15} />
               </IconButton>

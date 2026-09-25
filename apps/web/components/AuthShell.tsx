@@ -17,7 +17,14 @@ export default function AuthShell({
 }) {
   return (
     <div className="flex min-h-full items-center justify-center bg-bg p-0 sm:p-6">
-      <div className="animate-fade-up grid min-h-[100dvh] w-full max-w-5xl overflow-hidden border-border bg-[#0b0b0d] sm:min-h-[600px] sm:rounded-2xl sm:border sm:shadow-modal md:grid-cols-[1fr_1.05fr]">
+      <div className="animate-fade-up relative grid min-h-[100dvh] w-full max-w-5xl overflow-hidden border-border bg-[#0b0b0d] sm:min-h-[600px] sm:rounded-2xl sm:border sm:shadow-modal md:grid-cols-[1fr_1.05fr]">
+        {/* celular: a mesma arte vira o FUNDO da tela, com blur e um véu escuro opaco
+            por cima para o formulário continuar legível (no desktop ela fica na coluna) */}
+        <div aria-hidden className="pointer-events-none absolute inset-0 md:hidden">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/login-hero.webp" alt="" className="h-full w-full scale-110 object-cover opacity-80 blur-xl" />
+          <div className="absolute inset-0 bg-gradient-to-b from-[#0b0b0d]/55 via-[#0b0b0d]/70 to-[#0b0b0d]/90" />
+        </div>
         <div className="relative hidden md:block">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/login-hero.webp" alt="" className="absolute inset-0 h-full w-full object-cover" />
@@ -36,7 +43,7 @@ export default function AuthShell({
           )}
         </div>
 
-        <div className="relative flex flex-col px-7 py-8 sm:px-12">
+        <div className="relative z-10 flex flex-col px-7 py-8 sm:px-12">
           <div className="flex min-h-[36px] items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 md:invisible">
               {/* eslint-disable-next-line @next/next/no-img-element */}

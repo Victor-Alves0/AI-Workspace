@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArchiveRestore, Trash2 } from "lucide-react";
+import { ArchiveRestore, Trash2, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Chat } from "@/lib/types";
 import { useClickOutside } from "./ui";
@@ -35,7 +35,10 @@ export default function ArchivedModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm">
       <div ref={ref} className="w-full max-w-lg rounded-2xl border border-border bg-surface p-5 shadow-2xl">
-        <h2 className="mb-3 text-lg font-semibold">Chats Arquivados</h2>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold">Chats Arquivados</h2>
+          <button onClick={onClose} title="Fechar" className="rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink"><X size={18} /></button>
+        </div>
         <div className="max-h-96 space-y-1 overflow-y-auto">
           {items.map((c) => (
             <div key={c.id} className="flex items-center justify-between rounded-lg px-3 py-2 hover:bg-hover">

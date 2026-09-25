@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 import type { Chat } from "@/lib/types";
 import { useClickOutside } from "./ui";
 
@@ -33,6 +33,7 @@ export default function SearchModal({
             placeholder="Pesquisar chats…"
             className="w-full bg-transparent text-sm outline-none placeholder:text-muted"
           />
+          <button onClick={onClose} title="Fechar" className="shrink-0 rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink"><X size={18} /></button>
         </div>
         <div className="max-h-80 overflow-y-auto p-2">
           {results.map((c) => (

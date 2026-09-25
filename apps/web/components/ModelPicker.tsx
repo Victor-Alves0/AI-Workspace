@@ -13,6 +13,7 @@ import {
   PinOff,
   Search,
   Star,
+  X,
 } from "lucide-react";
 import type { Model, ModelConfig } from "@/lib/types";
 import { copyText } from "@/lib/clipboard";
@@ -127,9 +128,9 @@ export default function ModelPicker({
       {/* mobile: fixed na largura da tela (ancorado no botão ele estoura a borda
           direita — o gatilho não está no x=0); desktop: ancorado como antes */}
       {open && (
-        <div className="fixed inset-x-3 top-20 z-50 overflow-hidden rounded-2xl border border-border bg-surface shadow-menu animate-pop sm:absolute sm:inset-x-auto sm:left-0 sm:top-11 sm:w-[380px] sm:max-w-[calc(100vw-1.5rem)]">
+        <div className="fixed inset-x-3 top-20 z-50 flex max-h-[75dvh] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-menu animate-pop sm:absolute sm:inset-x-auto sm:left-0 sm:top-11 sm:max-h-none sm:w-[380px] sm:max-w-[calc(100vw-1.5rem)]">
           <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
-            <Search size={16} className="text-muted" />
+            <Search size={16} className="shrink-0 text-muted" />
             <input
               autoFocus={finePointer()}
               value={q}
@@ -137,6 +138,13 @@ export default function ModelPicker({
               placeholder="Pesquisar um modelo"
               className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted max-md:text-[16px]"
             />
+            <button
+              onClick={() => setOpen(false)}
+              title="Fechar"
+              className="shrink-0 rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink"
+            >
+              <X size={18} />
+            </button>
           </div>
           <div className="flex items-center gap-1 border-b border-border px-2 py-1.5 text-sm max-md:py-2 max-md:text-[15px]">
             <button
@@ -162,7 +170,9 @@ export default function ModelPicker({
           </div>
           {/* max-h em dvh: no celular a lista não passa por baixo do teclado;
               onTouchMove fecha o teclado ao arrastar (senão o scroll trava no iOS) */}
-          <div onTouchMove={dismissKeyboard} className="max-h-[min(20rem,55dvh)] overflow-y-auto overscroll-contain p-1.5 max-md:max-h-[21rem]">
+          {/* no máximo ~5 modelos visíveis; o resto rola. No celular as linhas têm
+              min-h-14 (56px) → 5 linhas ≈ 18rem; no desktop cabem mais na mesma altura */}
+          <div onTouchMove={dismissKeyboard} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5 max-md:max-h-[18rem] sm:max-h-[20rem]">
             {rows.map((r) => (
               <div key={r.key} className="group relative flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-hover max-md:min-h-14 max-md:px-3">
                 <button

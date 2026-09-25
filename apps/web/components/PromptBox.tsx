@@ -401,6 +401,7 @@ export default function PromptBox({
   sending,
   recording,
   onToggleMic,
+  onCancelMic,
   onVoiceMode,
   modelTools = [],
   prompts = [],
@@ -445,6 +446,8 @@ export default function PromptBox({
   sending: boolean;
   recording: boolean;
   onToggleMic: () => void;
+  /** cancela a gravação DESCARTANDO (sem transcrever) — o "X" da barra de gravação */
+  onCancelMic?: () => void;
   /** entra no modo voz (assistente hands-free) — ausente esconde o botão */
   onVoiceMode?: () => void;
   /** ferramentas que o modelo ativo pode usar (nome + descrição) */
@@ -506,6 +509,14 @@ export default function PromptBox({
   const backdropRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [attachErr, setAttachErr] = useState<string | null>(null);
+  // cronômetro da barra de gravação (só conta enquanto grava)
+  const [recSecs, setRecSecs] = useState(0);
+  useEffect(() => {
+    if (!recording) { setRecSecs(0); return; }
+    setRecSecs(0);
+    const t = setInterval(() => setRecSecs((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [recording]);
 
   // upload liberado quando o modelo pode ver imagens, ouvir áudios ou receber arquivos
   const canVision = !!capabilities.vision || !!capabilities["filter:vision_router"];
@@ -878,7 +889,7 @@ export default function PromptBox({
   }, [value, attachedAgent]);
 
   return (
-    <div className="px-4 pb-5 pt-2">
+    <div className="px-4 pt-2 pb-[max(0.6rem,env(safe-area-inset-bottom))] md:pb-5">
       <div
         /* só realça o que REALMENTE dá pra soltar aqui: arquivos do sistema, um
            arquivo do Codespace ou um trecho de código — arrastar uma seleção de
@@ -903,6 +914,40 @@ export default function PromptBox({
             {dropKind === "snippet" ? "Solte para anexar o trecho"
               : dropKind === "file" ? "Solte para anexar o arquivo"
               : "Solte para anexar"}
+          </div>
+        )}
+        {/* barra de gravação (estilo ChatGPT): cobre o composer enquanto grava, com
+            cancelar (descarta), a onda animada + cronômetro e concluir (transcreve). */}
+        {recording && (
+          <div className="absolute inset-0 z-40 flex items-center gap-2 rounded-3xl bg-surface px-2">
+            <button
+              onClick={onCancelMic ?? onToggleMic}
+              title="Cancelar"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-hover hover:text-ink"
+            >
+              <X size={20} />
+            </button>
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <div className="flex h-8 flex-1 items-center gap-[3px] overflow-hidden" aria-hidden>
+                {Array.from({ length: 40 }, (_, i) => (
+                  <span
+                    key={i}
+                    className="w-[3px] shrink-0 rounded-full bg-accent/70 [animation:aiw-wave_1s_ease-in-out_infinite]"
+                    style={{ animationDelay: `${(i % 10) * 90}ms`, height: `${20 + ((i * 37) % 60)}%` }}
+                  />
+                ))}
+              </div>
+              <span className="shrink-0 font-mono text-sm tabular-nums text-muted">
+                {String(Math.floor(recSecs / 60)).padStart(2, "0")}:{String(recSecs % 60).padStart(2, "0")}
+              </span>
+            </div>
+            <button
+              onClick={onToggleMic}
+              title="Concluir (transcrever)"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-white transition-colors hover:bg-accent-hover"
+            >
+              <Check size={20} />
+            </button>
           </div>
         )}
         {commandMenuOpen && (

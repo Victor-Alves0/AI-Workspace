@@ -1246,6 +1246,46 @@ export default function ChatPage() {
     return () => clearInterval(t);
   }, [refreshChats, reloadMessages]);
 
+  // volta do segundo plano (celular: tela desbloqueada / app reaberto): o iOS congela
+  // o JS e mata o fetch do stream sem disparar erro — a UI podia ficar "gerando" para
+  // sempre ou mostrar um estado velho. Ao reaparecer, re-sincroniza o chat aberto e
+  // reassina a geração se ainda houver uma rodando no servidor (best-effort).
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.hidden) return;
+      const s = pollRef.current;
+      if (!s.active) return;
+      const cid = s.active.id;
+      reloadMessages(cid).catch(() => {});
+      resumeStream(cid);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [reloadMessages, resumeStream]);
+
+  // teclado do celular: mede a altura que ele cobre (visualViewport) e expõe em `--kb`.
+  // O iOS não encolhe o 100dvh ao abrir o teclado (ele SOBREPÕE) — sem isto, o composer
+  // ficava alto demais, com um vão grande até o teclado. A coluna do chat usa `--kb`
+  // como padding inferior, então o composer encosta no teclado, como no ChatGPT.
+  // (Android com interactive-widget=resizes-content já encolhe o layout → --kb≈0.)
+  useEffect(() => {
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    if (!vv) return;
+    const root = document.documentElement;
+    const update = () => {
+      const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      root.style.setProperty("--kb", `${Math.round(kb)}px`);
+    };
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+      root.style.removeProperty("--kb");
+    };
+  }, []);
+
   // toggle "Artefatos" (Configurações → Interface → Chat). Padrão: ligado.
   const iface = ((user?.profile as Record<string, any> | undefined)?.interface as Record<string, any> | undefined) ?? {};
   const artifactsEnabled = iface.artifacts !== false;
@@ -1660,6 +1700,22 @@ export default function ChatPage() {
       if (state.acc) notify("Resposta pronta", state.acc.replace(/\s+/g, " ").slice(0, 90));
     } catch (e) {
       if (isAbort(e)) { refreshBudget(); return; }   // Parar: nao e falha de envio
+      // Conexão caiu NO MEIO do stream (tela bloqueada / troca de app no iOS matam o
+      // fetch): não é ApiError, é erro de rede. O POST já chegou e o turno roda no
+      // servidor — mostrar "não foi possível enviar" e apagar o balão era um alarme
+      // FALSO (a mensagem estava salva; só trocando de chat aparecia certo). Re-sincroniza
+      // com o servidor — a lista real substitui o balão otimista (some se de fato não
+      // salvou, fica se salvou) — e reassina a geração em andamento, sem erro na cara.
+      if (!(e instanceof ApiError) && ownerId && !temporary && isActiveChat(ownerId)) {
+        const cid2 = ownerId;
+        try { await reloadMessages(cid2); } catch { /* offline de verdade: mantém o balão */ }
+        setStreaming("");
+        setStreamingReasoning("");
+        resumeStream(cid2);
+        refreshChats();
+        refreshBudget();
+        return;
+      }
       // orçamento pessoal estourado (modo "pausar") ou outra falha ao iniciar o turno
       const msg = e instanceof ApiError ? e.message : "Falha ao enviar a mensagem";
       // Desfaz somente o balão deste envio. Outras mensagens otimistas podem
@@ -1871,6 +1927,17 @@ export default function ChatPage() {
         alert("Não foi possível acessar o microfone.");
       }
     }
+  }
+
+  // "X" da barra de gravação: descarta o áudio sem transcrever nem inserir nada.
+  function cancelMic() {
+    const rec = recorderRef.current;
+    const browser = browserDictRef.current;
+    recorderRef.current = null;
+    browserDictRef.current = null;
+    setRecording(false);
+    void rec?.stop().catch(() => {});
+    void browser?.stop();
   }
 
   // ---------------------------------------------------------------------------
@@ -2347,7 +2414,7 @@ export default function ChatPage() {
         />
       </div>
 
-      <main className="flex min-w-0 flex-1 flex-col">
+      <main className="flex min-w-0 flex-1 flex-col" style={{ paddingBottom: "var(--kb, 0px)" }}>
         {workspaceOpen ? (
           <WorkspaceView
             key={workspaceKey}
@@ -2506,7 +2573,7 @@ export default function ChatPage() {
                   onDragLeave={() => setCsDropOver(false)}
                   onDrop={handleComposerFileDrop}
                 >
-                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} />
+                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} />
                 </div>
                 {/* menu do "+" abre para baixo aqui (há espaço); na conversa abre para cima */}
                 {temporary && <p className="mt-2 text-xs text-muted">Chat temporário — esta conversa não será salva.</p>}
@@ -2733,7 +2800,7 @@ export default function ChatPage() {
                           {showAsk && askSpec && (
                             <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                           )}
-                          <div ref={promptBoxRef}><PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} /></div>
+                          <div ref={promptBoxRef}><PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} /></div>
                         </div>
                       </div>
                       {speakingMessageId && !imaginaiDocksShown && (
