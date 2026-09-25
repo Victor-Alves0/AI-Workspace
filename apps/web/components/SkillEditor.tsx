@@ -131,7 +131,7 @@ export default function SkillEditor({
   }
 
   return (
-    <div className="flex h-full flex-1 flex-col bg-bg">
+    <div className="flex h-full min-w-0 flex-1 flex-col bg-bg">
       {/* header */}
       <div className="flex items-center gap-3 border-b border-border px-5 py-3">
         <button onClick={onClose} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
@@ -159,9 +159,9 @@ export default function SkillEditor({
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto md:flex-row md:overflow-hidden">
         {/* coluna do formulário */}
-        <aside className="w-[340px] shrink-0 space-y-5 overflow-y-auto border-r border-border p-5">
+        <aside className="w-full shrink-0 space-y-5 border-b border-border p-5 md:w-[340px] md:overflow-y-auto md:border-b-0 md:border-r">
           <div>
             <FieldLabel>Identificador ($)</FieldLabel>
             <input
@@ -251,7 +251,7 @@ export default function SkillEditor({
         </aside>
 
         {/* área principal: SKILL.md ou o arquivo de referência selecionado */}
-        <main className="flex min-w-0 flex-1 flex-col p-5">
+        <main className="flex min-h-[70dvh] min-w-0 flex-1 flex-col p-5 md:min-h-0">
           {active === -1 ? (
             <>
               <FieldLabel>SKILL.md — conteúdo principal (carregado sob demanda)</FieldLabel>

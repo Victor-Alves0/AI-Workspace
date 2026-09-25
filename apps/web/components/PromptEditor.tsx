@@ -51,7 +51,7 @@ export default function PromptEditor({
   }
 
   return (
-    <div className="flex h-full flex-1 flex-col bg-bg">
+    <div className="flex h-full min-w-0 flex-1 flex-col bg-bg">
       {/* topo */}
       <div className="flex items-center gap-2 px-6 pt-4">
         <button onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink">

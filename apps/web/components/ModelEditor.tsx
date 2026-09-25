@@ -1323,7 +1323,7 @@ export default function ModelEditor({
   }
 
   return (
-    <div className="flex h-full flex-1 flex-col bg-bg">
+    <div className="flex h-full min-w-0 flex-1 flex-col bg-bg">
       {/* topo — barra fixa com voltar + título */}
       <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3 md:px-6">
         <button

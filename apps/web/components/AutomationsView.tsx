@@ -227,7 +227,7 @@ export default function AutomationsView({
   });
 
   return (
-    <div className="flex h-full flex-1 flex-col bg-bg">
+    <div className="flex h-full min-w-0 flex-1 flex-col bg-bg">
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto max-w-5xl px-3 py-6 sm:px-6">
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
