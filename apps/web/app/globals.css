@@ -142,15 +142,6 @@ select:focus-visible {
   animation: pop 0.15s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* barra de gravação de voz: onda animada (decorativa) enquanto o mic está aberto */
-@keyframes aiw-wave {
-  0%, 100% { transform: scaleY(0.35); }
-  50% { transform: scaleY(1); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .\[animation\:aiw-wave_1s_ease-in-out_infinite\] { animation: none !important; }
-}
-
 @keyframes fade-up {
   from {
     opacity: 0;

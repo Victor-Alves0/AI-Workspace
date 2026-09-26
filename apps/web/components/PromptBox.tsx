@@ -400,6 +400,7 @@ export default function PromptBox({
   queued = [],
   sending,
   recording,
+  micStream,
   onToggleMic,
   onCancelMic,
   onVoiceMode,
@@ -445,6 +446,8 @@ export default function PromptBox({
   placeholder?: string;
   sending: boolean;
   recording: boolean;
+  /** microfone aberto durante a gravação: a onda desenha o som captado */
+  micStream?: MediaStream | null;
   onToggleMic: () => void;
   /** cancela a gravação DESCARTANDO (sem transcrever) — o "X" da barra de gravação */
   onCancelMic?: () => void;
@@ -509,6 +512,13 @@ export default function PromptBox({
   const backdropRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [attachErr, setAttachErr] = useState<string | null>(null);
+  // aviso curto e nativo sobre o composer (some sozinho)
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 3500);
+    return () => clearTimeout(t);
+  }, [notice]);
   // cronômetro da barra de gravação (só conta enquanto grava)
   const [recSecs, setRecSecs] = useState(0);
   useEffect(() => {
@@ -521,7 +531,7 @@ export default function PromptBox({
   // upload liberado quando o modelo pode ver imagens, ouvir áudios ou receber arquivos
   const canVision = !!capabilities.vision || !!capabilities["filter:vision_router"];
   const canFiles = !!capabilities.file_upload;
-  const canAudio = !!capabilities["filter:audio_router"];
+  const canAudio = !!capabilities["filter:audio_router"] || !!capabilities["audio"];
   const canAttach = canVision || canFiles || canAudio;
 
   /** Sobe o arquivo e devolve o anexo por REFERÊNCIA. O binário não entra no JSON do
@@ -534,15 +544,15 @@ export default function PromptBox({
     for (const f of files) {
       if (livres <= 0) { setAttachErr(`Máximo de ${MAX_ATTACHMENTS} anexos por mensagem.`); break; }
       if (f.type.startsWith("image/")) {
-        if (!canVision) { setAttachErr("Este modelo não tem Visão nem Vision Router — habilite em Capacidades/Filtros."); continue; }
+        if (!canVision) { setAttachErr("Este modelo não tem Visão nem Roteador de Visão."); continue; }
         aceitos.push({ file: f, type: "image" });
       } else if (f.type.startsWith("audio/")) {
-        if (!canAudio) { setAttachErr("Este modelo não tem Audio Router — habilite em Filtros p/ transcrever áudios."); continue; }
+        if (!canAudio) { setAttachErr("Este modelo não ouve áudio: ative Áudio nas Capacidades ou o Roteador de Áudio."); continue; }
         aceitos.push({ file: f, type: "audio" });
       } else if (canFiles && (DOC_RE.test(f.name) || f.type.startsWith("text/") || TEXT_RE.test(f.name))) {
         aceitos.push({ file: f, type: "file" });
       } else {
-        setAttachErr(canFiles ? `Tipo não suportado: ${f.name} (imagens, PDF/Word/Excel/PPT/CSV ou texto).` : "Este modelo não aceita arquivos — habilite “Upload de Arquivos” em Capacidades.");
+        setAttachErr(canFiles ? `Tipo não suportado: ${f.name} (imagens, PDF/Word/Excel/PPT/CSV ou texto).` : "Este modelo não aceita arquivos: ative Arquivos nas Capacidades.");
         continue;
       }
       livres -= 1;
@@ -916,6 +926,16 @@ export default function PromptBox({
               : "Solte para anexar"}
           </div>
         )}
+        {notice && (
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="animate-pop absolute bottom-full left-3 z-50 mb-2 flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2 text-sm text-ink shadow-menu"
+          >
+            <Database size={15} className="shrink-0 text-muted" />
+            {notice}
+          </button>
+        )}
         {/* barra de gravação (estilo ChatGPT): cobre o composer enquanto grava, com
             cancelar (descarta), a onda animada + cronômetro e concluir (transcreve). */}
         {recording && (
@@ -928,15 +948,7 @@ export default function PromptBox({
               <X size={20} />
             </button>
             <div className="flex min-w-0 flex-1 items-center gap-3">
-              <div className="flex h-8 flex-1 items-center gap-[3px] overflow-hidden" aria-hidden>
-                {Array.from({ length: 40 }, (_, i) => (
-                  <span
-                    key={i}
-                    className="w-[3px] shrink-0 rounded-full bg-accent/70 [animation:aiw-wave_1s_ease-in-out_infinite]"
-                    style={{ animationDelay: `${(i % 10) * 90}ms`, height: `${20 + ((i * 37) % 60)}%` }}
-                  />
-                ))}
-              </div>
+              <MicWave stream={micStream ?? null} />
               <span className="shrink-0 font-mono text-sm tabular-nums text-muted">
                 {String(Math.floor(recSecs / 60)).padStart(2, "0")}:{String(recSecs % 60).padStart(2, "0")}
               </span>
@@ -1269,7 +1281,7 @@ export default function PromptBox({
                       onClick={() => {
                         if (canAttach) { openFilePicker(false); return; }
                         setPlusOpen(false);
-                        setAttachErr("Este modelo não aceita anexos. Habilite Visão ou Upload de Arquivos nas Capacidades do modelo (Modelos → editar).");
+                        setAttachErr("Este modelo não aceita anexos: ative Visão ou Arquivos nas Capacidades.");
                       }}
                     >
                       Carregar Arquivos
@@ -1279,7 +1291,7 @@ export default function PromptBox({
                       onClick={() => {
                         if (canVision) { openFilePicker(true); return; }
                         setPlusOpen(false);
-                        setAttachErr("Este modelo não vê imagens. Habilite Visão (ou o Vision Router) nas Capacidades do modelo.");
+                        setAttachErr("Este modelo não vê imagens: ative Visão ou o Roteador de Visão.");
                       }}
                     >
                       Enviar Captura
@@ -1289,7 +1301,7 @@ export default function PromptBox({
                       onClick={() => {
                         setPlusOpen(false);
                         if (!refEntries.length) {
-                          alert("Nenhum documento disponível para referenciar. Acople uma Base de Conhecimento a este modelo (Editor do modelo → Conhecimento) e envie documentos em Espaço → Conhecimento.");
+                          setNotice("Sem Base de Conhecimento acoplada");
                           return;
                         }
                         // insere "#" no fim p/ abrir o menu de referências (garante que
@@ -1436,6 +1448,71 @@ export default function PromptBox({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+const WAVE_BARS = 48;
+const WAVE_MAX_PX = 30;
+
+/** A onda da barra de gravação: cada barrinha é o volume captado num instante, rolando da
+ *  direita para a esquerda. Em silêncio fica rente (pontinhos); só cresce com som. Mexe no
+ *  DOM direto a cada quadro, sem re-renderizar o React. */
+function MicWave({ stream }: { stream: MediaStream | null }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!stream || !el) return;
+    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    void ctx.resume().catch(() => {});
+    const src = ctx.createMediaStreamSource(stream);
+    const an = ctx.createAnalyser();
+    an.fftSize = 1024;
+    src.connect(an);
+    const buf = new Uint8Array(an.fftSize);
+    const levels = new Array<number>(WAVE_BARS).fill(0);
+    const bars = Array.from(el.children) as HTMLElement[];
+    let raf = 0;
+    let last = 0;
+    let peak = 0;
+    const tick = (t: number) => {
+      raf = requestAnimationFrame(tick);
+      an.getByteTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) {
+        const v = (buf[i] - 128) / 128;
+        sum += v * v;
+      }
+      // ruído de fundo (~0,01) não mexe; fala normal (~0,03–0,15) ocupa a faixa média e
+      // só voz alta chega ao teto (curva suave, como o ouvido percebe)
+      const rms = Math.sqrt(sum / buf.length);
+      const nivel = Math.min(1, Math.pow(Math.max(0, rms - 0.012) / 0.3, 0.6));
+      peak = Math.max(peak, nivel);
+      if (t - last < 60) return;
+      last = t;
+      levels.shift();
+      levels.push(peak);
+      peak = 0;
+      for (let i = 0; i < bars.length; i++) {
+        const h = Math.max(3, Math.round(levels[i] * WAVE_MAX_PX));
+        bars[i].style.height = `${h}px`;
+        bars[i].style.opacity = levels[i] > 0.02 ? "1" : "0.45";
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      src.disconnect();
+      void ctx.close().catch(() => {});
+    };
+  }, [stream]);
+  return (
+    <div ref={ref} className="flex h-8 flex-1 items-center justify-end gap-[3px] overflow-hidden" aria-hidden>
+      {Array.from({ length: WAVE_BARS }, (_, i) => (
+        <span key={i} className="w-[3px] shrink-0 rounded-full bg-accent transition-[height] duration-75 ease-out" style={{ height: "3px", opacity: 0.45 }} />
+      ))}
     </div>
   );
 }

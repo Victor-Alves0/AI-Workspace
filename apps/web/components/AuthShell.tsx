@@ -22,8 +22,8 @@ export default function AuthShell({
             por cima para o formulário continuar legível (no desktop ela fica na coluna) */}
         <div aria-hidden className="pointer-events-none absolute inset-0 md:hidden">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/login-hero.webp" alt="" className="h-full w-full scale-110 object-cover opacity-80 blur-xl" />
-          <div className="absolute inset-0 bg-gradient-to-b from-[#0b0b0d]/55 via-[#0b0b0d]/70 to-[#0b0b0d]/90" />
+          <img src="/login-hero.webp" alt="" className="h-full w-full scale-105 object-cover blur-[2px]" />
+          <div className="absolute inset-0 bg-gradient-to-b from-[#0b0b0d]/20 via-[#0b0b0d]/45 to-[#0b0b0d]/80" />
         </div>
         <div className="relative hidden md:block">
           {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ArrowLeft, AudioLines, BookOpen, Box, Brain, Camera, Check, ChevronDown, ChevronRight, Ear, FileText, GitBranch, Info, Loader2, Mic2, Pin, Play, Plus, Search, Settings, ShieldAlert, Sliders, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { API_URL, api, ApiError } from "@/lib/api";
 import { fileToAvatarDataUrl } from "@/lib/image";
@@ -98,15 +99,40 @@ function defaultCapabilityMembers(key: string, members: string[]): string[] {
   return members;
 }
 
-/** Ícone de info com tooltip no hover — ao lado dos títulos de configuração.
- *  (Os textos são placeholders; ajuste conforme necessário.) */
+/** Ícone de info com tooltip no hover/toque — ao lado dos títulos de configuração.
+ *  O balão vai para o <body> com posição fixa: dentro de um modal com rolagem ele era
+ *  cortado pela caixa e, mesmo invisível, alargava a área rolável. */
 function InfoHint({ text }: { text: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; above: boolean } | null>(null);
+  const show = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    const w = 256;
+    const left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), window.innerWidth - w - 8);
+    const above = r.bottom + 120 > window.innerHeight;
+    setPos({ left, top: above ? r.top - 6 : r.bottom + 6, above });
+  };
+  const hide = () => setPos(null);
   return (
-    <span className="group/hint relative inline-flex align-middle">
-      <Info size={13} className="cursor-help text-muted transition-colors group-hover/hint:text-ink" />
-      <span className="pointer-events-none absolute left-1/2 top-5 z-50 w-64 -translate-x-1/2 rounded-lg border border-border bg-surface2 px-3 py-2 text-xs font-normal normal-case leading-5 tracking-normal text-ink-soft opacity-0 shadow-menu transition-opacity duration-150 group-hover/hint:opacity-100">
-        {text}
-      </span>
+    <span
+      ref={ref}
+      className="relative inline-flex align-middle"
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); if (pos) hide(); else show(); }}
+    >
+      <Info size={13} className={`cursor-help transition-colors ${pos ? "text-ink" : "text-muted"}`} />
+      {pos && typeof document !== "undefined" && createPortal(
+        <span
+          role="tooltip"
+          style={{ left: pos.left, top: pos.top, transform: pos.above ? "translateY(-100%)" : undefined }}
+          className="pointer-events-none fixed z-[200] w-64 rounded-lg border border-border bg-surface2 px-3 py-2 text-xs font-normal normal-case leading-5 tracking-normal text-ink-soft shadow-menu"
+        >
+          {text}
+        </span>,
+        document.body,
+      )}
     </span>
   );
 }
@@ -134,7 +160,7 @@ type Guard = {
 
 function newGuard(): Guard {
   const rid = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
-  return { id: rid, name: "Guarda de saída", enabled: true, detect: "refusal", action: "reinforce", inject_text: "", max_retries: 1 };
+  return { id: rid, name: "Guarda de Saída", enabled: true, detect: "refusal", action: "reinforce", inject_text: "", max_retries: 1 };
 }
 
 const selCls = "w-full rounded-lg border border-border bg-surface2 px-2 py-1.5 text-sm text-ink outline-none transition-colors focus:border-accent";
@@ -474,10 +500,6 @@ function VoiceStudio({
           </div>
         </div>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border bg-bg/40 px-4 py-2.5 text-[11px] text-muted">
-        <span>As configurações são salvas somente neste modelo.</span>
-        <span>Credenciais: Configurações → APIs / Provedores</span>
-      </div>
     </div>
   );
 }
@@ -591,26 +613,29 @@ const DEFAULT_TOOL_PROMPT =
 
 // filtros disponíveis (espelham as caixas do OpenWebUI). Mais podem ser adicionados.
 const FILTERS: { key: string; label: string }[] = [
-  { key: "vision_router", label: "Vision Router" },
-  { key: "audio_router", label: "Audio Router" },
-  { key: "genimage_router", label: "GenImage Router" },
-  { key: "output_guard", label: "Guarda de saída" },
+  { key: "vision_router", label: "Roteador de Visão" },
+  { key: "audio_router", label: "Roteador de Áudio" },
+  { key: "genimage_router", label: "Roteador de Geração de Imagens" },
+  { key: "output_guard", label: "Guarda de Saída" },
 ];
 
-// `native: true` = habilidade do PRÓPRIO modelo (o que ele sabe fazer). As demais
-// são recursos que o app injeta quando ativados (custam tokens/round-trips).
-const CAPS: { key: string; label: string; native?: boolean }[] = [
-  { key: "vision", label: "Visão", native: true },
-  { key: "file_upload", label: "Upload de Arquivos", native: true },
-  { key: "image_generation", label: "Geração de Imagens", native: true },
-  { key: "chat_context", label: "Contexto do Chat", native: true },
-  { key: "skill_learning", label: "Aprender Skills" },
+// Capacidades = o que o PRÓPRIO modelo sabe fazer. Recursos = o que o app injeta
+// quando ativados (custam tokens/round-trips). Os dois vivem em `capabilities`.
+const CAPS: { key: string; label: string }[] = [
+  { key: "vision", label: "Visão" },
+  { key: "audio", label: "Áudio" },
+  { key: "file_upload", label: "Arquivos" },
+  { key: "image_generation", label: "Geração de Imagens" },
+  { key: "chat_context", label: "Contexto" },
+];
+const RESOURCES: { key: string; label: string }[] = [
   { key: "realtime_datetime", label: "Data e Hora em Tempo Real" },
-  { key: "artifacts", label: "Artefatos" },
   // marcadores [[som: ...]] na resposta — precisa da ElevenLabs ligada para tocar
   { key: "sound_effects", label: "Efeitos Sonoros" },
+  { key: "artifacts", label: "Artefatos" },
+  { key: "skill_learning", label: "Aprender Skills" },
 ];
-const CAPS_NATIVE = new Set(CAPS.filter((c) => c.native).map((c) => c.key));
+const ALL_CAPS = [...CAPS, ...RESOURCES];
 
 // capacidades que vêm LIGADAS por padrão (ausência = ligada). Para desligá-las é
 // preciso gravar explicitamente `false` (o orchestrator respeita chat_context).
@@ -670,7 +695,7 @@ function ActiveListField({
   onManage: () => void;
   manageIcon?: React.ReactNode;
   searchPlaceholder: string;
-  empty: string;
+  empty?: string;
   /** a partir de quantos itens a busca aparece (seções com poucos itens possíveis,
    *  como Conhecimento, usam um limiar menor — com 4 a barra nunca surgiria). */
   searchFrom?: number;
@@ -694,7 +719,7 @@ function ActiveListField({
         </button>
       </div>
       {items.length === 0 ? (
-        <p className="text-xs text-muted">{empty}</p>
+        empty ? <p className="text-xs text-muted">{empty}</p> : null
       ) : (
         <div className="space-y-1.5">
           {items.length >= searchFrom && (
@@ -794,6 +819,8 @@ export default function ModelEditor({
   const [mem, setMem] = useState<MemoryCfg | null>(
     ((model?.capabilities as Record<string, unknown> | undefined)?.memory as MemoryCfg) ?? null,
   );
+  // sem config própria vale o padrão do perfil (ligada); desligar grava enabled:false
+  const memOn = mem ? mem.enabled !== false : true;
   // Subagentes: permissão de delegar (capability) + config (time/modo/limites em filter_config)
   const [subOn, setSubOn] = useState<boolean>((model?.capabilities as Record<string, unknown> | undefined)?.subagents === true);
   const [myModels, setMyModels] = useState<ModelConfig[]>([]);
@@ -840,6 +867,9 @@ export default function ModelEditor({
   const [skillsModal, setSkillsModal] = useState(false);
   const [toolsModal, setToolsModal] = useState(false);
   const [capsModal, setCapsModal] = useState(false);
+  const [resModal, setResModal] = useState(false);
+  const [brainModal, setBrainModal] = useState(false);
+  const [memModal, setMemModal] = useState(false);
   const [filtersModal, setFiltersModal] = useState(false);
   const [kbModal, setKbModal] = useState(false);          // seletor de bases (transferência)
   const [kbCfgBase, setKbCfgBase] = useState<string | null>(null); // base com "modo" aberto
@@ -1126,16 +1156,13 @@ export default function ModelEditor({
     setSkillIds((ids) => ids.filter((id) => skills.some((s) => s.id === id)));
   }, [skills]);
 
-  // capacidades (real caps, sem as chaves "filter:") como itens de transferência
-  const capItems: TransferItem[] = CAPS.map((c) => ({
-    key: c.key, label: c.label,
-    // capacidade NATIVA do modelo → chave inglesa no seletor (como as tools de sistema)
-    system: c.native, iconTitle: c.native ? "Nativa do modelo" : undefined,
-  }));
+  // capacidades e recursos (sem as chaves "filter:") como itens de transferência
+  const capItems: TransferItem[] = CAPS.map((c) => ({ key: c.key, label: c.label }));
+  const resItems: TransferItem[] = RESOURCES.map((c) => ({ key: c.key, label: c.label }));
   const capSelected = useMemo(() => {
-    // só capacidades conhecidas: outras chaves `true` (ex.: `subagents`, que tem seção
-    // própria) não são itens desta lista
-    const sel = Object.keys(caps).filter((k) => caps[k] === true && CAPS.some((c) => c.key === k));
+    // só chaves conhecidas: outras `true` (ex.: `subagents`, que tem seção própria)
+    // não são itens destas listas
+    const sel = Object.keys(caps).filter((k) => caps[k] === true && ALL_CAPS.some((c) => c.key === k));
     // default-on (ex.: chat_context): marcado quando ausente ou true; só some com false explícito
     for (const k of CAPS_DEFAULT_ON) {
       if (caps[k] !== false && !sel.includes(k)) sel.push(k);
@@ -1151,6 +1178,9 @@ export default function ModelEditor({
     for (const [k, v] of Object.entries(caps)) if (k.startsWith("filter:") && v) next[k] = true;
     setCaps(next);
   }
+  const isCap = (k: string) => CAPS.some((c) => c.key === k);
+  const capOnly = capSelected.filter(isCap);
+  const resOnly = capSelected.filter((k) => !isCap(k));
   const filterItems: TransferItem[] = FILTERS.map((f) => ({ key: f.key, label: f.label }));
 
   // Bases de Conhecimento (para o seletor de transferência + a lista de ativas)
@@ -1432,7 +1462,7 @@ export default function ModelEditor({
                 value={systemPrompt}
                 onChange={(e) => setSystemPrompt(e.target.value)}
                 placeholder="Como este modelo deve se comportar.&#10;ex.: Você é o Mario do Super Mario Bros e atua como assistente."
-                className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-accent placeholder:text-muted"
+                className="h-[128px] w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-accent placeholder:text-muted"
               />
               <button onClick={() => setShowAdvanced((v) => !v)} className="flex items-center gap-1 pt-1 text-sm text-muted transition-colors hover:text-ink">
                 {showAdvanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Parâmetros de geração (JSON)
@@ -1762,8 +1792,7 @@ export default function ModelEditor({
               <span>
                 <span className="block text-sm font-medium text-ink">SIFT</span>
                   <span className="block text-xs text-muted">
-                  Ative para permitir que este modelo use ferramentas. O catálogo longo é descoberto sob demanda;
-                  capacidades frequentes podem ser chamadas diretamente.
+                  Permite que este modelo utilize ferramentas através de descoberta dinâmica.
                 </span>
               </span>
               <div className="flex shrink-0 items-center gap-1.5">
@@ -1781,7 +1810,7 @@ export default function ModelEditor({
             </div>
 
             {toolsEnabled && (
-              <div className="space-y-3 pl-1">
+              <div className="space-y-3">
                 {/* Configuração de como o SIFT é apresentado ao modelo (engrenagem) */}
                 {showSiftConfig && (
                   <div className="space-y-3 rounded-xl border border-border bg-surface px-4 py-3">
@@ -1854,9 +1883,7 @@ export default function ModelEditor({
                       <Wrench size={13} /> Gerenciar
                     </button>
                   </div>
-                  {selectedCapabilityKeys.length === 0 ? (
-                    <p className="text-xs text-muted">Nenhuma ferramenta selecionada — o modelo não usará ferramentas.</p>
-                  ) : (
+                  {selectedCapabilityKeys.length === 0 ? null : (
                     <div className="space-y-1.5">
                       {selectedCapabilityKeys.length > 4 && (
                         <div className="relative">
@@ -1891,11 +1918,9 @@ export default function ModelEditor({
                                   <Pin size={12} className="fill-accent-hover" />
                                 </span>
                               )}
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-sm text-ink">{capability.label}</span>
-                                {enabledMembers.length > 1 && (
-                                  <span className="block truncate text-[11px] text-muted">{enabledMembers.length} {enabledMembers.length === 1 ? "ferramenta ativa" : "ferramentas ativas"}</span>
-                                )}
+                              <span className="min-w-0 flex-1 truncate text-sm text-ink">
+                                {capability.label}
+                                {enabledMembers.length > 1 && <span className="ml-1 text-muted">({enabledMembers.length})</span>}
                               </span>
                               {contextDirect && (
                                 <span title="A cadeia Web é chamada diretamente: pesquisar e ler a página não exigem uma rodada de descoberta." className="shrink-0 rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-hover">
@@ -1929,9 +1954,7 @@ export default function ModelEditor({
             hint="O modelo vê só nome + descrição de cada skill; quando precisa, chama view_skill e carrega o conteúdo completo. Também dá para invocá-las com $ no chat. Equipar muitas não encarece os turnos em que não são usadas."
             right={<ManageBtn icon={<Sparkles size={13} />} label="Gerenciar" onClick={() => setSkillsModal(true)} />}
           >
-            {skillIds.length === 0 ? (
-              <p className="text-xs text-muted">Nenhuma skill equipada. Crie skills na aba Skills.</p>
-            ) : (
+            {skillIds.length === 0 ? null : (
               <div className="space-y-1.5">
                 {skillIds.length > 4 && (
                   <div className="relative">
@@ -1962,186 +1985,100 @@ export default function ModelEditor({
             )}
           </Section>
 
-          {/* Capacidades — o que o modelo PODE fazer (config base) */}
+          {/* Capacidades — o que o próprio modelo sabe fazer */}
           <div className="mt-8 border-t border-border pt-7">
             <ActiveListField
               label="Capacidades"
-              icon={<Sparkles size={13} />}
+              icon={<Sparkles size={15} />}
               manageIcon={<Sparkles size={13} />}
-              items={capSelected}
-              labelOf={(k) => CAPS.find((c) => c.key === k)?.label ?? k}
-              badgeOf={(k) => (CAPS_NATIVE.has(k) ? "Nativo" : null)}
+              items={capOnly}
+              labelOf={(k) => ALL_CAPS.find((c) => c.key === k)?.label ?? k}
               onRemove={(k) => setCapSelected(capSelected.filter((x) => x !== k))}
               onManage={() => setCapsModal(true)}
               searchPlaceholder="Buscar capacidades…"
-              empty="Nenhuma capacidade marcada."
-              hint="Tudo o que o modelo é capaz de fazer. “Nativo” indica capacidades nativas do modelo, como visão; as demais capacidades são injetadas pelo app."
+              hint="O que o próprio modelo sabe fazer: ver imagens, ouvir áudio, ler arquivos."
             />
           </div>
 
-          {/* Memória — padrão POR-MODELO (novos chats deste modelo) */}
-          <div className="mt-8 space-y-2 border-t border-border pt-7">
-            <div className="mb-3 flex items-center justify-between gap-3">
+          {/* Recursos — o que o app acrescenta ao modelo */}
+          <div className="mt-8 border-t border-border pt-7">
+            <ActiveListField
+              label="Recursos do modelo"
+              icon={<Box size={15} />}
+              manageIcon={<Box size={13} />}
+              items={resOnly}
+              labelOf={(k) => ALL_CAPS.find((c) => c.key === k)?.label ?? k}
+              onRemove={(k) => setCapSelected(capSelected.filter((x) => x !== k))}
+              onManage={() => setResModal(true)}
+              searchPlaceholder="Buscar recursos…"
+              hint="Recursos que o app acrescenta ao modelo, como data e hora e artefatos."
+            />
+          </div>
+
+          {/* Memória — padrão POR-MODELO (novos chats deste modelo). Sem config própria
+              (`mem` null) vale o padrão do perfil; o toggle grava enabled true/false. */}
+          <div className="mt-8 border-t border-border pt-7">
+            <div className="flex items-center justify-between gap-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
                 <span className="text-muted"><Brain size={15} /></span>
                 Memória
-                <InfoHint text="Padrão de memória dos chats que usam este modelo. Cada chat ainda pode sobrescrever. Desativado = usa o padrão do seu perfil (Espaço → Memória)." />
+                <InfoHint text="O modelo lembra de fatos das conversas. A engrenagem define onde salvar e de onde ler." />
               </h2>
-              <button
-                onClick={() => setMem(mem ? null : { ...MEM_CFG_DEFAULT })}
-                className={`rounded-full border px-3 py-1 text-xs transition-colors ${mem ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border text-muted hover:text-ink"}`}
-              >
-                {mem ? "Personalizada" : "Padrão do perfil"}
-              </button>
-            </div>
-            {mem && (
-              <div className="grid gap-3 rounded-xl border border-border bg-surface2/40 p-3 sm:grid-cols-2">
-                <div>
-                  <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Salvar em</p>
-                  <select
-                    value={mem.write ?? "global"}
-                    onChange={(e) => setMem({ ...mem, write: e.target.value })}
-                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
-                  >
-                    {MEM_WRITE_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    {memBanks.length > 0 && (
-                      <optgroup label="Bancos">
-                        {memBanks.map((b) => <option key={b.id} value={`bank:${b.id}`}>Banco: {b.name}</option>)}
-                      </optgroup>
-                    )}
-                  </select>
-                </div>
-                <div>
-                  <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Ler de (união)</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {MEM_READ_OPTS.map((r) => {
-                      const on = (mem.read ?? MEM_CFG_DEFAULT.read)[r.key] !== false;
-                      return (
-                        <button
-                          key={r.key}
-                          onClick={() => setMem({ ...mem, read: { ...(mem.read ?? MEM_CFG_DEFAULT.read), [r.key]: !on } })}
-                          className={`rounded-full border px-3 py-1 text-xs transition-colors ${on ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border text-muted hover:text-ink"}`}
-                        >
-                          {r.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-                {/* Bancos acoplados: memória compartilhada entre modelos */}
-                <div className="sm:col-span-2">
-                  <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">
-                    Bancos acoplados
-                    <InfoHint text="Bancos de memória compartilhados entre modelos. Acoplar um banco faz este modelo LER dele (em união com os escopos acima). Vários modelos no mesmo banco compartilham memórias sem usar o escopo global. Crie/gerencie bancos em Espaço → Memória → Bancos." />
-                  </p>
-                  {memBanks.length === 0 ? (
-                    <p className="text-xs text-muted">Nenhum banco criado. Crie em <span className="text-ink-soft">Espaço → Memória → Bancos</span>.</p>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {memBanks.map((b) => {
-                        const on = (mem.banks ?? []).includes(b.id);
-                        return (
-                          <button
-                            key={b.id}
-                            onClick={() => {
-                              const cur = mem.banks ?? [];
-                              setMem({ ...mem, banks: on ? cur.filter((x) => x !== b.id) : [...cur, b.id] });
-                            }}
-                            className={`rounded-full border px-3 py-1 text-xs transition-colors ${on ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border text-muted hover:text-ink"}`}
-                          >
-                            {b.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+              <div className="flex items-center gap-2">
+                {memOn && (
+                  <button onClick={() => { if (!mem) setMem({ ...MEM_CFG_DEFAULT }); setMemModal(true); }} title="Configurar memória" className="rounded-md p-1 text-muted transition-colors hover:text-ink">
+                    <Settings size={15} />
+                  </button>
+                )}
+                <Toggle on={memOn} onChange={(v) => setMem({ ...(mem ?? MEM_CFG_DEFAULT), enabled: v })} />
               </div>
-            )}
+            </div>
           </div>
 
           {/* Base de Conhecimento — documentos que este modelo consulta (RAG). Lista
               no estilo "Ferramentas Ativas": engrenagem por base = o MODO daquela base. */}
           <div className="mt-8 border-t border-border pt-7">
-            {kbBases.length === 0 ? (
-              <>
-                <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
-                  <span className="text-muted"><BookOpen size={15} /></span>
-                  Conhecimento
-                  <InfoHint text="Acople Bases de Conhecimento (documentos) a este modelo. Ele passa a consultá-las nas conversas. Crie/suba documentos em Espaço → Conhecimento." />
-                </h2>
-                <p className="mt-3 text-xs text-muted">Nenhuma base criada. Crie em <span className="text-ink-soft">Espaço → Conhecimento</span>.</p>
-              </>
-            ) : (
-              <div className="space-y-4">
-                <ActiveListField
-                  label="Conhecimento"
-                  icon={<BookOpen size={15} />}
-                  manageIcon={<BookOpen size={13} />}
-                  items={kbAttached}
-                  labelOf={kbNameOf}
-                  badgeOf={(id) => `${kbModeOf(id) === "tool" ? "Ferramenta" : "Auto"} · ${kbKOf(id)} trechos`}
-                  leadingOf={() => <BookOpen size={13} className="shrink-0 text-accent-hover" />}
-                  hasConfig={() => true}
-                  onConfig={(id) => setKbCfgBase(id)}
-                  onRemove={(id) => setKbBasesSel(kbAttached.filter((x) => x !== id))}
-                  onManage={() => setKbModal(true)}
-                  searchPlaceholder="Buscar bases acopladas…"
-                  searchFrom={2}
-                  empty="Nenhuma base acoplada. Clique em Gerenciar para acoplar."
-                  hint="Bases acopladas a este modelo (consultadas nas conversas). A engrenagem de cada base define o MODO (Automático/Ferramenta) e os TRECHOS por busca dela. Crie bases em Espaço → Conhecimento."
-                />
-              </div>
-            )}
+            <ActiveListField
+              label="Conhecimento"
+              icon={<BookOpen size={15} />}
+              manageIcon={<BookOpen size={13} />}
+              items={kbAttached}
+              labelOf={kbNameOf}
+              badgeOf={(id) => `${kbModeOf(id) === "tool" ? "Ferramenta" : "Auto"} · ${kbKOf(id)} trechos`}
+              leadingOf={() => <BookOpen size={13} className="shrink-0 text-accent-hover" />}
+              hasConfig={() => true}
+              onConfig={(id) => setKbCfgBase(id)}
+              onRemove={(id) => setKbBasesSel(kbAttached.filter((x) => x !== id))}
+              onManage={() => setKbModal(true)}
+              searchPlaceholder="Buscar bases acopladas…"
+              searchFrom={2}
+              hint="Documentos que este modelo consulta. A engrenagem de cada base define como ela é usada."
+            />
           </div>
 
           {/* Cérebro — notas [[interligadas]] que este modelo lê/escreve */}
           <div className="mt-8 border-t border-border pt-7">
-            <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
-              <span className="text-muted"><Brain size={15} /></span>
-              Cérebro
-              <InfoHint text="Acople cérebros (notas interligadas) a este modelo. Ele lê/busca as notas e, com a escrita ligada, cria e atualiza notas sozinho durante as conversas. Crie cérebros em Espaço → Cérebros." />
-            </h2>
-            <div className="mt-3 space-y-4">
-              {brainBases.length === 0 ? (
-                <p className="text-xs text-muted">Nenhum cérebro criado. Crie em <span className="text-ink-soft">Espaço → Cérebros</span>.</p>
-              ) : (
-                <>
-                  <div>
-                    <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">Cérebros acoplados</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {brainBases.map((b) => {
-                        const on = (brainCfg.brains ?? []).includes(b.id);
-                        return (
-                          <button
-                            key={b.id}
-                            onClick={() => {
-                              const cur = brainCfg.brains ?? [];
-                              setBrainCfg({ ...brainCfg, brains: on ? cur.filter((x) => x !== b.id) : [...cur, b.id] });
-                            }}
-                            className={`rounded-full border px-3 py-1 text-xs transition-colors ${on ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border text-muted hover:text-ink"}`}
-                          >
-                            {b.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  {(brainCfg.brains ?? []).length > 0 && (
-                    <label className="flex items-center gap-2 text-xs text-muted">
-                      <input
-                        type="checkbox"
-                        checked={brainCfg.write !== false}
-                        onChange={(e) => setBrainCfg({ ...brainCfg, write: e.target.checked })}
-                        className="h-3.5 w-3.5 accent-accent"
-                      />
-                      Escrita pela IA (criar/atualizar notas)
-                      <InfoHint text="Com a escrita ligada, a IA grava notas direto (um card no chat mostra o que foi escrito). Desligada, o cérebro fica somente leitura." />
-                    </label>
-                  )}
-                </>
-              )}
-            </div>
+            <ActiveListField
+              label="Cérebro"
+              icon={<Brain size={15} />}
+              manageIcon={<Brain size={13} />}
+              items={(brainCfg.brains ?? []).filter((id) => brainBases.length === 0 || brainBases.some((b) => b.id === id))}
+              labelOf={(id) => brainBases.find((b) => b.id === id)?.name ?? id}
+              leadingOf={() => <Brain size={13} className="shrink-0 text-accent-hover" />}
+              onRemove={(id) => setBrainCfg({ ...brainCfg, brains: (brainCfg.brains ?? []).filter((x) => x !== id) })}
+              onManage={() => setBrainModal(true)}
+              searchPlaceholder="Buscar cérebros…"
+              searchFrom={2}
+              hint="Notas interligadas que o modelo lê e, com a escrita ligada, atualiza sozinho."
+            />
+            {(brainCfg.brains ?? []).length > 0 && (
+              <div className="mt-3 flex items-center justify-between gap-3">
+                <span className="flex items-center gap-1.5 text-sm text-ink">
+                  Escrita pela IA <InfoHint text="A IA cria e atualiza notas. Desligada, o cérebro é só leitura." />
+                </span>
+                <Toggle on={brainCfg.write !== false} onChange={(v) => setBrainCfg({ ...brainCfg, write: v })} />
+              </div>
+            )}
           </div>
 
           {/* Subagentes — este modelo delega tarefas a agentes (os do usuário ou criados pela IA) */}
@@ -2150,7 +2087,7 @@ export default function ModelEditor({
               <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
                 <span className="text-muted"><Users size={15} /></span>
                 Subagentes
-                <InfoHint text="Este modelo pode delegar tarefas a outros agentes, que trabalham em paralelo ou em sequência e devolvem o resultado para ele juntar. Na conversa, você também chama um agente direto digitando @." />
+                <InfoHint text="Este modelo delega tarefas a outros agentes. No chat, chame um agente com @." />
               </h2>
               <div className="flex items-center gap-2">
                 {subOn && (
@@ -2183,13 +2120,11 @@ export default function ModelEditor({
               <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
                 <span className="text-muted"><Sliders size={15} /></span>
                 Filtros
-                <InfoHint text="Filtros do sistema aplicados ao turno. O Vision Router redireciona as imagens para um modelo com visão, que as descreve para o modelo em uso (mesmo que ele não enxergue). O Audio Router transcreve áudios enviados (voz→texto) para o modelo 'ouvir'." />
+                <InfoHint text="Processam a mensagem antes ou depois do modelo: descrevem imagens, transcrevem áudio, geram imagens e revisam a resposta." />
               </h2>
               <ManageBtn icon={<Sliders size={13} />} label="Gerenciar" onClick={() => setFiltersModal(true)} />
             </div>
-            {filters.length === 0 ? (
-              <p className="text-xs text-muted">Nenhum filtro ativo.</p>
-            ) : (
+            {filters.length === 0 ? null : (
               <div className="space-y-1.5">
                 {/* só existem 4 filtros no total, então a barra aparece a partir de 2
                     (com o limiar de 5 das outras seções ela nunca surgiria aqui) */}
@@ -2393,12 +2328,106 @@ export default function ModelEditor({
         <TransferModal
           title="Capacidades do modelo"
           items={capItems}
-          selected={capSelected}
-          onChange={setCapSelected}
+          selected={capOnly}
+          onChange={(keys) => setCapSelected([...keys, ...resOnly])}
           onClose={() => setCapsModal(false)}
           availableLabel="Disponíveis"
           selectedLabel="Ativadas"
         />
+      )}
+      {resModal && (
+        <TransferModal
+          title="Recursos do modelo"
+          items={resItems}
+          selected={resOnly}
+          onChange={(keys) => setCapSelected([...capOnly, ...keys])}
+          onClose={() => setResModal(false)}
+          availableLabel="Disponíveis"
+          selectedLabel="Ativados"
+        />
+      )}
+      {brainModal && (
+        <TransferModal
+          title="Cérebros do modelo"
+          items={brainBases.map((b) => ({ key: b.id, label: b.name }))}
+          selected={brainCfg.brains ?? []}
+          onChange={(ids) => setBrainCfg({ ...brainCfg, brains: ids })}
+          onClose={() => setBrainModal(false)}
+          availableLabel="Disponíveis"
+          selectedLabel="Acoplados"
+          searchPlaceholder="Buscar cérebros…"
+        />
+      )}
+      {memModal && mem && (
+        <CfgModal title="Memória" onClose={() => setMemModal(false)}>
+          <div className="space-y-5">
+            <div>
+              <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">
+                Salvar em <InfoHint text="Onde as memórias novas deste modelo ficam guardadas." />
+              </p>
+              <select
+                value={mem.write ?? "global"}
+                onChange={(e) => setMem({ ...mem, write: e.target.value })}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
+              >
+                {MEM_WRITE_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                {memBanks.length > 0 && (
+                  <optgroup label="Bancos">
+                    {memBanks.map((b) => <option key={b.id} value={`bank:${b.id}`}>Banco: {b.name}</option>)}
+                  </optgroup>
+                )}
+              </select>
+            </div>
+            <div>
+              <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">
+                Ler de <InfoHint text="De onde o modelo lê memórias (junta todas as marcadas)." />
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {MEM_READ_OPTS.map((r) => {
+                  const on = (mem.read ?? MEM_CFG_DEFAULT.read)[r.key] !== false;
+                  return (
+                    <button
+                      key={r.key}
+                      onClick={() => setMem({ ...mem, read: { ...(mem.read ?? MEM_CFG_DEFAULT.read), [r.key]: !on } })}
+                      className={`rounded-full border px-3 py-1 text-xs transition-colors ${on ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border text-muted hover:text-ink"}`}
+                    >
+                      {r.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {memBanks.length > 0 && (
+              <div>
+                <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">
+                  Bancos acoplados <InfoHint text="Memória compartilhada entre modelos. Este modelo lê dos bancos marcados." />
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {memBanks.map((b) => {
+                    const on = (mem.banks ?? []).includes(b.id);
+                    return (
+                      <button
+                        key={b.id}
+                        onClick={() => {
+                          const cur = mem.banks ?? [];
+                          setMem({ ...mem, banks: on ? cur.filter((x) => x !== b.id) : [...cur, b.id] });
+                        }}
+                        className={`rounded-full border px-3 py-1 text-xs transition-colors ${on ? "border-accent/40 bg-accent/15 text-accent-hover" : "border-border text-muted hover:text-ink"}`}
+                      >
+                        {b.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            <div className="border-t border-border pt-4">
+              <button onClick={() => { setMem(null); setMemModal(false); }} className="text-xs text-muted transition-colors hover:text-ink">
+                Usar o padrão do perfil
+              </button>
+            </div>
+          </div>
+        </CfgModal>
       )}
       {filtersModal && (
         <TransferModal
@@ -2471,7 +2500,7 @@ export default function ModelEditor({
               <div className="flex items-center justify-between gap-3">
                 <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">
                   Seus agentes
-                  <InfoHint text="Modelos custom que você já configurou (prompt, ferramentas, permissões). A IA escolhe o mais adequado para cada tarefa." />
+                  <InfoHint text="Seus modelos que a IA pode chamar. Ela escolhe o melhor para cada tarefa." />
                 </p>
                 <button
                   onClick={() => setTeamModal(true)}
@@ -2481,9 +2510,7 @@ export default function ModelEditor({
                   <Users size={13} /> Selecionar
                 </button>
               </div>
-              {team.length === 0 ? (
-                <p className="text-xs text-muted">{teamCandidates.length === 0 ? "Nenhum outro modelo custom." : "Nenhum agente selecionado."}</p>
-              ) : (
+              {team.length === 0 ? null : (
                 <div className="max-h-52 space-y-1.5 overflow-y-auto pr-1">
                   {team.map((tid) => (
                     <div key={tid} className="flex items-center gap-2 rounded-lg border border-border bg-surface2 px-3 py-1.5">
@@ -2513,7 +2540,7 @@ export default function ModelEditor({
 
             <div className="space-y-2 border-t border-border pt-4">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-1.5 text-sm text-ink">Agentes criados pela IA <InfoHint text="A IA pode criar um agente para uma tarefa específica, dando a ele um nome e instruções. Ele usa as ferramentas e skills deste modelo, sem memória, e não cria outros agentes." /></span>
+                  <span className="flex items-center gap-1.5 text-sm text-ink">Agentes criados pela IA <InfoHint text="A IA cria agentes e equipes sob medida para a tarefa, com as ferramentas deste modelo." /></span>
                   <Toggle on={adhocOn} onChange={(v) => setSubCfg({ adhoc: v })} />
                 </div>
               {adhocOn && (
@@ -2532,37 +2559,37 @@ export default function ModelEditor({
 
             <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
               <label className="space-y-1">
-                <span className="flex items-center gap-1.5 text-[11px] text-muted">Execução <InfoHint text="Paralela: os agentes trabalham ao mesmo tempo, e a IA ainda pode pedir que uma equipe siga em sequência quando cada etapa depende da anterior. Sequencial: sempre um agente por vez." /></span>
+                <span className="flex items-center gap-1.5 text-[11px] text-muted">Execução <InfoHint text="Paralela: vários ao mesmo tempo. Sequencial: um por vez." /></span>
                 <select value={subCfg.execution === "sequential" ? "sequential" : "parallel"} onChange={(e) => setSubCfg({ execution: e.target.value })} className={selCls}>
                   <option value="parallel">Paralela</option>
                   <option value="sequential">Sequencial</option>
                 </select>
               </label>
               <label className="space-y-1">
-                <span className="flex items-center gap-1.5 text-[11px] text-muted">Máx. de agentes <InfoHint text="Quantos agentes podem trabalhar numa mesma resposta, contando as equipes e sub-equipes (até 1000). Cada agente é uma conversa própria com o modelo: equipes grandes custam proporcionalmente." /></span>
+                <span className="flex items-center gap-1.5 text-[11px] text-muted">Máx. de agentes <InfoHint text="Total de agentes por resposta (até 1000). Cada agente consome tokens." /></span>
                 <input type="number" min={1} max={1000} value={subCfg.max_calls ?? 4} onChange={(e) => setSubCfg({ max_calls: Math.max(1, Math.min(1000, Number(e.target.value) || 4)) })} className={inpCls} />
               </label>
               {subCfg.execution !== "sequential" && <label className="space-y-1">
-                <span className="flex items-center gap-1.5 text-[11px] text-muted">Simultâneos <InfoHint text="Quantos agentes trabalham ao mesmo tempo em cada nível; os demais esperam na fila. Valores altos terminam antes, mas podem esbarrar no limite de requisições do provedor." /></span>
+                <span className="flex items-center gap-1.5 text-[11px] text-muted">Simultâneos <InfoHint text="Quantos rodam ao mesmo tempo; o resto espera na fila." /></span>
                 <input type="number" min={1} max={64} value={subCfg.concurrency ?? 8} onChange={(e) => setSubCfg({ concurrency: Math.max(1, Math.min(64, Number(e.target.value) || 8)) })} className={inpCls} />
               </label>}
               <label className="space-y-1">
-                <span className="flex items-center gap-1.5 text-[11px] text-muted">Profundidade <InfoHint text="Até quantos níveis um agente pode delegar para outro (agente chamando agente). 1 = só este modelo delega." /></span>
+                <span className="flex items-center gap-1.5 text-[11px] text-muted">Profundidade <InfoHint text="Quantos níveis de agente chamando agente." /></span>
                 <input type="number" min={1} max={3} value={subCfg.max_depth ?? 2} onChange={(e) => setSubCfg({ max_depth: Math.max(1, Math.min(3, Number(e.target.value) || 2)) })} className={inpCls} />
               </label>
             </div>
 
             <div className="space-y-3 border-t border-border pt-4">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-1.5 text-sm text-ink">Contexto da conversa <InfoHint text="Os agentes recebem o histórico recente da conversa. Desligado, recebem só a tarefa." /></span>
+                  <span className="flex items-center gap-1.5 text-sm text-ink">Contexto da conversa <InfoHint text="Os agentes recebem o histórico da conversa." /></span>
                   <Toggle on={!!subCfg.pass_context} onChange={(v) => setSubCfg({ pass_context: v })} />
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-1.5 text-sm text-ink">Memória própria <InfoHint text="Seus agentes leem e gravam na memória do próprio modelo (configurada em Memória). Agentes criados pela IA não usam memória." /></span>
+                  <span className="flex items-center gap-1.5 text-sm text-ink">Memória própria <InfoHint text="Seus agentes usam a memória do próprio modelo." /></span>
                   <Toggle on={!!subCfg.worker_memory} onChange={(v) => setSubCfg({ worker_memory: v })} />
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-1.5 text-sm text-ink">Worktree isolado <InfoHint text="Em projetos do Codespace, um agente pode trabalhar numa branch própria, sem colidir com outros em paralelo; o resultado vira uma tarefa para você revisar e mesclar. Ligado, cada um dos seus agentes ganha o botão worktree, e a IA decide para os que ela cria. Deixe desligado em agentes só de leitura, como revisores." /></span>
+                  <span className="flex items-center gap-1.5 text-sm text-ink">Worktree isolado <InfoHint text="No Codespace, cada agente trabalha numa branch própria; o resultado vira uma tarefa para revisar." /></span>
                   <Toggle on={worktreeOn} onChange={(v) => setSubCfg({ worktree: v })} />
                 </div>
             </div>

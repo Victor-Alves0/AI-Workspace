@@ -40,7 +40,7 @@ const SEV_LABEL: Record<Sev, string> = {
 };
 const CAP_LABEL: Record<string, string> = {
   memory: "Memória", synthesis: "Síntese final", tool_watchdog: "Watchdog de tools",
-  codegraph: "Grafo de código", output_guard: "Guarda de saída", guard_judge: "Guarda-juiz",
+  codegraph: "Grafo de código", output_guard: "Guarda de Saída", guard_judge: "Guarda-juiz",
   compaction: "Compactação", database: "Banco", embedder: "Embedder", browser: "Navegador",
   steering: "Steering (intervenção)", anti_spin: "Anti-spin", queue: "Fila de mensagens",
   ledger: "Ledger de tarefa",

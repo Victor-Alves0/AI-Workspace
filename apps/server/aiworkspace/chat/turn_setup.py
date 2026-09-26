@@ -459,6 +459,7 @@ async def _media_opts(
     return MediaOpts(
         attachments=attachments or None,
         vision=_has_vision(model_config),
+        audio=bool(model_config and (model_config.capabilities or {}).get("audio")),
         vision_router_model=_vision_router_model(model_config),
         audio_router=await _audio_router_config(db, user, model_config),
         ocr=ocr_on, ocr_engine=ocr_eng, ocr_lang=ocr_lang,

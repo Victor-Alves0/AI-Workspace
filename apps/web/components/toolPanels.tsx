@@ -335,7 +335,7 @@ export function TextExtractionPanel({ value, onChange }: PanelProps) {
         {on("ocr") && (
           <>
             <div className="border-t border-border">
-              <Row label="Motor" sub="Tesseract é local/grátis; Visão usa o Vision Router">
+              <Row label="Motor" sub="Tesseract é local/grátis; Visão usa o Roteador de Visão">
                 <select value={te.ocr_engine ?? "tesseract"} onChange={(e) => teSet("ocr_engine", e.target.value)} className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
                   <option value="tesseract">Tesseract (local)</option>
                   <option value="vision">Modelo de visão</option>

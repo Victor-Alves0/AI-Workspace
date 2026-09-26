@@ -631,7 +631,7 @@ export default function AutomationEditor({
           <div className="space-y-2.5 rounded-xl border border-border bg-surface px-3 py-2.5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm text-ink">Contexto do Chat</p>
+                <p className="text-sm text-ink">Contexto</p>
                 <p className="text-xs text-muted">O modelo vê as últimas mensagens do chat (disparos anteriores)</p>
               </div>
               <Toggle on={!!d.options?.use_context} onClick={() => setOpt("use_context", !d.options?.use_context)} />

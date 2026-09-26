@@ -600,6 +600,20 @@ _VISION_DESCRIBE_PROMPT = (
 )
 
 
+_AUDIO_FORMATS = {"mpeg": "mp3", "mp3": "mp3", "x-wav": "wav", "wave": "wav", "wav": "wav",
+                  "webm": "webm", "ogg": "ogg", "mp4": "m4a", "x-m4a": "m4a", "aac": "aac", "flac": "flac"}
+
+
+def _audio_part(a: dict[str, Any]) -> dict[str, Any] | None:
+    """Anexo de áudio (data URL) → parte `input_audio` do formato OpenAI/OpenRouter."""
+    url = str(a.get("url") or "")
+    if not url.startswith("data:") or "," not in url:
+        return None
+    head, data = url.split(",", 1)
+    sub = head[5:].split(";", 1)[0].split("/", 1)[-1].lower()
+    return {"type": "input_audio", "input_audio": {"data": data, "format": _AUDIO_FORMATS.get(sub, sub or "wav")}}
+
+
 def _decode_data_url(url: str | None) -> bytes | None:
     """Bytes de um data URL de imagem (data:image/...;base64,XXXX)."""
     if not url or not isinstance(url, str) or "," not in url:
@@ -1604,6 +1618,7 @@ class MediaOpts:
     """Anexos e roteadores de mídia (visão, áudio, OCR, geração de imagem)."""
     attachments: list[dict[str, Any]] | None = None
     vision: bool = False
+    audio: bool = False  # capacidade "Áudio": o modelo recebe o áudio direto (input_audio)
     vision_router_model: str | None = None
     # Audio Router: {"engine":"stt", base_url, api_key, model} ou {"engine":"model", model}
     audio_router: dict[str, Any] | None = None
@@ -2035,7 +2050,13 @@ async def _append_user_message(
     # Audio Router: transcreve os áudios ANTES do tratamento de imagens, para a
     # transcrição entrar no texto-base em qualquer um dos ramos abaixo.
     audio_note = ""
-    if audios and media.audio_router:
+    audio_parts: list[dict[str, Any]] = []
+    if audios and media.audio:
+        # o próprio modelo ouve: o áudio vai como parte input_audio, sem transcrição
+        audio_parts = [p for p in (_audio_part(a) for a in audios) if p]
+        if len(audio_parts) < len(audios):
+            audio_note = "[Parte dos áudios enviados não pôde ser lida.]"
+    elif audios and media.audio_router:
         yield {"type": "audio_router", "status": "start", "engine": media.audio_router.get("engine"), "count": len(audios)}
         try:
             tx = await _transcribe_audios(media.audio_router, audios, api_key)
@@ -2112,6 +2133,10 @@ async def _append_user_message(
         messages.append({"role": "user", "content": combined})
     else:
         messages.append({"role": "user", "content": base_text})
+    if audio_parts:
+        c = messages[-1]["content"]
+        texto = [{"type": "text", "text": c}] if isinstance(c, str) and c else (c if isinstance(c, list) else [])
+        messages[-1] = {**messages[-1], "content": texto + audio_parts}
     st["attach_chars"] = attach_chars
 
 

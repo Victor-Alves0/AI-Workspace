@@ -274,8 +274,9 @@ export function startBrowserDictation(): { stop: () => Promise<string> } | null 
   };
 }
 
-// Gravação simples via MediaRecorder. Retorna um controlador com stop().
-export async function startRecording(): Promise<{ stop: () => Promise<Blob> }> {
+// Gravação simples via MediaRecorder. Retorna um controlador com stop() e o stream
+// do microfone (a barra de gravação desenha o nível do som a partir dele).
+export async function startRecording(): Promise<{ stop: () => Promise<Blob>; stream: MediaStream }> {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   const cleanup = () => stream.getTracks().forEach((track) => track.stop());
   try {
@@ -290,7 +291,7 @@ export async function startRecording(): Promise<{ stop: () => Promise<Blob> }> {
     rec.onstop = () => { cleanup(); resolve(recordingBlob(chunks, rec.mimeType)); };
     rec.onerror = () => { cleanup(); reject(new Error("Falha ao gravar o microfone")); };
     rec.start();
-    return { stop: () => {
+    return { stream, stop: () => {
       if (rec.state !== "inactive") rec.stop();
       return done;
     } };

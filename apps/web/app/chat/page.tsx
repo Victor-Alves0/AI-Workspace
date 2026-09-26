@@ -446,10 +446,11 @@ export default function ChatPage() {
   const [showCompactions, setShowCompactions] = useState(false);
 
   const [recording, setRecording] = useState(false);
+  const [micStream, setMicStream] = useState<MediaStream | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   // notificações (toast + som), controladas pela config "Notificações" da Conta
   const [toasts, setToasts] = useState<{ id: number; title: string; body?: string }[]>([]);
-  const recorderRef = useRef<{ stop: () => Promise<Blob> } | null>(null);
+  const recorderRef = useRef<{ stop: () => Promise<Blob>; stream: MediaStream } | null>(null);
   const browserDictRef = useRef<{ stop: () => Promise<string> } | null>(null);
   // Modo voz (assistente hands-free): fase visível no HUD + controle do loop.
   const [voicePhase, setVoicePhase] = useState<"off" | "listening" | "thinking" | "speaking">("off");
@@ -1888,6 +1889,7 @@ export default function ChatPage() {
       recorderRef.current = null;
       browserDictRef.current = null;
       setRecording(false);
+      setMicStream(null);
       if (rec) {
         try {
           const blob = await rec.stop();
@@ -1921,6 +1923,7 @@ export default function ChatPage() {
         recorderRef.current = await startRecording();
         // melhor esforço, junto com a gravação — vira o fallback se o servidor falhar
         browserDictRef.current = startBrowserDictation();
+        setMicStream(recorderRef.current.stream);
         setRecording(true);
       } catch {
         alert("Não foi possível acessar o microfone.");
@@ -1935,6 +1938,7 @@ export default function ChatPage() {
     recorderRef.current = null;
     browserDictRef.current = null;
     setRecording(false);
+    setMicStream(null);
     void rec?.stop().catch(() => {});
     void browser?.stop();
   }
@@ -2572,7 +2576,7 @@ export default function ChatPage() {
                   onDragLeave={() => setCsDropOver(false)}
                   onDrop={handleComposerFileDrop}
                 >
-                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} />
+                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} micStream={micStream} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} />
                 </div>
                 {/* menu do "+" abre para baixo aqui (há espaço); na conversa abre para cima */}
                 {temporary && <p className="mt-2 text-xs text-muted">Chat temporário — esta conversa não será salva.</p>}
@@ -2787,7 +2791,7 @@ export default function ChatPage() {
                           {showAsk && askSpec && (
                             <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                           )}
-                          <div ref={promptBoxRef}><PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} /></div>
+                          <div ref={promptBoxRef}><PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} micStream={micStream} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} /></div>
                         </div>
                       </div>
                       {speakingMessageId && !imaginaiDocksShown && (
