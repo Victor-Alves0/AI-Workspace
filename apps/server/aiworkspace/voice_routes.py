@@ -77,6 +77,70 @@ async def _model_voice_config(
     return {**(raw if isinstance(raw, dict) else {}), "tts_voice": mc.tts_voice}
 
 
+# Preferência para o modelo padrão de fala no OpenRouter (o catálogo muda: um id fixo
+# morre — foi o que aconteceu com openai/gpt-4o-mini-tts-2025-12-15). Escolhe do
+# catálogo VIVO o primeiro que casar, na ordem.
+_OR_TTS_PREFER = ("google/gemini", "openai/", "x-ai/grok-voice", "mistralai/voxtral", "deepgram/aura")
+
+
+def _or_tts_entries(models: list[dict]) -> list[dict]:
+    """Modelos de fala do OpenRouter com as vozes que cada um aceita."""
+    out = []
+    for m in models:
+        mid = m.get("id")
+        if not mid:
+            continue
+        vozes = m.get("supported_voices")
+        out.append({
+            "id": mid, "name": m.get("name") or mid, "provider": "OpenRouter",
+            "voices": [str(v) for v in vozes] if isinstance(vozes, list) else [],
+        })
+    return out
+
+
+def _or_default_tts(entries: list[dict]) -> str | None:
+    for pref in _OR_TTS_PREFER:
+        for e in entries:
+            if e["id"].startswith(pref) and e["voices"]:
+                return e["id"]
+    com_voz = [e for e in entries if e["voices"]]
+    return (com_voz or entries or [{"id": None}])[0]["id"]
+
+
+def _or_pick_voice(entry: dict | None, voice: str | None) -> str | None:
+    """Voz válida para o modelo: a pedida, se ele aceita; senão a primeira dele. Modelo
+    que não lista vozes usa a própria (None = não mandar o campo)."""
+    if not entry or not entry.get("voices"):
+        return None
+    vozes = entry["voices"]
+    if voice:
+        for v in vozes:
+            if v.lower() == voice.lower():
+                return v
+    return vozes[0]
+
+
+def _pcm_to_wav(pcm: bytes, rate: int = 24000) -> bytes:
+    """PCM cru (16-bit mono) → WAV tocável no navegador."""
+    import io
+    import wave
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm)
+    return buf.getvalue()
+
+
+async def _or_speech_catalog(key: str) -> list[dict]:
+    try:
+        return _or_tts_entries(await openrouter.list_models(key, output_modality="speech"))
+    except httpx.HTTPError:
+        return []
+
+
 async def _resolve_tts(
     db: AsyncSession,
     user: User,
@@ -90,7 +154,11 @@ async def _resolve_tts(
         key = await get_secret(db, user.id, OPENROUTER_KEY)
         if not key:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Configure sua chave do OpenRouter primeiro")
-        return s.openrouter_base_url, key, model or "openai/gpt-4o-mini-tts-2025-12-15"
+        if not model:
+            model = _or_default_tts(await _or_speech_catalog(key)) or ""
+        if not model:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "O OpenRouter não listou nenhum modelo de fala agora")
+        return s.openrouter_base_url, key, model
     if provider == "api":
         return s.voice_base_url, await _global_key(db, user), model or s.tts_model
     prov = await voice_service.get_provider(db, user.id)
@@ -159,18 +227,34 @@ async def tts(
     base_url, key, model = await _resolve_tts(
         db, user, provider=provider, model=requested_model
     )
+    payload: dict = {"model": model, "voice": voice, "input": body.text, "response_format": "mp3"}
+    no_openrouter = base_url.rstrip("/") == get_settings().openrouter_base_url.rstrip("/")
+    if no_openrouter:
+        # cada modelo de fala tem as PRÓPRIAS vozes (Gemini: Kore/Puck…, Deepgram:
+        # aura-2-…); a voz da OpenAI/embutida num Gemini é recusada. Usa uma que o
+        # modelo aceita; modelo que não lista vozes usa a dele (sem o campo).
+        entry = next((e for e in await _or_speech_catalog(key) if e["id"] == model), None)
+        escolhida = _or_pick_voice(entry, voice)
+        if escolhida:
+            payload["voice"] = escolhida
+        elif entry is not None:
+            payload.pop("voice", None)
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post(
                 f"{base_url}/audio/speech",
                 headers={"Authorization": f"Bearer {key}"},
-                json={
-                    "model": model,
-                    "voice": voice,
-                    "input": body.text,
-                    "response_format": "mp3",
-                },
+                json=payload,
             )
+            if no_openrouter and resp.status_code == 400 and "format" in resp.text.lower():
+                # provedor sem mp3: pede PCM e embrulha em WAV
+                resp = await client.post(
+                    f"{base_url}/audio/speech",
+                    headers={"Authorization": f"Bearer {key}"},
+                    json={**payload, "response_format": "pcm"},
+                )
+                if resp.status_code == 200:
+                    return Response(content=_pcm_to_wav(resp.content), media_type="audio/wav")
     except httpx.HTTPError:
         # servidor de voz inacessível (ex.: conexão local configurada mas desligada):
         # erro claro em vez de 500 — o front cai na voz do navegador
@@ -324,6 +408,7 @@ async def voice_catalog(
     key = await get_secret(db, user.id, OPENROUTER_KEY)
     tts_models: list[dict] = []
     stt_models: list[dict] = []
+    tts_default: str | None = None
     if key:
         async def load_catalog(modality):
             try:
@@ -334,10 +419,8 @@ async def voice_catalog(
         speech, transcription = await asyncio.gather(
             load_catalog("speech"), load_catalog("transcription"),
         )
-        tts_models = [
-            {"id": m.get("id"), "name": m.get("name") or m.get("id"), "provider": "OpenRouter"}
-            for m in speech if m.get("id")
-        ]
+        tts_models = _or_tts_entries(speech)
+        tts_default = _or_default_tts(tts_models)
         stt_models = [
             {"id": m.get("id"), "name": m.get("name") or m.get("id"), "provider": "OpenRouter"}
             for m in transcription if m.get("id")
@@ -353,6 +436,8 @@ async def voice_catalog(
             "builtin": {"configured": voice_builtin.available(), "label": "Voz embutida"},
         },
         "tts_models": tts_models,
+        # modelo de fala usado quando o provedor é o OpenRouter e nenhum foi escolhido
+        "tts_default": tts_default,
         "stt_models": stt_models,
         "voices": [
             *[{"id": v, "name": v.title(), "provider": "OpenAI/API"} for v in _OPENAI_VOICES],

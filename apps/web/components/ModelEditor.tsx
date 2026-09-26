@@ -208,9 +208,12 @@ function ManageBtn({ icon, label, onClick }: { icon: React.ReactNode; label: str
 // "builtin" = voz embutida (Kokoro no próprio servidor), só para fala (TTS)
 type VoiceProvider = "auto" | "openrouter" | "api" | "local" | "builtin";
 type AudioChoice = { id: string; name: string; provider: string };
+// modelos de fala do OpenRouter trazem as vozes que cada um aceita
+type TtsModelChoice = AudioChoice & { voices?: string[] };
 type VoiceCatalog = {
   providers: Record<Exclude<VoiceProvider, "auto">, { configured: boolean; label: string }>;
-  tts_models: AudioChoice[];
+  tts_models: TtsModelChoice[];
+  tts_default?: string | null;
   stt_models: AudioChoice[];
   voices: AudioChoice[];
 };
@@ -397,7 +400,24 @@ function VoiceStudio({
     ...(sttProvider === "api" || sttProvider === "auto" ? API_STT_MODELS : []),
     ...(sttProvider === "local" || sttProvider === "auto" ? [{ id: "whisper-large-v3-turbo", name: "Whisper Large V3 Turbo", provider: "Local" }] : []),
   ]);
-  const voiceOptions = catalog?.voices ?? [];
+  // Modelo de fala do OpenRouter em uso (o escolhido ou o padrão do catálogo): cada um
+  // aceita só as PRÓPRIAS vozes — a lista de vozes passa a ser a dele.
+  const orModelId = config.tts_model || (ttsProvider === "openrouter" ? catalog?.tts_default ?? "" : "");
+  const orModel = (catalog?.tts_models ?? []).find((m) => m.id === orModelId);
+  const PROVIDER_OF_VOICE: Partial<Record<VoiceProvider, string>> = { builtin: "Embutida", local: "Local", api: "OpenAI/API" };
+  const voiceOptions: AudioChoice[] = orModel
+    ? (orModel.voices?.length
+        ? orModel.voices.map((v) => ({ id: v, name: v, provider: orModel.name }))
+        : [{ id: "", name: "Voz padrão do modelo", provider: orModel.name }])
+    : (catalog?.voices ?? []).filter((v) => !PROVIDER_OF_VOICE[ttsProvider] || v.provider === PROVIDER_OF_VOICE[ttsProvider]);
+  // trocou de modelo e a voz atual não existe nele: passa para a primeira que ele aceita
+  useEffect(() => {
+    if (!orModel) return;
+    const vozes = orModel.voices ?? [];
+    if (!vozes.length) { if (voice) onVoiceChange(""); return; }
+    if (!vozes.some((v) => v.toLowerCase() === (voice || "").toLowerCase())) onVoiceChange(vozes[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orModel?.id]);
   const choiceProvider = (choice?: AudioChoice): VoiceProvider =>
     choice?.provider === "OpenRouter" ? "openrouter"
       : choice?.provider === "Local" ? "local"
@@ -433,7 +453,7 @@ function VoiceStudio({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: "Olá! Esta é uma prévia da voz deste modelo.",
-          voice: voice || "alloy",
+          voice: voice || undefined,
           provider: ttsProvider,
           model: config.tts_model || undefined,
         }),
@@ -472,7 +492,7 @@ function VoiceStudio({
             </span>
           </div>
           <ProviderPicker kind="tts" value={ttsProvider} catalog={catalog} onChange={(value) => onConfigChange({ tts_provider: value, tts_model: "" })} />
-          <SearchChoice label="Modelo de voz" value={config.tts_model ?? ""} options={ttsOptions} placeholder="Usar modelo padrão do provedor" onChange={(value, choice) => onConfigChange({ tts_model: value, tts_provider: ttsProvider === "auto" ? choiceProvider(choice) : ttsProvider })} />
+          <SearchChoice label="Modelo de voz" value={config.tts_model ?? ""} options={ttsOptions} placeholder={ttsProvider === "openrouter" && catalog?.tts_default ? `Padrão: ${catalog.tts_default}` : "Usar modelo padrão do provedor"} onChange={(value, choice) => onConfigChange({ tts_model: value, tts_provider: ttsProvider === "auto" ? choiceProvider(choice) : ttsProvider })} />
           <SearchChoice label="Voz" value={voice} options={voiceOptions} placeholder="Escolher uma voz" onChange={onVoiceChange} searchPlaceholder="Buscar ou misturar: builtin:pf_dora(2)+pm_alex(1)" />
           <button
             type="button"
