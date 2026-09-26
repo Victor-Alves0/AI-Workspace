@@ -12,7 +12,9 @@
         "https://github.com/Victor-Alves0/AI-Workspace/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYwRDU5NUQ5ODZDRTRDMDEKUldRQlRNNkcyWlhWWU02UTNCUFh0cjY3Rkw5aUJ6UEsrSUxNcUhSZnJEQzkzbU5jTWlZL1c3WjEK",
-      "windows": { "installMode": "passive" }
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "app": {
@@ -24,15 +26,26 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "icon": ["icons/icon.ico", "icons/icon.png"],
-    "resources": ["engine/**/*"],
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "resources": [
+      "engine/**/*"
+    ],
     "windows": {
       "certificateThumbprint": "48E29E674FDC244A96B18EE7C36E74FDE1BC2A09",
       "digestAlgorithm": "sha256",
       "timestampUrl": "http://timestamp.digicert.com",
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "template": "installer.nsi",
+        "languages": [
+          "PortugueseBR"
+        ]
       }
     }
   }
