@@ -131,7 +131,8 @@ async def list_projects(user: User = Depends(require_approved), db: AsyncSession
         select(CodespaceProject).where(CodespaceProject.user_id == user.id)
         .order_by(CodespaceProject.created_at)
     ))
-    return [_out(p) for p in rows]
+    # o espaço de trabalho de um chat comum não é um projeto do usuário: fica fora da lista
+    return [_out(p) for p in rows if not (p.scope or {}).get("chat_workspace")]
 
 
 _SOURCES = ("git", "git-ssh", "local", "folder")

@@ -278,6 +278,14 @@ async def _resolve_provider(db: AsyncSession, user: User, model: str) -> tuple[s
     return api_key, None
 
 
+def _workspace_on(chat: Chat | None, model_config: ModelConfig | None) -> bool:
+    """Espaço de trabalho do chat (recurso "Espaço de trabalho", padrão ligado): um chat
+    comum, sem projeto, ganha pasta + shell + análise de código, criados no 1º uso."""
+    if chat is None or chat.project_id or model_config is None or not model_config.tools_enabled:
+        return False
+    return (model_config.capabilities or {}).get("workspace", True) is not False
+
+
 async def _prepare_turn(db: AsyncSession, user: User, chat: Chat):
     """Prepara um turno e devolve também seus valores efetivos de runtime.
 
@@ -292,6 +300,7 @@ async def _prepare_turn(db: AsyncSession, user: User, chat: Chat):
     sift = await get_sift_for_user(
         db, user.id, model_config,
         codespace_project_id=str(chat.project_id) if chat.project_id else None,
+        workspace=_workspace_on(chat, model_config),
     )
     skills = await _load_skills(db, user, model_config)
     return api_key, base_url, model_config, sift, skills, model, system_prompt, params
@@ -981,7 +990,7 @@ async def _resolve_subagents(
 
 async def subagents_for_turn(
     db: AsyncSession, user: User, chat_id: uuid.UUID | None, project_id: str | None,
-    model_config: ModelConfig | None,
+    model_config: ModelConfig | None, workspace: bool = False,
 ) -> SubagentOpts | None:
     """Delegação do turno (tool `delegate`), ou None se o modelo não delega."""
     specs, conf = await _resolve_subagents(db, user, model_config)
@@ -991,14 +1000,14 @@ async def subagents_for_turn(
         db, user, chat_id, conf.get("max_depth", 2),
         pass_context=conf.get("pass_context", False),
         worker_memory=conf.get("worker_memory", False),
-        project_id=project_id,
+        project_id=project_id, workspace=workspace and not project_id,
         isolate_keys=frozenset(conf.get("isolate") or []),
         parent=model_config, adhoc_model=conf.get("adhoc_model", ""),
         # sequencial = um agente por vez, inclusive dentro de uma equipe
         pool=SubagentPool(conf.get("max_calls", 4),
                           conf.get("concurrency", 8) if conf.get("mode") != "sequential" else 1, user.id),
     )
-    return _subagent_opts(specs, {**conf, "worktree": conf.get("worktree") and bool(project_id)}, runner)
+    return _subagent_opts(specs, {**conf, "worktree": conf.get("worktree") and bool(project_id or workspace)}, runner)
 
 
 async def _recent_history(db: AsyncSession, chat_id: uuid.UUID, limit: int = 20) -> list[dict]:
@@ -1072,7 +1081,7 @@ def _make_subagent_runner(
     depth: int = 0, ancestry: frozenset[str] = frozenset(),
     project_id: str | None = None, isolate_keys: frozenset[str] = frozenset(),
     parent: ModelConfig | None = None, adhoc_model: str = "",
-    pool: SubagentPool | None = None,
+    pool: SubagentPool | None = None, workspace: bool = False,
 ):
     """Closure que executa um subagente num turno aninhado. Dois tipos:
       - agente do usuário (`key` = id de um ModelConfig): prompt/tools/skills dele;
@@ -1106,10 +1115,14 @@ def _make_subagent_runner(
         # worktree isolado: branch própria do projeto do chat; o resultado vira uma
         # tarefa `awaiting_review` que o humano aprova/descarta na UI
         wt_task_id: str | None = None
-        if isolated and project_id:
+        proj_id = project_id
+        if isolated and not proj_id and workspace and chat_id:
+            from ..codespace import graph_service as _gs
+            proj_id = await run_in_threadpool(_gs.ensure_chat_workspace, str(user.id), str(chat_id))
+        if isolated and proj_id:
             from ..codespace import worktree_service
             opened = await worktree_service.open_task(
-                str(user.id), project_id, title=task[:200], agent=label,
+                str(user.id), proj_id, title=task[:200], agent=label,
                 chat_id=str(chat_id) if chat_id else None,
             )
             if opened.get("error"):
@@ -1160,7 +1173,7 @@ def _make_subagent_runner(
                     user_id=str(user.id),
                     chat_id=str(chat_id) if chat_id else None,
                     agent_id=agent_id,
-                    codespace_project_id=project_id if wt_task_id else None,
+                    codespace_project_id=proj_id,
                     codespace_worktree=wt_task_id,
                 ),
                 memory=memory, skills=skills, use_context=True, subagent=sub_opts,
@@ -1235,11 +1248,13 @@ def _make_subagent_runner(
                            "NÃO foi mesclado ainda; o usuário aprova/descarta na aba Tarefas.")
         return out
 
-    async def _adhoc_prep() -> dict | str:
+    async def _adhoc_prep(read_only: bool = False) -> dict | str:
         """Provedor, tools e skills dos agentes criados pela IA: iguais para todos eles,
-        resolvidos UMA vez por turno (mil agentes não viram mil consultas)."""
-        if "adhoc" in pool.cache:
-            return pool.cache["adhoc"]
+        resolvidos UMA vez por turno (mil agentes não viram mil consultas). As tools
+        levam o projeto (ou o espaço do chat); `read_only` tira escrita/execução."""
+        chave = f"adhoc:{read_only}"
+        if chave in pool.cache:
+            return pool.cache[chave]
         if parent is None or not parent.base_model:
             return "agentes criados pela IA precisam de um modelo custom como orquestrador"
         model = adhoc_model or parent.base_model
@@ -1249,10 +1264,12 @@ def _make_subagent_runner(
             return f"provedor do subagente indisponível: {exc.detail}"
         prep = {
             "model": model, "api_key": api_key, "base_url": base_url,
-            "sift": await _db(lambda: get_sift_for_user(db, user.id, parent)),
+            "sift": await _db(lambda: get_sift_for_user(
+                db, user.id, parent, codespace_project_id=project_id,
+                workspace=workspace, read_only=read_only)),
             "skills": await _db(lambda: _load_skills(db, user, parent)),
         }
-        pool.cache["adhoc"] = prep
+        pool.cache[chave] = prep
         return prep
 
     def _team_opts() -> SubagentOpts | None:
@@ -1262,13 +1279,16 @@ def _make_subagent_runner(
         nested = _make_subagent_runner(
             db, user, chat_id, max_depth, pass_context=pass_context, worker_memory=False,
             depth=depth + 1, ancestry=ancestry, project_id=project_id,
-            parent=parent, adhoc_model=adhoc_model, pool=pool,
+            parent=parent, adhoc_model=adhoc_model, pool=pool, workspace=workspace,
         )
         return SubagentOpts(agents=[], run=nested, mode="parallel", max_calls=pool.limit,
-                            adhoc=True, isolation=bool(project_id), background=False)
+                            adhoc=True, isolation=bool(project_id or workspace), background=False)
 
-    async def _run_new(new: dict, task: str, progress: Callable[[dict], None] | None) -> dict:
-        prep = await _adhoc_prep()
+    async def _run_new(new: dict, task: str, progress: Callable[[dict], None] | None,
+                       read_only: bool = False) -> dict:
+        # quem trabalha em paralelo no MESMO código só lê; worktree isolado pode tudo
+        ro = (read_only or bool(new.get("read_only"))) and not new.get("isolated")
+        prep = await _adhoc_prep(ro)
         if isinstance(prep, str):
             return {"error": prep}
         name = str(new.get("name") or "Agente")
@@ -1303,7 +1323,8 @@ def _make_subagent_runner(
         return str(out.get("output") or "")
 
     async def run_subagent(key: str, task: str, new: dict | None = None,
-                           progress: Callable[[dict], None] | None = None) -> dict:
+                           progress: Callable[[dict], None] | None = None,
+                           read_only: bool = False) -> dict:
         if not pool.take():
             return {"error": f"limite de {pool.limit} agentes deste turno atingido"}
         # fila: no máximo `concurrency` agentes deste nível trabalhando ao mesmo tempo. A
@@ -1313,12 +1334,13 @@ def _make_subagent_runner(
                 return {"error": "orçamento mensal atingido (modo pausar): agente não iniciado"}
             if progress is not None:
                 progress({"state": "running"})
-            return await _run_subagent(key, task, new, progress)
+            return await _run_subagent(key, task, new, progress, read_only)
 
     async def _run_subagent(key: str, task: str, new: dict | None,
-                            progress: Callable[[dict], None] | None) -> dict:
+                            progress: Callable[[dict], None] | None,
+                            read_only: bool = False) -> dict:
         if new is not None:
-            return await _run_new(new, task, progress)
+            return await _run_new(new, task, progress, read_only)
         if key in ancestry:
             return {"error": "ciclo de subagentes detectado; delegação abortada"}
         try:
@@ -1343,7 +1365,7 @@ def _make_subagent_runner(
                     pass_context=sub_conf.get("pass_context", False),
                     worker_memory=sub_conf.get("worker_memory", False),
                     depth=depth + 1, ancestry=ancestry | {key},
-                    project_id=project_id,
+                    project_id=project_id, workspace=workspace,
                     isolate_keys=frozenset(sub_conf.get("isolate") or []),
                     parent=mc, adhoc_model=sub_conf.get("adhoc_model", ""), pool=pool,
                 )
@@ -1360,7 +1382,9 @@ def _make_subagent_runner(
         return await _execute(
             label=mc.name, model=mc.base_model, api_key=api_key, base_url=base_url, task=task,
             system=mc.system_prompt, params=mc.params or {},
-            sift=await _db(lambda: get_sift_for_user(db, user.id, mc)),
+            sift=await _db(lambda: get_sift_for_user(
+                db, user.id, mc, codespace_project_id=project_id, workspace=workspace,
+                read_only=read_only and key not in isolate_keys)),
             skills=await _db(lambda: _load_skills(db, user, mc)),
             code_mode=_code_mode(mc), agent_id=_mem_agent_id(mc, mc.base_model),
             memory=MemoryOpts(read=mem_read, write=mem_write, review=mem_review),
@@ -1384,7 +1408,7 @@ def _make_subagent_runner(
                     s, u, chat_id, max_depth, pass_context=pass_context,
                     worker_memory=worker_memory, depth=depth, ancestry=ancestry,
                     project_id=project_id, isolate_keys=isolate_keys,
-                    parent=p, adhoc_model=adhoc_model, pool=bg_pool,
+                    parent=p, adhoc_model=adhoc_model, pool=bg_pool, workspace=workspace,
                 )
                 return await runner(key, task, new)
 
@@ -1409,7 +1433,7 @@ def _make_subagent_runner(
                     s, u, chat_id, max_depth, pass_context=pass_context,
                     worker_memory=worker_memory, depth=depth, ancestry=ancestry,
                     project_id=project_id, isolate_keys=isolate_keys,
-                    parent=p, adhoc_model=adhoc_model, pool=bg_pool,
+                    parent=p, adhoc_model=adhoc_model, pool=bg_pool, workspace=workspace,
                 )
                 res = await run_team(runner, members, goal, lambda ev: None, runner.synthesize,
                                      chain=chain)

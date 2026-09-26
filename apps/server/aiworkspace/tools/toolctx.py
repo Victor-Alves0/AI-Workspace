@@ -25,6 +25,13 @@ current_codespace_project_id: contextvars.ContextVar[str | None] = contextvars.C
     "current_codespace_project_id", default=None
 )
 
+# Espaço de trabalho do CHAT (sem projeto vinculado): as tools de código criam, no
+# primeiro uso, um projeto local só deste chat (graph_service.ensure_chat_workspace)
+# — pasta + shell + análise de código num chat comum, sem o usuário criar projeto.
+chat_workspace: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "chat_workspace", default=False
+)
+
 # Worktree ATIVO do Codespace (id da CodespaceTask) quando o turno/worker roda dentro
 # de uma tarefa isolada. Quando setado, as tools de escrita/exec operam no worktree
 # (`<proj>/wt/<task_id>`) em vez do `src`, e commitam na branch do worktree sem push.

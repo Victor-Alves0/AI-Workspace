@@ -34,6 +34,8 @@ import subprocess
 import tempfile
 import time
 import uuid
+import asyncio
+import threading
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,6 +43,7 @@ from typing import Any
 
 import pathspec
 from fastapi.concurrency import run_in_threadpool
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -1756,3 +1759,89 @@ async def push(user_id: str, project_id: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)[:400]}
     return {"ok": True, "branch": proj.branch}
+
+
+# --------------------------------------------------------------------------- #
+# Espaço de trabalho do CHAT: um projeto `local` (repo git vazio) criado no primeiro
+# uso das tools de código num chat SEM projeto vinculado. Fica marcado no escopo
+# (`chat_workspace`) e fora da lista de projetos do Codespace.
+# --------------------------------------------------------------------------- #
+_ws_locks: dict[str, threading.Lock] = {}
+_ws_locks_guard = threading.Lock()
+
+
+async def _ensure_chat_workspace(user_id: str, chat_id: str) -> str | None:
+    from ..models import Chat
+
+    eng = create_async_engine(get_settings().database_url, poolclass=NullPool)
+    try:
+        Session = async_sessionmaker(eng, expire_on_commit=False)
+        async with Session() as db:
+            try:
+                uid, cid = uuid.UUID(str(user_id)), uuid.UUID(str(chat_id))
+            except ValueError:
+                return None
+            chat = await db.get(Chat, cid)
+            if chat is None or chat.user_id != uid:
+                return None
+            if chat.project_id:
+                return str(chat.project_id)
+            row = (await db.scalars(
+                select(CodespaceProject).where(
+                    CodespaceProject.user_id == uid,
+                    CodespaceProject.scope["chat_workspace"].astext == str(cid),
+                )
+            )).first()
+            if row is None:
+                row = CodespaceProject(
+                    user_id=uid, name=f"Espaço do chat: {(chat.title or 'chat')[:60]}",
+                    source="local", repo_url="", branch="main",
+                    scope={"chat_workspace": str(cid)}, index_status="pending",
+                )
+                db.add(row)
+                await db.commit()
+                await db.refresh(row)
+            pid, status = row.id, row.index_status
+    finally:
+        await eng.dispose()
+    if status != "ready" or not working_copy_path(user_id, str(pid)).exists():
+        await _index_project(pid, reclone=False)
+    return str(pid)
+
+
+def ensure_chat_workspace(user_id: str, chat_id: str) -> str | None:
+    """Id do espaço de trabalho do chat, criando no primeiro uso. Síncrono (as tools
+    rodam em thread); um lock por chat evita que vários agentes em paralelo criem
+    espaços duplicados."""
+    with _ws_locks_guard:
+        lock = _ws_locks.setdefault(str(chat_id), threading.Lock())
+    with lock:
+        return asyncio.run(_ensure_chat_workspace(user_id, chat_id))
+
+
+def is_chat_workspace(proj: CodespaceProject) -> bool:
+    return bool((proj.scope or {}).get("chat_workspace"))
+
+
+async def delete_chat_workspaces(db: Any, user_id: Any, chat_ids: list[str] | None = None) -> None:
+    """Apaga o espaço de trabalho dos chats (banco + pasta). `chat_ids` None = todos do
+    usuário. Chamado ao excluir chats: o espaço é do chat e morre com ele."""
+    q = select(CodespaceProject).where(
+        CodespaceProject.user_id == user_id,
+        CodespaceProject.scope["chat_workspace"].astext.isnot(None),
+    )
+    if chat_ids is not None:
+        q = q.where(CodespaceProject.scope["chat_workspace"].astext.in_([str(c) for c in chat_ids]))
+    try:
+        rows = list(await db.scalars(q))
+    except Exception as exc:  # noqa: BLE001 - limpeza não impede excluir o chat
+        logger.warning("falha ao buscar espaços de chat para apagar: %s", exc)
+        return
+    for p in rows:
+        try:
+            delete_project_files(str(user_id), str(p.id))
+        except Exception as exc:  # noqa: BLE001 - pasta órfã não impede a exclusão
+            logger.warning("falha ao apagar a pasta do espaço %s: %s", p.id, exc)
+        await db.delete(p)
+    if rows:
+        await db.commit()

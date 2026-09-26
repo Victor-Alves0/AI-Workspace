@@ -27,6 +27,7 @@ from ..auth.deps import require_approved
 from ..auth.security import hash_password
 from ..db import get_db
 from ..memory import memory_service
+from ..codespace import graph_service
 from ..models import Artifact, Chat, CodespaceProject, Message, User
 from ..schemas.chat import (
     ChatCreate,
@@ -308,6 +309,7 @@ async def delete_chat(
     await db.delete(chat)
     await db.commit()
     await _delete_chat_memory_scopes(db, user, [str(chat_id)])
+    await graph_service.delete_chat_workspaces(db, user.id, [str(chat_id)])
     return {"ok": True}
 
 
@@ -565,6 +567,7 @@ async def delete_all_chats(
     await db.execute(delete(Chat).where(Chat.user_id == user.id))
     await db.commit()
     await _delete_chat_memory_scopes(db, user)
+    await graph_service.delete_chat_workspaces(db, user.id)
     return {"ok": True}
 
 

@@ -391,6 +391,22 @@ TOOL_ACTION_GUARD = (
 # passaram") sem chamar tool nenhuma — os dois modos de falha observados no chat do
 # Jenkins (kimi-k3, 30/07). É a mesma postura de um Codex/Claude Code: agir com as tools
 # e NUNCA inventar que agiu. Injetada no system prompt sempre que o escopo é codespace.
+WORKSPACE_DIRECTIVE = (
+    "WORKSPACE — this chat has its own private sandbox: a folder with a real shell and code "
+    "tools, created on first use. Use it whenever a task needs files or execution: download "
+    "programs or repositories (code.exec.run with git clone / curl / wget), unpack, build, run "
+    "and test them, read and search files (code.files.browse), analyze code "
+    "(code.graph.query, code.flow.analyze) and write files (code.files.write). These tools "
+    "ACTUALLY run — never say you cannot download, open or run something, and never invent "
+    "output you did not observe. No root, no Docker: install toolchains with mise."
+)
+
+READ_ONLY_DIRECTIVE = (
+    "READ-ONLY: you can read, search and analyze the code, but not write files or run commands "
+    "(other agents work on the same code in parallel). Report findings with file and line; do "
+    "not claim you changed or executed anything."
+)
+
 CODESPACE_AGENT_DIRECTIVE = (
     "CODESPACE — you are an autonomous coding agent working inside a REAL project with a "
     "REAL execution sandbox, exactly like Codex or Claude Code. Your code tools ACTUALLY "
@@ -1923,6 +1939,10 @@ def _assemble_tools_and_prompt(
         # execução). scope.meta["codespace"] é montado pelo loader p/ chats de projeto.
         if sift_meta.get("codespace"):
             a.sift_prompt += "\n\n" + CODESPACE_AGENT_DIRECTIVE
+        elif sift_meta.get("workspace"):
+            a.sift_prompt += "\n\n" + WORKSPACE_DIRECTIVE
+        if sift_meta.get("read_only"):
+            a.sift_prompt += "\n\n" + READ_ONLY_DIRECTIVE
         # Grafo de Investigação: injeta a diretriz quando a tool está equipada (native,
         # independe de projeto). Pode estar FIXADA (spec em a.tools, nome dot→__) ou só
         # no catálogo (string "Grafo de Investigação — ..." montada pelo loader).
@@ -3143,6 +3163,9 @@ async def run_turn(
     toolctx.user_profile.set(session.user_profile or {})
     # projeto do Codespace vinculado a este chat, visível às tools code.graph/code.files
     toolctx.current_codespace_project_id.set(session.codespace_project_id)
+    toolctx.chat_workspace.set(bool(
+        session.chat_id and sift is not None and getattr(sift, "meta", {}).get("workspace")
+    ))
     toolctx.current_codespace_worktree.set(session.codespace_worktree)
 
     # Arquivos da KB que já foram enviados aparecem como links no conteúdo persistido.
@@ -3370,8 +3393,9 @@ async def run_turn(
     # Teto de iterações do loop agêntico. Num chat de Codespace (loop escreve → testa
     # → corrige) usamos um teto bem maior, como os agentes de código do mercado; nos
     # demais, o teto normal. O flag vem do scope.meta["codespace"] montado no loader.
+    _meta = getattr(sift, "meta", {}) if sift is not None else {}
     _in_codespace = bool(session.codespace_project_id) or bool(
-        getattr(sift, "meta", {}).get("codespace") if sift is not None else False
+        _meta.get("codespace") or _meta.get("workspace")
     )
     max_iters = (
         settings.codespace_max_tool_iterations if _in_codespace
@@ -3714,10 +3738,14 @@ async def run_turn(
                     disp.delegations_used += 1
                     picked.append((tc["id"], key, task, new))
                 if picked:
+                    # vários agentes ao mesmo tempo no MESMO código: só leitura (os de
+                    # worktree isolado continuam podendo escrever/rodar)
+                    ro = len(picked) > 1
+
                     def _fn(k: str, t: str, n: dict | None) -> Any:
                         if n is not None:
-                            return lambda prog: run_subagent(k, t, n, progress=prog)
-                        return lambda prog: run_subagent(k, t, progress=prog)
+                            return lambda prog: run_subagent(k, t, n, progress=prog, read_only=ro)
+                        return lambda prog: run_subagent(k, t, progress=prog, read_only=ro)
 
                     nomes = {i: (n or {}).get("name") or subagents_by_key.get(k, {}).get("name", k)
                              for (i, k, _t, n) in picked}

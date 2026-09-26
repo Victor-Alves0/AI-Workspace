@@ -160,7 +160,10 @@ async def run_team(
         try:
             tarefa = _task_with_prior(i, m) if chain else m["task"]
             res = await run("new", tarefa, {"name": m["name"], "instructions": m["instructions"],
-                                                "isolated": m["isolated"]}, progress=prog)
+                                                "isolated": m["isolated"],
+                                                # em paralelo, no MESMO código: só leitura
+                                                "read_only": not chain and not m["isolated"]},
+                            progress=prog)
         except Exception as exc:  # noqa: BLE001 - a falha vira o resultado do membro
             logger.warning("membro da equipe falhou: %s", exc)
             res = {"error": f"o subagente falhou: {exc}"}

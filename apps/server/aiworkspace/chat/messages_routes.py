@@ -41,6 +41,7 @@ from .turn_setup import (
     _imaginai_turn_kwargs,
     _load_skills,
     _media_opts,
+    _workspace_on,
     _mem_agent_id,
     _memory_opts,
     _ordered_messages,
@@ -324,6 +325,7 @@ async def send_message(
     sift = await get_sift_for_user(
         db, user.id, model_config,
         codespace_project_id=str(chat.project_id) if chat.project_id else None,
+        workspace=_workspace_on(chat, model_config),
     )
     skills = await _load_skills(db, user, model_config, body.skill_ids)
 
@@ -399,7 +401,8 @@ async def send_message(
 
     guards = await _resolve_guards(db, user, model_config)
     subagent_opts = await subagents_for_turn(
-        db, user, chat_id, str(chat.project_id) if chat.project_id else None, model_config)
+        db, user, chat_id, str(chat.project_id) if chat.project_id else None, model_config,
+        workspace=_workspace_on(chat, model_config))
     # steer/fila: o loop do turno drena as mensagens de STEER desta geração. A `gen` só
     # existe após generation.start; um box de late-binding liga o drain à gen certa (o
     # driver só chama isto depois do start retornar). on_queue dispara a continuação.
@@ -645,7 +648,8 @@ async def regenerate_message(
 
     guards = await _resolve_guards(db, user, model_config)
     subagent_opts = await subagents_for_turn(
-        db, user, chat_id, str(chat.project_id) if chat.project_id else None, model_config)
+        db, user, chat_id, str(chat.project_id) if chat.project_id else None, model_config,
+        workspace=_workspace_on(chat, model_config))
     source = run_turn_guarded(
         guards=guards,
         api_key=api_key,

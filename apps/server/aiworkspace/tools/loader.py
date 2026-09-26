@@ -401,6 +401,8 @@ async def get_sift_for_user(
     user_id: uuid.UUID,
     model_config: Any | None = None,
     codespace_project_id: str | None = None,
+    workspace: bool = False,
+    read_only: bool = False,
 ):
     """`codespace_project_id`: chat vinculado a um projeto do Codespace — libera
     TODAS as tools de código (ler/escrever/rodar/tarefas) e as FIXA, para o modelo
@@ -408,7 +410,10 @@ async def get_sift_for_user(
     para um modelo BASE cru (sem ModelConfig): num chat de projeto o vínculo é o
     consentimento, então o agente sempre tem as ferramentas de código — foi o buraco
     que deixava o Kimi/DeepSeek crus sem tool alguma e escrevendo da memória."""
-    in_codespace = bool(codespace_project_id)
+    # `workspace`: chat comum com o espaço de trabalho do chat (criado no 1º uso) —
+    # mesmas tools de código de um projeto. `read_only`: sem escrita/execução (os
+    # subagentes que analisam em paralelo no mesmo código, sem pisar um no outro).
+    in_codespace = bool(codespace_project_id) or workspace
     # Fora de um chat de projeto, sem ModelConfig ou com a SIFT desligada => sem
     # ferramentas. DENTRO de um projeto, um ModelConfig que desligou as tools
     # (tools_enabled=False) ainda manda — respeita a escolha explícita do usuário —,
@@ -430,6 +435,8 @@ async def get_sift_for_user(
     allow = effective_allow
     if in_codespace:
         allow = codespace_allow(allow)
+        if read_only:
+            allow = [p for p in allow if p not in _CODESPACE_WORK]
     if not allow:
         return None
 
@@ -498,7 +505,9 @@ async def get_sift_for_user(
         scope.meta["sift_prompt"] = sift_config.get("prompt") or ""
         # chat de projeto: o orchestrator usa isto p/ dar um teto de iterações maior
         # (loop agêntico de código: escreve → testa → corrige, dezenas de passos).
-        scope.meta["codespace"] = in_codespace
+        scope.meta["codespace"] = bool(codespace_project_id)
+        scope.meta["workspace"] = bool(workspace and not codespace_project_id)
+        scope.meta["read_only"] = bool(read_only)
         return scope
     except Exception as exc:  # noqa: BLE001
         logger.warning("Falha ao aplicar scope SIFT (%s); chat sem ferramentas", exc)

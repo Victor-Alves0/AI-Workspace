@@ -629,6 +629,8 @@ const CAPS: { key: string; label: string }[] = [
   { key: "chat_context", label: "Contexto" },
 ];
 const RESOURCES: { key: string; label: string }[] = [
+  // pasta + shell + análise de código num chat comum (sem projeto), criados no 1º uso
+  { key: "workspace", label: "Espaço de trabalho" },
   { key: "realtime_datetime", label: "Data e Hora em Tempo Real" },
   // marcadores [[som: ...]] na resposta — precisa da ElevenLabs ligada para tocar
   { key: "sound_effects", label: "Efeitos Sonoros" },
@@ -641,7 +643,7 @@ const ALL_CAPS = [...CAPS, ...RESOURCES];
 // preciso gravar explicitamente `false` (o orchestrator respeita chat_context).
 // `artifacts` NÃO é default-on: só injeta as instruções quando marcada (ou quando o
 // chat já tem artefatos) — poupa ~400 tokens/turno.
-const CAPS_DEFAULT_ON = new Set<string>(["chat_context", "skill_learning", "realtime_datetime"]);
+const CAPS_DEFAULT_ON = new Set<string>(["chat_context", "skill_learning", "realtime_datetime", "workspace"]);
 
 // memória por-modelo (guardada em capabilities.memory; null = herda do perfil).
 // Ao personalizar, materializa com enabled:true (liga a memória p/ os chats deste
@@ -2011,7 +2013,7 @@ export default function ModelEditor({
               onRemove={(k) => setCapSelected(capSelected.filter((x) => x !== k))}
               onManage={() => setResModal(true)}
               searchPlaceholder="Buscar recursos…"
-              hint="Recursos que o app acrescenta ao modelo, como data e hora e artefatos."
+              hint="Recursos que o app acrescenta ao modelo. Espaço de trabalho: pasta e terminal próprios do chat para baixar, rodar e analisar programas."
             />
           </div>
 

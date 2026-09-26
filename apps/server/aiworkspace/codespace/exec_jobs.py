@@ -154,6 +154,13 @@ def _read_thread(job: Job) -> None:
     else:
         job.status = "done" if rc == 0 else ("killed" if rc is not None and rc < 0 else "failed")
     job.ended_at = time.monotonic()
+    # arquivos trazidos/criados pelo job (download, build) entram no grafo de código
+    if not job.worktree:
+        try:
+            from . import graph_service
+            graph_service._reindex_after_write(job.user_id, job.project_id)
+        except Exception:  # noqa: BLE001 - grafo atrasado não derruba o job
+            pass
     _db_update(job.id, status=job.status, exit_code=job.exit_code,
                output_tail=job.output[-4000:])
     job._evt.set()

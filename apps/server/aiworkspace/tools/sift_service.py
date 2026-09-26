@@ -1662,10 +1662,24 @@ def _register_builtins(
             or want("code.preview.serve")):
         from ..codespace import graph_service
 
+        def _cs_pid():
+            """Projeto do chat: o vinculado ou, num chat comum com o espaço de trabalho
+            ligado, o espaço do chat (criado aqui no primeiro uso)."""
+            pid = toolctx.current_codespace_project_id.get()
+            if pid or not toolctx.chat_workspace.get():
+                return pid
+            chat_id = toolctx.current_chat_id.get()
+            if not chat_id:
+                return None
+            pid = graph_service.ensure_chat_workspace(str(user_id), str(chat_id))
+            if pid:
+                toolctx.current_codespace_project_id.set(pid)
+            return pid
+
         def _cs_project():
             """Resolve e valida o projeto do chat atual. Devolve (project, None) ou
             (None, error_dict) — o error_dict já é a resposta pronta da tool."""
-            pid = toolctx.current_codespace_project_id.get()
+            pid = _cs_pid()
             if not pid:
                 return None, {"error": "Nenhum projeto do Codespace vinculado a este chat. "
                               "Vincule um projeto em Espaço de Trabalho → Codespace."}
@@ -1677,7 +1691,7 @@ def _register_builtins(
         def _cs_project_ctx():
             """Como `_cs_project`, mas também devolve se 'confirmar ações' está
             ligado — usado pelas ações destrutivas/externas (delete/push)."""
-            pid = toolctx.current_codespace_project_id.get()
+            pid = _cs_pid()
             if not pid:
                 return None, False, {"error": "Nenhum projeto do Codespace vinculado a este chat. "
                                       "Vincule um projeto em Espaço de Trabalho → Codespace."}
@@ -2145,6 +2159,10 @@ def _register_builtins(
                     return r
                 r["command"] = cmd
                 r["ok"] = r.get("exit_code") == 0
+                # o comando pode ter trazido/criado arquivos (git clone, curl, build):
+                # reindexa o grafo (incremental) p/ a análise de código enxergá-los
+                if not wt:
+                    graph_service._reindex_after_write(uid, pid)
                 # loop de verificação: rodando o test_command DENTRO de um worktree,
                 # grava pass/fail na tarefa (aparece na aba Tarefas p/ o humano).
                 is_test = not (command or "").strip() or cmd == (proj.test_command or "").strip()

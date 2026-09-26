@@ -211,3 +211,32 @@ def test_passo_leva_so_o_resumo_dos_argumentos():
         == {"query": "café hoje"}
     assert ts._step_args("delegate_team", {"team_name": "M", "members": [{}, {}]}) == {"team_name": "M", "members": 2}
     assert len(ts._step_args("x", {"query": "y" * 500})["query"]) == 120
+
+
+def test_espaco_de_trabalho_so_em_chat_comum_com_tools():
+    from types import SimpleNamespace as NS
+
+    from aiworkspace.chat import turn_setup as ts
+
+    mc = NS(tools_enabled=True, capabilities={})
+    assert ts._workspace_on(NS(project_id=None), mc) is True           # padrão: ligado
+    assert ts._workspace_on(NS(project_id="p1"), mc) is False          # chat de projeto: já tem
+    assert ts._workspace_on(None, mc) is False                         # chat temporário
+    assert ts._workspace_on(NS(project_id=None), NS(tools_enabled=False, capabilities={})) is False
+    assert ts._workspace_on(NS(project_id=None), NS(tools_enabled=True, capabilities={"workspace": False})) is False
+
+
+async def test_membros_em_paralelo_so_leem_e_em_cadeia_ou_isolados_podem_tudo():
+    vistos = []
+
+    async def run(key, task, new=None, progress=None):
+        vistos.append((new["name"], new["read_only"]))
+        return {"output": "ok"}
+
+    membros = [{"name": "A", "task": "t", "instructions": "", "isolated": False},
+               {"name": "B", "task": "t", "instructions": "", "isolated": True}]
+    await team.run_team(run, membros, "g", lambda ev: None, None)
+    assert sorted(vistos) == [("A", True), ("B", False)]
+    vistos.clear()
+    await team.run_team(run, membros, "g", lambda ev: None, None, chain=True)
+    assert sorted(vistos) == [("A", False), ("B", False)]
