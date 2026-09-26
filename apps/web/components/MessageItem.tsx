@@ -1662,10 +1662,10 @@ function MessageItem({
                         key={i}
                         onClick={() => setViewingAtt(i)}
                         title={a.name}
-                        className="flex items-center gap-1.5 rounded-lg border border-border bg-surface2 px-2.5 py-1 text-xs text-ink-soft transition-colors hover:border-accent/40 hover:text-ink"
+                        className="flex items-center gap-2 rounded-lg border border-border bg-surface2 px-3 py-1.5 text-[13px] text-ink-soft transition-colors hover:border-accent/40 hover:text-ink"
                       >
-                        <FileText size={13} className="shrink-0 text-muted" />
-                        <span className="max-w-[220px] truncate">{a.name || "arquivo"}</span>
+                        <FileText size={15} className="shrink-0 text-muted" />
+                        <span className="max-w-[264px] truncate">{a.name || "arquivo"}</span>
                       </button>
                     ) : (
                       <a

@@ -1142,8 +1142,8 @@ export default function PromptBox({
                       </button>
                     </span>
                   ) : (
-                    <span key={i} className="flex max-w-[220px] items-center gap-1.5 rounded-lg border border-border bg-surface2 px-2.5 py-1 text-xs text-ink">
-                      {a.type === "audio" ? <Mic size={13} className="shrink-0 text-accent-hover" /> : <FileText size={13} className="shrink-0 text-muted" />}
+                    <span key={i} className="flex max-w-[264px] items-center gap-2 rounded-lg border border-border bg-surface2 px-3 py-1.5 text-[13px] text-ink">
+                      {a.type === "audio" ? <Mic size={15} className="shrink-0 text-accent-hover" /> : <FileText size={15} className="shrink-0 text-muted" />}
                       {/* min-w-0: sem ele o nome longo ("Texto colado 23/09/2026, 14:30.txt")
                           não encolhe e empurra o ✕ para fora do chip — onde a lista o corta */}
                       {isTextAttachment(a) ? (
@@ -1154,7 +1154,7 @@ export default function PromptBox({
                         <span className="min-w-0 truncate">{a.name}</span>
                       )}
                       <button onClick={() => removeAttachment(i)} title="Remover" className="shrink-0 text-muted transition-colors hover:text-red-300">
-                        <X size={12} />
+                        <X size={14} />
                       </button>
                     </span>
                   ),
