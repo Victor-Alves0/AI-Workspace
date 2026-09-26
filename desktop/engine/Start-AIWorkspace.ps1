@@ -215,7 +215,18 @@ Write-Host "==> Iniciando Postgres em $($Loop):$PgPort"
 
 try {
     # --- 3) banco + extensao pgvector (idempotente) ---
-    & (Pg "createdb.exe") -h $Loop -p $PgPort -U aiworkspace aiworkspace 2>$null
+    # SO' cria o banco se ele nao existe. Antes era `createdb ... 2>$null` sempre: com
+    # $ErrorActionPreference = "Stop", o PowerShell 5.1 transforma o stderr redirecionado
+    # de um programa externo ("database already exists") em erro FATAL — o script caia no
+    # finally, desligava o Postgres e o app ficava para sempre em "Iniciando". Acontecia
+    # em TODA reabertura (depois do 1o boot o banco sempre existe).
+    $existe = & (Pg "psql.exe") -h $Loop -p $PgPort -U aiworkspace -d postgres -tA `
+        -c "SELECT 1 FROM pg_database WHERE datname = 'aiworkspace'"
+    if ("$existe".Trim() -ne "1") {
+        $eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+        try { & (Pg "createdb.exe") -h $Loop -p $PgPort -U aiworkspace aiworkspace 2>&1 | Out-Null }
+        finally { $ErrorActionPreference = $eap }
+    }
     & (Pg "psql.exe") -h $Loop -p $PgPort -U aiworkspace -d aiworkspace `
         -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector" | Out-Null
 
