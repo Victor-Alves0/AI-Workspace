@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Children, isValidElement, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { X } from "lucide-react";
+import { Check, ChevronDown, X } from "lucide-react";
 
 /** Ponteiro fino (mouse)? Em telas de toque, autoFocus abre o teclado na hora — o
  *  iOS desloca a viewport p/ revelar o input e o scroll interno de menus fica
@@ -286,5 +286,88 @@ export function InfoDot({ text }: { text: string }) {
         </span>
       )}
     </span>
+  );
+}
+
+type SelectOpt = { value: string; label: string; group?: never } | { group: string; value?: never; label?: never };
+
+function textOf(node: React.ReactNode): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  if (isValidElement(node)) return textOf((node.props as { children?: React.ReactNode }).children);
+  return "";
+}
+
+function optionsOf(children: React.ReactNode): SelectOpt[] {
+  const out: SelectOpt[] = [];
+  Children.forEach(children, (ch) => {
+    if (!isValidElement(ch)) return;
+    const p = ch.props as { value?: unknown; label?: string; children?: React.ReactNode };
+    if (ch.type === "optgroup") {
+      out.push({ group: String(p.label ?? "") });
+      out.push(...optionsOf(p.children));
+    } else if (ch.type === "option") {
+      out.push({ value: String(p.value ?? ""), label: textOf(p.children) });
+    } else if (p.children) {
+      out.push(...optionsOf(p.children)); // fragmentos/listas
+    }
+  });
+  return out;
+}
+
+/** Seletor no visual do sistema, no lugar do <select> nativo (cujo menu segue o SO e
+ *  corta textos longos). Mesma API do nativo: `<option>`/`<optgroup>` como filhos e
+ *  `onChange(e => e.target.value)`. O texto completo aparece no hover (title). */
+export function Select({
+  value, onChange, className = "", children, disabled, title,
+}: {
+  value: string | number | undefined;
+  onChange: (e: { target: { value: string } }) => void;
+  className?: string;
+  children: React.ReactNode;
+  disabled?: boolean;
+  title?: string;
+  required?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+  const opts = optionsOf(children);
+  const cur = opts.find((o) => o.value !== undefined && o.value === String(value ?? ""));
+  const label = cur?.label ?? "";
+  return (
+    <>
+      <button
+        ref={ref}
+        type="button"
+        disabled={disabled}
+        title={title ?? label}
+        onClick={() => setOpen((v) => !v)}
+        className={`inline-flex min-w-0 items-center justify-between gap-2 text-left transition-colors hover:brightness-110 disabled:opacity-50 ${className}`}
+      >
+        <span className="min-w-0 truncate">{label}</span>
+        <ChevronDown size={14} className={`shrink-0 text-muted transition-transform duration-150 ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <AnchoredMenu anchorRef={ref} onClose={() => setOpen(false)} align="left" className="max-h-72 max-w-[min(26rem,calc(100vw-1rem))] overflow-y-auto">
+          {opts.map((o, i) =>
+            o.group !== undefined ? (
+              <p key={`g${i}`} className="px-2.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-muted">{o.group}</p>
+            ) : (
+              <button
+                key={`${o.value}-${i}`}
+                type="button"
+                title={o.label}
+                onClick={() => { setOpen(false); if (o.value !== String(value ?? "")) onChange({ target: { value: o.value } }); }}
+                className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors ${o.value === String(value ?? "") ? "bg-accent/15 text-accent-hover" : "text-ink hover:bg-hover"}`}
+              >
+                <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                {o.value === String(value ?? "") && <Check size={14} className="shrink-0" />}
+              </button>
+            ),
+          )}
+        </AnchoredMenu>
+      )}
+    </>
   );
 }

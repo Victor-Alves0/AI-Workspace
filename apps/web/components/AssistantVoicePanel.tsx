@@ -6,6 +6,7 @@
 // o .ppn custom. Inclui um "Testar escuta" que liga o mic de verdade e acende quando
 // ouve a palavra — é assim que o usuário sabe que funciona.
 
+import { Select } from "./ui";
 import { useEffect, useRef, useState } from "react";
 import { Ear, Loader2, Check, Mic, Download, Trash2 } from "lucide-react";
 import {
@@ -459,7 +460,7 @@ export default function AssistantVoicePanel() {
         <div className="flex flex-wrap items-end gap-2">
           <label className="block">
             <span className="mb-1 block text-[11px] font-medium text-muted">Engine</span>
-            <select
+            <Select
               value={engine}
               onChange={(e) => setEngine(e.target.value as "porcupine" | "vosk" | "whisper" | "openwakeword")}
               disabled={testing}
@@ -469,7 +470,7 @@ export default function AssistantVoicePanel() {
               <option value="whisper">Whisper</option>
               <option value="vosk">Vosk</option>
               <option value="openwakeword">OpenWakeWord</option>
-            </select>
+            </Select>
           </label>
           <label className="block">
             <span className="mb-1 block text-[11px] font-medium text-muted">Palavra</span>

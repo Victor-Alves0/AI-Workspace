@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "./ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -141,8 +142,7 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Imaginai", cat: "miniapps" },
   { label: "Formato de hora", cat: "account" },
   { label: "Formato de data", cat: "account" },
-  { label: "Aviso de uso alto", cat: "account" },
-  { label: "Avisar quando uma resposta passar de (tokens)", cat: "account" },
+  { label: "Controle de gasto", cat: "account" },
   { label: "Atalhos de teclado", cat: "shortcuts" },
   { label: "Atalhos", cat: "shortcuts" },
   { label: "Segurança", cat: "security" },
@@ -162,7 +162,7 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: "Data de nascimento", cat: "account" },
   { label: "Alterar Senha", cat: "account" },
   { label: "APIs", cat: "connections", view: "apis" },
-  { label: "Voz Local", cat: "connections", view: "voice" },
+  { label: "Voz", cat: "connections", view: "voice" },
   { label: "Servidor de voz", cat: "connections", view: "voice" },
   { label: "Assistente de voz", cat: "connections", view: "assistant-voice" },
   { label: "Wake word", cat: "connections", view: "assistant-voice" },
@@ -515,6 +515,11 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                 placeholder="Pesquisar"
                 className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
               />
+              {q && (
+                <button onClick={() => setQ("")} title="Limpar" className="shrink-0 rounded p-0.5 text-muted transition-colors hover:text-ink">
+                  <X size={14} />
+                </button>
+              )}
             </div>
             <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
               {CATS.filter((c) => c.key !== "desktop" || onDesktop).map((c) => (
@@ -619,11 +624,11 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                   <Heading>Conexões</Heading>
                   <CardGrid
                     cards={[
-                      { key: "apis", icon: <KeyRound size={22} />, name: "APIs", desc: "Provedores, voz, pesquisa e finanças" },
+                      { key: "apis", icon: <KeyRound size={22} />, name: "APIs", desc: "Provedores e chaves de APIs" },
                       { key: "subscriptions", icon: <Crown size={22} />, name: "Assinaturas", desc: "Suas assinaturas" },
                       { key: "web", icon: <Globe size={22} />, name: "Web", desc: "Acesso a internet" },
                       { key: "ollama", icon: <SiOllama size={22} />, name: "Ollama", desc: "Utilize modelos locais" },
-                      { key: "voice", icon: <AudioLines size={22} />, name: "Voz Local", desc: "Servidor de voz externo / clonagem de voz" },
+                      { key: "voice", icon: <AudioLines size={22} />, name: "Voz", desc: "Controlar voz de IA" },
                       { key: "assistant-voice", icon: <Bot size={22} />, name: "Assistente", desc: "Usabilidade de agentes" },
                     ]}
                     onOpen={setConnView}
@@ -959,6 +964,7 @@ function SidebarSettings({ profile, set, onBack }: { profile: Record<string, any
   const setIface = (k: string, v: any) => set("interface", { ...iface, [k]: v });
   const [cfgOpen, setCfgOpen] = useState(false);
   const [compactCfgOpen, setCompactCfgOpen] = useState(false);
+  const [organizeOpen, setOrganizeOpen] = useState(false);
   const [models, setModels] = useState<Model[]>([]);
   useEffect(() => { api.get<Model[]>("/settings/models").then(setModels).catch(() => {}); }, []);
   const autoTitle = !!iface.auto_title;
@@ -1017,8 +1023,10 @@ function SidebarSettings({ profile, set, onBack }: { profile: Record<string, any
       <div className="mt-3 rounded-xl border border-border bg-surface px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <span className="text-sm text-ink">Resumo de contexto (compactação)</span>
-            <span className="mt-0.5 block text-xs text-muted">Tarefa auxiliar — dá pra usar um modelo mais barato.</span>
+            <span className="flex items-center gap-1.5 text-sm text-ink">
+              Resumo de contexto (compactação)
+              <InfoDot text="Tarefa auxiliar — dá pra usar um modelo mais barato." />
+            </span>
           </div>
           <button
             onClick={() => setCompactCfgOpen((v) => !v)}
@@ -1053,10 +1061,29 @@ function SidebarSettings({ profile, set, onBack }: { profile: Record<string, any
 
       <div className="mt-6 flex items-center justify-between">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted/70">Itens visíveis</p>
-        <button onClick={() => setIface("sidebar_order", SIDEBAR_ITEMS.map((i) => i.key))} className="text-[11px] text-muted transition-colors hover:text-ink">Ordem padrão</button>
+        <button
+          onClick={() => setOrganizeOpen(true)}
+          className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink"
+        >
+          <GripVertical size={13} /> Organizar
+        </button>
       </div>
-      <p className="mb-2.5 text-[11px] text-muted">Arraste para reordenar a barra lateral; o olho mostra/oculta cada item.</p>
-      <SidebarItemsEditor iface={iface} setIface={setIface} />
+      {organizeOpen && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" onClick={() => setOrganizeOpen(false)}>
+          <div className="animate-pop flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-border bg-bg shadow-menu" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-border px-5 py-3">
+              <p className="text-sm font-semibold text-ink">Organizar barra lateral</p>
+              <div className="flex items-center gap-1">
+                <button onClick={() => setIface("sidebar_order", SIDEBAR_ITEMS.map((i) => i.key))} className="rounded-lg px-2 py-1 text-xs text-muted transition-colors hover:bg-hover hover:text-ink">Ordem padrão</button>
+                <button onClick={() => setOrganizeOpen(false)} title="Fechar" className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={18} /></button>
+              </div>
+            </div>
+            <div className="overflow-y-auto px-5 py-4">
+              <SidebarItemsEditor iface={iface} setIface={setIface} />
+            </div>
+          </div>
+        </div>
+      )}
 
       <p className="mb-2 mt-6 text-xs font-semibold uppercase tracking-wider text-muted/70">No menu do usuário</p>
       <div className="space-y-2.5">
@@ -1271,7 +1298,7 @@ function GeneralTab({ profile, set }: { profile: Record<string, any>; set: (k: s
     <div>
       <Heading>Configurações da WebUI</Heading>
       <Row label="Tema">
-        <select
+        <Select
           value={profile.theme ?? "system"}
           onChange={(e) => set("theme", e.target.value)}
           className="rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none"
@@ -1279,17 +1306,17 @@ function GeneralTab({ profile, set }: { profile: Record<string, any>; set: (k: s
           <option value="system">Sistema</option>
           <option value="dark">Escuro</option>
           <option value="light">Claro</option>
-        </select>
+        </Select>
       </Row>
       <Row label="Idioma">
-        <select
+        <Select
           value={profile.language ?? "pt-BR"}
           onChange={(e) => set("language", e.target.value)}
           className="rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none"
         >
           <option value="pt-BR">Portuguese (Brazil)</option>
           <option value="en">English</option>
-        </select>
+        </Select>
       </Row>
       <Row label="Notificações">
         <Toggle on={!!profile.notifications} onClick={() => set("notifications", !profile.notifications)} />
@@ -1656,7 +1683,7 @@ function AccountTab({ user, profile, set }: { user: User | null; profile: Record
       </div>
 
       <Row label="Gênero">
-        <select
+        <Select
           value={profile.gender ?? ""}
           onChange={(e) => set("gender", e.target.value)}
           className="rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none"
@@ -1665,7 +1692,7 @@ function AccountTab({ user, profile, set }: { user: User | null; profile: Record
           <option value="Masculino">Masculino</option>
           <option value="Feminino">Feminino</option>
           <option value="Outro">Outro</option>
-        </select>
+        </Select>
       </Row>
       <Row label="Data de nascimento">
         <input
@@ -1691,17 +1718,17 @@ function AccountTab({ user, profile, set }: { user: User | null; profile: Record
 
       <Heading>Formato de data e hora</Heading>
       <Row label="Formato de hora">
-        <select
+        <Select
           value={profile.time_format ?? "24h"}
           onChange={(e) => set("time_format", e.target.value)}
           className="rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none"
         >
           <option value="24h">24 horas (14:30)</option>
           <option value="12h">12 horas (2:30 PM)</option>
-        </select>
+        </Select>
       </Row>
       <Row label="Formato de data">
-        <select
+        <Select
           value={profile.date_format ?? "dmy"}
           onChange={(e) => set("date_format", e.target.value)}
           className="rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none"
@@ -1709,22 +1736,10 @@ function AccountTab({ user, profile, set }: { user: User | null; profile: Record
           <option value="dmy">DD/MM/AAAA</option>
           <option value="mdy">MM/DD/AAAA</option>
           <option value="ymd">AAAA-MM-DD</option>
-        </select>
+        </Select>
       </Row>
 
-      <Heading>Aviso de uso alto</Heading>
-      <Row label="Avisar quando uma resposta passar de (tokens)" info="0 = desligado. Marca a mensagem com um alerta; não bloqueia.">
-        <input
-          type="number"
-          min={0}
-          step={1000}
-          value={profile.token_warn ?? ""}
-          onChange={(e) => set("token_warn", e.target.value === "" ? 0 : Number(e.target.value))}
-          placeholder="0"
-          className="w-28 rounded-lg border border-border bg-surface px-3 py-1.5 text-right text-sm text-ink outline-none focus:border-accent"
-        />
-      </Row>
-
+      <Heading>Controle de gasto</Heading>
       <BudgetSettings profile={profile} set={set} />
     </div>
   );
@@ -1742,7 +1757,7 @@ function BudgetSettings({ profile, set }: { profile: Record<string, any>; set: (
   const cap = Number(b.monthly_usd) || 0;
   const pct = cap > 0 ? Math.min(100, Math.round((spent / cap) * 100)) : 0;
   return (
-    <div className="mt-4 border-t border-border pt-4">
+    <div className="mt-2">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="flex items-center gap-1.5 text-sm font-medium text-ink">
@@ -1767,10 +1782,10 @@ function BudgetSettings({ profile, set }: { profile: Record<string, any>; set: (
             </label>
             <label className="flex items-center gap-2 text-sm text-ink-soft">
               Ao atingir
-              <select value={b.mode === "pause" ? "pause" : "warn"} onChange={(e) => setB({ mode: e.target.value })} className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
+              <Select value={b.mode === "pause" ? "pause" : "warn"} onChange={(e) => setB({ mode: e.target.value })} className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
                 <option value="warn">Só avisar</option>
                 <option value="pause">Avisar e pausar</option>
-              </select>
+              </Select>
             </label>
           </div>
           {cap > 0 && (
@@ -2127,7 +2142,7 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
           <p className="text-xs text-muted sm:col-span-2">Padrões para novos chats — cada chat pode sobrescrever em Controles.</p>
           <div>
             <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">Salvar novas memórias em</p>
-            <select
+            <Select
               value={mem?.write ?? "global"}
               onChange={(e) => saveMem({ write: e.target.value as MemoryConfig["write"] })}
               className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent"
@@ -2135,7 +2150,7 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
               {(["global", "model", "chat", "off"] as const).map((v) => (
                 <option key={v} value={v}>{MEM_WRITE_LABEL[v]}</option>
               ))}
-            </select>
+            </Select>
           </div>
           <div>
             <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">Ler memórias de (união)</p>

@@ -142,6 +142,15 @@ select:focus-visible {
   animation: pop 0.15s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* barra lateral que entra pela direita (trabalho de um agente) */
+@keyframes slide-in-right {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.animate-slide-in-right {
+  animation: slide-in-right 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 @keyframes fade-up {
   from {
     opacity: 0;

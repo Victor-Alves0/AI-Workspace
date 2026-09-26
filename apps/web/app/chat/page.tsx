@@ -3315,12 +3315,6 @@ function MessageBubble({
             {name}
           </p>
         )}
-        {status && (
-          <p className="mb-2 flex items-center gap-2 text-sm text-ink-soft">
-            <Loader2 size={14} className="shrink-0 animate-spin text-accent-hover" />
-            <span>{status}</span>
-          </p>
-        )}
         {(reasoning?.text || reasoning?.steps?.length || usedTools) && (
           <ReasoningBlock text={reasoning?.text ?? ""} seconds={reasoning?.seconds} steps={reasoning?.steps} tools={toolEvents} live={reasoningLive || toolsLive} />
         )}
@@ -3328,6 +3322,14 @@ function MessageBubble({
           <Markdown content={content} fast={streaming} className={streaming ? "stream-caret" : ""} />
         )}
         {footer}
+        {/* o que a IA está fazendo agora: EMBAIXO da resposta (como no Claude) — o texto
+            cresce acima e a linha acompanha o fim */}
+        {status && (
+          <p className="mt-2 flex items-center gap-2 text-sm text-ink-soft">
+            <Loader2 size={14} className="shrink-0 animate-spin text-accent-hover" />
+            <span className="min-w-0 truncate" title={status}>{status}</span>
+          </p>
+        )}
         {onSpeak && (
           <button
             onClick={() => onSpeak()}
@@ -3482,16 +3484,15 @@ function ShareModal({
   const [copied, setCopied] = useState(false);
   const url = publicId ? `${typeof window !== "undefined" ? window.location.origin : ""}/shared?id=${publicId}` : "";
 
-  // ao abrir sem link, cria um automaticamente
-  useEffect(() => {
-    if (publicId) return;
+  // o link só nasce depois da confirmação (antes era criado ao abrir o diálogo)
+  async function generate() {
     setBusy(true);
-    api.post<{ public_id: string }>(`/chats/${chat.id}/share`)
-      .then((r) => { setPublicId(r.public_id); onChange(r.public_id); })
-      .catch(() => {})
-      .finally(() => setBusy(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    try {
+      const r = await api.post<{ public_id: string }>(`/chats/${chat.id}/share`);
+      setPublicId(r.public_id);
+      onChange(r.public_id);
+    } catch { /* segue sem link */ } finally { setBusy(false); }
+  }
 
   async function copy() {
     try { await copyText(url); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch {}
@@ -3508,9 +3509,18 @@ function ShareModal({
           <span className="flex items-center gap-2 text-sm font-semibold text-ink"><Share2 size={16} className="text-accent-hover" /> Compartilhar conversa</span>
           <button onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={16} /></button>
         </div>
-        <p className="mb-3 text-xs text-muted">
-          Qualquer pessoa com o link vê esta conversa em modo leitura (título e mensagens). Novas mensagens aparecem quando a pessoa recarrega. Revogue quando quiser.
-        </p>
+        {!publicId ? (
+          <>
+            <p className="mb-4 text-sm text-ink-soft">Gerar um link público? Qualquer pessoa com ele poderá ver esta conversa.</p>
+            <div className="flex justify-end gap-2">
+              <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-muted transition-colors hover:bg-hover hover:text-ink">Cancelar</button>
+              <button onClick={generate} disabled={busy} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
+                <Link2 size={14} /> {busy ? "Gerando…" : "Gerar link"}
+              </button>
+            </div>
+          </>
+        ) : (
+        <>
         <div className="flex items-center gap-2 rounded-xl border border-border bg-surface2 px-3 py-2">
           <Link2 size={14} className="shrink-0 text-muted" />
           <input readOnly value={busy && !url ? "Gerando link…" : url} className="min-w-0 flex-1 bg-transparent text-xs text-ink outline-none" />
@@ -3523,6 +3533,8 @@ function ShareModal({
             Parar de compartilhar
           </button>
         </div>
+        </>
+        )}
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "./ui";
 import { useEffect, useState } from "react";
 import { Check, Globe, Loader2, Monitor, X } from "lucide-react";
 import { api } from "@/lib/api";
@@ -128,17 +129,15 @@ export function WebSearchPanel({ value, onChange, status, scope = "model" }: Pan
   const maxResults = ws.max_results === "" ? "" : ws.max_results ?? 5;
   return (
     <div>
-      <p className="text-xs leading-5 text-muted">
-        {scope === "user"
-          ? "Mecanismo padrão de pesquisa da sua conta (vale para todos os modelos). Um modelo pode sobrepor na engrenagem da ferramenta Pesquisa na Web."
-          : "Mecanismo que este modelo usa na busca. Configure a chave (quando exigida) e filtros."}
-      </p>
+      {scope !== "user" && (
+        <p className="text-xs leading-5 text-muted">Mecanismo que este modelo usa na busca. Configure a chave (quando exigida) e filtros.</p>
+      )}
       <Heading>Mecanismo</Heading>
       <div className="rounded-xl border border-border bg-surface px-3">
         <Row label="Mecanismo principal">
-          <select value={primary} onChange={(e) => wsSet("primary", e.target.value)} className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
+          <Select value={primary} onChange={(e) => wsSet("primary", e.target.value)} className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
             {ENGINES.map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}
-          </select>
+          </Select>
         </Row>
         <div className="border-t border-border">
           <Row label="Permitir múltiplos mecanismos" sub="Consulta vários e mescla (dedup por URL)">
@@ -171,10 +170,10 @@ export function WebSearchPanel({ value, onChange, status, scope = "model" }: Pan
               <div className="space-y-2.5 pt-2.5">
                 <div className="flex items-center justify-between gap-3">
                   <p className="text-xs text-muted">Região</p>
-                  <select value={ws.region ?? "wt-wt"} onChange={(ev) => wsSet("region", ev.target.value)}
+                  <Select value={ws.region ?? "wt-wt"} onChange={(ev) => wsSet("region", ev.target.value)}
                     className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
                     {REGIONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-                  </select>
+                  </Select>
                 </div>
                 <div>
                   <p className="mb-1.5 text-xs text-muted">Motores {motores.length === 0 && <span className="text-ink-soft">· todos</span>}</p>
@@ -270,11 +269,11 @@ export function FinancePanel({ value, onChange, status }: PanelProps) {
       <Heading>Modo do card</Heading>
       <div className="rounded-xl border border-border bg-surface px-3">
         <Row label="Card visual (mini-gráfico)" sub="Quando o modelo não especifica">
-          <select value={fin.card_mode ?? "on_request"} onChange={(e) => onChange({ ...fin, card_mode: e.target.value })}
+          <Select value={fin.card_mode ?? "on_request"} onChange={(e) => onChange({ ...fin, card_mode: e.target.value })}
             className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
             <option value="on_request">Só quando pedido</option>
             <option value="always">Sempre mostrar</option>
-          </select>
+          </Select>
         </Row>
       </div>
       <Heading>Provedores</Heading>
@@ -336,10 +335,10 @@ export function TextExtractionPanel({ value, onChange }: PanelProps) {
           <>
             <div className="border-t border-border">
               <Row label="Motor" sub="Tesseract é local/grátis; Visão usa o Roteador de Visão">
-                <select value={te.ocr_engine ?? "tesseract"} onChange={(e) => teSet("ocr_engine", e.target.value)} className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
+                <Select value={te.ocr_engine ?? "tesseract"} onChange={(e) => teSet("ocr_engine", e.target.value)} className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
                   <option value="tesseract">Tesseract (local)</option>
                   <option value="vision">Modelo de visão</option>
-                </select>
+                </Select>
               </Row>
             </div>
             {(te.ocr_engine ?? "tesseract") === "tesseract" && (

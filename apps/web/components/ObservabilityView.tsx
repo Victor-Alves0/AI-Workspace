@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ObsConfig, ObsSpan, ObsSummary, ObsTrace } from "@/lib/types";
+import { Select } from "@/components/ui";
 
 const KIND_COLOR: Record<string, string> = {
   http: "#6366f1", chat: "#8b5cf6", api: "#0ea5e9", automation: "#f59e0b",
@@ -308,24 +309,24 @@ function TraceList({ hours, onOpen }: { hours: number; onOpen: (id: string) => v
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar rota/nome…"
             className="w-40 bg-transparent text-xs text-ink outline-none placeholder:text-muted" />
         </div>
-        <select value={kind} onChange={(e) => setKind(e.target.value)}
+        <Select value={kind} onChange={(e) => setKind(e.target.value)}
           className="rounded-lg border border-border bg-surface px-2 py-1.5 text-xs text-ink outline-none">
           <option value="">Todo tipo</option>
           {["http", "chat", "api", "automation", "channel", "client"].map((k) => <option key={k} value={k}>{k}</option>)}
-        </select>
-        <select value={statusF} onChange={(e) => setStatusF(e.target.value)}
+        </Select>
+        <Select value={statusF} onChange={(e) => setStatusF(e.target.value)}
           className="rounded-lg border border-border bg-surface px-2 py-1.5 text-xs text-ink outline-none">
           <option value="">Qualquer status</option>
           <option value="ok">OK</option>
           <option value="error">Erro</option>
-        </select>
-        <select value={minMs} onChange={(e) => setMinMs(Number(e.target.value))}
+        </Select>
+        <Select value={minMs} onChange={(e) => setMinMs(Number(e.target.value))}
           className="rounded-lg border border-border bg-surface px-2 py-1.5 text-xs text-ink outline-none">
           <option value={0}>Qualquer duração</option>
           <option value={200}>≥ 200ms</option>
           <option value={1000}>≥ 1s</option>
           <option value={3000}>≥ 3s</option>
-        </select>
+        </Select>
         <button onClick={() => void load()} className="ml-auto flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-ink-soft hover:bg-hover">
           <RefreshCw size={13} /> Atualizar
         </button>
@@ -388,13 +389,13 @@ export default function ObservabilityView() {
             {t === "summary" ? "Resumo" : "Chamadas"}
           </button>
         ))}
-        <select value={hours} onChange={(e) => setHours(Number(e.target.value))}
+        <Select value={hours} onChange={(e) => setHours(Number(e.target.value))}
           className="ml-auto rounded-lg border border-border bg-surface px-2 py-1.5 text-xs text-ink outline-none">
           <option value={1}>Última hora</option>
           <option value={24}>24 horas</option>
           <option value={168}>7 dias</option>
           <option value={720}>30 dias</option>
-        </select>
+        </Select>
         {config && (
           <span className={`${CHIP} ${config.enabled ? "bg-emerald-500/15 text-emerald-500" : "bg-muted/15 text-muted"}`}
             title={`amostra ${(config.sample_rate * 100).toFixed(0)}% · retenção ${config.retention_days}d · fila ${config.sink.queued} · descartados ${config.sink.dropped}`}>

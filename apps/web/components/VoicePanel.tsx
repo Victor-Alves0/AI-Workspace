@@ -48,8 +48,8 @@ export default function VoicePanel({ onBack, onChanged }: { onBack: () => void; 
           <AudioLines size={18} />
         </span>
         <div>
-          <p className="text-sm font-semibold text-ink">Voz Local</p>
-          <p className="text-xs text-muted">Servidor de voz próprio (OpenAI-compatível)</p>
+          <p className="text-sm font-semibold text-ink">Voz</p>
+          <p className="text-xs text-muted">Controlar voz de IA</p>
         </div>
       </div>
 

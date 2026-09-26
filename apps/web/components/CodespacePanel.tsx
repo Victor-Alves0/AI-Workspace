@@ -9,7 +9,7 @@ import {
 import { api, ApiError, previewHref } from "@/lib/api";
 import type { CodespaceChatLite, CodespaceEgo, CodespaceEgoEdge, CodespacePreview, CodespaceProject, CodespaceSymbol, CodespaceTask, MemoryItem, User } from "@/lib/types";
 import { useConfirm, usePrompt } from "@/components/ConfirmDialog";
-import { AnchoredMenu, MenuItem, Toggle, InfoDot } from "@/components/ui";
+import { AnchoredMenu, MenuItem, Toggle, InfoDot, Select } from "@/components/ui";
 import { copyText } from "@/lib/clipboard";
 import CodespaceFileBrowser, { extLang } from "@/components/CodespaceFileBrowser";
 import CodespaceGraphView from "@/components/CodespaceGraphView";
@@ -230,11 +230,11 @@ function NewProjectModal({
           {source === "git" && (
             <label className="flex flex-col gap-1">
               <span className="text-xs font-medium text-muted">Conta GitHub (repos privados)</span>
-              <select value={accountId} onChange={(e) => setAccountId(e.target.value)}
+              <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}
                 className="rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none">
                 <option value="">Nenhuma (só repos públicos)</option>
                 {accounts.map((a) => <option key={a.id} value={a.id}>{a.login}</option>)}
-              </select>
+              </Select>
             </label>
           )}
           {source === "git-ssh" && (

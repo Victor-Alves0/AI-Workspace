@@ -1,5 +1,6 @@
 "use client";
 
+import { Select } from "./ui";
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, SlidersHorizontal, X } from "lucide-react";
 import { api } from "@/lib/api";
@@ -156,7 +157,7 @@ function ParamControl({
     return (
       <div className="flex items-center justify-between py-1.5 text-sm">
         <span className="text-ink">{spec.label}</span>
-        <select
+        <Select
           value={cur}
           onChange={(e) => {
             const v = e.target.value;
@@ -169,7 +170,7 @@ function ParamControl({
         >
           <option value="">Padrão (do modelo)</option>
           {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
+        </Select>
       </div>
     );
   }
@@ -323,9 +324,6 @@ export default function Controls({
             <div className="mb-3 flex items-center justify-between">
               <div className="min-w-0">
                 <p className="text-sm text-ink">Memória neste chat</p>
-                <p className="text-xs text-muted">
-                  {inheriting ? `Herdando o padrão (${memEnabled ? "ligada" : "desligada"})` : "Personalizado para este chat"}
-                </p>
               </div>
               <div className="flex items-center gap-2">
                 {!inheriting && (
@@ -338,16 +336,13 @@ export default function Controls({
               <div className="space-y-3 border-t border-border pt-3">
                 <div>
                   <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">Salvar novas memórias em</p>
-                  <select
+                  <Select
                     value={mem.write}
                     onChange={(e) => patchMem({ write: e.target.value as MemoryConfig["write"] })}
                     className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
                   >
                     {MEM_WRITE.filter((o) => !o.project || hasProject).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                  {!hasProject && (
-                    <p className="mt-1 text-[11px] text-muted">Mova este chat para uma pasta para compartilhar memória de projeto entre os chats dela.</p>
-                  )}
+                  </Select>
                 </div>
                 <div>
                   <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">Ler memórias de (união)</p>
@@ -378,7 +373,7 @@ export default function Controls({
             ) : (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs text-muted">Bases consultadas só neste chat (além das do modelo).</p>
+                  <span />
                   {kbBasesSel.length > 0 && (
                     <button onClick={() => onKnowledgeChange(null)} className="text-xs text-muted hover:text-ink">Limpar</button>
                   )}
@@ -400,14 +395,14 @@ export default function Controls({
                 {kbBasesSel.length > 0 && (
                   <div>
                     <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">Modo</p>
-                    <select
+                    <Select
                       value={kb.mode || "auto"}
                       onChange={(e) => patchKb({ mode: e.target.value as "auto" | "tool" })}
                       className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
                     >
                       <option value="auto">Automático (injeta + cita)</option>
                       <option value="tool">Ferramenta (a IA busca)</option>
-                    </select>
+                    </Select>
                   </div>
                 )}
               </div>
@@ -418,7 +413,7 @@ export default function Controls({
         {onBrainChange && (
           <Section title="Cérebro" open={open.brain} onToggle={() => setOpen({ ...open, brain: !open.brain })}>
             {brains.length === 0 ? (
-              <p className="text-xs text-muted">Nenhum cérebro criado. Crie um em <span className="text-ink-soft">Espaço → Cérebros</span>.</p>
+              null
             ) : (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">

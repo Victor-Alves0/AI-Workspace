@@ -35,7 +35,6 @@ from .turn_setup import (
     _code_mode,
     _effective_chat_model,
     _final_message_fields,
-    _flag_budget,
     _get_model_config,
     _get_owned_chat,
     _imaginai_turn_kwargs,
@@ -348,7 +347,6 @@ async def send_message(
         # salva também quando não houve texto mas houve artefato (ex.: imagem nativa)
         if content_to_save or collected["tools"]:
             rec = _usage_record(collected["usage"], model, model_config)
-            _flag_budget(rec, model_config, user)
             async with SessionLocal() as s:
                 if arts_on and content_to_save:
                     # blocos <artifact> viram linhas versionadas; no texto fica [[artifact:id]]
@@ -620,7 +618,6 @@ async def regenerate_message(
         # salva também quando não houve texto mas houve artefato (ex.: imagem nativa)
         if content_to_save or collected["tools"]:
             rec = _usage_record(collected["usage"], model, model_config)
-            _flag_budget(rec, model_config, user)
             async with SessionLocal() as s:
                 if arts_on and content_to_save:
                     content_to_save, arts_changed = await artifacts_service.extract_and_apply(
@@ -735,7 +732,6 @@ async def continue_message(
         reasoning = collected["reasoning"]
         tools = collected["tools"]
         rec = _usage_record(collected["usage"], model, model_config)
-        _flag_budget(rec, model_config, user)
         # ledger: só o DELTA desta continuação (o evento do original já foi gravado);
         # capturado ANTES de `rec` virar cumulativo abaixo.
         delta_ev = usage_event_from_record(user.id, chat_id, message_id, rec)

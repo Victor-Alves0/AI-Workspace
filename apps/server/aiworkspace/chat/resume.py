@@ -27,7 +27,6 @@ from .turn_setup import (
     _brain_setup,
     _code_mode,
     _final_message_fields,
-    _flag_budget,
     _imaginai_turn_kwargs,
     _media_opts,
     _mem_agent_id,
@@ -181,7 +180,6 @@ async def resume_chat_turn(
             if not content and not collected.get("tools"):
                 return
             rec = _usage_record(collected["usage"], model, model_config)
-            _flag_budget(rec, model_config, user)
             arts_changed: list[str] = []
             async with SessionLocal() as s:
                 if arts_on:

@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { api, API_URL } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
-import { Toggle } from "@/components/ui";
+import { Toggle, Select } from "@/components/ui";
 import type { ApiKey, ApiKeyMeta, ApiKeyRequest } from "@/lib/types";
 
 const SCOPE_LABELS: Record<string, string> = {
@@ -279,7 +279,7 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
         )}
         <div className="mt-2">
           <Field label="Modelo padrão" hint="Usado quando a requisição não informa 'model'.">
-            <select
+            <Select
               value={f.defaultModel}
               onChange={(e) => set("defaultModel", e.target.value)}
               className={INPUT}
@@ -288,7 +288,7 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
               {(meta?.models ?? []).map((m) => (
                 <option key={m.id} value={m.id}>{m.name}</option>
               ))}
-            </select>
+            </Select>
           </Field>
         </div>
       </div>
@@ -328,7 +328,7 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
 
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Memória">
-          <select
+          <Select
             value={f.memoryMode}
             onChange={(e) => set("memoryMode", e.target.value)}
             className={INPUT}
@@ -336,7 +336,7 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
             {(meta?.memory_modes ?? []).map((m) => (
               <option key={m} value={m}>{MEMORY_LABELS[m] ?? m}</option>
             ))}
-          </select>
+          </Select>
         </Field>
         <Field label="Máximo de memórias" hint="0 = sem teto.">
           <input
@@ -624,11 +624,11 @@ function Playground({ meta }: { meta: ApiKeyMeta | null }) {
         />
       </Field>
       <Field label="Modelo">
-        <select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT}>
+        <Select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT}>
           {(meta?.models ?? []).map((m) => (
             <option key={m.id} value={m.id}>{m.name}</option>
           ))}
-        </select>
+        </Select>
       </Field>
       <Field label="Mensagem">
         <textarea

@@ -8,6 +8,7 @@ import type { Model, ModelConfig, DiscordConnection } from "@/lib/types";
 import ModelField from "./ModelField";
 import ContextWindowSelect from "./ContextWindowSelect";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { Select } from "@/components/ui";
 
 const inputCls = "mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent placeholder:text-muted";
 
@@ -155,10 +156,10 @@ export default function DiscordPanel({ onBack }: { onBack: () => void }) {
                     <ModelField models={extModels} custom={models} includeCustom value={joinModel(c)} onChange={(v) => patch(c.id, splitModel(v))} className="mt-1" />
                   </div>
                   <div className="text-xs text-muted">Memória
-                    <select value={c.memory} onChange={(e) => patch(c.id, { memory: e.target.value as "local" | "global" })} className={inputCls}>
+                    <Select value={c.memory} onChange={(e) => patch(c.id, { memory: e.target.value as "local" | "global" })} className={inputCls}>
                       <option value="local">Local (isolada por conversa)</option>
                       <option value="global">Global (memória do modelo)</option>
-                    </select>
+                    </Select>
                   </div>
                   <div className="text-xs text-muted">Contexto (mensagens que a IA enxerga)
                     <ContextWindowSelect value={c.context_window} onChange={(v) => patch(c.id, { context_window: v })} className={inputCls} />
@@ -178,13 +179,13 @@ export default function DiscordPanel({ onBack }: { onBack: () => void }) {
                     <input defaultValue={c.filters?.trigger || ""} onBlur={(e) => (e.target.value !== (c.filters?.trigger || "")) && patch(c.id, { filters: { ...(c.filters || {}), trigger: e.target.value } })} placeholder="Ex.: !ia" className={inputCls} />
                   </label>
                   <label className="block text-xs text-muted">Agrupar mensagens seguidas
-                    <select value={c.debounce_seconds ?? 0} onChange={(e) => patch(c.id, { debounce_seconds: Number(e.target.value) })} className={inputCls}>
+                    <Select value={c.debounce_seconds ?? 0} onChange={(e) => patch(c.id, { debounce_seconds: Number(e.target.value) })} className={inputCls}>
                       <option value={0}>Desligado (responde cada mensagem)</option>
                       <option value={3}>Esperar 3s de silêncio</option>
                       <option value={5}>Esperar 5s de silêncio</option>
                       <option value={8}>Esperar 8s de silêncio</option>
                       <option value={15}>Esperar 15s de silêncio</option>
-                    </select>
+                    </Select>
                   </label>
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-ink">Modo humanizador (digitando… + atraso)</span>

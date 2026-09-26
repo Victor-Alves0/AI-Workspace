@@ -6,6 +6,7 @@ import { Check, Loader2, Pencil, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ImaginaiEntity, ImaginaiSnapshot, ImaginaiSystemDefinition } from "../types";
 import { EntityImage, ImaginaiFeatureStatus, abilityScore, numericState, signed } from "../shared";
+import { Select } from "@/components/ui";
 
 export function ImaginaiSheetPanel({
   campaignId,
@@ -184,7 +185,7 @@ export function ImaginaiCharacterEditor({
             <div className="mt-2 grid gap-3 sm:grid-cols-6">
               <label className="text-xs font-medium text-ink-soft sm:col-span-4">Nome<input autoFocus required maxLength={255} value={name} onChange={(event) => setName(event.target.value)} className={field} /></label>
               <label className="text-xs font-medium text-ink-soft sm:col-span-2">Nível<input required type="number" min="1" max="20" value={level} onChange={(event) => setLevel(event.target.value)} className={field} /></label>
-              <label className="text-xs font-medium text-ink-soft sm:col-span-2">Classe<select required value={characterClass} onChange={(event) => setCharacterClass(event.target.value)} className={field}><option value="" disabled>Selecione</option>{DND5E_CLASSES.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+              <label className="text-xs font-medium text-ink-soft sm:col-span-2">Classe<Select required value={characterClass} onChange={(event) => setCharacterClass(event.target.value)} className={field}><option value="" disabled>Selecione</option>{DND5E_CLASSES.map((item) => <option key={item} value={item}>{item}</option>)}</Select></label>
               <label className="text-xs font-medium text-ink-soft sm:col-span-2">Ancestralidade<input maxLength={120} value={ancestry} onChange={(event) => setAncestry(event.target.value)} placeholder="Humano" className={field} /></label>
               <label className="text-xs font-medium text-ink-soft sm:col-span-2">Antecedente<input maxLength={120} value={background} onChange={(event) => setBackground(event.target.value)} placeholder="Acólito" className={field} /></label>
               <label className="text-xs font-medium text-ink-soft sm:col-span-6">Tendência<input maxLength={80} value={alignment} onChange={(event) => setAlignment(event.target.value)} placeholder="Neutro e Bom" className={field} /></label>

@@ -8,7 +8,7 @@ import {
 import { api } from "@/lib/api";
 import type { MemoryBank, MemoryConfig, MemoryItem, MemoryScopes } from "@/lib/types";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { AnchoredMenu, dismissKeyboard, finePointer } from "@/components/ui";
+import { AnchoredMenu, dismissKeyboard, finePointer, Select } from "@/components/ui";
 
 type Tab = "global" | "model" | "chat" | "project" | "bank";
 
@@ -323,7 +323,7 @@ export default function MemoryView() {
           ),
         )}
         {tab === "model" && (
-          <select
+          <Select
             value={selModel}
             onChange={(e) => setSelModel(e.target.value)}
             className="rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
@@ -331,13 +331,13 @@ export default function MemoryView() {
             {scopes?.models.length ? scopes.models.map((m) => (
               <option key={m.id} value={m.id}>{m.name} ({m.count})</option>
             )) : <option value="">Nenhum modelo com memória</option>}
-          </select>
+          </Select>
         )}
         {tab === "chat" && (
           <ChatMemoryPicker chats={scopes?.chats ?? []} value={selChat} onChange={setSelChat} />
         )}
         {tab === "project" && (
-          <select
+          <Select
             value={selProject}
             onChange={(e) => setSelProject(e.target.value)}
             className="max-w-[240px] rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
@@ -345,18 +345,18 @@ export default function MemoryView() {
             {scopes?.projects.length ? scopes.projects.map((p) => (
               <option key={p.id} value={p.id}>{p.name} ({p.count})</option>
             )) : <option value="">Nenhum projeto com memória</option>}
-          </select>
+          </Select>
         )}
         {tab === "bank" && (
           <>
             {banks.length > 0 && (
-              <select
+              <Select
                 value={selBank}
                 onChange={(e) => setSelBank(e.target.value)}
                 className="max-w-[240px] rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
               >
                 {banks.map((b) => <option key={b.id} value={b.id}>{b.name} ({b.count})</option>)}
-              </select>
+              </Select>
             )}
             <button
               onClick={() => setNewBank({ name: "", description: "" })}

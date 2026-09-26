@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { ChevronDown, Pause, Pencil, Play, Plus, Search, StepForward, Trash2, X } from "lucide-react";
 import type { Model, ModelConfig, RoundtableConfig, RoundtableParticipant } from "@/lib/types";
-import { useClickOutside } from "./ui";
+import { useClickOutside, Select } from "./ui";
 
 // paleta de cores dos participantes (atribuída por ordem de entrada)
 export const RT_COLORS = ["#f59e0b", "#3b82f6", "#10b981", "#ef4444", "#a855f7", "#ec4899", "#14b8a6", "#f97316"];
@@ -147,24 +147,24 @@ export default function Roundtable({
 
       {/* controles */}
       <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2">
-        <select value={policy} onChange={(e) => onConfigChange({ turn_policy: e.target.value as RoundtableConfig["turn_policy"] })} className={selCls} title="Quem fala em seguida">
+        <Select value={policy} onChange={(e) => onConfigChange({ turn_policy: e.target.value as RoundtableConfig["turn_policy"] })} className={selCls} title="Quem fala em seguida">
           <option value="round_robin">Round-robin</option>
           <option value="manual">Manual</option>
           <option value="moderator">Moderador (LLM)</option>
-        </select>
+        </Select>
 
         {policy === "manual" && (
-          <select value={config.next ?? ""} onChange={(e) => onConfigChange({ next: e.target.value || null })} className={selCls} title="Próximo a falar">
+          <Select value={config.next ?? ""} onChange={(e) => onConfigChange({ next: e.target.value || null })} className={selCls} title="Próximo a falar">
             <option value="">Próximo: automático</option>
             {participants.map((p) => <option key={p.id} value={p.id}>Próximo: {p.name}</option>)}
-          </select>
+          </Select>
         )}
         {policy === "moderator" && (
-          <select value={config.moderator?.model ?? ""} onChange={(e) => onConfigChange({ moderator: { model: e.target.value } })} className={`${selCls} max-w-[160px]`} title="Modelo moderador">
+          <Select value={config.moderator?.model ?? ""} onChange={(e) => onConfigChange({ moderator: { model: e.target.value } })} className={`${selCls} max-w-[160px]`} title="Modelo moderador">
             <option value="">Moderador: escolha…</option>
             {custom.map((m) => <option key={m.id} value={m.base_model}>{m.name}</option>)}
             {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>
+          </Select>
         )}
 
         <label className="flex items-center gap-1 text-xs text-muted">

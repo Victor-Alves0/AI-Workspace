@@ -6,6 +6,7 @@ import { Check, ChevronLeft, ChevronRight, Loader2, Pencil, Sparkles, Trash2, X 
 import { api } from "@/lib/api";
 import type { ImaginaiSpell, ImaginaiSpells } from "../types";
 import { ImaginaiFeatureStatus, ImaginaiToolbar } from "../shared";
+import { Select } from "@/components/ui";
 
 export function spellComponents(value: unknown): string {
   if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean).join(", ");
@@ -129,7 +130,7 @@ function SpellEditor({ spell, onSave, onClose }: {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const set = (key: keyof typeof draft) => (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setDraft((current) => ({ ...current, [key]: event.target.value }));
+  const set = (key: keyof typeof draft) => (event: { target: { value: string } }) => setDraft((current) => ({ ...current, [key]: event.target.value }));
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -160,7 +161,7 @@ function SpellEditor({ spell, onSave, onClose }: {
         </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-4">
           <label className="text-xs font-medium text-ink-soft sm:col-span-3">Nome<input autoFocus required maxLength={120} value={draft.name} onChange={set("name")} className={field} /></label>
-          <label className="text-xs font-medium text-ink-soft">Nível<select value={draft.level} onChange={set("level")} className={field}>{Array.from({ length: 10 }, (_, level) => <option key={level} value={level}>{levelLabel(level)}</option>)}</select></label>
+          <label className="text-xs font-medium text-ink-soft">Nível<Select value={draft.level} onChange={set("level")} className={field}>{Array.from({ length: 10 }, (_, level) => <option key={level} value={level}>{levelLabel(level)}</option>)}</Select></label>
           <label className="text-xs font-medium text-ink-soft sm:col-span-2">Escola<input maxLength={80} value={draft.school} onChange={set("school")} placeholder="Evocação" className={field} /></label>
           <label className="text-xs font-medium text-ink-soft sm:col-span-2">Tempo de conjuração<input maxLength={80} value={draft.casting_time} onChange={set("casting_time")} placeholder="1 ação" className={field} /></label>
           <label className="text-xs font-medium text-ink-soft sm:col-span-2">Alcance<input maxLength={80} value={draft.range} onChange={set("range")} placeholder="36 m" className={field} /></label>
@@ -168,7 +169,7 @@ function SpellEditor({ spell, onSave, onClose }: {
           <label className="text-xs font-medium text-ink-soft sm:col-span-4">Componentes<input maxLength={400} value={draft.components} onChange={set("components")} placeholder="V, S, M (uma pitada de cinza)" className={field} /></label>
           <label className="text-xs font-medium text-ink-soft">Dano<input maxLength={20} value={draft.damage} onChange={set("damage")} placeholder="1d10" className={field} /></label>
           <label className="text-xs font-medium text-ink-soft">Tipo de dano<input maxLength={40} value={draft.damage_type} onChange={set("damage_type")} placeholder="fogo" className={field} /></label>
-          <label className="text-xs font-medium text-ink-soft">Salvaguarda<select value={draft.save} onChange={set("save")} className={field}><option value="">Ataque / nenhuma</option>{["FOR", "DES", "CON", "INT", "SAB", "CAR"].map((ability) => <option key={ability} value={ability}>{ability}</option>)}</select></label>
+          <label className="text-xs font-medium text-ink-soft">Salvaguarda<Select value={draft.save} onChange={set("save")} className={field}><option value="">Ataque / nenhuma</option>{["FOR", "DES", "CON", "INT", "SAB", "CAR"].map((ability) => <option key={ability} value={ability}>{ability}</option>)}</Select></label>
           <label className="text-xs font-medium text-ink-soft">Cura<input type="number" min="0" max="999" value={draft.healing} onChange={set("healing")} className={field} /></label>
           <label className="text-xs font-medium text-ink-soft sm:col-span-4">Descrição<textarea rows={6} maxLength={4000} value={draft.description} onChange={set("description")} className={`${field} resize-y leading-5`} /></label>
         </div>

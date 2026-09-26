@@ -9,7 +9,7 @@ import type { KnowledgeBase, MemoryBank, Model, ModelConfig, Skill, SystemTool, 
 import TransferModal, { type TransferItem } from "./TransferModal";
 import { toolCategoryIcon, toolCategoryTitle } from "./toolCategory";
 import ModelField from "./ModelField";
-import { AnchoredMenu, finePointer, Toggle } from "./ui";
+import { AnchoredMenu, finePointer, Toggle, Select } from "./ui";
 import { WebSearchPanel, FinancePanel, TextExtractionPanel, DeepSearchPanel, GooglePanel, TuyaToolPanel, GithubToolPanel, MessagingToolPanel, RemoteTerminalToolPanel } from "./toolPanels";
 
 // ferramentas internas com painel de config (engrenagem em "Ferramentas Ativas")
@@ -534,12 +534,12 @@ function OutputGuards({ value, onChange, baseModels }: { value: any; onChange: (
           <div className="grid grid-cols-[1fr_auto] gap-2">
             <label className="space-y-1">
               <span className="text-[11px] text-muted">Quando</span>
-              <select value={g.detect} onChange={(e) => update(g.id, { detect: e.target.value as Guard["detect"] })} className={selCls}>
+              <Select value={g.detect} onChange={(e) => update(g.id, { detect: e.target.value as Guard["detect"] })} className={selCls}>
                 <option value="refusal">O modelo recusar</option>
                 <option value="empty">Resposta vazia</option>
                 <option value="regex">Casar um padrão (regex)</option>
                 <option value="judge">Juiz (LLM) avaliar</option>
-              </select>
+              </Select>
             </label>
             <label className="space-y-1">
               <span className="text-[11px] text-muted">Tentativas</span>
@@ -578,10 +578,10 @@ function OutputGuards({ value, onChange, baseModels }: { value: any; onChange: (
 
           <label className="block space-y-1">
             <span className="text-[11px] text-muted">Reação</span>
-            <select value={g.action} onChange={(e) => update(g.id, { action: e.target.value as Guard["action"] })} className={selCls}>
+            <Select value={g.action} onChange={(e) => update(g.id, { action: e.target.value as Guard["action"] })} className={selCls}>
               <option value="reinforce">Reforçar o system prompt e refazer</option>
               <option value="fallback_model">Trocar para outro modelo</option>
-            </select>
+            </Select>
           </label>
           {g.action === "reinforce" ? (
             <textarea
@@ -1477,7 +1477,7 @@ export default function ModelEditor({
                         <p className="text-sm font-medium text-ink">Roteamento OpenRouter</p>
                         <p className="text-xs text-muted">Escolha consistência ou priorize velocidade. Não é enviado a modelos locais.</p>
                       </div>
-                      <select
+                      <Select
                         value={providerSort}
                         onChange={(e) => updateProviderPrefs({ sort: e.target.value || undefined })}
                         className="rounded-md border border-border bg-bg px-2 py-1.5 text-xs text-ink outline-none focus:border-accent"
@@ -1487,7 +1487,7 @@ export default function ModelEditor({
                         <option value="latency">Menor latência</option>
                         <option value="throughput">Maior vazão</option>
                         <option value="price">Menor preço</option>
-                      </select>
+                      </Select>
                     </div>
                     <label className="mt-3 block text-xs text-muted">
                       Ordem de provedores (slugs separados por vírgula)
@@ -1733,7 +1733,7 @@ export default function ModelEditor({
                       {(listenCfg.wake_engine ?? "porcupine") === "porcupine" ? (
                         <label className="block">
                           <span className="mb-1 block text-xs font-medium text-muted">Palavra</span>
-                          <select
+                          <Select
                             value={listenCfg.porcupine_keyword ?? "Jarvis"}
                             onChange={(e) => setListenCfg({ porcupine_keyword: e.target.value })}
                             className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent"
@@ -1742,7 +1742,7 @@ export default function ModelEditor({
                               <option key={w} value={w}>{w}</option>
                             ))}
                             <option value="__custom__">Personalizada (.ppn nas Conexões)</option>
-                          </select>
+                          </Select>
                           <span className="mt-1 block text-[11px] text-muted">Embutidas grátis (precisam da AccessKey). Para &quot;hey &lt;nome&gt;&quot;, use &quot;Personalizada&quot; e cadastre o .ppn nas Conexões.</span>
                         </label>
                       ) : (listenCfg.wake_engine ?? "porcupine") === "whisper" ? (
@@ -2208,14 +2208,14 @@ export default function ModelEditor({
                           </p>
                           <div className="flex items-center gap-2 text-sm">
                             <span className="shrink-0 text-ink-soft">Motor</span>
-                            <select
+                            <Select
                               value={fc.engine || "stt"}
                               onChange={(e) => setCfg({ engine: e.target.value })}
                               className="rounded-lg border border-border bg-surface2 px-2 py-1 text-sm text-ink outline-none focus:border-accent"
                             >
                               <option value="stt">Provedor de voz (Whisper)</option>
                               <option value="model">Modelo multimodal (OpenRouter)</option>
-                            </select>
+                            </Select>
                           </div>
                           {(fc.engine || "stt") === "model" ? (
                             <ModelField
@@ -2237,14 +2237,14 @@ export default function ModelEditor({
                           </p>
                           <div className="flex items-center gap-2 text-sm">
                             <span className="shrink-0 text-ink-soft">Provedor</span>
-                            <select
+                            <Select
                               value={provider}
                               onChange={(e) => setCfg({ provider: e.target.value })}
                               className="rounded-lg border border-border bg-surface2 px-2 py-1 text-sm text-ink outline-none focus:border-accent"
                             >
                               <option value="openrouter">OpenRouter</option>
                               <option value="openai_compat">Compatível OpenAI</option>
-                            </select>
+                            </Select>
                           </div>
                           {provider === "openrouter" ? (
                             <ModelField
@@ -2367,7 +2367,7 @@ export default function ModelEditor({
               <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">
                 Salvar em <InfoHint text="Onde as memórias novas deste modelo ficam guardadas." />
               </p>
-              <select
+              <Select
                 value={mem.write ?? "global"}
                 onChange={(e) => setMem({ ...mem, write: e.target.value })}
                 className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
@@ -2378,7 +2378,7 @@ export default function ModelEditor({
                     {memBanks.map((b) => <option key={b.id} value={`bank:${b.id}`}>Banco: {b.name}</option>)}
                   </optgroup>
                 )}
-              </select>
+              </Select>
             </div>
             <div>
               <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">
@@ -2562,10 +2562,10 @@ export default function ModelEditor({
             <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
               <label className="space-y-1">
                 <span className="flex items-center gap-1.5 text-[11px] text-muted">Execução <InfoHint text="Paralela: vários ao mesmo tempo. Sequencial: um por vez." /></span>
-                <select value={subCfg.execution === "sequential" ? "sequential" : "parallel"} onChange={(e) => setSubCfg({ execution: e.target.value })} className={selCls}>
+                <Select value={subCfg.execution === "sequential" ? "sequential" : "parallel"} onChange={(e) => setSubCfg({ execution: e.target.value })} className={selCls}>
                   <option value="parallel">Paralela</option>
                   <option value="sequential">Sequencial</option>
-                </select>
+                </Select>
               </label>
               <label className="space-y-1">
                 <span className="flex items-center gap-1.5 text-[11px] text-muted">Máx. de agentes <InfoHint text="Total de agentes por resposta (até 1000). Cada agente consome tokens." /></span>

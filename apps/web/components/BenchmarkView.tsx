@@ -11,6 +11,7 @@ import type { BenchmarkCase, BenchmarkDetail, BenchmarkRun, BenchmarkSummary, Ru
 import { cellKey } from "@/lib/playground";
 import ModelField from "./ModelField";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { Select } from "@/components/ui";
 
 function splitModel(v: string): { model: string; model_config_id: string | null } {
   return v.startsWith("custom:") ? { model: "", model_config_id: v.slice(7) } : { model: v, model_config_id: null };
@@ -102,14 +103,14 @@ function BenchmarkEditor({ id, onBack, onSaved }: { id: string | null; onBack: (
             <textarea value={c.prompt} onChange={(e) => patchCase(i, { prompt: e.target.value })} rows={2} placeholder="Prompt do caso" className={inputCls} />
             <input value={c.system || ""} onChange={(e) => patchCase(i, { system: e.target.value })} placeholder="System prompt do caso (opcional)" className={inputCls} />
             <div className="flex flex-wrap items-center gap-2">
-              <select value={c.expected?.mode || "none"} onChange={(e) => patchCase(i, { expected: { mode: e.target.value as RuleMode, value: c.expected?.value || "" } })} className="rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-ink outline-none focus:border-accent">
+              <Select value={c.expected?.mode || "none"} onChange={(e) => patchCase(i, { expected: { mode: e.target.value as RuleMode, value: c.expected?.value || "" } })} className="rounded-lg border border-border bg-bg px-2 py-1.5 text-xs text-ink outline-none focus:border-accent">
                 <option value="none">Sem regra</option>
                 <option value="contains">Deve conter</option>
                 <option value="regex">Regex</option>
                 <option value="tool_called">Chamou a tool</option>
                 <option value="tool_not_called">NÃO chamou a tool</option>
                 <option value="no_tool">Sem nenhuma tool</option>
-              </select>
+              </Select>
               {c.expected && c.expected.mode !== "none" && c.expected.mode !== "no_tool" && (
                 <input value={c.expected.value} onChange={(e) => patchCase(i, { expected: { mode: c.expected!.mode, value: e.target.value } })} placeholder={c.expected.mode === "regex" ? "expressão regular" : c.expected.mode === "contains" ? "texto esperado" : "path da tool (ex.: web.search.query)"} className="flex-1 rounded-lg border border-border bg-bg px-3 py-1.5 text-sm text-ink outline-none focus:border-accent" />
               )}

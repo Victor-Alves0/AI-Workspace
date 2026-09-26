@@ -13,6 +13,7 @@ import { ImaginaiMapPanel } from "./panels/MapPanel";
 import { ImaginaiInventoryPanel } from "./panels/InventoryPanel";
 import { ImaginaiSpellsPanel } from "./panels/SpellsPanel";
 import { ImaginaiSheetPanel } from "./panels/SheetPanel";
+import { Select } from "@/components/ui";
 
 /**
  * Docks do primeiro sistema do Imaginai. A composição em dois painéis permite que
@@ -366,19 +367,19 @@ export default function ImaginaiDocks({
                 <div className="grid grid-cols-2 gap-3">
                   <label className="block text-xs font-medium text-ink-soft">
                     Narração
-                    <select value={narrationDraft} onChange={(event) => setNarrationDraft(event.target.value as typeof narrationDraft)} className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-ink outline-none focus:border-violet-400/70">
+                    <Select value={narrationDraft} onChange={(event) => setNarrationDraft(event.target.value as typeof narrationDraft)} className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-ink outline-none focus:border-violet-400/70">
                       <option value="balanced">Equilibrada</option>
                       <option value="cinematic">Cinematográfica</option>
                       <option value="gritty">Realista</option>
-                    </select>
+                    </Select>
                   </label>
                   <label className="block text-xs font-medium text-ink-soft">
                     Dificuldade
-                    <select value={difficultyDraft} onChange={(event) => setDifficultyDraft(event.target.value as typeof difficultyDraft)} className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-ink outline-none focus:border-violet-400/70">
+                    <Select value={difficultyDraft} onChange={(event) => setDifficultyDraft(event.target.value as typeof difficultyDraft)} className="mt-1.5 min-h-11 w-full rounded-xl border border-border bg-surface2 px-3 py-2.5 text-sm text-ink outline-none focus:border-violet-400/70">
                       <option value="story">Narrativa</option>
                       <option value="balanced">Equilibrada</option>
                       <option value="challenging">Desafiadora</option>
-                    </select>
+                    </Select>
                   </label>
                 </div>
                 <label className="block text-xs font-medium text-ink-soft">Local inicial

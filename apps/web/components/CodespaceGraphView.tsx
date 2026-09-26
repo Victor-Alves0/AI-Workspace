@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, FileCode2, Maximize2, Minus, Plus, RotateCcw, Search } from "lucide-react";
 import { api } from "@/lib/api";
 import type { CodespaceViz, CodespaceVizNode } from "@/lib/types";
+import { Select } from "@/components/ui";
 
 type XY = { x: number; y: number };
 type View = { x: number; y: number; k: number };
@@ -497,10 +498,10 @@ export default function CodespaceGraphView({
   return (
     <div className="relative h-[58vh] min-h-[360px] overflow-hidden rounded-xl border border-border bg-[radial-gradient(circle,rgb(var(--c-border))_1px,transparent_1px)] [background-size:22px_22px]">
       <div className="absolute left-3 top-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-1.5 rounded-lg border border-border bg-surface/90 px-2 py-1.5 backdrop-blur">
-        <select value={mode} onChange={(e) => setMode(e.target.value as VizMode)}
+        <Select value={mode} onChange={(e) => setMode(e.target.value as VizMode)}
           title="Modo de visualização" className="rounded-md bg-surface2 px-1.5 py-1 text-xs text-ink outline-none">
           {(Object.keys(MODE_LABEL) as VizMode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
-        </select>
+        </Select>
         {SEEDED.has(mode) && (
           <div className="flex items-center gap-1 rounded-md bg-surface2 px-1.5 py-1">
             <input value={seedInput} onChange={(e) => setSeedInput(e.target.value)}
@@ -509,10 +510,10 @@ export default function CodespaceGraphView({
             <button onClick={() => setSeed(seedInput.trim())} title="Semear" className="rounded p-0.5 text-muted hover:text-ink"><ArrowRight size={12} /></button>
           </div>
         )}
-        <select value={minConf} onChange={(e) => setMinConf(e.target.value as Conf)}
+        <Select value={minConf} onChange={(e) => setMinConf(e.target.value as Conf)}
           title="Filtrar arestas por confiança" className="rounded-md bg-surface2 px-1.5 py-1 text-xs text-ink outline-none">
           {(Object.keys(CONF_LABEL) as Conf[]).map((c) => <option key={c} value={c}>{CONF_LABEL[c]}</option>)}
-        </select>
+        </Select>
         <div className="flex items-center gap-1 rounded-md bg-surface2 px-1.5 py-1">
           <Search size={12} className="text-muted" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Realçar…"

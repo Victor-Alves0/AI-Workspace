@@ -6,6 +6,7 @@ import { api, ApiError } from "@/lib/api";
 import type { Automation, AutomationOptions, Chat, Model, ModelConfig, SystemTool, TelegramConnection, Tool, WhatsAppConnection } from "@/lib/types";
 import ModelField from "./ModelField";
 import TransferModal, { type TransferItem } from "./TransferModal";
+import { Select } from "@/components/ui";
 
 type Draft = Pick<
   Automation,
@@ -112,20 +113,20 @@ function WhatsAppDelivery({ value, connections, onChange }: {
             <>
               <label className="block text-sm">
                 <span className="text-xs text-muted">Número que envia (conexão)</span>
-                <select value={v.connection_id ?? ""} onChange={(e) => set({ connection_id: e.target.value || null })} className={WA_INPUT}>
+                <Select value={v.connection_id ?? ""} onChange={(e) => set({ connection_id: e.target.value || null })} className={WA_INPUT}>
                   <option value="">Selecione…</option>
                   {connections.map((c) => (
                     <option key={c.id} value={c.id}>{c.label || c.phone || "Sem nome"}{c.phone ? ` (+${c.phone})` : ""}</option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label className="block text-sm">
                 <span className="text-xs text-muted">Enviar para</span>
-                <select value={to} onChange={(e) => set({ to: e.target.value as WaDelivery["to"] })} className={WA_INPUT}>
+                <Select value={to} onChange={(e) => set({ to: e.target.value as WaDelivery["to"] })} className={WA_INPUT}>
                   <option value="number">Um número específico</option>
                   <option value="contacts">Todos os contatos cadastrados{conn ? ` (${conn.contacts?.length ?? 0})` : ""}</option>
                   <option value="threads">Todas as conversas existentes{conn ? ` (${conn.threads ?? 0})` : ""}</option>
-                </select>
+                </Select>
               </label>
               {to === "number" && (
                 <label className="block text-sm">
@@ -175,19 +176,19 @@ function TelegramDelivery({ value, connections, onChange }: {
             <>
               <label className="block text-sm">
                 <span className="text-xs text-muted">Bot que envia</span>
-                <select value={v.connection_id ?? ""} onChange={(e) => set({ connection_id: e.target.value || null })} className={WA_INPUT}>
+                <Select value={v.connection_id ?? ""} onChange={(e) => set({ connection_id: e.target.value || null })} className={WA_INPUT}>
                   <option value="">Selecione…</option>
                   {connections.map((c) => (
                     <option key={c.id} value={c.id}>{c.label || `@${c.bot_username}`}</option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label className="block text-sm">
                 <span className="text-xs text-muted">Enviar para</span>
-                <select value={mode} onChange={(e) => set({ mode: e.target.value as TgDelivery["mode"] })} className={WA_INPUT}>
+                <Select value={mode} onChange={(e) => set({ mode: e.target.value as TgDelivery["mode"] })} className={WA_INPUT}>
                   <option value="threads">Todas as conversas do bot{conn ? ` (${conn.threads ?? 0})` : ""}</option>
                   <option value="chat">Um chat específico (id)</option>
-                </select>
+                </Select>
               </label>
               {mode === "chat" && (
                 <label className="block text-sm">
@@ -420,13 +421,13 @@ export default function AutomationEditor({
             <>
               <div className="space-y-1">
                 <p className="text-xs text-muted">Raciocínio (thinking)</p>
-                <select
+                <Select
                   value={d.options?.reasoning ?? ""}
                   onChange={(e) => setOpt("reasoning", e.target.value || null)}
                   className={inputCls}
                 >
                   {REASONING_OPTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-                </select>
+                </Select>
               </div>
 
               <div className="space-y-1.5">
@@ -457,17 +458,17 @@ export default function AutomationEditor({
 
               <div className="space-y-1.5">
                 <p className="text-xs text-muted">Frequência</p>
-                <select value={freqMode} onChange={(e) => sched({ mode: e.target.value })} className={inputCls}>
+                <Select value={freqMode} onChange={(e) => sched({ mode: e.target.value })} className={inputCls}>
                   {FREQ_MODES.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-                </select>
+                </Select>
 
                 {freqMode === "interval" && (
                   <div className="flex items-center gap-2 pt-1">
                     <span className="text-sm text-ink-soft">A cada</span>
                     <input type="number" min={1} value={d.schedule.every ?? 1} onChange={(e) => sched({ every: Math.max(1, Number(e.target.value) || 1) })} className="w-20 rounded-lg border border-border bg-surface2 px-3 py-1.5 text-right text-sm text-ink outline-none focus:border-accent" />
-                    <select value={d.schedule.unit ?? "hours"} onChange={(e) => sched({ unit: e.target.value })} className="rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent">
+                    <Select value={d.schedule.unit ?? "hours"} onChange={(e) => sched({ unit: e.target.value })} className="rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent">
                       {UNITS.map((u) => <option key={u.key} value={u.key}>{u.label}</option>)}
-                    </select>
+                    </Select>
                   </div>
                 )}
 
@@ -478,9 +479,9 @@ export default function AutomationEditor({
                       <input type="number" min={1} value={d.schedule.min ?? 1} onChange={(e) => sched({ min: Math.max(1, Number(e.target.value) || 1) })} className="w-20 rounded-lg border border-border bg-surface2 px-3 py-1.5 text-right text-sm text-ink outline-none focus:border-accent" />
                       <span className="text-sm text-ink-soft">e</span>
                       <input type="number" min={1} value={d.schedule.max ?? 6} onChange={(e) => sched({ max: Math.max(1, Number(e.target.value) || 1) })} className="w-20 rounded-lg border border-border bg-surface2 px-3 py-1.5 text-right text-sm text-ink outline-none focus:border-accent" />
-                      <select value={d.schedule.unit ?? "hours"} onChange={(e) => sched({ unit: e.target.value })} className="rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent">
+                      <Select value={d.schedule.unit ?? "hours"} onChange={(e) => sched({ unit: e.target.value })} className="rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent">
                         {UNITS.map((u) => <option key={u.key} value={u.key}>{u.label}</option>)}
-                      </select>
+                      </Select>
                     </div>
                     <p className="text-xs text-muted">A cada disparo sorteia um novo intervalo aleatório nessa faixa.</p>
                   </>
@@ -528,9 +529,9 @@ export default function AutomationEditor({
             <>
               <div className="space-y-1">
                 <p className="text-xs text-muted">Tipo de monitor</p>
-                <select value={d.watcher_type ?? "page"} onChange={(e) => { set("watcher_type", e.target.value); set("watcher_config", {}); }} className={inputCls}>
+                <Select value={d.watcher_type ?? "page"} onChange={(e) => { set("watcher_type", e.target.value); set("watcher_config", {}); }} className={inputCls}>
                   {WATCHERS.map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
-                </select>
+                </Select>
               </div>
 
               {d.watcher_type === "page" && (
@@ -554,11 +555,11 @@ export default function AutomationEditor({
                   <div className="space-y-1"><p className="text-xs text-muted">Ativo (ticker Yahoo)</p>
                     <input value={c.symbol ?? ""} onChange={(e) => wc("symbol", e.target.value)} placeholder="ex.: PETR4.SA, AAPL, BTC-USD" className={inputCls} /></div>
                   <div className="flex items-center gap-2">
-                    <select value={c.op ?? "above"} onChange={(e) => wc("op", e.target.value)} className="rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent">
+                    <Select value={c.op ?? "above"} onChange={(e) => wc("op", e.target.value)} className="rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent">
                       <option value="above">Preço acima de</option>
                       <option value="below">Preço abaixo de</option>
                       <option value="pct">Variação % (±) de</option>
-                    </select>
+                    </Select>
                     <input type="number" value={c.value ?? ""} onChange={(e) => wc("value", Number(e.target.value))} placeholder="valor" className="w-32 rounded-lg border border-border bg-surface2 px-3 py-2 text-right text-sm text-ink outline-none focus:border-accent" />
                   </div>
                 </>
@@ -596,7 +597,7 @@ export default function AutomationEditor({
           {/* local de resposta */}
           <div className="space-y-1">
             <p className="text-xs text-muted">Local de Resposta</p>
-            <select
+            <Select
               value={d.target.mode ?? "reuse"}
               onChange={(e) => set("target", { ...d.target, mode: e.target.value as any })}
               className={inputCls}
@@ -604,12 +605,12 @@ export default function AutomationEditor({
               <option value="reuse">Sempre no mesmo chat (criado uma vez)</option>
               <option value="new_each">Um chat novo a cada disparo</option>
               <option value="existing">Em um chat existente</option>
-            </select>
+            </Select>
             {d.target.mode === "existing" && (
-              <select value={d.target.chat_id ?? ""} onChange={(e) => set("target", { ...d.target, chat_id: e.target.value || null })} className={inputCls}>
+              <Select value={d.target.chat_id ?? ""} onChange={(e) => set("target", { ...d.target, chat_id: e.target.value || null })} className={inputCls}>
                 <option value="">Selecione um chat…</option>
                 {chats.map((ch) => <option key={ch.id} value={ch.id}>{ch.title}</option>)}
-              </select>
+              </Select>
             )}
           </div>
 
@@ -646,13 +647,13 @@ export default function AutomationEditor({
                   <Toggle on={ttlOn} onClick={() => setOpt("chat_ttl", ttlOn ? null : 24)} />
                 </div>
                 {ttlOn && (
-                  <select
+                  <Select
                     value={String(ttl)}
                     onChange={(e) => setOpt("chat_ttl", e.target.value === "view_once" ? "view_once" : Number(e.target.value))}
                     className={`${inputCls} mt-2`}
                   >
                     {TTL_OPTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-                  </select>
+                  </Select>
                 )}
               </div>
             )}

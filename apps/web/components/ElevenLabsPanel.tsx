@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AudioLines, Check, ChevronLeft, Loader2, TriangleAlert, Trash2, Wifi } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { useConfirm } from "./ConfirmDialog";
+import { Select } from "@/components/ui";
 
 interface Voice { id: string; name: string }
 interface ElevenLabsStatus {
@@ -110,13 +111,13 @@ export default function ElevenLabsPanel({ onBack, onChanged }: { onBack: () => v
             <label className="block text-sm">
               <span className="text-ink-soft">Voz padrão</span>
               {st.voices.length ? (
-                <select
+                <Select
                   value={defVoice} onChange={(e) => setDefVoice(e.target.value)}
                   className="mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
                 >
                   <option value="">(padrão da ElevenLabs)</option>
                   {st.voices.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-                </select>
+                </Select>
               ) : (
                 <input
                   value={defVoice} onChange={(e) => setDefVoice(e.target.value)}

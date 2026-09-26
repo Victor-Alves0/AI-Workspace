@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { useConfirm } from "./ConfirmDialog";
-import { Toggle } from "./ui";
+import { Toggle, Select } from "./ui";
 
 /** Máquina remota como o servidor a devolve. Segredos NUNCA vêm: só `has_*` e as URLs
  *  de proxy mascaradas — por isso os campos secretos do formulário começam vazios e
@@ -395,11 +395,11 @@ function HostForm({ host, onBack, onSaved }: { host: Host | null; onBack: () => 
           <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder={host?.has_token ? "••••••••" : "cole o token"} className={`${inputCls} font-mono text-xs`} />
         </Field>
         <Field label="Verificação de TLS" hint="'Certificado do agente' valida contra o certificado colado abaixo — é a opção certa para o certificado autoassinado que o instalador gera.">
-          <select value={f.tls_mode} onChange={(e) => set("tls_mode", e.target.value)} className={inputCls}>
+          <Select value={f.tls_mode} onChange={(e) => set("tls_mode", e.target.value)} className={inputCls}>
             <option value="pinned">Certificado do agente (recomendado)</option>
             <option value="system">Cadeia pública (proxy reverso com certificado próprio)</option>
             <option value="off">Sem verificação (só dentro de um túnel confiável)</option>
-          </select>
+          </Select>
         </Field>
         {f.tls_mode === "pinned" && (
           <Field label="Certificado do agente" hint={host?.has_cert ? "Já configurado — cole outro só para trocar." : "O bloco -----BEGIN CERTIFICATE----- impresso pelo instalador."}>
@@ -436,11 +436,11 @@ function HostForm({ host, onBack, onSaved }: { host: Host | null; onBack: () => 
           pelo IP real.
         </p>
         <Field label="Modo">
-          <select value={eg.mode} onChange={(e) => setEg("mode", e.target.value)} className={inputCls}>
+          <Select value={eg.mode} onChange={(e) => setEg("mode", e.target.value)} className={inputCls}>
             <option value="off">Sem restrição</option>
             <option value="env">Só variáveis de ambiente (sem killswitch)</option>
             <option value="force">Selada por proxy + killswitch (recomendado)</option>
-          </select>
+          </Select>
         </Field>
         {eg.mode === "env" && (
           <p className="flex items-start gap-1.5 rounded-lg bg-amber-400/10 px-3 py-2 text-[11px] leading-4 text-amber-400">

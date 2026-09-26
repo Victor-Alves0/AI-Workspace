@@ -20,6 +20,7 @@ import { copyText } from "@/lib/clipboard";
 import type { Model, ModelConfig, WhatsAppConnection, WhatsAppFilters } from "@/lib/types";
 import ModelField from "./ModelField";
 import ContextWindowSelect from "./ContextWindowSelect";
+import { Select } from "@/components/ui";
 
 const inputCls =
   "mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent placeholder:text-muted";
@@ -267,10 +268,10 @@ function ConnectionCard({
             </label>
             <label className="block text-sm">
               <span className="text-xs text-muted">Memória</span>
-              <select value={conn.memory} onChange={(e) => patch({ memory: e.target.value })} className={inputCls}>
+              <Select value={conn.memory} onChange={(e) => patch({ memory: e.target.value })} className={inputCls}>
                 <option value="local">Local (isolada por conversa)</option>
                 <option value="global">Global (compartilhada do modelo)</option>
-              </select>
+              </Select>
             </label>
             <label className="block text-sm">
               <span className="text-xs text-muted">Contexto (mensagens que a IA enxerga)</span>
@@ -302,11 +303,11 @@ function ConnectionCard({
             <div className="grid grid-cols-2 gap-2">
               <label className="block text-sm">
                 <span className="text-xs text-muted">Contatos</span>
-                <select value={f.policy} onChange={(e) => setFilters({ policy: e.target.value as WhatsAppFilters["policy"] })} className={inputCls}>
+                <Select value={f.policy} onChange={(e) => setFilters({ policy: e.target.value as WhatsAppFilters["policy"] })} className={inputCls}>
                   <option value="all">Todos podem interagir</option>
                   <option value="allow">Somente lista de permissão</option>
                   <option value="block">Todos, exceto bloqueados</option>
-                </select>
+                </Select>
               </label>
               <label className="block text-sm">
                 <span className="text-xs text-muted">Prefixo-gatilho (opcional)</span>
@@ -375,7 +376,7 @@ function ConnectionCard({
 
           {/* Agrupar mensagens fragmentadas do contato num único turno */}
           <label className="block text-xs text-muted">Agrupar mensagens seguidas
-            <select
+            <Select
               value={conn.debounce_seconds ?? 0}
               onChange={(e) => patch({ debounce_seconds: Number(e.target.value) })}
               className="mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
@@ -385,7 +386,7 @@ function ConnectionCard({
               <option value={5}>Esperar 5s de silêncio</option>
               <option value={8}>Esperar 8s de silêncio</option>
               <option value={15}>Esperar 15s de silêncio</option>
-            </select>
+            </Select>
           </label>
 
           {/* Modo humanizador */}

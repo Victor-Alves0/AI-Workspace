@@ -7,6 +7,7 @@ import {
 import { api } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { useConfirm, usePrompt } from "./ConfirmDialog";
+import { Select } from "@/components/ui";
 
 type SharedChat = {
   id: string;
@@ -176,7 +177,7 @@ export default function SharedChatsModal({ onClose }: { onClose: () => void }) {
 
                     <label className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-ink">
                       <Clock size={12} className="text-muted" />
-                      <select
+                      <Select
                         value=""
                         onChange={(e) => { if (e.target.value) setTtl(c, e.target.value); e.target.value = ""; }}
                         disabled={busy === c.id}
@@ -184,7 +185,7 @@ export default function SharedChatsModal({ onClose }: { onClose: () => void }) {
                       >
                         <option value="">Validade…</option>
                         {TTL_OPTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
-                      </select>
+                      </Select>
                     </label>
 
                     <button onClick={() => rotate(c)} disabled={busy === c.id} title="Gera um novo link e invalida o atual" className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-ink transition-colors hover:bg-hover disabled:opacity-50">

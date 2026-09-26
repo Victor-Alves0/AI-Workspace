@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { Model, ModelConfig } from "@/lib/types";
+import { Select } from "@/components/ui";
 
 export default function ModelSelector({
   value,
@@ -40,7 +41,7 @@ export default function ModelSelector({
   }
 
   return (
-    <select
+    <Select
       value={value}
       onChange={(e) => handle(e.target.value)}
       className="max-w-[280px] truncate rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm outline-none focus:border-accent"
@@ -62,6 +63,6 @@ export default function ModelSelector({
           </option>
         ))}
       </optgroup>
-    </select>
+    </Select>
   );
 }

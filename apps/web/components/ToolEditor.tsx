@@ -17,6 +17,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import type { Tool } from "@/lib/types";
 import CodeEditor from "./CodeEditor";
+import { Select } from "@/components/ui";
 
 const NEW_TEMPLATE = `VALVES = {
     # Configurações ajustáveis pela engrenagem (opcional). Ex.:
@@ -361,14 +362,14 @@ export default function ToolEditor({
                   </div>
                   <div>
                     <FieldLabel>Transporte</FieldLabel>
-                    <select
+                    <Select
                       value={mcpTransport}
                       onChange={(e) => setMcpTransport(e.target.value)}
                       className={inputCls}
                     >
                       <option value="http">Streamable HTTP</option>
                       <option value="sse">SSE (legado)</option>
-                    </select>
+                    </Select>
                   </div>
                   <div>
                     <FieldLabel>Headers (opcional, JSON)</FieldLabel>

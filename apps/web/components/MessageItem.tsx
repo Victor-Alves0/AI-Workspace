@@ -1758,14 +1758,6 @@ function MessageItem({
                 <ShieldAlert size={12} /> Guarda{guardEvents.length > 1 ? ` ×${guardEvents.length}` : ""}
               </button>
             )}
-            {u?.over_budget ? (
-              <span
-                title={`Este turno usou ${u.total_tokens.toLocaleString("pt-BR")} tokens (limite de aviso: ${u.over_budget.toLocaleString("pt-BR")})`}
-                className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-500"
-              >
-                <TriangleAlert size={12} /> Uso alto
-              </span>
-            ) : null}
             <span data-touch="decorative" className="text-[11px] font-normal text-muted opacity-0 transition-opacity duration-150 group-hover:opacity-100">
               {fmtTime(message.created_at)}
             </span>

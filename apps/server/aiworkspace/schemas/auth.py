@@ -81,7 +81,8 @@ class ProfileIn(BaseModel):
     language: str | None = Field(default=None, max_length=20)
     notifications: bool | None = None
     system_prompt: str | None = Field(default=None, max_length=20000)
-    # "Guarda de tokens": avisa quando uma resposta passa deste nº de tokens (0 = off)
+    # legado (aviso de tokens por resposta, removido em 26/09): aceito só para perfis
+    # antigos continuarem válidos; nada lê este valor
     token_warn: int | None = Field(default=None, ge=0, le=10_000_000)
     # avatar como data URL (imagem redimensionada no cliente p/ ~256px)
     avatar: str | None = Field(default=None, max_length=400_000)

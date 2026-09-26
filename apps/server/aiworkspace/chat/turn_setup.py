@@ -331,24 +331,6 @@ def _has_vision(model_config: ModelConfig | None) -> bool:
     return bool(model_config and (model_config.capabilities or {}).get("vision"))
 
 
-def _token_warn(model_config: ModelConfig | None, user: User) -> int:
-    """Limite de aviso de uso (tokens/turno) do PERFIL (Configurações → Conta); 0 =
-    desligado. Só avisa, não bloqueia. O override por modelo saiu da UI (19/09) — um
-    valor antigo gravado no modelo não pode continuar valendo sem controle visível."""
-    del model_config
-    try:
-        return int((user.profile or {}).get("token_warn") or 0)
-    except (TypeError, ValueError):
-        return 0
-
-
-def _flag_budget(rec: dict, model_config: ModelConfig | None, user: User) -> None:
-    """Marca o registro de uso quando o turno passou do limite configurado."""
-    warn = _token_warn(model_config, user)
-    if warn and (rec.get("total_tokens") or 0) > warn:
-        rec["over_budget"] = warn
-
-
 def _final_message_fields(collected: dict) -> tuple[str, dict | None]:
     """Resolve o conteúdo e o raciocínio a PERSISTIR ao fim de um turno, de modo que
     a resposta NÃO suma quando o stream falha no meio (erro/moderação) e o `done`

@@ -8,6 +8,7 @@ import type { Model, ModelConfig } from "@/lib/types";
 import type { ToolCatalogItem } from "@/lib/playground";
 import ModelField from "./ModelField";
 import Markdown from "./Markdown";
+import { Select } from "@/components/ui";
 
 function splitModel(v: string): { model: string; model_config_id: string | null } {
   return v.startsWith("custom:") ? { model: "", model_config_id: v.slice(7) } : { model: v, model_config_id: null };
@@ -66,7 +67,7 @@ function DirectTab() {
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       <div className="rounded-2xl border border-border bg-surface p-4">
         <label className="block text-xs text-muted">Ferramenta
-          <select value={path} onChange={(e) => pick(e.target.value)} className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent">
+          <Select value={path} onChange={(e) => pick(e.target.value)} className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent">
             <option value="">Selecione…</option>
             {cat && (
               <>
@@ -80,7 +81,7 @@ function DirectTab() {
                 )}
               </>
             )}
-          </select>
+          </Select>
         </label>
         {selected?.description && <p className="mt-2 text-xs text-muted">{selected.description}</p>}
         <label className="mt-3 block text-xs text-muted">Parâmetros (JSON)
