@@ -269,20 +269,6 @@ export default function MemoryView() {
 
   return (
     <div className="space-y-5">
-      {settings && (
-        <div className="flex justify-end">
-          <span
-            title={enabled
-              ? "A memória está ativada."
-              : "A memória está desativada. Ative e ajuste os padrões em Configurações → Controle de Dados → Memória (engrenagem)."}
-            className="inline-flex cursor-help items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-ink-soft"
-          >
-            <span aria-hidden className={`h-2 w-2 rounded-full ${enabled ? "bg-emerald-400" : "bg-red-400"}`} />
-            <span>{enabled ? "Ativado" : "Desativado"}</span>
-          </span>
-        </div>
-      )}
-
       {/* Fila de revisão (pendentes) */}
       {pending.length > 0 && (
         <div className="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4">
@@ -537,5 +523,24 @@ export default function MemoryView() {
         </div>
       )}
     </div>
+  );
+}
+
+/** Selo "Ativado/Desativado" da memória — vai no cabeçalho da seção, na linha do título. */
+export function MemoryStatusPill() {
+  const [settings, setSettings] = useState<MemoryConfig | null>(null);
+  useEffect(() => { api.get<MemoryConfig>("/memory/settings").then(setSettings).catch(() => {}); }, []);
+  if (!settings) return null;
+  const enabled = settings.enabled === true;
+  return (
+    <span
+      title={enabled
+        ? "A memória está ativada."
+        : "A memória está desativada. Ative em Configurações → Controle de Dados → Memória."}
+      className="inline-flex cursor-help items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-ink-soft"
+    >
+      <span aria-hidden className={`h-2 w-2 rounded-full ${enabled ? "bg-emerald-400" : "bg-red-400"}`} />
+      <span>{enabled ? "Ativado" : "Desativado"}</span>
+    </span>
   );
 }

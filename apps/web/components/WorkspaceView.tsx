@@ -18,7 +18,7 @@ import PromptEditor from "./PromptEditor";
 import SkillEditor from "./SkillEditor";
 import ValvesModal from "./ValvesModal";
 import AnalyticsView from "./AnalyticsView";
-import MemoryView from "./MemoryView";
+import MemoryView, { MemoryStatusPill } from "./MemoryView";
 import KnowledgeView from "./KnowledgePanel";
 import CodespacePanel from "./CodespacePanel";
 import InvestigationPanel from "./InvestigationPanel";
@@ -1081,7 +1081,7 @@ export default function WorkspaceView({
         <PlaygroundView onClose={backHome} />
       )}
       {section === "Memoria" && (
-        <SectionShell title="Memória" onBack={backHome}>
+        <SectionShell title="Memória" onBack={backHome} actions={<MemoryStatusPill />}>
           <MemoryView />
         </SectionShell>
       )}

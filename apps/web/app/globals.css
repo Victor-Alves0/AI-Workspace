@@ -48,6 +48,11 @@ body {
   overscroll-behavior: none;
 }
 
+/* app DESKTOP: a janela não tem moldura; a barra de título embutida (DesktopTitleBar)
+   ocupa o topo e o conteúdo começa logo abaixo dela */
+:root { --titlebar-h: 32px; }
+html.aiw-desktop body { padding-top: var(--titlebar-h) !important; }
+
 body {
   @apply bg-bg font-sans text-ink antialiased;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11"; /* Inter: formas alternativas mais limpas */

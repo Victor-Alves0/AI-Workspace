@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
 import DesktopContextMenu from "@/components/DesktopContextMenu";
+import DesktopTitleBar from "@/components/DesktopTitleBar";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -43,6 +44,7 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" className={inter.variable}>
       <body>
+        <DesktopTitleBar />
         <DesktopContextMenu />
         <ConfirmProvider>{children}</ConfirmProvider>
       </body>

@@ -2,6 +2,7 @@
 
 import { forwardRef, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
+import RisingLines from "./RisingLines";
 
 /** Moldura das telas de entrada (login e assistente de primeiro uso): um cartão em duas
  *  metades — a arte da marca à esquerda, o formulário à direita. No celular a arte sai
@@ -16,8 +17,9 @@ export default function AuthShell({
   step?: number;
 }) {
   return (
-    <div className="flex min-h-full items-center justify-center bg-bg p-0 sm:p-6">
-      <div className="animate-fade-up relative grid min-h-[100dvh] w-full max-w-5xl overflow-hidden border-border bg-[#0b0b0d] sm:min-h-[600px] sm:rounded-2xl sm:border sm:shadow-modal md:grid-cols-[1fr_1.05fr]">
+    // a tela INTEIRA é o login (sem moldura/cartão em volta): arte à esquerda, formulário à direita
+    <div className="h-full overflow-y-auto bg-[#0b0b0d]">
+      <div className="animate-fade-up relative grid min-h-full w-full overflow-hidden bg-[#0b0b0d] md:grid-cols-[1fr_1.05fr]">
         {/* celular: a mesma arte vira o FUNDO da tela, com blur e um véu escuro opaco
             por cima para o formulário continuar legível (no desktop ela fica na coluna) */}
         <div aria-hidden className="pointer-events-none absolute inset-0 md:hidden">
@@ -26,8 +28,8 @@ export default function AuthShell({
           <div className="absolute inset-0 bg-gradient-to-b from-[#0b0b0d]/20 via-[#0b0b0d]/45 to-[#0b0b0d]/80" />
         </div>
         <div className="relative hidden md:block">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/login-hero.webp" alt="" className="absolute inset-0 h-full w-full object-cover" />
+          {/* a arte viva: as linhas sobem em loop até o ápice (a mesma da tela de início) */}
+          <RisingLines className="absolute inset-0" />
           <div aria-hidden className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-[#0b0b0d]/70" />
           <div className="absolute left-8 top-8 flex items-center gap-2.5">
             {/* eslint-disable-next-line @next/next/no-img-element */}

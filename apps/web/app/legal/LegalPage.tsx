@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import Markdown from "@/components/Markdown";
+import BackButton from "./BackButton";
 
 /** Casca das páginas jurídicas (/privacy e /terms).
  *
@@ -18,8 +19,16 @@ export default function LegalPage({ file }: { file: "privacy" | "terms" }) {
     path.join(process.cwd(), "content", `${file}.md`),
     "utf-8",
   );
+  // o <body> do app não rola (cada tela é uma moldura de 100dvh): a página jurídica
+  // precisa da PRÓPRIA área de rolagem, e de um jeito de voltar
   return (
-    <main className="mx-auto min-h-dvh max-w-3xl px-5 py-12">
+    <div className="h-full overflow-y-auto">
+    <div className="sticky top-0 z-10 border-b border-border bg-bg/90 backdrop-blur">
+      <div className="mx-auto flex max-w-3xl items-center px-3 py-2">
+        <BackButton />
+      </div>
+    </div>
+    <main className="mx-auto max-w-3xl px-5 py-10">
       <Markdown content={md} />
       <p className="mt-12 border-t border-border pt-5 text-xs text-muted">
         <a href="/" className="transition-colors hover:text-ink">AI Workspace</a>
@@ -29,5 +38,6 @@ export default function LegalPage({ file }: { file: "privacy" | "terms" }) {
         <a href="/terms" className="transition-colors hover:text-ink">Termos</a>
       </p>
     </main>
+    </div>
   );
 }

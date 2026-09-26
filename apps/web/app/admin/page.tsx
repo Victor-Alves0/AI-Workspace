@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft, Bug, Check, DatabaseBackup, Download, Gauge, HeartPulse, Loader2, Network,
+  ArrowLeft, Bug, Check, ChevronLeft, DatabaseBackup, Download, Gauge, HeartPulse, Loader2, Network,
   RefreshCw, Shield, Trash2, Upload, Users, X,
 } from "lucide-react";
 import { api, API_URL, ApiError } from "@/lib/api";
@@ -131,22 +131,25 @@ export default function AdminPage() {
   return (
     <div className="h-full overflow-y-auto bg-bg px-4 py-5 md:p-6">
       <div className="mx-auto max-w-4xl space-y-5">
-        {/* cabeçalho: no home volta ao chat; numa seção, o breadcrumb volta ao painel */}
+        {/* cabeçalho no padrão do Espaço de Trabalho: no início, "Voltar ao chat" à direita;
+            numa seção, o botão quadrado ‹ ao lado do título volta ao painel */}
         <div>
-          {section ? (
-            <button onClick={() => setSection(null)} className="mb-3 flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm text-muted transition-colors hover:bg-hover hover:text-ink">
-              <ArrowLeft size={16} /> Painel do Admin
-            </button>
-          ) : (
-            <button onClick={() => router.push("/chat")} className="mb-3 flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm text-muted transition-colors hover:bg-hover hover:text-ink">
-              <ArrowLeft size={16} /> Voltar ao chat
-            </button>
-          )}
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/15 text-accent-hover">
-                <Shield size={20} />
-              </span>
+            <div className="flex min-w-0 items-center gap-3">
+              {section ? (
+                <button
+                  onClick={() => setSection(null)}
+                  title="Painel do Admin"
+                  aria-label="Voltar ao Painel do Admin"
+                  className="flex h-8 w-8 flex-none items-center justify-center rounded-xl border border-transparent bg-surface text-ink-soft transition-colors hover:border-border hover:bg-surface2 hover:text-ink"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+              ) : (
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent/15 text-accent-hover">
+                  <Shield size={20} />
+                </span>
+              )}
               <div>
                 <h1 className="text-xl font-bold tracking-tight text-ink">
                   {section ? curCard?.name ?? "Painel do Admin" : "Painel do Admin"}
@@ -157,9 +160,14 @@ export default function AdminPage() {
               </div>
             </div>
             {!section && (
-              <button onClick={() => router.push("/debug")} className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">
-                <Bug size={15} /> Debug
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => router.push("/debug")} className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">
+                  <Bug size={15} /> Debug
+                </button>
+                <button onClick={() => router.push("/chat")} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">
+                  <ArrowLeft size={16} /> Voltar ao chat
+                </button>
+              </div>
             )}
           </div>
         </div>

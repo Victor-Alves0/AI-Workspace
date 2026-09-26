@@ -31,6 +31,16 @@
     -webkit-font-smoothing: antialiased; user-select: none; cursor: default;
   }
   canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  /* barra de título embutida (a janela não tem moldura do Windows) */
+  .bar { position: fixed; inset: 0 0 auto 0; height: 32px; z-index: 10; display: flex; align-items: center; }
+  .bar .drag { flex: 1; height: 100%; }
+  .bar button {
+    width: 46px; height: 100%; border: 0; background: transparent; color: var(--muted);
+    display: grid; place-items: center; cursor: default;
+  }
+  .bar button:hover { background: color-mix(in srgb, var(--ink) 10%, transparent); color: var(--ink); }
+  .bar button.close:hover { background: #c42b1c; color: #fff; }
+  .bar svg { width: 15px; height: 15px; stroke: currentColor; fill: none; stroke-width: 1.3; }
   /* véu embaixo: o texto fica legível sobre as linhas */
   .veil {
     position: fixed; inset: 0; pointer-events: none;
@@ -73,6 +83,12 @@
 </style>
 <body>
   <canvas id="c" aria-hidden="true"></canvas>
+  <div class="bar" id="bar" hidden>
+    <div class="drag" data-tauri-drag-region></div>
+    <button type="button" id="b-min" title="Minimizar" aria-label="Minimizar"><svg viewBox="0 0 16 16"><path d="M3 8h10"/></svg></button>
+    <button type="button" id="b-max" title="Maximizar" aria-label="Maximizar"><svg viewBox="0 0 16 16"><rect x="3.5" y="3.5" width="9" height="9"/></svg></button>
+    <button type="button" id="b-close" class="close" title="Fechar" aria-label="Fechar"><svg viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
+  </div>
   <div class="veil" aria-hidden="true"></div>
   <main>
     <p class="brand">AI <b>Workspace</b></p>
@@ -84,6 +100,17 @@
   </main>
 
 <script>
+(() => {
+  // --------------------------------------------------------- barra da janela --
+  const w = window.__TAURI__?.window?.getCurrentWindow?.();
+  if (w) {
+    document.getElementById("bar").hidden = false;
+    document.getElementById("b-min").onclick = () => w.minimize();
+    document.getElementById("b-max").onclick = () => w.toggleMaximize();
+    document.getElementById("b-close").onclick = () => w.close();
+    document.querySelector(".bar .drag").ondblclick = () => w.toggleMaximize();
+  }
+})();
 (() => {
   // ------------------------------------------------------------------ status --
   // O shell não informa a etapa; o texto acompanha o tempo típico de cada fase.

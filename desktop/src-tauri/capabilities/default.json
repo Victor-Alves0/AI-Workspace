@@ -1,14 +1,56 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permite que a interface web (carregada de uma origem remota) leia e grave as preferências desta máquina. A lista de origens é fechada de propósito: só o próprio app, em localhost.",
-  "windows": ["main"],
+  "description": "Permite que a interface web (servida pelo motor local) use os recursos da janela e da máquina. A lista de origens é fechada de propósito: só o próprio app, em localhost — nas portas do motor atual (41414–41433, a primeira livre) e nas do motor antigo (3000/8000).",
+  "windows": [
+    "main"
+  ],
   "remote": {
     "urls": [
       "http://localhost:3000",
       "http://127.0.0.1:3000",
       "http://localhost:8000",
-      "http://127.0.0.1:8000"
+      "http://127.0.0.1:8000",
+      "http://localhost:41414",
+      "http://127.0.0.1:41414",
+      "http://localhost:41415",
+      "http://127.0.0.1:41415",
+      "http://localhost:41416",
+      "http://127.0.0.1:41416",
+      "http://localhost:41417",
+      "http://127.0.0.1:41417",
+      "http://localhost:41418",
+      "http://127.0.0.1:41418",
+      "http://localhost:41419",
+      "http://127.0.0.1:41419",
+      "http://localhost:41420",
+      "http://127.0.0.1:41420",
+      "http://localhost:41421",
+      "http://127.0.0.1:41421",
+      "http://localhost:41422",
+      "http://127.0.0.1:41422",
+      "http://localhost:41423",
+      "http://127.0.0.1:41423",
+      "http://localhost:41424",
+      "http://127.0.0.1:41424",
+      "http://localhost:41425",
+      "http://127.0.0.1:41425",
+      "http://localhost:41426",
+      "http://127.0.0.1:41426",
+      "http://localhost:41427",
+      "http://127.0.0.1:41427",
+      "http://localhost:41428",
+      "http://127.0.0.1:41428",
+      "http://localhost:41429",
+      "http://127.0.0.1:41429",
+      "http://localhost:41430",
+      "http://127.0.0.1:41430",
+      "http://localhost:41431",
+      "http://127.0.0.1:41431",
+      "http://localhost:41432",
+      "http://127.0.0.1:41432",
+      "http://localhost:41433",
+      "http://127.0.0.1:41433"
     ]
   },
   "permissions": [
@@ -18,6 +60,12 @@
     "global-shortcut:allow-unregister-all",
     "global-shortcut:allow-is-registered",
     "updater:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-is-maximized"
   ]
 }

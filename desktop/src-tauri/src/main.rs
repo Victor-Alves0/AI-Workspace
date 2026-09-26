@@ -392,6 +392,10 @@ fn main() {
                 .title("AI Workspace")
                 .inner_size(1280.0, 800.0)
                 .min_inner_size(380.0, 480.0)
+                // sem a moldura do Windows: a própria interface desenha a barra de título
+                // (arrastar + minimizar/maximizar/fechar), embutida como no VS Code
+                .decorations(false)
+                .shadow(true)
                 .center()
                 .visible(!start_hidden)
                 .initialization_script(init_script.as_str())
