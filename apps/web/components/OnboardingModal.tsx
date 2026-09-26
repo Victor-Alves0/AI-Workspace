@@ -82,7 +82,7 @@ export default function OnboardingModal({ user, onClose, onDone }: {
           <div className="flex items-center gap-2 text-sm font-medium text-ink">
             <Sparkles size={16} className="text-accent-hover" /> Configuração inicial
           </div>
-          <button onClick={() => finish(true)} title="Pular" className="rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink">
+          <button onClick={() => finish(true)} title="Pular" aria-label="Pular" className="rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink">
             <X size={18} />
           </button>
         </div>

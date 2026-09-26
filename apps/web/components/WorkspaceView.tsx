@@ -11,7 +11,7 @@ import {
 import { api, ApiError, API_URL } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import type { ModelConfig, Prompt, Skill, SkillSuggestion, Tool, User } from "@/lib/types";
-import { AnchoredMenu, MenuItem } from "@/components/ui";
+import { AnchoredMenu, InfoDot, MenuItem } from "@/components/ui";
 import ToolEditor from "./ToolEditor";
 import ModelEditor from "./ModelEditor";
 import PromptEditor from "./PromptEditor";
@@ -120,8 +120,8 @@ function BackToWorkspace({ onClick }: { onClick: () => void }) {
   );
 }
 
-function SectionShell({ title, count, onBack, actions, filter, children }: {
-  title: string; count?: number; onBack: () => void; actions?: ReactNode; filter?: ReactNode; children: ReactNode;
+function SectionShell({ title, count, hint, onBack, actions, filter, children }: {
+  title: string; count?: number; hint?: string; onBack: () => void; actions?: ReactNode; filter?: ReactNode; children: ReactNode;
 }) {
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
@@ -132,6 +132,7 @@ function SectionShell({ title, count, onBack, actions, filter, children }: {
           <h1 className="truncate text-2xl font-bold text-ink">
             {title}{count !== undefined && <span className="ml-2 font-semibold text-muted">{count}</span>}
           </h1>
+          {hint && <InfoDot text={hint} />}
         </div>
         {(filter || actions) && (
           <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -1052,12 +1053,14 @@ export default function WorkspaceView({
 
       {/* --------------------------- seções ainda por vir ------------------------- */}
       {section === "Conhecimento" && (
-        <SectionShell title="Conhecimento" onBack={backHome}>
+        <SectionShell title="Conhecimento" onBack={backHome}
+          hint="Organize documentos em pastas e acople as bases a um modelo ou chat para a IA responder com citações.">
           <KnowledgeView />
         </SectionShell>
       )}
       {section === "Cerebros" && (
-        <SectionShell title="Cérebros" onBack={backHome}>
+        <SectionShell title="Cérebros" onBack={backHome}
+          hint="Notas interligadas que a IA lê e escreve. Acople um cérebro a um modelo ou chat e ele passa a anotar e consultar o que aprende.">
           <KnowledgeView kind="brain" />
         </SectionShell>
       )}

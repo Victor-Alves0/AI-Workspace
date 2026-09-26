@@ -33,7 +33,11 @@ function SharedChat() {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async (password?: string) => {
-    if (!id) return;
+    if (!id) {
+      setErr("Link de compartilhamento incompleto.");
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setPwErr(false);
     try {
@@ -61,7 +65,8 @@ function SharedChat() {
   useEffect(() => { load(); }, [load]);
 
   return (
-    <div className="min-h-full bg-bg text-ink">
+    // o body é a moldura fixa (100dvh): a rolagem da conversa fica aqui dentro
+    <div className="h-full overflow-y-auto bg-bg text-ink">
       <header className="sticky top-0 z-10 border-b border-border bg-bg/80 px-4 py-3 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center gap-2">
           <MessageSquare size={18} className="text-accent-hover" />
@@ -121,7 +126,10 @@ function SharedChat() {
             ))}
           </div>
         )}
-        <p className="mt-10 text-center text-xs text-muted">Compartilhado via AI Workspace</p>
+        <p className="mt-10 text-center text-xs text-muted">
+          Compartilhado via{" "}
+          <a href="/" className="underline decoration-border underline-offset-2 transition-colors hover:text-ink">AI Workspace</a>
+        </p>
       </main>
     </div>
   );

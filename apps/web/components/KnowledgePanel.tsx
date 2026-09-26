@@ -664,12 +664,7 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
   // ---- Lista de bases --------------------------------------------------- //
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted">
-          {isBrain
-            ? "Notas interligadas que a IA lê e escreve. Acople um cérebro a um modelo ou chat e ele passa a anotar e consultar o que aprende."
-            : "Organize documentos em pastas, crie arquivos de texto e acople as bases a um modelo ou chat para a IA respondê-los com citações."}
-        </p>
+      <div className="flex items-center justify-end">
         {!creating && (
           <button onClick={() => setCreating(true)} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover">
             <Plus size={16} /> {isBrain ? "Novo cérebro" : "Nova base"}
