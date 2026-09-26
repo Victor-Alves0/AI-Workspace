@@ -2783,7 +2783,9 @@ export default function ChatPage() {
                     AskOptions, multilinha) encolhendo a área de rolagem automaticamente
                     — sem medir nada. O gradiente é `absolute` ACIMA dele (-top-12), só
                     enfeite: não entra no layout e não pode desalinhar a geometria. */}
-                <div className="relative z-10 shrink-0">
+                {/* z-30: acima do cabeçalho fixo dos blocos de código (z-20) das mensagens —
+                    com z-10, os menus do composer (raciocínio, "+") abriam POR BAIXO dele */}
+                <div className="relative z-30 shrink-0">
                   <div className="pointer-events-none absolute -top-12 inset-x-0 h-12 bg-gradient-to-t from-bg to-transparent" />
                   <div className="chat-composer-shell bg-bg px-4 pb-3">
                     <div className="chat-composer-grid">
