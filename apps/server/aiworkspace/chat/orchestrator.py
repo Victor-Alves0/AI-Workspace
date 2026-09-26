@@ -620,14 +620,46 @@ _AUDIO_FORMATS = {"mpeg": "mp3", "mp3": "mp3", "x-wav": "wav", "wave": "wav", "w
                   "webm": "webm", "ogg": "ogg", "mp4": "m4a", "x-m4a": "m4a", "aac": "aac", "flac": "flac"}
 
 
+# formatos que os provedores de áudio nativo aceitam de forma comum (docs do OpenRouter)
+_AUDIO_NATIVE_OK = {"wav", "mp3", "aiff", "aac", "ogg", "flac", "m4a"}
+
+
+def _to_wav_ffmpeg(raw: bytes) -> bytes | None:
+    """Qualquer áudio → WAV 16 kHz mono (ffmpeg existe na imagem Docker; no desktop, não —
+    lá o navegador já converte antes de subir)."""
+    import shutil
+    import subprocess
+
+    if not raw or not shutil.which("ffmpeg"):
+        return None
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-i", "pipe:0",
+             "-ac", "1", "-ar", "16000", "-f", "wav", "pipe:1"],
+            input=raw, capture_output=True, timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout if r.returncode == 0 and r.stdout else None
+
+
 def _audio_part(a: dict[str, Any]) -> dict[str, Any] | None:
-    """Anexo de áudio (data URL) → parte `input_audio` do formato OpenAI/OpenRouter."""
+    """Anexo de áudio (data URL) → parte `input_audio` do formato OpenAI/OpenRouter.
+    Formato fora da lista comum (webm/opus/amr/wma…) é convertido para WAV."""
     url = str(a.get("url") or "")
     if not url.startswith("data:") or "," not in url:
         return None
     head, data = url.split(",", 1)
     sub = head[5:].split(";", 1)[0].split("/", 1)[-1].lower()
-    return {"type": "input_audio", "input_audio": {"data": data, "format": _AUDIO_FORMATS.get(sub, sub or "wav")}}
+    fmt = _AUDIO_FORMATS.get(sub, sub or "wav")
+    if fmt not in _AUDIO_NATIVE_OK:
+        try:
+            wav = _to_wav_ffmpeg(base64.b64decode(data))
+        except (ValueError, TypeError):
+            wav = None
+        if wav:
+            return {"type": "input_audio", "input_audio": {"data": base64.b64encode(wav).decode(), "format": "wav"}}
+    return {"type": "input_audio", "input_audio": {"data": data, "format": fmt}}
 
 
 def _decode_data_url(url: str | None) -> bytes | None:

@@ -36,6 +36,7 @@ import { SHORTCUTS, eventToCombo, resolveBinding, comboHasModifier, type Shortcu
 import ImaginaiDocks from "@/components/imaginai/ImaginaiDocks";
 import { useImaginaiCampaign } from "@/components/imaginai/useImaginaiCampaign";
 import { useGeneration } from "./useGeneration";
+import { recordingFilename } from "@/lib/audioFormat";
 import { describeToolCall } from "@/lib/activity";
 import { useDrawerSwipe } from "./useDrawerSwipe";
 import { SoundAutoplayContext } from "@/components/SoundChip";
@@ -447,6 +448,8 @@ export default function ChatPage() {
 
   const [recording, setRecording] = useState(false);
   const [micStream, setMicStream] = useState<MediaStream | null>(null);
+  // o composer registra aqui o seu `addFiles`: a gravação vira anexo de áudio
+  const addFilesRef = useRef<((files: File[]) => Promise<void>) | null>(null);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   // notificações (toast + som), controladas pela config "Notificações" da Conta
   const [toasts, setToasts] = useState<{ id: number; title: string; body?: string }[]>([]);
@@ -1890,6 +1893,22 @@ export default function ChatPage() {
       browserDictRef.current = null;
       setRecording(false);
       setMicStream(null);
+      // modelo que OUVE áudio (capacidade Áudio): a gravação vai como áudio para a IA,
+      // em vez de virar texto. Sem a capacidade, segue transcrevendo como antes.
+      const modelo = curCustom ?? customModels.find((m) => m.id === active?.model_config_id);
+      const ouve = !!(modelo?.capabilities as Record<string, unknown> | undefined)?.audio;
+      if (rec && ouve && addFilesRef.current) {
+        try {
+          const blob = await rec.stop();
+          void browser?.stop();
+          const hora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+          const ext = recordingFilename(blob).split(".").pop() || "webm";
+          await addFilesRef.current([new File([blob], `Gravação ${hora}.${ext}`, { type: blob.type || "audio/webm" })]);
+        } catch (e) {
+          alert("Falha na gravação: " + (e as Error).message);
+        }
+        return;
+      }
       if (rec) {
         try {
           const blob = await rec.stop();
@@ -1915,7 +1934,8 @@ export default function ChatPage() {
       const selectedModel = curCustom
         ?? customModels.find((model) => model.id === active?.model_config_id);
       const voiceConfig = selectedModel?.filter_config?.voice as { stt_enabled?: boolean } | undefined;
-      if (voiceConfig?.stt_enabled === false) {
+      const ouveAudio = !!(selectedModel?.capabilities as Record<string, unknown> | undefined)?.audio;
+      if (voiceConfig?.stt_enabled === false && !ouveAudio) {
         alert("A escuta (STT) está desativada nas configurações deste modelo.");
         return;
       }
@@ -2576,7 +2596,7 @@ export default function ChatPage() {
                   onDragLeave={() => setCsDropOver(false)}
                   onDrop={handleComposerFileDrop}
                 >
-                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} micStream={micStream} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} />
+                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} />
                 </div>
                 {/* menu do "+" abre para baixo aqui (há espaço); na conversa abre para cima */}
                 {temporary && <p className="mt-2 text-xs text-muted">Chat temporário — esta conversa não será salva.</p>}
@@ -2791,7 +2811,7 @@ export default function ChatPage() {
                           {showAsk && askSpec && (
                             <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                           )}
-                          <div ref={promptBoxRef}><PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} micStream={micStream} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} /></div>
+                          <div ref={promptBoxRef}><PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} /></div>
                         </div>
                       </div>
                       {speakingMessageId && !imaginaiDocksShown && (

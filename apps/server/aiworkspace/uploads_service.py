@@ -26,6 +26,13 @@ logger = logging.getLogger(__name__)
 
 _IMAGE_MIME = ("image/",)
 _AUDIO_MIME = ("audio/", "video/webm")
+# áudio reconhecido pela extensão quando o navegador não manda o MIME (.opus/.amr/.wma
+# no Windows) — sem isto o arquivo virava "documento" e não chegava como áudio
+_AUDIO_EXT = {
+    "mp3", "wav", "wave", "m4a", "mp4a", "aac", "ogg", "oga", "opus", "flac", "webm", "weba",
+    "amr", "awb", "wma", "aif", "aiff", "aifc", "caf", "3gp", "3ga", "mka", "mpga", "mp2",
+    "ac3", "spx", "ra", "au", "snd",
+}
 
 
 def kind_for(filename: str, mime: str) -> str:
@@ -39,6 +46,9 @@ def kind_for(filename: str, mime: str) -> str:
     if guess.startswith("image/"):
         return "image"
     if guess.startswith("audio/"):
+        return "audio"
+    ext = (filename or "").rsplit(".", 1)[-1].lower() if "." in (filename or "") else ""
+    if ext in _AUDIO_EXT:
         return "audio"
     return "file"
 

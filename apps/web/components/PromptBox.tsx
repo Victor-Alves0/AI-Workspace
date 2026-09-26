@@ -51,6 +51,7 @@ function flattenRefs(refs: KnowledgeRef[]): RefDoc[] {
   return out;
 }
 import { API_URL, uploadFile } from "@/lib/api";
+import { isAudioFile, toModelAudio } from "@/lib/audioFormat";
 import { matchCommands, type ChatCommand } from "@/lib/commands";
 import { MenuItem, finePointer, useClickOutside } from "./ui";
 import { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME } from "./CodespaceFileBrowser";
@@ -401,6 +402,7 @@ export default function PromptBox({
   sending,
   recording,
   micStream,
+  addFilesRef,
   onToggleMic,
   onCancelMic,
   onVoiceMode,
@@ -448,6 +450,8 @@ export default function PromptBox({
   recording: boolean;
   /** microfone aberto durante a gravação: a onda desenha o som captado */
   micStream?: MediaStream | null;
+  /** o chat usa para anexar arquivos vindos de fora do composer (ex.: a gravação do microfone) */
+  addFilesRef?: React.MutableRefObject<((files: File[]) => Promise<void>) | null>;
   onToggleMic: () => void;
   /** cancela a gravação DESCARTANDO (sem transcrever) — o "X" da barra de gravação */
   onCancelMic?: () => void;
@@ -546,9 +550,10 @@ export default function PromptBox({
       if (f.type.startsWith("image/")) {
         if (!canVision) { setAttachErr("Este modelo não tem Visão nem Roteador de Visão."); continue; }
         aceitos.push({ file: f, type: "image" });
-      } else if (f.type.startsWith("audio/")) {
+      } else if (isAudioFile(f)) {
         if (!canAudio) { setAttachErr("Este modelo não ouve áudio: ative Áudio nas Capacidades ou o Roteador de Áudio."); continue; }
-        aceitos.push({ file: f, type: "audio" });
+        // modelo que ouve áudio de forma nativa: formatos incomuns viram WAV antes de subir
+        aceitos.push({ file: capabilities["audio"] ? await toModelAudio(f) : f, type: "audio" });
       } else if (canFiles && (DOC_RE.test(f.name) || f.type.startsWith("text/") || TEXT_RE.test(f.name))) {
         aceitos.push({ file: f, type: "file" });
       } else {
@@ -586,6 +591,7 @@ export default function PromptBox({
       onAttachmentsChange?.(atuais);
     }
   }
+  if (addFilesRef) addFilesRef.current = addFiles;
   async function pickFiles(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
@@ -1113,7 +1119,7 @@ export default function PromptBox({
           ref={fileRef}
           type="file"
           multiple
-          accept="image/*,text/*,.pdf,.docx,.xlsx,.xlsm,.pptx,.csv,.txt,.md,.json,.yaml,.yml,.log,.xml,.html,.py,.js,.ts"
+          accept="image/*,audio/*,text/*,.pdf,.docx,.xlsx,.xlsm,.pptx,.csv,.txt,.md,.json,.yaml,.yml,.log,.xml,.html,.py,.js,.ts,.mp3,.wav,.m4a,.aac,.ogg,.oga,.opus,.flac,.webm,.weba,.amr,.wma,.aif,.aiff,.caf,.3gp,.mka"
           className="hidden"
           onChange={pickFiles}
         />
