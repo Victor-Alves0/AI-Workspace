@@ -10,6 +10,7 @@ import { api, API_URL, ApiError } from "@/lib/api";
 import type { AdminUser } from "@/lib/types";
 import ObservabilityView from "@/components/ObservabilityView";
 import HealthView from "@/components/HealthView";
+import { InfoDot, Toggle } from "@/components/ui";
 import { checkDesktopUpdate, installDesktopUpdate, isDesktop } from "@/lib/desktop";
 
 /* ------------------------------- navegação por cards ------------------------ */
@@ -482,27 +483,70 @@ function UpdateSection() {
   );
 }
 
+/** Cabeçalho do arquivo diz se o backup tem senha: AIWBK3 = cifrado por senha
+ *  (vale em qualquer instalação); AIWBK1/2 = pela chave desta instalação. */
+async function backupHasPassword(f: File): Promise<boolean> {
+  const head = new TextDecoder().decode(await f.slice(0, 7).arrayBuffer());
+  return head === "AIWBK3\n";
+}
+
+type BackupPanel = "export" | "import" | "reset" | null;
+
+const inputCls =
+  "w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none transition-colors placeholder:text-muted focus:border-accent";
+const pillCls =
+  "flex items-center gap-1.5 rounded-full border px-4 py-1.5 text-sm transition-colors disabled:opacity-50";
+
 function BackupCard() {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [exporting, setExporting] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [confirmFile, setConfirmFile] = useState<File | null>(null);
+  const [panel, setPanel] = useState<BackupPanel>(null);
+  const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
-  // senha do backup: com ela o arquivo restaura em OUTRA instalação (outro APP_SECRET,
-  // como o app desktop) — os segredos são recifrados para a chave do destino
+  // exportar
+  const [withPass, setWithPass] = useState(false);
   const [exportPass, setExportPass] = useState("");
+  const [exportPass2, setExportPass2] = useState("");
+  // importar
+  const [file, setFile] = useState<File | null>(null);
+  const [needsPass, setNeedsPass] = useState(false);
   const [importPass, setImportPass] = useState("");
   const [legacySecret, setLegacySecret] = useState("");
   const [showLegacy, setShowLegacy] = useState(false);
+  // resetar
+  const [resetPass, setResetPass] = useState("");
+  const [resetWord, setResetWord] = useState("");
+
+  function open(p: BackupPanel) {
+    setPanel((cur) => (cur === p ? null : p));
+    setResult(null);
+  }
+
+  function clearImport() {
+    setFile(null);
+    setNeedsPass(false);
+    setImportPass("");
+    setLegacySecret("");
+    setShowLegacy(false);
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
+  async function pickFile(f: File) {
+    setResult(null);
+    setFile(f);
+    setNeedsPass(await backupHasPassword(f).catch(() => false));
+    setPanel("import");
+  }
+
+  const exportPassOk = !withPass || (exportPass.length >= 8 && exportPass === exportPass2);
 
   async function exportBackup() {
-    setExporting(true);
+    setBusy(true);
     setResult(null);
     try {
       const r = await fetch(`${API_URL}/admin/backup`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: exportPass }),
+        body: JSON.stringify({ password: withPass ? exportPass : "" }),
       });
       if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `Falha (${r.status})`);
       const blob = await r.blob();
@@ -511,87 +555,157 @@ function BackupCard() {
       a.download = r.headers.get("Content-Disposition")?.match(/filename="(.+?)"/)?.[1] ?? "aiworkspace.backup";
       a.click();
       URL.revokeObjectURL(a.href);
+      setPanel(null);
+      setWithPass(false);
+      setExportPass("");
+      setExportPass2("");
+      setResult({ ok: true, text: withPass ? "Backup exportado com senha." : "Backup exportado." });
     } catch (e) {
       setResult({ ok: false, text: e instanceof Error ? e.message : "Falha ao exportar" });
     } finally {
-      setExporting(false);
+      setBusy(false);
     }
   }
 
-  async function importBackup(f: File) {
-    setImporting(true);
+  async function importBackup() {
+    if (!file) return;
+    setBusy(true);
     setResult(null);
     try {
       const form = new FormData();
-      form.append("file", f);
-      form.append("password", importPass);
+      form.append("file", file);
+      form.append("password", needsPass ? importPass : "");
       form.append("source_secret", showLegacy ? legacySecret : "");
       const r = await fetch(`${API_URL}/admin/restore`, { method: "POST", credentials: "include", body: form });
       const data = await r.json().catch(() => null);
-      if (!r.ok) throw new Error(data?.detail ?? `Falha (${r.status})`);
-      setResult({ ok: true, text: data?.note ?? "Backup restaurado." });
+      if (!r.ok) {
+        const msg: string = data?.detail ?? `Falha (${r.status})`;
+        // backup sem senha de OUTRA instalação: só abre com a chave de lá
+        if (!needsPass && msg.includes("APP_SECRET")) setShowLegacy(true);
+        throw new Error(msg);
+      }
+      clearImport();
+      setPanel(null);
+      setResult({ ok: true, text: data?.note ?? "Backup importado." });
     } catch (e) {
       setResult({ ok: false, text: e instanceof Error ? e.message : "Falha ao importar" });
     } finally {
-      setImporting(false);
-      setConfirmFile(null);
-      if (fileRef.current) fileRef.current.value = "";
+      setBusy(false);
     }
   }
 
+  async function resetAll() {
+    setBusy(true);
+    setResult(null);
+    try {
+      await api.post("/admin/reset", { password: resetPass });
+      // banco vazio: a sessão não existe mais → volta ao primeiro uso
+      window.location.href = "/setup";
+    } catch (e) {
+      setResult({ ok: false, text: e instanceof Error ? e.message : "Falha ao resetar" });
+      setBusy(false);
+    }
+  }
+
+  const btn = (p: BackupPanel, active: string) =>
+    `${pillCls} ${panel === p ? active : "border-border text-ink-soft hover:bg-hover hover:text-ink"}`;
+
   return (
     <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
-      <p className="flex items-center gap-2 text-sm font-semibold text-ink"><DatabaseBackup size={16} /> Backup e migração</p>
       <div className="flex flex-wrap items-center gap-2.5">
-        <input
-          type="password" value={exportPass} onChange={(e) => setExportPass(e.target.value)}
-          placeholder="Senha do backup (para outra instalação)"
-          autoComplete="new-password"
-          className="w-64 rounded-full border border-border bg-surface2 px-4 py-1.5 text-sm text-ink outline-none transition-colors placeholder:text-muted focus:border-accent"
-        />
-        <button onClick={exportBackup} disabled={exporting || (exportPass.length > 0 && exportPass.length < 8)} className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-          {exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Exportar sistema
+        <button onClick={() => fileRef.current?.click()} disabled={busy} className={btn("import", "border-accent/60 bg-accent/10 text-ink")}>
+          <Upload size={14} /> Importar
         </button>
         <input ref={fileRef} type="file" accept=".backup,.dump" className="hidden"
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) setConfirmFile(f); }} />
-        <button onClick={() => fileRef.current?.click()} disabled={importing} className="flex items-center gap-1.5 rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-60">
-          {importing ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} Importar backup
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickFile(f); }} />
+        <button onClick={() => open("export")} disabled={busy} className={btn("export", "border-accent/60 bg-accent/10 text-ink")}>
+          <Download size={14} /> Exportar
+        </button>
+        <button onClick={() => open("reset")} disabled={busy} className={`${btn("reset", "border-red-500/60 bg-red-500/10 text-red-300")} ml-auto`}>
+          <Trash2 size={14} /> Resetar
         </button>
       </div>
-      {confirmFile && (
-        <div className="space-y-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2.5 text-sm">
-          <p className="text-ink">
-            Importar <span className="font-mono text-xs">{confirmFile.name}</span>?{" "}
-            <span className="text-red-300">Isto SUBSTITUI todos os dados atuais</span> (usuários, chats, tudo). Não tem volta.
-          </p>
-          <input
-            type="password" value={importPass} onChange={(e) => setImportPass(e.target.value)}
-            placeholder="Senha do backup (se ele tiver)"
-            autoComplete="off"
-            className="w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none placeholder:text-muted focus:border-accent"
-          />
-          {showLegacy ? (
-            <input
-              type="password" value={legacySecret} onChange={(e) => setLegacySecret(e.target.value)}
-              placeholder="APP_SECRET da instalação de origem"
-              autoComplete="off"
-              className="w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-sm text-ink outline-none placeholder:font-sans placeholder:text-muted focus:border-accent"
-            />
-          ) : (
-            <button onClick={() => setShowLegacy(true)} className="text-xs text-muted underline hover:text-ink">
-              Backup antigo, sem senha, de outra instalação?
-            </button>
+
+      {panel === "export" && (
+        <div className="space-y-2.5 rounded-lg border border-border bg-surface2/40 p-3">
+          <label className="flex items-center justify-between gap-3 text-sm text-ink">
+            <span className="flex items-center gap-1.5">
+              Proteger com senha
+              <InfoDot text="Com senha, o backup pode ser importado em outra instalação (outro servidor ou o app desktop). Sem senha, só nesta." />
+            </span>
+            <Toggle on={withPass} onChange={setWithPass} />
+          </label>
+          {withPass && (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <input type="password" value={exportPass} onChange={(e) => setExportPass(e.target.value)}
+                placeholder="Senha (mín. 8 caracteres)" autoComplete="new-password" className={inputCls} />
+              <input type="password" value={exportPass2} onChange={(e) => setExportPass2(e.target.value)}
+                placeholder="Repita a senha" autoComplete="new-password" className={inputCls} />
+              {exportPass2 && exportPass !== exportPass2 && (
+                <p className="text-xs text-red-400 sm:col-span-2">As senhas não conferem.</p>
+              )}
+            </div>
           )}
-          <div className="flex items-center gap-2">
-            <button onClick={() => importBackup(confirmFile)} className="rounded-full bg-red-500/90 px-4 py-1 text-xs font-medium text-white hover:bg-red-500">
-              Sim, substituir tudo
-            </button>
-            <button onClick={() => { setConfirmFile(null); if (fileRef.current) fileRef.current.value = ""; }} className="rounded-full border border-border px-4 py-1 text-xs text-muted hover:text-ink">
-              Cancelar
+          <div className="flex justify-end">
+            <button onClick={exportBackup} disabled={busy || !exportPassOk}
+              className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Baixar backup
             </button>
           </div>
         </div>
       )}
+
+      {panel === "import" && file && (
+        <div className="space-y-2.5 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm">
+          <p className="text-ink">
+            Importar <span className="font-mono text-xs">{file.name}</span>?{" "}
+            <span className="text-red-300">Substitui todos os dados atuais</span> (usuários, chats, tudo).
+          </p>
+          {needsPass && (
+            <input type="password" value={importPass} onChange={(e) => setImportPass(e.target.value)}
+              placeholder="Senha do backup" autoComplete="off" autoFocus className={inputCls} />
+          )}
+          {showLegacy && (
+            <input type="password" value={legacySecret} onChange={(e) => setLegacySecret(e.target.value)}
+              placeholder="APP_SECRET da instalação de origem" autoComplete="off"
+              className={`${inputCls} font-mono placeholder:font-sans`} />
+          )}
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={() => { clearImport(); setPanel(null); }} className="rounded-full border border-border px-4 py-1.5 text-xs text-muted hover:text-ink">
+              Cancelar
+            </button>
+            <button onClick={importBackup} disabled={busy || (needsPass && !importPass) || (showLegacy && !legacySecret)}
+              className="flex items-center gap-1.5 rounded-full bg-red-500/90 px-4 py-1.5 text-xs font-medium text-white hover:bg-red-500 disabled:opacity-60">
+              {busy && <Loader2 size={13} className="animate-spin" />} Importar e substituir
+            </button>
+          </div>
+        </div>
+      )}
+
+      {panel === "reset" && (
+        <div className="space-y-2.5 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm">
+          <p className="text-ink">
+            <span className="font-medium text-red-300">Apaga tudo</span> — usuários, chats, modelos, memórias,
+            conexões, anexos e projetos — e volta a instalação ao primeiro uso. Não tem volta.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input type="password" value={resetPass} onChange={(e) => setResetPass(e.target.value)}
+              placeholder="Sua senha" autoComplete="current-password" autoFocus className={inputCls} />
+            <input value={resetWord} onChange={(e) => setResetWord(e.target.value)}
+              placeholder='Digite "APAGAR" para confirmar' autoComplete="off" className={inputCls} />
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <button onClick={() => { setPanel(null); setResetPass(""); setResetWord(""); }} className="rounded-full border border-border px-4 py-1.5 text-xs text-muted hover:text-ink">
+              Cancelar
+            </button>
+            <button onClick={resetAll} disabled={busy || !resetPass || resetWord.trim().toUpperCase() !== "APAGAR"}
+              className="flex items-center gap-1.5 rounded-full bg-red-500/90 px-4 py-1.5 text-xs font-medium text-white hover:bg-red-500 disabled:opacity-60">
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Apagar tudo
+            </button>
+          </div>
+        </div>
+      )}
+
       {result && (
         <p className={`rounded-lg px-3 py-2 text-xs ${result.ok ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"}`}>
           {result.text}

@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import tarfile
 import tempfile
 import uuid
@@ -24,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from . import __version__, audit_service, db_restore, network_config
 from .app_config import ALLOW_SIGNUPS, get_setting, set_setting
 from .auth.deps import require_admin
+from .auth.security import verify_password
 from .config import get_settings
 from .crypto import (
     BACKUP_MAGIC, BACKUP_MAGIC_V2, BACKUP_MAGIC_V3, BACKUP_V3_HEADER, backup_decryptor,
@@ -472,6 +474,28 @@ def _restore_tree(tar_path: str, prefix: str, dest_root: Path) -> int:
     return n
 
 
+async def _alembic_upgrade() -> tuple[int, str]:
+    """`alembic upgrade head` pelo interpretador atual (o desktop não tem o
+    executável `alembic` no PATH). Retorna (código, saída)."""
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "alembic", "upgrade", "head", cwd=str(_app_root()),
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+    )
+    out, _ = await proc.communicate()
+    return proc.returncode or 0, out.decode(errors="replace")
+
+
+async def _drop_caches() -> None:
+    """Caches em memória ficam órfãos do banco antigo depois de restore/reset."""
+    try:
+        from .db import engine
+        from .tools import sift_service
+        sift_service._cache.clear()
+        await engine.dispose()
+    except Exception:  # noqa: BLE001 - o restart recomendado resolve o resto
+        logger.exception("limpeza de caches falhou (siga com o restart)")
+
+
 async def _dump_alembic_rev(path: str) -> str | None:
     """Revisão do alembic gravada DENTRO do dump (sem restaurar nada): extrai só a
     tabela alembic_version como SQL e lê o valor do COPY."""
@@ -712,13 +736,9 @@ async def import_backup(
         # backup de versão ANTIGA → traz o esquema ao presente já aqui (antes o app
         # rodava com esquema velho até alguém lembrar do upgrade e tudo quebrava)
         migrate_note = ""
-        up = await asyncio.create_subprocess_exec(
-            "alembic", "upgrade", "head", cwd=str(_app_root()),
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-        )
-        up_out, _ = await up.communicate()
-        if up.returncode != 0:
-            logger.error("alembic upgrade pós-restore falhou: %s", up_out.decode(errors="replace")[-2000:])
+        up_code, up_out = await _alembic_upgrade()
+        if up_code != 0:
+            logger.error("alembic upgrade pós-restore falhou: %s", up_out[-2000:])
             migrate_note = (
                 " ATENÇÃO: as migrações pós-restore falharam — rode `alembic upgrade head` "
                 "manualmente antes de usar o sistema."
@@ -772,14 +792,7 @@ async def import_backup(
         except Exception:  # noqa: BLE001 - não pode bloquear o restore
             logger.exception("pós-restore: falha ao zerar status do WhatsApp")
 
-        # caches em memória ficam órfãos do banco antigo → limpa (best-effort)
-        try:
-            from .db import engine
-            from .tools import sift_service
-            sift_service._cache.clear()
-            await engine.dispose()
-        except Exception:  # noqa: BLE001 - o restart recomendado resolve o resto
-            logger.exception("limpeza pós-restore falhou (siga com o restart)")
+        await _drop_caches()
 
         logger.warning("Backup restaurado pelo admin %s", admin.email)
         await audit_service.record("backup_restored", user_id=admin.id, detail={"migrate_note": bool(migrate_note)})
@@ -798,3 +811,64 @@ async def import_backup(
                 except OSError:
                     pass
         shutil.rmtree(work_dir, ignore_errors=True)
+
+
+class ResetIn(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
+
+
+def _empty_dir(root: Path) -> int:
+    """Apaga o CONTEÚDO de `root` (a pasta fica). Retorna quantos itens saíram."""
+    if not root.is_dir():
+        return 0
+    n = 0
+    for item in root.iterdir():
+        try:
+            if item.is_dir() and not item.is_symlink():
+                # objetos do git são read-only: no Windows o rmtree precisa liberar
+                shutil.rmtree(item, onerror=lambda f, p, _e: (os.chmod(p, 0o700), f(p)))
+            else:
+                item.unlink()
+            n += 1
+        except OSError:
+            logger.exception("reset: não consegui apagar %s", item)
+    return n
+
+
+@router.post("/reset")
+async def reset_system(
+    body: ResetIn,
+    admin: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """APAGA TUDO e volta a instalação ao primeiro uso: esvazia o banco (usuários,
+    chats, modelos, memórias, segredos…), recria o esquema pelas migrações e limpa os
+    arquivos em disco (anexos, Codespace). Exige a senha do admin que pediu."""
+    if not verify_password(body.password, admin.hashed_password):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Senha incorreta.")
+    logger.warning("RESET do sistema pedido pelo admin %s", admin.email)
+
+    # derruba as outras conexões (pools do app) e esvazia o esquema numa transação
+    await db.execute(text(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+        "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+    ))
+    await db.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+    await db.execute(text("CREATE SCHEMA public"))
+    await db.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    await db.commit()
+
+    code, out = await _alembic_upgrade()
+    if code != 0:
+        logger.error("alembic upgrade pós-reset falhou: %s", out[-2000:])
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "O banco foi apagado, mas recriar as tabelas falhou — reinicie o servidor "
+            "(as migrações rodam no início).",
+        )
+
+    n_up = await run_in_threadpool(_empty_dir, _uploads_root())
+    n_cs = await run_in_threadpool(_empty_dir, _codespace_root())
+    logger.warning("reset concluído: %d item(ns) de anexos e %d do Codespace apagados", n_up, n_cs)
+    await _drop_caches()
+    return {"ok": True}
