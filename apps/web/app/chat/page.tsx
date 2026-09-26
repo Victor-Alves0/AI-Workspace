@@ -2904,6 +2904,11 @@ export default function ChatPage() {
         )}
       </main>
 
+      {/* Encaixe do painel de um AGENTE (SubagentCard renderiza aqui por portal): coluna
+          do layout, como os Controles — o chat encolhe e recentraliza em vez de ficar
+          coberto. Vazio, não ocupa espaço. */}
+      <div id="aiw-agent-slot" className="contents" />
+
       {/* Controles: coluna de altura total à direita, como a barra lateral esquerda */}
       {showControls && !workspaceOpen && (
         <>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { ArrowLeft, Check, ChevronDown, ChevronRight, Clock, GitBranch, Loader2, Sparkles, TriangleAlert, Users, X } from "lucide-react";
 import type { SubagentTimelineItem, ToolEvent } from "@/lib/types";
@@ -38,6 +38,10 @@ function usePanelOpen(k: string): boolean {
   );
 }
 
+const PANEL_KEY = "agent_panel_w";
+const PANEL_MIN = 320;
+const PANEL_MAX = 960;
+
 function SidePanel({
   icon, title, subtitle, running, onClose, onBack, children,
 }: {
@@ -49,17 +53,66 @@ function SidePanel({
   onBack?: () => void;
   children: React.ReactNode;
 }) {
+  const [w, setW] = useState<number>(() => {
+    if (typeof window === "undefined") return 440;
+    const v = Number(window.localStorage.getItem(PANEL_KEY));
+    return Number.isFinite(v) && v >= PANEL_MIN ? v : 440;
+  });
+  const ref = useRef<HTMLElement | null>(null);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // arrastar a borda esquerda: mais para a esquerda = painel mais largo (como os Controles)
+  const startDrag = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const el = ref.current;
+    if (!el) return;
+    const right = el.getBoundingClientRect().right;
+    // o pai direto é o encaixe `display: contents` (largura 0): mede o 1º ancestral com largura
+    let anc: HTMLElement | null = el.parentElement;
+    while (anc && anc.getBoundingClientRect().width === 0) anc = anc.parentElement;
+    const cap = Math.min(PANEL_MAX, Math.round((anc?.getBoundingClientRect().width ?? window.innerWidth) * 0.7));
+    const prev = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+    const move = (ev: PointerEvent) => setW(Math.max(PANEL_MIN, Math.min(Math.round(right - ev.clientX), cap)));
+    const up = () => {
+      document.body.style.userSelect = prev;
+      document.body.style.cursor = "";
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setW((cur) => { try { window.localStorage.setItem(PANEL_KEY, String(cur)); } catch { /* sem storage */ } return cur; });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   if (typeof document === "undefined") return null;
+  // no chat: entra na coluna do layout (o miolo encolhe e recentraliza); fora dele
+  // (ex.: página compartilhada), flutua à direita
+  const slot = document.getElementById("aiw-agent-slot");
+  const inline = !!slot;
   return createPortal(
     <aside
+      ref={ref}
       aria-label={title}
-      className="animate-slide-in-right fixed bottom-0 right-0 top-0 z-[70] flex w-full flex-col border-l border-border bg-bg shadow-2xl sm:w-[440px]"
+      style={{ "--agw": `${w}px` } as React.CSSProperties}
+      className={`animate-slide-in-right z-50 flex flex-col border-l border-border bg-bg ${
+        inline
+          ? "fixed inset-0 md:relative md:inset-auto md:z-auto md:h-full md:w-[var(--agw)] md:shrink-0"
+          : "fixed bottom-0 right-0 top-0 w-full shadow-2xl sm:w-[var(--agw)]"
+      }`}
     >
+      <div
+        onPointerDown={startDrag}
+        title="Arraste para redimensionar"
+        className="group absolute inset-y-0 -left-1 z-10 hidden w-2.5 cursor-col-resize items-stretch justify-center md:flex"
+      >
+        <span className="my-auto h-10 w-1 rounded-full bg-border transition-colors group-hover:bg-accent" />
+      </div>
       <div className="flex items-center gap-2 border-b border-border px-4 py-3">
         {onBack && (
           <button onClick={onBack} title="Voltar" className="shrink-0 rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink">
@@ -77,7 +130,7 @@ function SidePanel({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
     </aside>,
-    document.body,
+    slot ?? document.body,
   );
 }
 
