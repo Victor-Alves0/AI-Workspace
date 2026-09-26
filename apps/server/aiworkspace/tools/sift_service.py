@@ -22,6 +22,7 @@ import operator
 import os
 import re
 import shlex
+import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Iterable
@@ -719,6 +720,24 @@ def system_tools() -> list[dict[str, str]]:
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
 
+_JS_CHALLENGE_RE = re.compile(
+    r"cf-chl|challenge-platform|just a moment|checking your browser|attention required|"
+    r"enable javascript|ddos-guard|captcha-delivery|perimeterx|_incapsula_", re.I)
+_JS_REQUIRED_RE = re.compile(
+    r"(enable|turn on|ative|habilite)[^.<]{0,30}javascript|javascript (is )?(required|disabled)|"
+    r"requires javascript|precisa (do|de) javascript", re.I)
+
+
+def _needs_js(html: str, text: str) -> bool:
+    """O HTML cru parece não trazer o conteúdo (app de JavaScript, aviso de "habilite o
+    JavaScript" ou desafio anti-bot)? Aí vale renderizar num navegador de verdade."""
+    t = (text or "").strip()
+    if _JS_REQUIRED_RE.search(t[:3000]) or _JS_CHALLENGE_RE.search((html or "")[:20000]) and len(t) < 1500:
+        return True
+    # pouco texto num HTML com bastante script = página montada no navegador
+    return len(t) < 500 and (html or "").count("<script") >= 2 and len(html or "") > 1500
+
+
 async def _fetch_page(url: str, max_chars: int, find: str = "") -> dict[str, Any]:
     """Baixa uma URL pública e devolve o texto legível (HTML removido).
 
@@ -734,7 +753,11 @@ async def _fetch_page(url: str, max_chars: int, find: str = "") -> dict[str, Any
     except Exception as exc:  # noqa: BLE001
         return {"error": f"fetch failed: {exc}"}
     if r.status_code != 200:
-        return {"error": f"HTTP {r.status_code}"}
+        # 403/429/503 com página de desafio (Cloudflare & cia.) só abre num navegador
+        out: dict[str, Any] = {"error": f"HTTP {r.status_code}"}
+        if r.status_code in (403, 429, 503) and _JS_CHALLENGE_RE.search(r.text[:20000] or ""):
+            out["needs_js"] = True
+        return out
     ct = r.headers.get("content-type", "")
     if "html" not in ct and "text" not in ct:
         return {"error": f"unsupported content-type: {ct or 'unknown'}"}
@@ -743,6 +766,10 @@ async def _fetch_page(url: str, max_chars: int, find: str = "") -> dict[str, Any
     if m:
         title = deep_search._html_to_text(m.group(1))[:200]
     text = deep_search._html_to_text(r.text)
+    if _needs_js(r.text, text):
+        # SPA/"habilite o JavaScript": o HTML cru não tem o conteúdo
+        return {"ok": True, "url": str(r.url), "title": title, "text": text[:max_chars],
+                "chars": len(text[:max_chars]), "needs_js": True}
     if find:
         idx = text.lower().find(find.lower())
         if idx > 0:
@@ -1188,8 +1215,10 @@ def _register_builtins(
             description=(
                 "Fetch a web page by URL and return its readable text (HTML stripped). "
                 "Use this to actually READ a page's content — e.g. after web.search.query "
-                "gives you a link, or when the user hands you a URL. Public http/https "
-                "pages only. Optionally pass `find` to center the excerpt on a keyword."
+                "gives you a link, or when the user hands you a URL. Pages that need "
+                "JavaScript (web apps, anti-bot checks) are rendered in a real browser "
+                "automatically. Public http/https pages only. Optionally pass `find` to "
+                "center the excerpt on a keyword."
             ),
             params={
                 "url": "string:o::the page URL (http/https)",
@@ -1208,10 +1237,37 @@ def _register_builtins(
                 cap = max(500, min(int(max_chars or 6000), 20000))
             except (TypeError, ValueError):
                 cap = 6000
+            achar = (find or "").strip()
             try:
-                return asyncio.run(_fetch_page(u, cap, (find or "").strip()))
+                res = asyncio.run(_fetch_page(u, cap, achar))
             except Exception as exc:  # noqa: BLE001
                 return {"error": str(exc)}
+            if not res.get("needs_js"):
+                return res
+            # a página precisa de JavaScript: renderiza no navegador de verdade
+            endpoint = _browser_endpoint(browser_cfg)
+            if not endpoint or not _public_web_url(u):
+                res.pop("needs_js", None)
+                res["note"] = ("This page needs JavaScript and the browser is not available, "
+                               "so the text may be incomplete. Enable the browser in "
+                               "Settings → Connections → Web.")
+                return res
+            from .browser_driver import driver
+            driver.url_guard = _public_web_url
+            try:
+                out = driver.render(endpoint, f"read:{uuid.uuid4().hex[:10]}", u, max(cap * 4, 20000))
+            except Exception as exc:  # noqa: BLE001 - fica com o que o HTML cru deu
+                res.pop("needs_js", None)
+                res["note"] = f"page needs JavaScript; rendering failed ({str(exc)[:160]})"
+                return res
+            text = out.get("text") or ""
+            if achar:
+                idx = text.lower().find(achar.lower())
+                if idx > 0:
+                    text = text[max(0, idx - cap // 4):]
+            text = text[:cap]
+            return {"ok": True, "url": out.get("url") or u, "title": out.get("title") or res.get("title", ""),
+                    "text": text, "chars": len(text), "rendered": True}
 
     if want("github.public.search"):
         @sift.tool(

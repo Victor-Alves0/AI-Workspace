@@ -699,6 +699,35 @@ class BrowserDriver:
             raise CDPError("no open page — use action 'goto' with a URL first")
         return sess
 
+    async def _act_render(self, endpoint: str, key: str, url: str, max_chars: int) -> dict[str, Any]:
+        """Abre `url` numa aba descartável, espera o JavaScript montar a página (o texto
+        parar de crescer) e devolve o texto renderizado. Fecha a aba no fim. É o que o
+        "Ler Página" usa quando o HTML cru vem vazio (SPA) ou barrado por desafio."""
+        try:
+            await self._act_goto(endpoint, key, url)
+            sess = self._require(endpoint, key)
+            last, estavel = -1, 0
+            st: dict[str, Any] = {}
+            for _ in range(16):  # ~8s no máximo
+                st = await sess.eval(
+                    "({url: location.href, title: document.title,"
+                    " text: document.body ? document.body.innerText : ''})"
+                ) or {}
+                n = len(st.get("text") or "")
+                estavel = estavel + 1 if n == last and n > 0 else 0
+                if estavel >= 2 and n > 200:
+                    break
+                last = n
+                await asyncio.sleep(0.5)
+            return {
+                "ok": True,
+                "url": st.get("url") or url,
+                "title": (st.get("title") or "")[:200],
+                "text": (st.get("text") or "")[:max_chars],
+            }
+        finally:
+            await self._close_session(f"{endpoint}\x00{key}")
+
     async def _act_probe(self, endpoint: str) -> None:
         """Conecta e fecha um contexto — usado pelo 'Testar conexão'."""
         conn = await self._conn(endpoint)
@@ -726,6 +755,9 @@ class BrowserDriver:
 
     def screenshot(self, endpoint: str, key: str) -> bytes:
         return self._submit(self._act_screenshot(endpoint, key), timeout=_NAV_TIMEOUT + 10)
+
+    def render(self, endpoint: str, key: str, url: str, max_chars: int = 20000) -> dict[str, Any]:
+        return self._submit(self._act_render(endpoint, key, url, max_chars), timeout=_NAV_TIMEOUT + 40)
 
     def close(self, endpoint: str, key: str) -> dict[str, Any]:
         self._submit(self._close_session(f"{endpoint}\x00{key}"), timeout=15)
