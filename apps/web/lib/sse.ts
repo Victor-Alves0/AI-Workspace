@@ -115,7 +115,7 @@ export async function streamMessage(
   refDocIds?: string[],
   refChatIds?: string[],
   miniApp?: "imaginai" | null,
-): Promise<void> {
+): Promise<{ queued: boolean }> {
   const t0 = performance.now();
   const res = await authedFetch(`/chats/${chatId}/messages`, {
     method: "POST",
@@ -133,6 +133,12 @@ export async function streamMessage(
   // "do clique ao 'oi'": mede o tempo até o PRIMEIRO token e o correlaciona ao
   // trace do servidor (X-Trace-Id do próprio POST). Emite uma vez, no 1º token.
   const traceId = res.headers.get("X-Trace-Id");
+  // o chat já estava gerando (ex.: continuação no servidor): o back guardou a mensagem
+  // na fila dele e respondeu JSON em vez de abrir outro stream
+  if (res.ok && (res.headers.get("Content-Type") || "").includes("application/json")) {
+    const body = await res.json().catch(() => null);
+    return { queued: !!body?.queued };
+  }
   let firstTokenSent = false;
   await readSSE(res, (e) => {
     if (!firstTokenSent && e.type === "token") {
@@ -141,6 +147,7 @@ export async function streamMessage(
     }
     onEvent(e);
   });
+  return { queued: false };
 }
 
 // Mesa-redonda (multi-modelo): roda uma ou várias rodadas em que os participantes

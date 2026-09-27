@@ -40,6 +40,10 @@ import { recordingFilename } from "@/lib/audioFormat";
 import { describeToolCall } from "@/lib/activity";
 import { useDrawerSwipe } from "./useDrawerSwipe";
 import { SoundAutoplayContext } from "@/components/SoundChip";
+import type { QueueItem } from "@/components/QueueTray";
+
+// fila de mensagens por chat (bandeja do composer), guardada no navegador
+const QUEUE_KEY = "aiw_msg_queue";
 
 // Painéis usados apenas sob demanda não devem pesar no primeiro carregamento do
 // chat. O chat principal (mensagens/composer/model picker) continua imediato;
@@ -255,11 +259,37 @@ export default function ChatPage() {
   } = useImaginaiCampaign(active?.id ?? null, activeMiniApp === "imaginai", isActiveChat);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  // mensagens enviadas DURANTE a geração (fila/steer) — chips acima do composer até
-  // o turno terminar. steer=injeta no turno em curso; senão vira turno de continuação.
-  const [queued, setQueued] = useState<{ id: string; text: string; steer: boolean }[]>([]);
-  const queuedRef = useRef(queued);
-  queuedRef.current = queued;
+  // FILA de mensagens por chat (bandeja em cima do composer). Fica no navegador até
+  // ser despachada: o próximo item sai sozinho quando um turno termina; "Enviar agora"
+  // durante a geração injeta no turno em curso (steer) e o item fica marcado "sent" até
+  // o turno acabar. Parar pausa a fila daquele chat (nada sai sozinho até o próximo envio).
+  const [queues, setQueues] = useState<Record<string, QueueItem[]>>(() => {
+    try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || "{}") || {}; } catch { return {}; }
+  });
+  const queuesRef = useRef(queues);
+  queuesRef.current = queues;
+  useEffect(() => {
+    // só o que ainda não saiu: os "sent" já estão no servidor
+    const keep: Record<string, QueueItem[]> = {};
+    for (const [k, v] of Object.entries(queues)) {
+      const rest = v.filter((q) => !q.sent);
+      if (rest.length) keep[k] = rest;
+    }
+    try { localStorage.setItem(QUEUE_KEY, JSON.stringify(keep)); } catch { /* opcional */ }
+  }, [queues]);
+  const updateQueue = useCallback((chatId: string, fn: (q: QueueItem[]) => QueueItem[]) => {
+    setQueues((all) => {
+      const next = fn(all[chatId] ?? []);
+      const out = { ...all };
+      if (next.length) out[chatId] = next; else delete out[chatId];
+      return out;
+    });
+  }, []);
+  // chats cujo turno acabou normalmente e podem despachar o próximo item da fila
+  const [queueReady, setQueueReady] = useState<Record<string, boolean>>({});
+  // chats em que o usuário apertou Parar (o abort local também é usado pela rede de
+  // segurança pós-done, então não serve para distinguir)
+  const stoppedRef = useRef(new Set<string>());
   // Subsistema de GERAÇÃO (streaming/tools/imagem/conhecimento/áudio/subagentes/
   // guardas/artefato ao vivo + parser SSE + retomada + parar) — extraído p/ um hook.
   // getDeps é lido pós-render, então as deps podem ser declaradas mais abaixo.
@@ -1187,7 +1217,6 @@ export default function ChatPage() {
     setConsultingKnowledge(false);
     setTranscribingAudio(false);
     setGuardNote(null);
-    setQueued([]);
   }
 
   function goHome() {
@@ -1261,7 +1290,7 @@ export default function ChatPage() {
       if (!s.active) return;
       const cid = s.active.id;
       reloadMessages(cid).catch(() => {});
-      resumeStream(cid);
+      resumeAndFlow(cid);
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
@@ -1356,7 +1385,7 @@ export default function ChatPage() {
     }
     // se havia uma resposta sendo gerada quando o chat foi fechado/atualizado,
     // volta a acompanhá-la ao vivo em vez de mostrar só o que ficou salvo.
-    resumeStream(id);
+    resumeAndFlow(id);
   }
 
   async function newChat() {
@@ -1671,8 +1700,9 @@ export default function ChatPage() {
         // persistente: o servidor cancela a geração e salva o parcial
         const cid = chat.id;
         stopRef.current = () => { streamAbort.abort(); api.post(`/chats/${cid}/stop`).catch(() => {}); };
+        let serverQueued = false;
         try {
-          await streamMessage(chat.id, text, onEvent, streamAbort.signal, turnSkillIds, turnAttachments, turnAgentId, turnRefDocIds, turnRefChatIds, turnMiniApp);
+          serverQueued = (await streamMessage(chat.id, text, onEvent, streamAbort.signal, turnSkillIds, turnAttachments, turnAgentId, turnRefDocIds, turnRefChatIds, turnMiniApp)).queued;
         } catch (streamErr) {
           if (!isAbort(streamErr)) throw streamErr;   // Parar/rede de seguranca: segue p/ recarregar o parcial salvo
         }
@@ -1690,14 +1720,20 @@ export default function ChatPage() {
           setStreamingReasoning("");
           await reloadArtifacts(chat.id);
           if (state.imaginaiChanged) await refreshImaginaiCampaign(chat.id);
-          // as mensagens enfileiradas já "aterrissaram" (persistidas + no histórico):
-          // limpa os chips. Se havia FILA (não-steer), o back disparou um turno de
-          // continuação — re-assina p/ vê-lo ao vivo (best-effort; o poll é a rede).
-          if (queuedRef.current.length) {
-            const hadQueue = queuedRef.current.some((q) => !q.steer);
-            setQueued([]);
-            if (hadQueue) resumeStream(chat.id);
+          // os itens "Enviar agora" já aterrissaram no histórico: saem da bandeja. Se um
+          // deles chegou tarde demais p/ o turno, o back abriu um turno de continuação —
+          // re-assina p/ vê-lo ao vivo (best-effort; o poll é a rede). Senão, a fila segue.
+          // Depois de Parar (abort), a fila fica pausada: nada sai sozinho.
+          // Um "Enviar agora" tardio ou um envio que o servidor enfileirou abrem um turno
+          // de continuação lá: acompanha-o ao vivo e só então libera o próximo da fila
+          // (senão os itens seguintes cairiam na fila do servidor e sairiam grudados).
+          const steered = (queuesRef.current[chat.id] ?? []).some((q) => q.sent);
+          updateQueue(chat.id, (q) => q.filter((x) => !x.sent));
+          if (steered || serverQueued) {
+            await new Promise((r) => setTimeout(r, 400)); // o servidor registra a continuação
+            await resumeStream(chat.id);
           }
+          if (!stoppedRef.current.delete(chat.id)) setQueueReady((r) => ({ ...r, [chat.id]: true }));
         }
       }
       if (state.acc) notify("Resposta pronta", state.acc.replace(/\s+/g, " ").slice(0, 90));
@@ -1714,7 +1750,7 @@ export default function ChatPage() {
         try { await reloadMessages(cid2); } catch { /* offline de verdade: mantém o balão */ }
         setStreaming("");
         setStreamingReasoning("");
-        resumeStream(cid2);
+        resumeAndFlow(cid2);
         refreshChats();
         refreshBudget();
         return;
@@ -1754,21 +1790,99 @@ export default function ChatPage() {
     }
   }
 
-  // Enviar DURANTE a geração: não abre um 2º turno (o back enfileira). steer=true injeta
-  // no turno em curso (entre iterações); steer=false vira turno de continuação no fim.
-  async function enqueue(steer: boolean) {
+  // Enviar DURANTE a geração: Enter enfileira (bandeja); Alt+Enter = "Enviar agora".
+  function enqueue(steer: boolean) {
     const text = input.trim();
     if (!text || !active) return;
     setInput("");
-    const id = `q-${Date.now()}`;
-    setQueued((q) => [...q, { id, text, steer }]);
+    const id = `q-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    updateQueue(active.id, (q) => [...q, { id, text }]);
+    if (steer) void sendQueuedNow(id, text);
+  }
+
+  // "Enviar agora": gerando → injeta no turno em curso (steer; o item fica "Enviada"
+  // até o turno acabar); parado → vira o próximo turno já.
+  async function sendQueuedNow(id: string, textArg?: string) {
+    if (!active) return;
+    const chatId = active.id;
+    const text = textArg ?? queuesRef.current[chatId]?.find((q) => q.id === id)?.text;
+    if (!text) return;
+    if (sending) {
+      updateQueue(chatId, (q) => q.map((x) => (x.id === id ? { ...x, sent: true } : x)));
+      try {
+        await api.post(`/chats/${chatId}/messages`, { content: text, steer: true });
+      } catch {
+        updateQueue(chatId, (q) => q.map((x) => (x.id === id ? { ...x, sent: false } : x)));
+      }
+      return;
+    }
+    updateQueue(chatId, (q) => q.filter((x) => x.id !== id));
+    setQueueReady((r) => ({ ...r, [chatId]: false }));
+    await send(text);
+  }
+
+  // Fork: clona a conversa como está e manda a mensagem na cópia (o original segue)
+  async function forkWithQueued(id: string) {
+    if (!active) return;
+    const chatId = active.id;
+    const item = queuesRef.current[chatId]?.find((q) => q.id === id);
+    if (!item) return;
     try {
-      await api.post(`/chats/${active.id}/messages`, { content: text, steer });
-    } catch {
-      setQueued((q) => q.filter((x) => x.id !== id)); // falhou → desfaz o chip
-      setInput(text);
+      const clone = await api.post<Chat>(`/chats/${chatId}/clone`, { title: `${active.title} (fork)` });
+      updateQueue(chatId, (q) => q.filter((x) => x.id !== id));
+      await refreshChats();
+      await selectChat(clone.id);
+      setForkSend({ chatId: clone.id, text: item.text });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Não foi possível fazer o fork.");
     }
   }
+  // o envio no fork espera o chat novo estar ativo e livre (selectChat é assíncrono)
+  const [forkSend, setForkSend] = useState<{ chatId: string; text: string } | null>(null);
+  useEffect(() => {
+    if (!forkSend || active?.id !== forkSend.chatId || sending) return;
+    setForkSend(null);
+    void send(forkSend.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [forkSend, active?.id, sending]);
+
+  // turno terminou normalmente → despacha o próximo item da fila deste chat
+  useEffect(() => {
+    if (!active || sending || !queueReady[active.id]) return;
+    const next = (queues[active.id] ?? []).find((q) => !q.sent);
+    setQueueReady((r) => ({ ...r, [active.id]: false }));
+    if (!next) return;
+    updateQueue(active.id, (q) => q.filter((x) => x.id !== next.id));
+    void send(next.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id, sending, queueReady, queues]);
+
+  // retomada de uma geração em andamento (abrir o chat, F5): quando ela termina
+  // normalmente, a fila daquele chat segue
+  function resumeAndFlow(id: string) {
+    void resumeStream(id).then((ran) => {
+      if (ran && !stoppedRef.current.delete(id)) setQueueReady((r) => ({ ...r, [id]: true }));
+    });
+  }
+
+  // Parar pausa a fila deste chat: nada sai sozinho até o próximo turno terminar
+  function stopAndPauseQueue() {
+    if (active) {
+      setQueueReady((r) => ({ ...r, [active.id]: false }));
+      stoppedRef.current.add(active.id);
+      // os "Enviar agora" já foram gravados no servidor: aparecem no histórico
+      updateQueue(active.id, (q) => q.filter((x) => !x.sent));
+    }
+    handleStop();
+  }
+
+  const queueProps = active ? {
+    items: queues[active.id] ?? [],
+    onSendNow: (id: string) => { void sendQueuedNow(id); },
+    onDelete: (id: string) => updateQueue(active.id, (q) => q.filter((x) => x.id !== id)),
+    onEdit: (id: string, text: string) => updateQueue(active.id, (q) => q.map((x) => (x.id === id ? { ...x, text } : x))),
+    onFork: (id: string) => { void forkWithQueued(id); },
+  } : undefined;
 
   const editMessage = useCallback(async (id: string, content: string) => {
     if (!active) return;
@@ -2596,7 +2710,7 @@ export default function ChatPage() {
                   onDragLeave={() => setCsDropOver(false)}
                   onDrop={handleComposerFileDrop}
                 >
-                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} />
+                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={stopAndPauseQueue} onQueue={enqueue} queue={queueProps} sending={sending} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} />
                 </div>
                 {/* menu do "+" abre para baixo aqui (há espaço); na conversa abre para cima */}
                 {temporary && <p className="mt-2 text-xs text-muted">Chat temporário — esta conversa não será salva.</p>}
@@ -2813,7 +2927,7 @@ export default function ChatPage() {
                           {showAsk && askSpec && (
                             <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                           )}
-                          <div ref={promptBoxRef}><PromptBox value={input} onChange={setInput} onSend={send} onStop={handleStop} onQueue={enqueue} queued={queued} sending={sending} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} /></div>
+                          <div ref={promptBoxRef}><PromptBox value={input} onChange={setInput} onSend={send} onStop={stopAndPauseQueue} onQueue={enqueue} queue={queueProps} sending={sending} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} /></div>
                         </div>
                       </div>
                       {speakingMessageId && !imaginaiDocksShown && (

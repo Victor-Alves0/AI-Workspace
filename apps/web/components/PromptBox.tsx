@@ -7,8 +7,6 @@ import {
   Brain,
   Camera,
   Check,
-  Clock,
-  CornerDownRight,
   Database,
   Dices,
   FileText,
@@ -57,6 +55,7 @@ import { MenuItem, finePointer, useClickOutside } from "./ui";
 import { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME } from "./CodespaceFileBrowser";
 import { toolCategoryIcon, toolCategoryTitle } from "./toolCategory";
 import TextAttachmentModal from "./TextAttachmentModal";
+import QueueTray, { type QueueItem } from "./QueueTray";
 
 // docs binários com extração server-side (integração "Extração de Texto")
 const DOC_RE = /\.(pdf|docx|xlsx|xlsm|pptx|csv)$/i;
@@ -398,7 +397,7 @@ export default function PromptBox({
   onSend,
   onStop,
   onQueue,
-  queued = [],
+  queue,
   sending,
   recording,
   micStream,
@@ -443,8 +442,14 @@ export default function PromptBox({
   onStop?: () => void;
   /** enviar DURANTE a geração: enfileira (steer=false) ou injeta no turno (steer=true) */
   onQueue?: (steer: boolean) => void;
-  /** mensagens já enfileiradas neste turno (chips acima do composer) */
-  queued?: { id: string; text: string; steer: boolean }[];
+  /** fila de mensagens (bandeja presa em cima da caixa) e as ações de cada item */
+  queue?: {
+    items: QueueItem[];
+    onSendNow: (id: string) => void;
+    onDelete: (id: string) => void;
+    onEdit: (id: string, text: string) => void;
+    onFork: (id: string) => void;
+  };
   placeholder?: string;
   sending: boolean;
   recording: boolean;
@@ -906,6 +911,7 @@ export default function PromptBox({
 
   return (
     <div className="px-4 pt-2 pb-[max(0.6rem,env(safe-area-inset-bottom))] md:pb-5">
+      {queue && <QueueTray {...queue} />}
       <div
         /* só realça o que REALMENTE dá pra soltar aqui: arquivos do sistema, um
            arquivo do Codespace ou um trecho de código — arrastar uma seleção de
@@ -1178,23 +1184,6 @@ export default function PromptBox({
             onClose={() => setViewing(null)}
             onSave={(t) => saveTextAttachment(viewing, t)}
           />
-        )}
-        {/* mensagens enviadas DURANTE a geração: chips (fila/steer) até o turno acabar */}
-        {queued.length > 0 && (
-          <div className="mb-1.5 flex flex-wrap gap-1.5 px-1">
-            {queued.map((q) => (
-              <span
-                key={q.id}
-                title={q.steer ? "Injetada no turno atual (steer)" : "Na fila — continua após esta resposta"}
-                className={`flex max-w-[240px] items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs ${
-                  q.steer ? "border-accent/40 bg-accent/10 text-accent-hover" : "border-border bg-surface2 text-ink-soft"
-                }`}
-              >
-                {q.steer ? <CornerDownRight size={12} className="shrink-0" /> : <Clock size={12} className="shrink-0" />}
-                <span className="truncate">{q.text}</span>
-              </span>
-            ))}
-          </div>
         )}
         {/* compositor: uma camada de realce (chips $slug) atrás de um textarea de
             fundo transparente — mesma métrica de fonte/padding/altura de linha, então

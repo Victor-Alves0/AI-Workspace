@@ -403,32 +403,56 @@ async def chat_info(
     }
 
 
+class CloneIn(BaseModel):
+    title: str | None = Field(default=None, max_length=255)
+
+
+# configuração da conversa que a cópia herda (o fork continua "igual" ao original)
+_CLONE_CHAT_FIELDS = (
+    "folder_id", "model_config_id", "project_id", "mini_app", "system_prompt", "model",
+    "mode", "participants", "roundtable_config", "params", "memory_config",
+    "knowledge_config", "brain_config", "tags",
+)
+_CLONE_MSG_FIELDS = (
+    "role", "content", "tool_calls", "tool_call_id", "tokens", "cost", "usage", "reasoning",
+    "tool_events", "memories_used", "attachments", "mini_app", "speaker", "created_at",
+)
+
+
 @router.post("/{chat_id}/clone", response_model=ChatOut)
 async def clone_chat(
-    chat_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+    chat_id: uuid.UUID,
+    body: CloneIn | None = None,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
 ):
+    """Duplica a conversa (também é o "fork" da fila do composer). A cópia herda o modelo
+    e as configurações; as mensagens mantêm o `created_at` original — sem isso todas
+    ganhariam o mesmo now() da transação e a ordem da conversa se perderia. Resumos de
+    compactação não vêm: a cópia leva o histórico inteiro, sem nada compactado."""
     chat = await _get_owned_chat(db, chat_id, user)
     await db.refresh(chat, attribute_names=["messages"])
-    clone = Chat(
-        user_id=user.id,
-        folder_id=chat.folder_id,
-        title=f"{chat.title} (cópia)",
-        system_prompt=chat.system_prompt,
-        model=chat.model,
-        params=chat.params,
-    )
+    title = (body.title if body and body.title else None) or f"{chat.title} (cópia)"
+    clone = Chat(user_id=user.id, title=title[:255],
+                 **{f: getattr(chat, f) for f in _CLONE_CHAT_FIELDS})
     db.add(clone)
     await db.flush()
+    upload_ids: set[uuid.UUID] = set()
     for m in chat.messages:
-        db.add(
-            Message(
-                chat_id=clone.id,
-                role=m.role,
-                content=m.content,
-                tool_calls=m.tool_calls,
-                tool_call_id=m.tool_call_id,
-            )
-        )
+        if m.is_summary:
+            continue
+        db.add(Message(chat_id=clone.id, **{f: getattr(m, f) for f in _CLONE_MSG_FIELDS}))
+        for a in m.attachments or []:
+            try:
+                upload_ids.add(uuid.UUID(str(a.get("upload_id"))))
+            except (ValueError, TypeError, AttributeError):
+                pass
+    if upload_ids:
+        # anexos agora são de DUAS conversas: soltos do chat de origem, não somem em
+        # cascata se ele for apagado (continuam marcados como anexados)
+        from ..models.upload import Upload
+        await db.execute(update(Upload).where(
+            Upload.id.in_(upload_ids), Upload.user_id == user.id).values(chat_id=None))
     await db.commit()
     await db.refresh(clone)
     return clone

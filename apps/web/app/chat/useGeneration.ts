@@ -449,8 +449,9 @@ export function useGeneration(getDeps: () => GenerationDeps) {
   // Re-assina uma geração ainda em andamento no chat (ex.: o usuário deu F5 no
   // meio de uma resposta). A geração roda em background no servidor; aqui a UI só
   // volta a "ouvir". Só liga o estado "gerando" quando chega o 1º evento real —
-  // o servidor manda {type:"idle"} quando não há nada rodando.
-  async function resumeStream(id: string) {
+  // o servidor manda {type:"idle"} quando não há nada rodando. Retorna true se acompanhou
+  // uma geração até o fim (a fila do composer usa isso para seguir).
+  async function resumeStream(id: string): Promise<boolean> {
     const deps = getDeps();
     let started = false;
     const { handler, state, dispose } = makeStreamHandler(() => id);
@@ -482,7 +483,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
     dispose();
     // Uma retomada mais nova já assumiu o estado: a antiga não pode desligar o
     // composer nem recarregar mensagens por cima dela ao terminar o abort.
-    if (resumeAbortRef.current !== controller) return;
+    if (resumeAbortRef.current !== controller) return false;
     resumeAbortRef.current = null;
     // ao encerrar, só mexe na UI/recarrega se o chat ainda está aberto — senão
     // sobrescreveria a tela do chat para onde o usuário navegou.
@@ -499,6 +500,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       if (state.imaginaiChanged) await deps.onImaginaiTurnComplete?.(id);
       deps.refreshChats();
     }
+    return started;
   }
 
   // botão "Parar" do composer: interrompe o turno em geração (o parcial fica)
