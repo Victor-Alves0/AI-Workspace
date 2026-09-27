@@ -110,6 +110,25 @@ def test_passos_ignoram_descoberta_e_leem_o_execute_tool():
     assert ts._step_of("web__page__read", {"url": "https://a.b"}) == ("web.page.read", "https://a.b")
 
 
+def test_passo_guarda_a_chamada_e_o_comeco_do_resultado():
+    """Clicar em "Pesquisando “x”" no painel do agente mostra a chamada e o que voltou —
+    curtos, porque com dezenas de agentes isso vai inteiro para o histórico."""
+    chamada = ts._call_preview("execute_tool", {"path": "web.search.query", "params": {"query": "gta 6"}})
+    assert '"tool": "web.search.query"' in chamada and '"query": "gta 6"' in chamada
+    grande = ts._result_preview({"results": [{"title": "t" * 50}] * 100})
+    assert len(grande) <= ts._RESULT_PREVIEW + 4 and grande.endswith("[…]")
+    assert ts._result_preview({"error": "bloqueado pelo site"}) == "bloqueado pelo site"
+
+
+def test_equipe_apara_chamada_e_resultado_quando_estoura_a_conta():
+    from aiworkspace.chat.subagent_team import _trim_timeline
+    passo = {"kind": "tool", "tool": "web.search.query", "ok": True, "call": "c" * 300, "preview": "r" * 300}
+    out = _trim_timeline([passo, dict(passo)], cap=800)
+    assert "preview" in out[0] and "call" in out[0]           # cabe
+    assert "preview" not in out[1] and "call" not in out[1]   # estourou: fica só a frase
+    assert out[1]["tool"] == "web.search.query"
+
+
 async def test_dispatcher_repassa_o_progresso_do_agente():
     async def runner(key, task, new=None, progress=None):
         progress({"tool": "web.search.query", "detail": "café"})

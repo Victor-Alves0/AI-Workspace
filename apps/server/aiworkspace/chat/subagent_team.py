@@ -120,6 +120,13 @@ def _trim_timeline(timeline: list[dict], cap: int) -> list[dict]:
             used += len(txt)
             out.append({**it, "text": txt})
         else:
+            # passo de ferramenta: a chamada/resultado (abrem ao clicar) entram na mesma
+            # conta; esgotada, o passo fica só com a frase ("Pesquisando “x”")
+            extra = len(str(it.get("call") or "")) + len(str(it.get("preview") or ""))
+            if extra and used + extra > cap:
+                it = {k: v for k, v in it.items() if k not in ("call", "preview")}
+            else:
+                used += extra
             out.append(it)
     return out
 

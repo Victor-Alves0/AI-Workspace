@@ -353,7 +353,9 @@ export interface ToolEvent {
 
 export type SubagentTimelineItem =
   | { kind: "reasoning" | "text"; text: string }
-  | { kind: "tool"; tool: string; detail?: string; ok?: boolean | null; args?: Record<string, unknown> };
+  | { kind: "tool"; tool: string; detail?: string; ok?: boolean | null; args?: Record<string, unknown>;
+      /** a chamada (parâmetros) e o começo do que voltou — abrem ao clicar no passo */
+      call?: string; preview?: string };
 
 export interface SubagentLive {
   name: string;

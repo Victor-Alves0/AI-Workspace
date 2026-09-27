@@ -1008,6 +1008,43 @@ _STEP_KEYS = ("action", "path", "query", "url", "command", "cmd", "title", "symb
               "topic", "prompt", "task", "team_name", "name")
 
 
+# o que a UI mostra ao abrir um passo do agente ("Pesquisando “x”" → a chamada e o que
+# voltou). Curto de propósito: com dezenas de agentes isso vai inteiro para o histórico.
+_CALL_PREVIEW = 600
+_RESULT_PREVIEW = 800
+
+
+def _preview_text(value: Any, limit: int) -> str:
+    if isinstance(value, str):
+        txt = value
+    else:
+        try:
+            txt = json.dumps(value, ensure_ascii=False, default=str, indent=1)
+        except (TypeError, ValueError):
+            txt = str(value)
+    txt = txt.strip()
+    return txt if len(txt) <= limit else txt[:limit].rstrip() + " […]"
+
+
+def _call_preview(name: str, args: Any) -> str:
+    """A chamada como o agente fez (os parâmetros; em execute_tool, a tool de verdade)."""
+    a = args
+    if isinstance(args, str):
+        try:
+            a = json.loads(args)
+        except ValueError:
+            return _preview_text(args, _CALL_PREVIEW)
+    if name == "execute_tool" and isinstance(a, dict):
+        a = {"tool": a.get("path"), **(a.get("params") if isinstance(a.get("params"), dict) else {})}
+    return _preview_text(a, _CALL_PREVIEW)
+
+
+def _result_preview(res: Any) -> str:
+    if isinstance(res, dict) and res.get("error"):
+        return _preview_text(res.get("error"), _RESULT_PREVIEW)
+    return _preview_text(res, _RESULT_PREVIEW)
+
+
 def _step_args(name: str, args: Any) -> dict[str, Any]:
     """Os poucos argumentos que dizem O QUE o passo faz (a UI monta a frase: "Editando
     src/app.ts", "Pesquisando “x”"), curtos; nunca o conteúdo de um arquivo."""
@@ -1175,23 +1212,26 @@ def _make_subagent_runner(
                     if passo is not None and len(steps) < 60:
                         item = {"tool": passo[0], "detail": passo[1], "ok": None}
                         resumo = _step_args(str(ev.get("name") or ""), ev.get("arguments"))
+                        chamada = _call_preview(str(ev.get("name") or ""), ev.get("arguments"))
                         steps.append(item)
-                        timeline.append({"kind": "tool", **item, "args": resumo})
+                        timeline.append({"kind": "tool", **item, "args": resumo, "call": chamada})
                         abertos.setdefault(str(ev.get("name")), []).append(item)
                         if progress is not None:
-                            progress({"tool": passo[0], "detail": passo[1], "args": resumo})
+                            progress({"tool": passo[0], "detail": passo[1], "args": resumo, "call": chamada})
                 elif t == "tool_result":
                     fila = abertos.get(str(ev.get("name")))
                     if fila:
                         res = ev.get("result")
                         feito = fila.pop(0)
                         feito["ok"] = not (isinstance(res, dict) and res.get("error"))
+                        previa = _result_preview(res)
                         for passo_t in reversed(timeline):
                             if passo_t["kind"] == "tool" and passo_t["tool"] == feito["tool"] and passo_t["ok"] is None:
                                 passo_t["ok"] = feito["ok"]
+                                passo_t["preview"] = previa
                                 break
                         if progress is not None:
-                            progress({"result": feito["tool"], "ok": feito["ok"]})
+                            progress({"result": feito["tool"], "ok": feito["ok"], "preview": previa})
         except Exception as exc:  # noqa: BLE001
             if wt_task_id:
                 from ..codespace import worktree_service

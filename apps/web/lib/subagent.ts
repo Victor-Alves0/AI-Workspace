@@ -15,7 +15,7 @@ export function applySubagentProgress(live: SubagentLive, ev: Record<string, unk
     for (let i = timeline.length - 1; i >= 0; i--) {
       const it = timeline[i];
       if (it.kind === "tool" && it.tool === ev.result && it.ok == null) {
-        timeline[i] = { ...it, ok: ev.ok !== false };
+        timeline[i] = { ...it, ok: ev.ok !== false, ...(typeof ev.preview === "string" ? { preview: ev.preview } : {}) };
         break;
       }
     }
@@ -23,6 +23,7 @@ export function applySubagentProgress(live: SubagentLive, ev: Record<string, unk
     timeline.push({
       kind: "tool", tool: ev.tool, detail: typeof ev.detail === "string" ? ev.detail : undefined, ok: null,
       args: ev.args && typeof ev.args === "object" ? (ev.args as Record<string, unknown>) : undefined,
+      call: typeof ev.call === "string" ? ev.call : undefined,
     });
   }
   return { ...live, timeline };

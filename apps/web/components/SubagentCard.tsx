@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { ArrowLeft, Check, ChevronDown, ChevronRight, Clock, GitBranch, Loader2, Sparkles, TriangleAlert, Users, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, ChevronRight, ChevronUp, Clock, GitBranch, Loader2, Sparkles, TriangleAlert, Users, X } from "lucide-react";
 import type { SubagentTimelineItem, ToolEvent } from "@/lib/types";
 import { timelineFromSteps } from "@/lib/subagent";
 import { describeStep } from "@/lib/activity";
@@ -172,16 +172,7 @@ function AgentTimeline({ r }: { r: ReturnType<typeof resumo> }) {
       {timeline.map((t, i) => (
         <Item key={i} dot={t.kind === "tool" ? (t.ok === false ? "bg-amber-400" : "bg-emerald-400") : "bg-muted"}>
           {t.kind === "tool" ? (
-            <div className="flex min-w-0 items-center gap-2 text-xs">
-              {t.ok === false
-                ? <TriangleAlert size={12} className="shrink-0 text-amber-400" />
-                : t.ok == null && running && i === timeline.length - 1
-                  ? <Loader2 size={12} className="shrink-0 animate-spin text-accent-hover" />
-                  : <Check size={12} className="shrink-0 text-green-400" />}
-              <span className="min-w-0 truncate text-ink-soft" title={[t.tool, t.detail].filter(Boolean).join(" · ")}>
-                {describeStep(t.tool, t.detail, t.args)}
-              </span>
-            </div>
+            <ToolStepRow step={t} spinning={t.ok == null && running && i === timeline.length - 1} />
           ) : t.kind === "reasoning" ? (
             <div className="whitespace-pre-wrap">{t.text}</div>
           ) : (
@@ -206,6 +197,59 @@ function AgentTimeline({ r }: { r: ReturnType<typeof resumo> }) {
         </Item>
       )}
     </ol>
+  );
+}
+
+/** Um passo de ferramenta do agente ("Pesquisando “x”"). Mesma cara de sempre; quando
+ *  há o que mostrar, clicar abre a chamada e o que voltou (a setinha no fim diz se está
+ *  aberto). Passos antigos, sem chamada/resultado gravados, ficam só como texto. */
+function ToolStepRow({ step, spinning }: {
+  step: Extract<SubagentTimelineItem, { kind: "tool" }>;
+  spinning: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const podeAbrir = !!(step.call || step.preview);
+  const icon = step.ok === false
+    ? <TriangleAlert size={12} className="shrink-0 text-amber-400" />
+    : spinning
+      ? <Loader2 size={12} className="shrink-0 animate-spin text-accent-hover" />
+      : <Check size={12} className="shrink-0 text-green-400" />;
+  const texto = describeStep(step.tool, step.detail, step.args);
+  if (!podeAbrir) {
+    return (
+      <div className="flex min-w-0 items-center gap-2 text-xs">
+        {icon}
+        <span className="min-w-0 truncate text-ink-soft" title={[step.tool, step.detail].filter(Boolean).join(" · ")}>{texto}</span>
+      </div>
+    );
+  }
+  const Seta = open ? ChevronUp : ChevronDown;
+  return (
+    <div className="min-w-0">
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+        className="flex w-full min-w-0 items-center gap-2 text-left text-xs">
+        {icon}
+        <span className="min-w-0 truncate text-ink-soft" title={[step.tool, step.detail].filter(Boolean).join(" · ")}>{texto}</span>
+        <Seta size={12} className="shrink-0 text-muted" />
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1.5">
+          {step.call && <StepBlock label="Chamada" text={step.call} />}
+          {step.preview
+            ? <StepBlock label={step.ok === false ? "Erro" : "Resultado"} text={step.preview} />
+            : spinning && <p className="text-[11px] text-muted">aguardando o resultado…</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StepBlock({ label, text }: { label: string; text: string }) {
+  return (
+    <div>
+      <p className="mb-0.5 text-[10px] font-medium uppercase tracking-wider text-muted">{label}</p>
+      <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-surface2 px-2.5 py-2 font-mono text-[11px] leading-[1.45] text-ink-soft">{text}</pre>
+    </div>
   );
 }
 
