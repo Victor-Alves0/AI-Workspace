@@ -20,6 +20,7 @@ Reference guide for AI Workspace. If you just want to get it running, start with
 | [integration-auth.md](integration-auth.md) | How each integration authenticates: which ones are a button, which need a key, and why (PT) |
 | [remote-terminal.md](remote-terminal.md) | Terminal nas suas máquinas (VPS): agente, proxy de saída e killswitch (PT) |
 | [desktop.md](desktop.md)             | Desktop app (Tauri): tray, autostart, build |
+| [sync.md](sync.md)                   | Sincronização entre instâncias (servidor ↔ desktop): pareamento, o que viaja, conflitos (PT) |
 | [desktop-updates.md](desktop-updates.md) | How a `.exe` user goes from one version to the next, without losing data (PT) |
 | [development.md](development.md)     | Running without Docker, tests, monorepo layout |
 

@@ -38,6 +38,7 @@ from .task_ledger import TaskLedger
 from .api_key import ApiKey, ApiRequest
 from .trace import ObsTrace, ObsSpan
 from .remote_host import RemoteHost
+from .sync_peer import SyncPeer
 from .imaginai import (
     ImaginaiActionAttempt,
     ImaginaiCampaign,
@@ -109,6 +110,7 @@ __all__ = [
     "ObsTrace",
     "ObsSpan",
     "RemoteHost",
+    "SyncPeer",
     "ImaginaiCampaign",
     "ImaginaiEntity",
     "ImaginaiEvent",

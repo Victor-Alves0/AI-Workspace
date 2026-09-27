@@ -3,18 +3,19 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft, Bug, Check, ChevronLeft, DatabaseBackup, Download, Gauge, HeartPulse, Loader2, Network,
+  ArrowLeft, ArrowLeftRight, Bug, Check, ChevronLeft, DatabaseBackup, Download, Gauge, HeartPulse, Loader2, Network,
   RefreshCw, Shield, Trash2, Upload, Users, X,
 } from "lucide-react";
 import { api, API_URL, ApiError } from "@/lib/api";
 import type { AdminUser } from "@/lib/types";
 import ObservabilityView from "@/components/ObservabilityView";
 import HealthView from "@/components/HealthView";
+import SyncAdmin from "@/components/SyncAdmin";
 import { InfoDot, Toggle } from "@/components/ui";
 import { checkDesktopUpdate, installDesktopUpdate, isDesktop } from "@/lib/desktop";
 
 /* ------------------------------- navegação por cards ------------------------ */
-type AdminSection = "users" | "network" | "update" | "backup" | "observability" | "health";
+type AdminSection = "users" | "network" | "update" | "backup" | "sync" | "observability" | "health";
 
 const ADMIN_CARDS: { key: AdminSection; name: string; desc: string; icon: ReactNode }[] = [
   { key: "users", name: "Usuários", desc: "Aprovar, remover e cadastros", icon: <Users size={22} /> },
@@ -23,6 +24,7 @@ const ADMIN_CARDS: { key: AdminSection; name: string; desc: string; icon: ReactN
   { key: "network", name: "Rede", desc: "IPs permitidos, host e porta", icon: <Network size={22} /> },
   { key: "update", name: "Atualização", desc: "Verificar novas versões", icon: <RefreshCw size={22} /> },
   { key: "backup", name: "Backup e migração", desc: "Exportar/importar o sistema", icon: <DatabaseBackup size={22} /> },
+  { key: "sync", name: "Sincronização", desc: "Mesmos dados no servidor e no desktop", icon: <ArrowLeftRight size={22} /> },
 ];
 
 /* card quadrado da grade (mesmo visual do Espaço de Trabalho) */
@@ -328,6 +330,13 @@ export default function AdminPage() {
         {section === "update" && (
           <AdminShell title="Atualização" onBack={() => setSection(null)}>
             <UpdateSection />
+          </AdminShell>
+        )}
+
+        {/* SEÇÃO: Sincronização entre instâncias */}
+        {section === "sync" && (
+          <AdminShell title="Sincronização" onBack={() => setSection(null)}>
+            <SyncAdmin />
           </AdminShell>
         )}
 

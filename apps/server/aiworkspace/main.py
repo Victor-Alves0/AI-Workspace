@@ -48,6 +48,7 @@ from .imaginai_routes import router as imaginai_router
 from .models_routes import router as models_router
 from .observability import install_logging, metrics
 from .observability_routes import router as observability_router
+from .sync.routes import admin_router as sync_admin_router, peer_router as sync_peer_router
 from .prompts_routes import router as prompts_router
 from .remote_routes import router as remote_router
 from .settings_routes import router as settings_router
@@ -160,6 +161,14 @@ async def lifespan(app: FastAPI):
         bg.spawn(exec_jobs.recover_orphans())
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível iniciar o reaper de exec_jobs (%s)", exc)
+    # sincronização entre instâncias: troca periódica com os pares que esta instância
+    # alcança, e completa a captura de mudanças de tabelas novas (após uma atualização)
+    try:
+        from .sync import service as sync_service
+        sync_service.start_scheduler()
+        bg.spawn(sync_service.ensure_capture())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Não foi possível iniciar a sincronização (%s)", exc)
     # reaper dos previews (dev servers no ar): derruba os velhos/caídos.
     try:
         from .codespace import preview_service
@@ -404,7 +413,8 @@ def create_app() -> FastAPI:
         # disco), então nenhum outro endpoint precisa aceitar dezenas de MB. A restauração
         # de backup (só admin) também grava o arquivo no disco aos pedaços — e um backup
         # passa fácil de gigabytes.
-        if not (request.url.path.startswith("/uploads") or request.url.path in _STREAMED_BODY_PATHS):
+        if not (request.url.path.startswith(("/uploads", "/sync/v1/blob/"))
+                or request.url.path in _STREAMED_BODY_PATHS):
             declarado = request.headers.get("content-length")
             if declarado and declarado.isdigit() and int(declarado) > settings.max_json_body_bytes:
                 metrics.record(request.method, request.url.path, 413, 0.0)
@@ -510,6 +520,8 @@ def create_app() -> FastAPI:
     app.include_router(playground_router)
     app.include_router(security_router)
     app.include_router(observability_router)
+    app.include_router(sync_peer_router)
+    app.include_router(sync_admin_router)
     # API pública: /v1/* (Bearer token) + /api-keys (painel, cookie)
     app.include_router(api_v1_router)
     app.include_router(api_mgmt_router)

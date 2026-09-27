@@ -39,6 +39,10 @@ _SCOPE_EVIDENCE = (
 # que o recurso não é por-usuário. Manter curta — se crescer, a regra virou decoração.
 _ALLOWLIST: dict[str, str] = {
     "share_routes.py::get_shared_chat": "link público é a funcionalidade (compartilhamento explícito)",
+    # chamadas da OUTRA instância pareada (sem sessão de usuário): _blob_row exige o
+    # token do segredo do par E que o anexo seja de uma conta comum aos dois (user_map)
+    "sync/routes.py::get_blob": "instância pareada; token do par + anexo de conta em comum (_blob_row)",
+    "sync/routes.py::put_blob": "instância pareada; token do par + anexo de conta em comum (_blob_row)",
 }
 
 _METHODS = {"get", "post", "put", "patch", "delete"}
