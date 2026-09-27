@@ -80,7 +80,7 @@ export default function LoginPage() {
     >
       <form onSubmit={submit} className="space-y-7">
         <h1 className="text-xl font-semibold tracking-tight text-ink">
-          {mode === "login" ? "Entre no seu AI Workspace" : "Crie sua conta"}
+          {mode === "login" ? "Entre no workspace" : "Crie sua conta"}
         </h1>
 
         <div className="space-y-6">

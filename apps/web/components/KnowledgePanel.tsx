@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle, ArrowLeft, BookOpen, Brain, Check, ChevronRight, Download, Eye, FilePlus2, FileText,
   Film as FilmIcon, Folder, FolderInput, FolderPlus, Home, Image as ImageIcon, Loader2, Pencil, Plus,
@@ -119,7 +119,12 @@ function MoveMenu({
  *  Com `kind="brain"` vira o explorador de CÉREBROS (Espaço → Cérebros): notas
  *  markdown [[interligadas]] que a IA lê/escreve, com vista de Grafo e editor
  *  de nota com preview/navegação por wikilink. */
-export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }) {
+/** `setHeaderAction`: o botão "Nova base/Novo cérebro" vai para a linha do título da
+ *  seção (quem hospeda o painel renderiza); sem ele, fica no topo do próprio painel. */
+export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
+  kind?: "kb" | "brain";
+  setHeaderAction?: (node: ReactNode) => void;
+}) {
   const isBrain = kind === "brain";
   const confirm = useConfirm();
   const [bases, setBases] = useState<KnowledgeBase[]>([]);
@@ -394,6 +399,18 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
   }
 
   const current = bases.find((b) => b.id === sel);
+
+  // botão de criar na linha do título: só na lista de bases (dentro de uma base, não)
+  const newLabel = isBrain ? "Novo cérebro" : "Nova base";
+  useEffect(() => {
+    if (!setHeaderAction) return;
+    setHeaderAction(current || creating ? null : (
+      <button onClick={() => setCreating(true)} className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover">
+        <Plus size={15} /> {newLabel}
+      </button>
+    ));
+  }, [setHeaderAction, current, creating, newLabel]);
+  useEffect(() => () => setHeaderAction?.(null), [setHeaderAction]);
   const folderById = useMemo(() => Object.fromEntries(folders.map((f) => [f.id, f])), [folders]);
   const breadcrumb = useMemo(() => {
     const path: KnowledgeFolder[] = [];
@@ -664,13 +681,13 @@ export default function KnowledgeView({ kind = "kb" }: { kind?: "kb" | "brain" }
   // ---- Lista de bases --------------------------------------------------- //
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-end">
-        {!creating && (
+      {!setHeaderAction && !creating && (
+        <div className="flex items-center justify-end">
           <button onClick={() => setCreating(true)} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover">
-            <Plus size={16} /> {isBrain ? "Novo cérebro" : "Nova base"}
+            <Plus size={16} /> {newLabel}
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {creating && (
         <div className="flex items-center gap-2 rounded-xl border border-border bg-surface p-2.5">

@@ -438,6 +438,9 @@ export default function WorkspaceView({
     setQ("");
     setTagFilter(null);
   }
+  // botão "Nova base/Novo cérebro" que o painel de conhecimento põe na linha do título
+  const [kbAction, setKbAction] = useState<ReactNode>(null);
+
   function backHome() {
     setSection(null);
     setQ("");
@@ -1053,15 +1056,15 @@ export default function WorkspaceView({
 
       {/* --------------------------- seções ainda por vir ------------------------- */}
       {section === "Conhecimento" && (
-        <SectionShell title="Conhecimento" onBack={backHome}
+        <SectionShell title="Conhecimento" onBack={backHome} actions={kbAction}
           hint="Organize documentos em pastas e acople as bases a um modelo ou chat para a IA responder com citações.">
-          <KnowledgeView />
+          <KnowledgeView setHeaderAction={setKbAction} />
         </SectionShell>
       )}
       {section === "Cerebros" && (
-        <SectionShell title="Cérebros" onBack={backHome}
+        <SectionShell title="Cérebros" onBack={backHome} actions={kbAction}
           hint="Notas interligadas que a IA lê e escreve. Acople um cérebro a um modelo ou chat e ele passa a anotar e consultar o que aprende.">
-          <KnowledgeView kind="brain" />
+          <KnowledgeView kind="brain" setHeaderAction={setKbAction} />
         </SectionShell>
       )}
       {section === "Apps" && (
