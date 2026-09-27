@@ -13,15 +13,36 @@ metabusca só com o DuckDuckGo; o segundo, a metabusca completa.
 
 A escolha do provider e as chaves vêm de `SearchConfig` (montada por chamada,
 considerando env global + segredos do usuário).
+
+Resiliência (muitos agentes pesquisando ao mesmo tempo — antes a busca "morria":
+os motores respondiam CAPTCHA/429 e a chamada voltava vazia):
+  - poucas metabuscas simultâneas, num pool de threads PRÓPRIO: o excesso espera na
+    fila em vez de martelar os motores (e não rouba as threads do resto do app);
+  - cache curto + voo único: agentes com a mesma busca dividem UMA ida aos motores;
+  - motor que respondeu bloqueio (CAPTCHA/429/403/timeout) descansa alguns minutos
+    e as próximas buscas usam os outros;
+  - até 3 tentativas com espera curta, trocando de motores;
+  - fallback entre providers: metabusca esgotada → Tavily/Brave (se houver chave), e
+    Tavily/Brave com erro → metabusca;
+  - teto de tempo por busca, bem abaixo do watchdog das tools.
+A tool chama isto de dentro de `asyncio.run` numa thread (um loop por chamada), então
+tudo aqui é thread-safe e independe de event loop.
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import random
+import threading
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import Any, Callable, TypedDict
 
 import httpx
-from fastapi.concurrency import run_in_threadpool
+
+logger = logging.getLogger(__name__)
 
 
 class SearchResult(TypedDict):
@@ -45,6 +66,9 @@ class SearchConfig:
     multi: bool = False
     # domínios a EXCLUIR dos resultados (separados por vírgula na UI)
     domain_filter: tuple[str, ...] = ()
+    # último recurso: busca pela página de resultados no navegador headless
+    # (query, max_results) → resultados. Injetada pela tool quando há navegador.
+    browser_search: Callable[[str, int], list] | None = None
 
 
 class SearchProviderError(Exception):
@@ -57,6 +81,7 @@ _PROVIDERS = {
     "metasearch": lambda q, c: _metasearch(q, c),
     "tavily": lambda q, c: _tavily(q, c),
     "brave": lambda q, c: _brave(q, c),
+    "browser": lambda q, c: _browser(q, c),
     # preferências antigas
     "duckduckgo": lambda q, c: _metasearch(q, c, engines="duckduckgo"),
     "searxng": lambda q, c: _metasearch(q, c),
@@ -70,12 +95,198 @@ def _blocked(url: str, domains: tuple[str, ...]) -> bool:
     return any(d and d.lower() in u for d in domains)
 
 
+# --------------------------------------------------------------------------- #
+# Resiliência                                                                 #
+# --------------------------------------------------------------------------- #
+_META_CONCURRENCY = 6          # metabuscas simultâneas (cada uma já abre 2 motores)
+_ATTEMPTS = 3
+_SEARCH_DEADLINE = 75.0        # segundos, fila inclusa (watchdog das tools = 120s)
+_CACHE_TTL = 600.0
+_CACHE_MAX = 500
+_COOLDOWN_BLOCK = 300.0        # CAPTCHA / 429 / 403
+_COOLDOWN_TIMEOUT = 60.0
+_RETRY_BASE = 0.7              # espera entre tentativas: base × nº da tentativa + jitter
+
+import contextvars
+
+_ATTEMPT: contextvars.ContextVar[int] = contextvars.ContextVar("websearch_attempt", default=0)
+
+_POOL = ThreadPoolExecutor(max_workers=_META_CONCURRENCY, thread_name_prefix="websearch")
+_LOCK = threading.Lock()
+_CACHE: dict[tuple, tuple[float, list[SearchResult]]] = {}
+_INFLIGHT: dict[tuple, Future] = {}
+_COOLING: dict[str, float] = {}   # motor da metabusca → até quando descansa
+
+
+def _classify(err: str) -> float:
+    e = err.lower()
+    if any(k in e for k in ("ratelimit", "rate limit", "429", "403", "captcha", "blocked", "forbidden", "too many")):
+        return _COOLDOWN_BLOCK
+    if "timed out" in e or "timeout" in e or "dns" in e:
+        return _COOLDOWN_TIMEOUT
+    return 0.0
+
+
+def _cool(engine: str, err: str) -> None:
+    secs = _classify(err)
+    if engine and secs:
+        with _LOCK:
+            _COOLING[engine] = max(_COOLING.get(engine, 0.0), time.monotonic() + secs)
+
+
+class _EngineErrors(logging.Handler):
+    """A ddgs só registra no log qual motor falhou ("Error in engine %s: %r"); é daqui
+    que vem o descanso por motor. Repassa ao log normal só o que é WARNING+."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            if record.msg == "Error in engine %s: %r" and record.args and len(record.args) >= 2:
+                _cool(str(record.args[0]), repr(record.args[1]))
+            elif record.levelno >= logging.WARNING:
+                logging.getLogger("aiworkspace.search.ddgs").handle(record)
+        except Exception:  # noqa: BLE001 - log nunca derruba a busca
+            pass
+
+
+def _install_engine_watch() -> None:
+    lg = logging.getLogger("ddgs.ddgs")
+    if not any(isinstance(h, _EngineErrors) for h in lg.handlers):
+        lg.addHandler(_EngineErrors())
+        lg.setLevel(logging.INFO)
+        lg.propagate = False
+
+
+def _all_engines() -> list[str]:
+    try:
+        from ddgs.engines import ENGINES
+        return list(ENGINES["text"].keys())
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _healthy_backend(engines: str, region: str = "wt-wt") -> str:
+    """"auto" menos os motores em descanso. Se todos estão descansando, tenta todos.
+    Sem região ("wt-wt") a Wikipedia da ddgs consulta wt.wikipedia.org, que não
+    existe — falhava em TODA busca; fica de fora."""
+    auto = (engines or "auto") in ("auto", "all")
+    if not auto:
+        pedidos = [e.strip() for e in engines.split(",") if e.strip()]
+    else:
+        pedidos = _all_engines()
+        if not pedidos:
+            return "auto"
+        if (region or "wt-wt") == "wt-wt":
+            pedidos = [e for e in pedidos if e != "wikipedia"]
+    agora = time.monotonic()
+    with _LOCK:
+        livres = [e for e in pedidos if _COOLING.get(e, 0.0) <= agora]
+    if not livres:
+        return engines or "auto"
+    if auto and len(livres) == len(pedidos) and len(pedidos) == len(_all_engines()):
+        return "auto"
+    return ",".join(livres)
+
+
+def _cache_key(provider: str, query: str, cfg: SearchConfig) -> tuple:
+    return (provider, " ".join(query.lower().split()), cfg.max_results, cfg.engines, cfg.region,
+            bool(cfg.tavily_api_key), bool(cfg.brave_api_key))
+
+
+async def _single_flight(key: tuple, make) -> list[SearchResult]:
+    """Cache curto + UMA ida aos motores para buscas iguais simultâneas (vale entre
+    threads/loops: quem chega depois espera o Future de quem já está buscando)."""
+    agora = time.monotonic()
+    with _LOCK:
+        hit = _CACHE.get(key)
+        if hit and hit[0] > agora:
+            return list(hit[1])
+        fut = _INFLIGHT.get(key)
+        dono = fut is None
+        if dono:
+            fut = Future()
+            _INFLIGHT[key] = fut
+    if not dono:
+        return list(await asyncio.wrap_future(fut))
+    try:
+        res = await make()
+    except BaseException as exc:
+        with _LOCK:
+            _INFLIGHT.pop(key, None)
+        fut.set_exception(exc if isinstance(exc, Exception) else RuntimeError(str(exc)))
+        fut.exception()  # marca como observada (sem "Future exception was never retrieved")
+        raise
+    with _LOCK:
+        _INFLIGHT.pop(key, None)
+        if res:
+            if len(_CACHE) >= _CACHE_MAX:
+                for k in sorted(_CACHE, key=lambda k: _CACHE[k][0])[: _CACHE_MAX // 5]:
+                    _CACHE.pop(k, None)
+            _CACHE[key] = (time.monotonic() + _CACHE_TTL, list(res))
+    fut.set_result(res)
+    return res
+
+
+async def _with_retries(provider: str, query: str, cfg: SearchConfig) -> list[SearchResult]:
+    fn = _PROVIDERS.get(provider, _PROVIDERS["metasearch"])
+    tentativas = (_ATTEMPTS if provider in ("metasearch", "searxng", "duckduckgo")
+                  else 1 if provider == "browser" else 2)
+    ultimo: Exception | None = None
+    for i in range(tentativas):
+        _ATTEMPT.set(i)
+        try:
+            return await fn(query, cfg)
+        except _NoKey:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            ultimo = exc
+            if i + 1 < tentativas:
+                await asyncio.sleep(_RETRY_BASE * (i + 1) + random.uniform(0, _RETRY_BASE))
+    assert ultimo is not None
+    raise ultimo
+
+
+def _fallbacks(provider: str, cfg: SearchConfig) -> list[str]:
+    if provider in ("tavily", "brave"):
+        out = ["metasearch"]
+    else:
+        out = []
+        if cfg.tavily_api_key:
+            out.append("tavily")
+        if cfg.brave_api_key:
+            out.append("brave")
+    if cfg.browser_search is not None:
+        out.append("browser")
+    return out
+
+
+async def _resilient(provider: str, query: str, cfg: SearchConfig) -> list[SearchResult]:
+    erros: list[str] = []
+    for prov in [provider, *_fallbacks(provider, cfg)]:
+        try:
+            found = await _with_retries(prov, query, cfg)
+        except Exception as exc:  # noqa: BLE001
+            erros.append(f"{prov}: {(str(exc).strip() or type(exc).__name__)[:200]}")
+            continue
+        if found or prov == provider and not _fallbacks(provider, cfg):
+            return found
+        erros.append(f"{prov}: sem resultados")
+    raise SearchProviderError("; ".join(erros) or "sem resultados")
+
+
 async def _one(
     provider: str, query: str, cfg: SearchConfig
 ) -> tuple[list[SearchResult], str | None]:
-    fn = _PROVIDERS.get((provider or "").lower(), _PROVIDERS["metasearch"])
+    provider = (provider or "metasearch").lower()
+    if provider not in _PROVIDERS:
+        provider = "metasearch"
     try:
-        return await fn(query, cfg), None
+        found = await asyncio.wait_for(
+            _single_flight(_cache_key(provider, query, cfg), lambda: _resilient(provider, query, cfg)),
+            timeout=_SEARCH_DEADLINE,
+        )
+        return found, None
+    except asyncio.TimeoutError:
+        return [], f"{provider}: a busca demorou demais (muitas buscas na fila); tente de novo"
     except Exception as exc:  # noqa: BLE001 - um provider falho não derruba a busca
         motivo = str(exc).strip() or type(exc).__name__
         return [], f"{provider}: {motivo[:300]}"
@@ -123,34 +334,63 @@ async def web_search_detailed(
 
 
 async def _metasearch(query: str, cfg: SearchConfig, engines: str | None = None) -> list[SearchResult]:
-    """Metabusca da ddgs: dispara vários motores em paralelo e agrega/ordena."""
+    """Metabusca da ddgs: dispara vários motores em paralelo e agrega/ordena. Roda no
+    pool próprio (fila limitada) e pula os motores que estão descansando de um bloqueio."""
+    _install_engine_watch()
+    backend = _healthy_backend(engines or cfg.engines or "auto", cfg.region or "wt-wt")
+    # nova tentativa: sorteia outros motores (a ddgs sempre começa pelos de maior
+    # prioridade — sem isto a 2ª tentativa batia nos mesmos que acabaram de falhar)
+    if _ATTEMPT.get() > 0:
+        pool = backend.split(",") if backend != "auto" else [
+            e for e in _all_engines() if (cfg.region or "wt-wt") != "wt-wt" or e != "wikipedia"]
+        if len(pool) > 3:
+            backend = ",".join(random.sample(pool, 3))
+
     def _run() -> list[SearchResult]:
         from ddgs import DDGS
         from ddgs.exceptions import DDGSException
 
         try:
-            found = DDGS().text(
+            found = DDGS(timeout=6).text(
                 query,
                 region=cfg.region or "wt-wt",
                 safesearch="moderate",
                 max_results=cfg.max_results,
-                backend=(engines or cfg.engines or "auto"),
+                backend=backend,
             )
         except DDGSException as exc:
-            # "No results found" com todos os motores falhando (ex.: CAPTCHA de IP de
-            # servidor): o motivo precisa chegar ao teste de conexão e à tool
+            # "No results found." também é o que sai quando os motores devolvem página de
+            # bloqueio sem erro — por isso conta como falha (e a próxima tentativa troca
+            # de motores). Todos os motores falhando (ex.: CAPTCHA de IP de servidor): o motivo
+            # precisa chegar ao teste de conexão e à tool
             raise SearchProviderError(f"metabusca sem resultado: {exc}") from exc
         return [
             {"title": r.get("title", ""), "url": r.get("href", r.get("url", "")), "content": r.get("body", "")}
             for r in found or []
         ]
 
-    return await run_in_threadpool(_run)
+    return await asyncio.wrap_future(_POOL.submit(_run))
+
+
+class _NoKey(SearchProviderError):
+    """Provider escolhido sem chave configurada: não adianta tentar de novo."""
+
+
+# renderizar pesa: no máximo 2 buscas pelo navegador ao mesmo tempo
+_BROWSER_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="websearch-browser")
+
+
+async def _browser(query: str, cfg: SearchConfig) -> list[SearchResult]:
+    if cfg.browser_search is None:
+        raise _NoKey("sem navegador configurado")
+    found = await asyncio.wrap_future(_BROWSER_POOL.submit(cfg.browser_search, query, cfg.max_results))
+    return [{"title": r.get("title", ""), "url": r.get("url", ""), "content": r.get("content", "")}
+            for r in found or []]
 
 
 async def _tavily(query: str, cfg: SearchConfig) -> list[SearchResult]:
     if not cfg.tavily_api_key:
-        return [{"title": "Erro", "url": "", "content": "Configure a chave do Tavily"}]
+        raise _NoKey("configure a chave do Tavily")
     async with httpx.AsyncClient(timeout=20) as client:
         resp = await client.post(
             "https://api.tavily.com/search",
@@ -174,7 +414,7 @@ async def _tavily(query: str, cfg: SearchConfig) -> list[SearchResult]:
 
 async def _brave(query: str, cfg: SearchConfig) -> list[SearchResult]:
     if not cfg.brave_api_key:
-        return [{"title": "Erro", "url": "", "content": "Configure a chave do Brave"}]
+        raise _NoKey("configure a chave do Brave")
     async with httpx.AsyncClient(timeout=20) as client:
         resp = await client.get(
             "https://api.search.brave.com/res/v1/web/search",

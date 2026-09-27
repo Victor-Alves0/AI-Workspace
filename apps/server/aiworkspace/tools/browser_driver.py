@@ -728,6 +728,23 @@ class BrowserDriver:
         finally:
             await self._close_session(f"{endpoint}\x00{key}")
 
+    async def _act_extract(self, endpoint: str, key: str, url: str, script: str) -> Any:
+        """Abre `url` numa aba descartável e roda `script` (uma expressão JS) até ele
+        devolver algo não vazio — ou ~6s. Fecha a aba no fim. É a busca na web pelo
+        navegador de verdade quando os motores barram as requisições diretas."""
+        try:
+            await self._act_goto(endpoint, key, url)
+            sess = self._require(endpoint, key)
+            out: Any = None
+            for _ in range(12):
+                out = await sess.eval(script)
+                if out:
+                    break
+                await asyncio.sleep(0.5)
+            return out
+        finally:
+            await self._close_session(f"{endpoint}\x00{key}")
+
     async def _act_probe(self, endpoint: str) -> None:
         """Conecta e fecha um contexto — usado pelo 'Testar conexão'."""
         conn = await self._conn(endpoint)
@@ -758,6 +775,9 @@ class BrowserDriver:
 
     def render(self, endpoint: str, key: str, url: str, max_chars: int = 20000) -> dict[str, Any]:
         return self._submit(self._act_render(endpoint, key, url, max_chars), timeout=_NAV_TIMEOUT + 40)
+
+    def extract(self, endpoint: str, key: str, url: str, script: str) -> Any:
+        return self._submit(self._act_extract(endpoint, key, url, script), timeout=_NAV_TIMEOUT + 20)
 
     def close(self, endpoint: str, key: str) -> dict[str, Any]:
         self._submit(self._close_session(f"{endpoint}\x00{key}"), timeout=15)

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import dataclasses
 import datetime as _dt
 import json
 import logging
@@ -984,6 +985,80 @@ async def _library_read(user_id: str | None, kind: str, key: str) -> dict[str, A
         await eng.dispose()
 
 
+# Busca pela PÁGINA de resultados no navegador de verdade — último recurso quando os
+# motores barram as requisições diretas (CAPTCHA/429 por IP, típico com muitos agentes
+# pesquisando juntos). Os links vêm "embrulhados" em redirecionadores; o JS desembrulha.
+_BROWSER_SEARCH_PAGES = (
+    # Yahoo entrega a SERP completa ao headless (o Bing degrada: busca só uma palavra)
+    ("https://search.yahoo.com/search?p={q}", r"""(() => {
+      const out = [];
+      for (const b of document.querySelectorAll('#web .algo')) {
+        const h3 = b.querySelector('h3');
+        const a = (h3 && h3.closest('a')) || b.querySelector('a[href^="http"]');
+        if (!h3 || !a) continue;
+        let url = a.href;
+        const m = url.match(/\/RU=([^/]+)\//);
+        if (m) { try { url = decodeURIComponent(m[1]); } catch (e) {} }
+        if (/(^|\.)yahoo\.com\//.test(new URL(url).host + '/')) continue;
+        const p = b.querySelector('.compText');
+        out.push({title: h3.textContent.trim(), url, content: p ? p.textContent.trim() : ''});
+      }
+      return out;
+    })()"""),
+    ("https://html.duckduckgo.com/html/?q={q}", r"""(() => {
+      const out = [];
+      for (const r of document.querySelectorAll('.result')) {
+        const a = r.querySelector('.result__a'); if (!a) continue;
+        let url = a.href;
+        try { const u = new URL(url).searchParams.get('uddg'); if (u) url = decodeURIComponent(u); } catch (e) {}
+        const p = r.querySelector('.result__snippet');
+        out.push({title: a.textContent.trim(), url, content: p ? p.textContent.trim() : ''});
+      }
+      return out;
+    })()"""),
+    ("https://www.bing.com/search?q={q}", r"""(() => {
+      const out = [];
+      for (const li of document.querySelectorAll('li.b_algo')) {
+        const a = li.querySelector('h2 a'); if (!a) continue;
+        let url = a.href;
+        try {
+          const u = new URL(url).searchParams.get('u');
+          if (url.includes('bing.com/ck/') && u && u.startsWith('a1'))
+            url = atob(u.slice(2).replace(/-/g, '+').replace(/_/g, '/'));
+        } catch (e) {}
+        const p = li.querySelector('.b_caption p, p');
+        out.push({title: a.textContent.trim(), url, content: p ? p.textContent.trim() : ''});
+      }
+      return out;
+    })()"""),
+)
+
+
+def browser_web_search(endpoint: str, query: str, max_results: int) -> list[dict[str, str]]:
+    """Pesquisa abrindo a página de resultados (Yahoo, DuckDuckGo, Bing) no navegador
+    headless e lendo os links do DOM. Levanta erro se nenhuma página render resultados."""
+    from urllib.parse import quote_plus
+
+    from .browser_driver import driver
+    driver.url_guard = _public_web_url
+    erros: list[str] = []
+    for tpl, script in _BROWSER_SEARCH_PAGES:
+        try:
+            found = driver.extract(endpoint, f"search:{uuid.uuid4().hex[:10]}",
+                                   tpl.format(q=quote_plus(query)), script) or []
+        except Exception as exc:  # noqa: BLE001 - tenta a próxima página
+            erros.append(str(exc)[:120])
+            continue
+        out = [
+            {"title": str(r.get("title") or "")[:200], "url": str(r.get("url") or ""),
+             "content": str(r.get("content") or "")[:400]}
+            for r in found if isinstance(r, dict) and str(r.get("url") or "").startswith("http")
+        ]
+        if out:
+            return out[:max_results]
+    raise RuntimeError("navegador sem resultados" + (f": {'; '.join(erros)}" if erros else ""))
+
+
 def _browser_endpoint(browser_cfg: dict | None) -> str:
     """Endpoint CDP do navegador (ws_url[?token=]) resolvido por CAMADAS:
     config por-usuário (Conexões → Web) primeiro; senão o env (BROWSER_WS_URL/
@@ -1191,7 +1266,15 @@ def _register_builtins(
         def _web_search(query: str = "", limit: int = 5) -> dict[str, Any]:
             try:
                 n = max(1, min(int(limit or 5), 10))
-                results, errors = asyncio.run(web_search_detailed(query, search_cfg))
+                cfg = search_cfg
+                # último recurso quando os motores barram: a página de resultados no
+                # navegador de verdade (se houver navegador configurado)
+                endpoint = _browser_endpoint(browser_cfg)
+                if endpoint:
+                    cfg = dataclasses.replace(
+                        search_cfg,
+                        browser_search=lambda q, k, _ep=endpoint: browser_web_search(_ep, q, k))
+                results, errors = asyncio.run(web_search_detailed(query, cfg))
                 if not results and errors:
                     # vazio POR FALHA ≠ vazio de verdade: o modelo precisa saber que a
                     # busca não funcionou, senão conclui que "não existe nada sobre isso"
