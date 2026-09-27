@@ -134,6 +134,11 @@ _CODESPACE_WORK = ("code.files.write", "code.exec.run", "code.exec.jobs", "code.
 # classe num chat de projeto — é onde as tarefas longas acontecem e onde convergir
 # importa. Ver [[harness-engineering-north-star]].
 _CODESPACE_ALL = (*_CODESPACE_READ, *_CODESPACE_WORK, "task.ledger.track", "http.session.use")
+# Espaço de trabalho de um chat COMUM (sem projeto): tudo continua liberado, mas só o
+# essencial vai fixo no prompt — rodar, ler e escrever. O resto (grafo, fluxo, preview,
+# worktrees, jobs, ledger, sessão HTTP) é achado sob demanda pelo search_tools. Fixar
+# todas custava ~5 mil tokens em CADA turno de qualquer chat com ferramentas.
+_WORKSPACE_PINS = ("code.exec.run", "code.files.browse", "code.files.write")
 
 
 def _allow_match(path: str, allow: list[str]) -> bool:
@@ -189,10 +194,12 @@ def codespace_allow(allow: list[str]) -> list[str]:
     return sorted(set(allow) | set(_CODESPACE_ALL))
 
 
-def codespace_pins(pin_paths: list[str], allow: list[str]) -> list[str]:
+def codespace_pins(pin_paths: list[str], allow: list[str], *, workspace_only: bool = False) -> list[str]:
     """Pins de um chat de projeto: os do modelo + TODAS as tools de código que
-    estão no escopo (num chat de Codespace, são sempre todas — ver codespace_allow)."""
-    return sorted(set(pin_paths) | {p for p in _CODESPACE_ALL if _allow_match(p, allow)})
+    estão no escopo (num chat de Codespace, são sempre todas — ver codespace_allow).
+    `workspace_only` (chat comum com espaço de trabalho): só as essenciais."""
+    fixas = _WORKSPACE_PINS if workspace_only else _CODESPACE_ALL
+    return sorted(set(pin_paths) | {p for p in fixas if _allow_match(p, allow)})
 
 
 def _allow_patterns(tool_ids: list[str], rows: list[Any]) -> list[str]:
@@ -474,7 +481,7 @@ async def get_sift_for_user(
             # modelo precisa adivinhar que elas existem via search_tools — o
             # caminho onde modelos fracos desistem e respondem "não tenho acesso
             # ao código" (ver [[tool-exposure-hallucination]]).
-            pin_paths = codespace_pins(pin_paths, allow)
+            pin_paths = codespace_pins(pin_paths, allow, workspace_only=not codespace_project_id)
         try:
             scope = full.scope(allow=allow, pin=pin_paths or None)
         except Exception as exc:  # noqa: BLE001 - pin fora do allow etc.: segue sem pin

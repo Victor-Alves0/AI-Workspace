@@ -104,3 +104,15 @@ def test_web_context_pack_promotes_search_and_page_read_together():
 def test_context_pack_never_expands_permission_by_itself():
     """O pack muda exposição, jamais adiciona uma ferramenta não liberada."""
     assert context_direct_pins(["utils.time.now"]) == []
+
+
+def test_espaco_de_trabalho_de_chat_comum_fixa_so_o_essencial():
+    """Chat comum com espaço de trabalho: tudo liberado, mas só rodar/ler/escrever vão
+    fixos no prompt (o resto sai do search_tools) — fixar tudo custava ~5 mil tokens."""
+    allow = codespace_allow(["web.search.query"])
+    pins = codespace_pins(["web.search.query"], allow, workspace_only=True)
+    assert set(pins) == {"web.search.query", "code.exec.run", "code.files.browse", "code.files.write"}
+    # continua tudo liberado (descoberta sob demanda)
+    assert {"code.graph.query", "code.preview.serve", "task.ledger.track"} <= set(allow)
+    # chat de PROJETO segue com todas fixas
+    assert "code.preview.serve" in codespace_pins([], allow)

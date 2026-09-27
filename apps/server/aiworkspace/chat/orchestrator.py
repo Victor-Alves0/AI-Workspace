@@ -395,8 +395,10 @@ WORKSPACE_DIRECTIVE = (
     "WORKSPACE — this chat has its own private sandbox: a folder with a real shell and code "
     "tools, created on first use. Use it whenever a task needs files or execution: download "
     "programs or repositories (code.exec.run with git clone / curl / wget), unpack, build, run "
-    "and test them, read and search files (code.files.browse), analyze code "
-    "(code.graph.query, code.flow.analyze) and write files (code.files.write). These tools "
+    "and test them, read and search files (code.files.browse) and write files "
+    "(code.files.write). More workspace tools are one search_tools away: code analysis "
+    "(code.graph.query, code.flow.analyze), a live preview server (code.preview.serve), "
+    "background jobs (code.exec.jobs) and a task ledger (task.ledger.track). These tools "
     "ACTUALLY run — never say you cannot download, open or run something, and never invent "
     "output you did not observe. No root, no Docker: install toolchains with mise."
 )
