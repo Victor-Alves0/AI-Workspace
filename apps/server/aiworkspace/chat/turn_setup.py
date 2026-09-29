@@ -13,6 +13,7 @@ import base64
 import binascii
 import json
 import logging
+import re
 import time
 import uuid
 from collections.abc import Callable
@@ -30,7 +31,7 @@ from .. import extraction
 from ..config import get_settings
 from ..db import SessionLocal
 from ..integrations import chatgpt_service, ollama_service, providers_service
-from ..models import Artifact, Chat, KnowledgeBase, KnowledgeDoc, Message, ModelConfig, Skill, User
+from ..models import Artifact, Chat, CodespaceProject, KnowledgeBase, KnowledgeDoc, Message, ModelConfig, Skill, User
 from ..secrets_service import IMAGEGEN_KEY, OPENROUTER_KEY, VOICE_KEY, get_secret
 from ..tools.loader import get_sift_for_user, tool_config
 from ..usage_service import usage_event_from_record
@@ -286,6 +287,70 @@ def _workspace_on(chat: Chat | None, model_config: ModelConfig | None) -> bool:
     return (model_config.capabilities or {}).get("workspace", True) is not False
 
 
+# Sinais de que a conversa PRECISA do sandbox (arquivos/execução). Falso-positivo só
+# fixa as 3 tools de código (o comportamento antigo); falso-negativo as deixa a um
+# search_tools de distância — por isso a lista é ampla mas sem palavras de uso comum
+# em pedidos de apresentação ("gráfico", "tabela", "código" sozinho não contam).
+_WORKSPACE_INTENT_RE = re.compile(
+    r"(?i)"
+    r"\bgit\b|\bclon(?:e|ar|a)\b|reposit[óo]ri|\brepos?\b|github\.com|gitlab\.com"
+    r"|\bbaix(?:ar|e|ando)\b|\bdownload"
+    r"|\binstal(?:ar|e|a|l)\b|\b(?:pip|npm|pnpm|yarn|cargo|mvn|gradle|mise)\b"
+    r"|\bcompil(?:ar|e|a)\b|\bcompile\b"
+    r"|\bexecut(?:ar|e|a)\b|\bexecute\b|\brod(?:ar|e)\b|\brun\b"
+    r"|\btest(?:ar|es|s)\b|\bpytest\b"
+    r"|\bscript\b|\bterminal\b|\bshell\b|\bsandbox\b|\bworkspace\b|espa[çc]o de trabalho"
+    r"|\bpasta\b|\bfolder\b"
+    r"|\.(?:py|js|ts|sh|ps1|java|go|rs|c|cpp|zip|tar|gz|tgz|7z|jar|ipynb)\b"
+)
+
+
+def _workspace_intent(text: str | None, attachments: list[dict] | None = None) -> bool:
+    """A mensagem pede algo que exige arquivos/execução (baixar, rodar, testar um
+    programa/repo) ou traz um arquivo de código/pacote anexado."""
+    if text and _WORKSPACE_INTENT_RE.search(text):
+        return True
+    for a in attachments or []:
+        name = str((a or {}).get("name") or "") if isinstance(a, dict) else ""
+        if name and _WORKSPACE_INTENT_RE.search(name):
+            return True
+    return False
+
+
+async def _workspace_active(
+    db: AsyncSession, chat: Chat | None, model_config: ModelConfig | None,
+    text: str | None = None, attachments: list[dict] | None = None,
+) -> bool:
+    """O espaço de trabalho de um chat comum está ATIVO neste turno? (política em
+    tools/loader._WORKSPACE_PINS). Ativo = a mensagem pede arquivos/execução, ou o
+    espaço do chat já existe (a IA já trabalhou nele e a conversa segue nisso).
+    `text` None (regenerar/continuar/retomar): usa a última mensagem do usuário."""
+    if not _workspace_on(chat, model_config):
+        return False
+    if text is None and attachments is None:
+        try:
+            last = (await db.scalars(
+                select(Message).where(Message.chat_id == chat.id, Message.role == "user")
+                .order_by(Message.created_at.desc()).limit(1)
+            )).first()
+        except Exception:  # noqa: BLE001 - sinal opcional: na dúvida, dormente
+            last = None
+        if last is not None:
+            text, attachments = last.content, (last.attachments or None)
+    if _workspace_intent(text, attachments if isinstance(attachments, list) else None):
+        return True
+    try:
+        row = (await db.scalars(
+            select(CodespaceProject.id).where(
+                CodespaceProject.user_id == chat.user_id,
+                CodespaceProject.scope["chat_workspace"].astext == str(chat.id),
+            ).limit(1)
+        )).first()
+        return row is not None
+    except Exception:  # noqa: BLE001 - sem banco/coluna: dormente (tools seguem liberadas)
+        return False
+
+
 async def _prepare_turn(db: AsyncSession, user: User, chat: Chat):
     """Prepara um turno e devolve também seus valores efetivos de runtime.
 
@@ -301,6 +366,7 @@ async def _prepare_turn(db: AsyncSession, user: User, chat: Chat):
         db, user.id, model_config,
         codespace_project_id=str(chat.project_id) if chat.project_id else None,
         workspace=_workspace_on(chat, model_config),
+        workspace_active=await _workspace_active(db, chat, model_config),
     )
     skills = await _load_skills(db, user, model_config)
     return api_key, base_url, model_config, sift, skills, model, system_prompt, params
@@ -344,7 +410,12 @@ def _final_message_fields(collected: dict) -> tuple[str, dict | None]:
     if err:
         note = f"⚠️ A resposta foi interrompida: {err}"
         content = f"{content}\n\n{note}" if content else note
+    elif not content and reasoning and collected.get("stopped"):
+        # "Parar" do usuário antes de qualquer texto: não é falha do modelo
+        content = "⏹️ Geração interrompida antes da resposta final."
     elif not content and reasoning:
+        # último recurso: o loop já tentou a continuação automática e a síntese em
+        # prompt limpo (orchestrator); chegar aqui é raro (ex.: raciocínio cifrado sem texto)
         content = "⚠️ O modelo não retornou uma resposta final (apenas o raciocínio acima)."
     return content, reasoning
 

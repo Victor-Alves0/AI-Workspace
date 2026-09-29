@@ -256,6 +256,9 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
             # shutdown, deixa uma nota explicando (o "Parar" é intencional → sem nota).
             if gen.interrupted_reason and not collected["error"]:
                 collected["error"] = gen.interrupted_reason
+            # marca a parada p/ a persistência não culpar o modelo ("não retornou
+            # resposta final") quando foi o usuário que interrompeu o turno
+            collected["stopped"] = True
             await gen._append({"type": "stopped"})
             collected["reasoning"] = activity.reasoning(collected["reasoning"])
             await _finalize(gen, on_finish, collected)

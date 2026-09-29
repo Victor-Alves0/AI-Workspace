@@ -40,6 +40,7 @@ from .turn_setup import (
     _imaginai_turn_kwargs,
     _load_skills,
     _media_opts,
+    _workspace_active,
     _workspace_on,
     _mem_agent_id,
     _memory_opts,
@@ -325,6 +326,9 @@ async def send_message(
         db, user.id, model_config,
         codespace_project_id=str(chat.project_id) if chat.project_id else None,
         workspace=_workspace_on(chat, model_config),
+        # sandbox só fixo quando a conversa precisa de arquivos/execução
+        workspace_active=await _workspace_active(
+            db, chat, model_config, body.content or "", attachments or []),
     )
     skills = await _load_skills(db, user, model_config, body.skill_ids)
 
