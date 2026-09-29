@@ -188,6 +188,56 @@ def context_direct_pins(allow: list[str]) -> list[str]:
     return sorted(out)
 
 
+def normalize_grant(raw: Any) -> list[str] | None:
+    """Lista de tools que o orquestrador concede a um subagente → paths normalizados.
+    None = não pediu escopo (herda tudo). Aceita o nome flat ("web__search__query")."""
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, list):
+        return None
+    out: list[str] = []
+    for item in raw[:60]:
+        p = " ".join(str(item or "").split()).replace("__", ".").strip(". ")
+        p = p.removeprefix(_BUILTIN_PREFIX)
+        if p and "*" not in p and p.count(".") < 2:
+            p += ".*"  # "web" / "web.search" = o grupo (paths têm 3 segmentos)
+        if p and p not in out:
+            out.append(p[:120])
+    return out
+
+
+def narrow_allow(allow: list[str], grant: list[str]) -> tuple[list[str], list[str], list[str]]:
+    """Interseção do escopo de quem concede (`allow`) com o que foi concedido.
+    Nunca amplia: um path só entra se já é permitido; "grupo.*" estreita para os
+    padrões do `allow` dentro do grupo. Devolve (allow estreito, aceitos, recusados)."""
+    out: set[str] = set()
+    aceitos: list[str] = []
+    recusados: list[str] = []
+    for g in grant:
+        if g.endswith(".*"):
+            base = g[:-1]
+            dentro = [a for a in allow if a.startswith(base)]
+            if any(a.endswith(".*") and base.startswith(a[:-1]) for a in allow):
+                dentro.append(g)  # o allow já é um curinga mais largo que cobre o grupo
+            if dentro:
+                out.update(dentro)
+                aceitos.append(g)
+            else:
+                recusados.append(g)
+        elif _allow_match(g, allow):
+            out.add(g)
+            aceitos.append(g)
+        else:
+            recusados.append(g)
+    # companions seguros (pesquisa → ler a página), só se o concedente também os tem
+    for c in expand_tool_companions(sorted(out)):
+        if _allow_match(c, allow):
+            out.add(c)
+    return sorted(out), aceitos, recusados
+
+
 def codespace_allow(allow: list[str]) -> list[str]:
     """Escopo de um chat de projeto: o do modelo + TODAS as tools de código
     (leitura + escrita + execução + tarefas). Vincular o chat = consentimento."""
@@ -410,8 +460,12 @@ async def get_sift_for_user(
     codespace_project_id: str | None = None,
     workspace: bool = False,
     read_only: bool = False,
+    grant: list[str] | None = None,
 ):
-    """`codespace_project_id`: chat vinculado a um projeto do Codespace — libera
+    """`grant`: subagente com escopo concedido pelo orquestrador — interseção com o
+    escopo deste modelo (nunca amplia); aceitos/recusados vão em scope.meta.
+
+    `codespace_project_id`: chat vinculado a um projeto do Codespace — libera
     TODAS as tools de código (ler/escrever/rodar/tarefas) e as FIXA, para o modelo
     vê-las direto em vez de depender do discovery (`search_tools`). Vale INCLUSIVE
     para um modelo BASE cru (sem ModelConfig): num chat de projeto o vínculo é o
@@ -444,6 +498,12 @@ async def get_sift_for_user(
         allow = codespace_allow(allow)
         if read_only:
             allow = [p for p in allow if p not in _CODESPACE_WORK]
+    grant_ok: list[str] = []
+    grant_no: list[str] = []
+    if grant is not None:
+        allow, grant_ok, grant_no = narrow_allow(allow, grant)
+        # catálogo/packs também estreitam (o agente não vê o que não recebeu)
+        effective_allow = narrow_allow(effective_allow, grant)[0]
     if not allow:
         return None
 
@@ -482,6 +542,10 @@ async def get_sift_for_user(
             # caminho onde modelos fracos desistem e respondem "não tenho acesso
             # ao código" (ver [[tool-exposure-hallucination]]).
             pin_paths = codespace_pins(pin_paths, allow, workspace_only=not codespace_project_id)
+        if grant is not None:
+            # escopo concedido: pin fora do allow derrubaria todos os pins (scope() recusa)
+            pin_paths = [p for p in pin_paths if _allow_match(p, allow)]
+            direct_paths = [p for p in direct_paths if _allow_match(p, allow)]
         try:
             scope = full.scope(allow=allow, pin=pin_paths or None)
         except Exception as exc:  # noqa: BLE001 - pin fora do allow etc.: segue sem pin
@@ -502,7 +566,20 @@ async def get_sift_for_user(
         # metadados p/ o orchestrator (scope.meta, oficial na SIFT >= 0.7 —
         # substituiu os antigos atributos injetados _aw_*): catálogo legível,
         # modo de exposição e prompt "quando usar"
-        scope.meta["catalog"] = _tool_catalog(tool_ids, rows, effective_allow)
+        cat_ids = tool_ids
+        if grant is not None:
+            by_id = {str(t.id): t for t in rows}
+            cat_ids = [
+                tid for tid in tool_ids
+                if isinstance(tid, str) and (
+                    _allow_match(tid[len(_BUILTIN_PREFIX):], allow) if tid.startswith(_BUILTIN_PREFIX)
+                    else (by_id.get(tid) is not None
+                          and _allow_match(sift_service.normalize_sift_path(by_id[tid].path), allow))
+                )
+            ]
+        scope.meta["catalog"] = _tool_catalog(cat_ids, rows, effective_allow)
+        # paths que este modelo pode CONCEDER a subagentes (tool delegate)
+        scope.meta["tool_paths"] = sorted(allow)
         scope.meta["web_research_chain"] = (
             _allow_match("web.search.query", effective_allow)
             and _allow_match("web.page.read", effective_allow)
@@ -515,6 +592,8 @@ async def get_sift_for_user(
         scope.meta["codespace"] = bool(codespace_project_id)
         scope.meta["workspace"] = bool(workspace and not codespace_project_id)
         scope.meta["read_only"] = bool(read_only)
+        if grant is not None:
+            scope.meta["grant"] = {"granted": grant_ok, "not_granted": grant_no}
         return scope
     except Exception as exc:  # noqa: BLE001
         logger.warning("Falha ao aplicar scope SIFT (%s); chat sem ferramentas", exc)

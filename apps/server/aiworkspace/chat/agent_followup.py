@@ -71,11 +71,18 @@ async def locate(db, chat_id: uuid.UUID, ref: str) -> tuple[Message, dict, dict,
 
 def _agent_view(res: dict, args: dict, member: dict | None) -> dict:
     """Nome, tarefa, relatório e conversa anterior do agente."""
+    from .orchestrator import _output_with_needs, _task_with_context
+
     d = member if member is not None else (res.get("data") or {})
+    # os dados entregues pelo orquestrador e o pedido do agente fazem parte da conversa
+    task = _task_with_context(str(d.get("task") or args.get("task") or ""), str(d.get("context") or ""))
+    output = str(d.get("output") or d.get("error") or "")
+    if d.get("needs"):
+        output = _output_with_needs(output, d.get("needs"))
     return {
         "name": str(d.get("agent") or args.get("name") or "Agente"),
-        "task": str(d.get("task") or args.get("task") or ""),
-        "output": str(d.get("output") or d.get("error") or ""),
+        "task": task,
+        "output": output,
         "followups": list(d.get("followups") or []),
         "adhoc": bool(d.get("adhoc")) or member is not None or str(args.get("agent") or "") == "new",
         "key": str(args.get("agent") or "new"),
@@ -90,6 +97,31 @@ def prior_history(view: dict) -> list[dict]:
         if f.get("role") in ("user", "assistant") and f.get("content"):
             hist.append({"role": f["role"], "content": str(f["content"])})
     return hist
+
+
+async def load_chain(db, chat_id: uuid.UUID, ref: str) -> dict:
+    """Agente gravado → identidade + histórico inteiro. Uma retomada pelo orquestrador
+    (`continue_agent`) grava `continues` apontando a anterior: refaz a corrente, para o
+    agente lembrar de tudo o que já fez. `tools` = escopo efetivo (None = o do orquestrador)."""
+    historico: list[dict] = []
+    ponta: tuple[dict, dict] | None = None
+    atual = ref
+    for _ in range(8):
+        _msg, res, args, member = await locate(db, chat_id, atual)
+        view = _agent_view(res, args, member)
+        d = member if member is not None else (res.get("data") or {})
+        historico = prior_history(view) + historico
+        if ponta is None:  # a identidade é a da ponta (a mais recente)
+            ponta = view, d
+        anterior = str(d.get("continues") or "")
+        if not anterior or anterior == atual:
+            break
+        atual = anterior
+    assert ponta is not None
+    view, d = ponta
+    tools = d.get("tools_granted") if isinstance(d.get("tools_granted"), list) else None
+    return {"key": view["key"], "name": view["name"], "adhoc": view["adhoc"],
+            "instructions": view["instructions"], "tools": tools, "history": historico}
 
 
 # --------------------------------------------------------------------------- #
@@ -145,6 +177,7 @@ async def _run(user_id: uuid.UUID, chat_id: uuid.UUID, ref: str, content: str, t
                 raise FollowupError("conversa não encontrada")
             msg, res, args, member = await locate(db, chat_id, ref)
             view = _agent_view(res, args, member)
+            chain = await load_chain(db, chat_id, ref)
             mc = await db.get(ModelConfig, chat.model_config_id) if chat.model_config_id else None
             opts = await subagents_for_turn(
                 db, user, chat.id, str(chat.project_id) if chat.project_id else None, mc,
@@ -154,12 +187,14 @@ async def _run(user_id: uuid.UUID, chat_id: uuid.UUID, ref: str, content: str, t
             new = ({"name": view["name"], "instructions": view["instructions"] or (
                         "Continue helping the user with the task you already worked on.")}
                    if view["adhoc"] else None)
+            if new is not None and chain["tools"] is not None:
+                new["tools"] = chain["tools"]  # conversar não amplia o escopo concedido
             # esta continuação também recebe mensagens enquanto trabalha (mesma caixa)
             agent_mailbox.current_ref.set(ref)
             agent_mailbox.force_effort.set("high" if think else None)
             out = await opts.run(view["key"], content, new,
                                  progress=lambda ev: _emit(box, {"type": "progress", **ev}),
-                                 prior=prior_history(view))
+                                 prior=chain["history"])
             if out.get("error"):
                 raise FollowupError(str(out["error"]))
             reply = str(out.get("output") or "")

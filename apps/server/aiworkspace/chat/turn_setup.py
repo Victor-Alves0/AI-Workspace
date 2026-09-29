@@ -16,6 +16,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -37,7 +38,14 @@ from ..usage_service import usage_event_from_record
 from . import artifacts as artifacts_service
 from . import attachment_context
 from . import generation
-from .orchestrator import MediaOpts, MemoryOpts, SubagentOpts, TurnSession, run_turn
+from .orchestrator import (
+    MediaOpts,
+    MemoryOpts,
+    SubagentOpts,
+    TurnSession,
+    _task_with_context,
+    run_turn,
+)
 from .subagent_team import MAX_AGENTS, MAX_CONCURRENCY, SubagentPool
 
 logger = logging.getLogger(__name__)
@@ -1084,10 +1092,21 @@ def _step_of(name: str, args: Any) -> tuple[str, str] | None:
     if name in _DISCOVERY_TOOLS:
         return None
     a = args if isinstance(args, dict) else {}
+    if name == "request_from_lead":  # o passo mostra O QUE foi pedido, não o tipo
+        return name, " ".join(str(a.get("need") or "").split())[:120]
     if name == "execute_tool":
         name, a = str(a.get("path") or "execute_tool"), a.get("params") or {}
     detalhe = next((v for v in (a.values() if isinstance(a, dict) else []) if isinstance(v, str) and v.strip()), "")
     return name.replace("__", "."), " ".join(detalhe.split())[:120]
+
+
+def _ask_lead(handoff: dict | None, prior: list[dict] | None) -> bool:
+    """request_from_lead: ligado numa delegação nova ou numa retomada pelo orquestrador;
+    desligado na conversa pelo painel (quem fala é o usuário) e em segundo plano."""
+    ho = handoff or {}
+    if "ask_lead" in ho:
+        return bool(ho["ask_lead"])
+    return prior is None
 
 
 _ADHOC_PREAMBLE = (
@@ -1135,8 +1154,12 @@ def _make_subagent_runner(
                        agent_id: str, memory: MemoryOpts, sub_opts: SubagentOpts | None,
                        isolated: bool, usage_mc: ModelConfig | None,
                        progress: Callable[[dict], None] | None = None,
-                       with_history: bool = True, prior: list[dict] | None = None) -> dict:
+                       with_history: bool = True, prior: list[dict] | None = None,
+                       handoff: dict | None = None, ask_lead: bool = False,
+                       media_mc: ModelConfig | None = None,
+                       grant_report: dict | None = None) -> dict:
         from . import agent_mailbox
+        from .orchestrator import REQUEST_FROM_LEAD, NativeToolOpts, request_from_lead_tool
 
         # caixa de correio deste agente (o que o usuário escreve no painel dele entra
         # no loop como steer); zera a ref para os agentes que ESTE criar não a herdarem
@@ -1207,11 +1230,43 @@ def _make_subagent_runner(
             pend["text"] += text
             if time.monotonic() - pend["at"] >= 0.3:
                 _flush_pend()
+        # o que o orquestrador entregou: dados (vão junto da tarefa — o agente não vê o
+        # chat) e anexos do usuário (mesmo caminho dos anexos do turno: visão/OCR/texto)
+        ho = handoff or {}
+        user_text = _task_with_context(task, str(ho.get("context") or ""))
+        media: MediaOpts | None = None
+        atts = [a for a in (ho.get("attachments") or []) if isinstance(a, dict)]
+        if atts:
+            media = await _db(lambda: _media_opts(db, user, media_mc, atts))
+            # anexos são entrada: o agente não herda a geração de imagem do orquestrador
+            media = replace(media, genimage=None, image_output=False)
+        # pedir ao orquestrador (tool ou dado): o pedido encerra o trabalho do agente —
+        # a próxima volta é só-texto (relatório parcial) e o resultado sai `needs_input`
+        pedido: dict[str, str] = {}
+        native: NativeToolOpts | None = None
+        if ask_lead:
+            async def _ask(name: str, a: dict) -> dict:
+                if name != REQUEST_FROM_LEAD:
+                    return {"error": f"unknown tool {name}"}
+                need = " ".join(str((a or {}).get("need") or "").split())[:2000]
+                if not need:
+                    return {"error": "say exactly what you need in `need`"}
+                if pedido:
+                    return {"error": "you already asked the lead; write your partial report now",
+                            "end_tool_loop": True}
+                kind = str((a or {}).get("kind") or "data")
+                pedido.update(kind=kind if kind in ("tool", "data") else "data", need=need)
+                return {"ok": True, "end_tool_loop": True,
+                        "note": "Request sent to the lead. Stop working now: write your partial "
+                                "report (what you did, what you found so far, what you need and "
+                                "why) as your final message. Do not call tools."}
+
+            native = NativeToolOpts(specs=[request_from_lead_tool()], run=_ask)
         if box:
             agent_mailbox.open_box(box)
         try:
             async for ev in run_turn(
-                api_key=api_key, model=model, history=history, user_text=task,
+                api_key=api_key, model=model, history=history, user_text=user_text,
                 chat_system_prompt=system, params=params,
                 base_url=base_url, sift=sift, code_mode=code_mode,
                 session=TurnSession(
@@ -1223,6 +1278,7 @@ def _make_subagent_runner(
                     steer_drain=(lambda: agent_mailbox.drain(box)) if box else None,
                 ),
                 memory=memory, skills=skills, use_context=True, subagent=sub_opts,
+                media=media, native_tools=native,
             ):
                 t = ev.get("type")
                 if t == "steer":
@@ -1300,17 +1356,29 @@ def _make_subagent_runner(
             timeline.pop()
         out = {"kind": "subagent", "agent": label, "task": task,
                "output": collected or "(sem resposta)", "steps": steps, "timeline": timeline}
+        if pedido:
+            out["status"] = "needs_input"
+            out["needs"] = dict(pedido)
+        if grant_report is not None:
+            out["tools_granted"] = grant_report.get("granted") or []
+            if grant_report.get("not_granted"):
+                out["tools_not_granted"] = grant_report["not_granted"]
+                out["tools_note"] = ("These tools were not granted: you do not have them (or the "
+                                     "agent ran read-only in parallel). Grant only tools you have.")
+        if atts:
+            out["attachments"] = [str(a.get("name") or a.get("type") or "") for a in atts]
         if wt_task_id:
             out["task_id"] = wt_task_id
             out["note"] = ("O trabalho ficou num worktree isolado (tarefa a revisar) — "
                            "NÃO foi mesclado ainda; o usuário aprova/descarta na aba Tarefas.")
         return out
 
-    async def _adhoc_prep(read_only: bool = False) -> dict | str:
+    async def _adhoc_prep(read_only: bool = False, grant: list[str] | None = None) -> dict | str:
         """Provedor, tools e skills dos agentes criados pela IA: iguais para todos eles,
         resolvidos UMA vez por turno (mil agentes não viram mil consultas). As tools
-        levam o projeto (ou o espaço do chat); `read_only` tira escrita/execução."""
-        chave = f"adhoc:{read_only}"
+        levam o projeto (ou o espaço do chat); `read_only` tira escrita/execução;
+        `grant` estreita ao escopo concedido (o cache é por escopo efetivo)."""
+        chave = f"adhoc:{read_only}:" + ("*" if grant is None else ",".join(sorted(set(grant))))
         if chave in pool.cache:
             return pool.cache[chave]
         if parent is None or not parent.base_model:
@@ -1324,9 +1392,14 @@ def _make_subagent_runner(
             "model": model, "api_key": api_key, "base_url": base_url,
             "sift": await _db(lambda: get_sift_for_user(
                 db, user.id, parent, codespace_project_id=project_id,
-                workspace=workspace, read_only=read_only)),
+                workspace=workspace, read_only=read_only,
+                **({"grant": grant} if grant is not None else {}))),
             "skills": await _db(lambda: _load_skills(db, user, parent)),
         }
+        if grant is not None:
+            meta = getattr(prep["sift"], "meta", None) or {}
+            # sem escopo nenhum sobrando (nada concedido é do orquestrador): tudo recusado
+            prep["grant"] = meta.get("grant") or {"granted": [], "not_granted": list(grant)}
         pool.cache[chave] = prep
         return prep
 
@@ -1343,10 +1416,12 @@ def _make_subagent_runner(
                             adhoc=True, isolation=bool(project_id or workspace), background=False)
 
     async def _run_new(new: dict, task: str, progress: Callable[[dict], None] | None,
-                       read_only: bool = False, prior: list[dict] | None = None) -> dict:
+                       read_only: bool = False, prior: list[dict] | None = None,
+                       handoff: dict | None = None) -> dict:
         # quem trabalha em paralelo no MESMO código só lê; worktree isolado pode tudo
         ro = (read_only or bool(new.get("read_only"))) and not new.get("isolated")
-        prep = await _adhoc_prep(ro)
+        grant = new.get("tools") if isinstance(new.get("tools"), list) else None
+        prep = await _adhoc_prep(ro, grant)
         if isinstance(prep, str):
             return {"error": prep}
         name = str(new.get("name") or "Agente")
@@ -1357,7 +1432,8 @@ def _make_subagent_runner(
             skills=prep["skills"], code_mode=_code_mode(parent),
             agent_id=_mem_agent_id(parent, prep["model"]), memory=MemoryOpts(read=None, write="off"),
             sub_opts=_team_opts(), isolated=bool(new.get("isolated")), usage_mc=parent, progress=progress,
-            prior=prior,
+            prior=prior, handoff=handoff, media_mc=parent, grant_report=prep.get("grant"),
+            ask_lead=_ask_lead(handoff, prior) and bool(parent and parent.tools_enabled),
         )
         if "error" not in out:
             out["adhoc"] = True
@@ -1383,7 +1459,8 @@ def _make_subagent_runner(
 
     async def run_subagent(key: str, task: str, new: dict | None = None,
                            progress: Callable[[dict], None] | None = None,
-                           read_only: bool = False, prior: list[dict] | None = None) -> dict:
+                           read_only: bool = False, prior: list[dict] | None = None,
+                           handoff: dict | None = None) -> dict:
         if not pool.take():
             return {"error": f"limite de {pool.limit} agentes deste turno atingido"}
         # fila: no máximo `concurrency` agentes deste nível trabalhando ao mesmo tempo. A
@@ -1393,13 +1470,14 @@ def _make_subagent_runner(
                 return {"error": "orçamento mensal atingido (modo pausar): agente não iniciado"}
             if progress is not None:
                 progress({"state": "running"})
-            return await _run_subagent(key, task, new, progress, read_only, prior)
+            return await _run_subagent(key, task, new, progress, read_only, prior, handoff)
 
     async def _run_subagent(key: str, task: str, new: dict | None,
                             progress: Callable[[dict], None] | None,
-                            read_only: bool = False, prior: list[dict] | None = None) -> dict:
+                            read_only: bool = False, prior: list[dict] | None = None,
+                            handoff: dict | None = None) -> dict:
         if new is not None:
-            return await _run_new(new, task, progress, read_only, prior)
+            return await _run_new(new, task, progress, read_only, prior, handoff)
         if key in ancestry:
             return {"error": "ciclo de subagentes detectado; delegação abortada"}
         try:
@@ -1448,10 +1526,12 @@ def _make_subagent_runner(
             code_mode=_code_mode(mc), agent_id=_mem_agent_id(mc, mc.base_model),
             memory=MemoryOpts(read=mem_read, write=mem_write, review=mem_review),
             sub_opts=sub_opts, isolated=key in isolate_keys, usage_mc=mc, progress=progress,
-            prior=prior,
+            prior=prior, handoff=handoff, media_mc=mc,
+            ask_lead=_ask_lead(handoff, prior) and bool(mc.tools_enabled),
         )
 
-    def start_background(key: str, task: str, new: dict | None, label: str) -> str:
+    def start_background(key: str, task: str, new: dict | None, label: str,
+                         handoff: dict | None = None) -> str:
         """Solta o subagente em segundo plano; o chat é acordado com o relatório. Roda
         numa sessão de banco PRÓPRIA: a do turno fecha quando o turno acaba."""
         from . import subagent_jobs
@@ -1470,12 +1550,14 @@ def _make_subagent_runner(
                     project_id=project_id, isolate_keys=isolate_keys,
                     parent=p, adhoc_model=adhoc_model, pool=bg_pool, workspace=workspace,
                 )
-                return await runner(key, task, new)
+                # em segundo plano ninguém está esperando para responder um pedido
+                return await runner(key, task, new, handoff={**(handoff or {}), "ask_lead": False})
 
         bg_pool = pool.fork()
         return subagent_jobs.start(str(chat_id), label, task, _job)
 
-    def start_background_team(members: list[dict], goal: str, label: str, chain: bool = False) -> str:
+    def start_background_team(members: list[dict], goal: str, label: str, chain: bool = False,
+                              attachments: list[dict] | None = None) -> str:
         """Solta a equipe inteira em segundo plano; o chat acorda com o relatório final."""
         from . import subagent_jobs
         from .subagent_team import run_team
@@ -1496,7 +1578,7 @@ def _make_subagent_runner(
                     parent=p, adhoc_model=adhoc_model, pool=bg_pool, workspace=workspace,
                 )
                 res = await run_team(runner, members, goal, lambda ev: None, runner.synthesize,
-                                     chain=chain)
+                                     chain=chain, attachments=attachments, ask_lead=False)
                 return {"output": res["report"],
                         "note": f"{res['succeeded']} of {res['size']} agents succeeded."}
 
