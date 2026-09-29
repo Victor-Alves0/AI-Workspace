@@ -44,7 +44,7 @@ from ..models import GeneratedImage, Message
 from ..providers import image_gen, openrouter, reasoning_details
 from ..tools import sift_service, toolctx
 from . import curator
-from . import attachment_context
+from . import attachment_context, media_support
 from .activity import with_activity
 
 logger = logging.getLogger(__name__)
@@ -3173,6 +3173,12 @@ async def run_turn(
     _mem = memory or MemoryOpts()
     mem_write, mem_review, mem_project = _mem.write, _mem.review, _mem.project
     _md = media or MediaOpts()
+    # a capacidade marcada pode não valer para o modelo DESTE turno (catálogo diz que
+    # não aceita, ou o provedor já recusou): degrada p/ texto em vez de quebrar o chat
+    if _md.vision and not media_support.accepts(model, "image"):
+        _md = replace(_md, vision=False)
+    if _md.audio and not media_support.accepts(model, "audio"):
+        _md = replace(_md, audio=False)
     genimage, image_output = _md.genimage, _md.image_output
     _sa = subagent or SubagentOpts()
     _native = native_tools or NativeToolOpts()
@@ -3338,6 +3344,10 @@ async def run_turn(
     ):
         yield ev
     attach_chars = _att["attach_chars"]
+    # nenhuma parte de mídia que o modelo não aceita sai daqui — em NENHUMA mensagem
+    # (histórico vindo da API pública, ou foto de um turno com outro modelo)
+    _sem_suporte = {k for k, ok in (("image", _md.vision), ("audio", _md.audio)) if not ok}
+    messages[:] = media_support.strip_media(messages, _sem_suporte)
 
     # Pesos (em caracteres) de cada origem do prompt, p/ atribuir os tokens de
     # ENTRADA por categoria. O total de prompt_tokens vem real do provedor; a
@@ -3435,6 +3445,7 @@ async def run_turn(
     # (ex.: image_generation num modelo só-texto → 404/400) degrada p/ texto em vez de
     # quebrar TODA mensagem do chat.
     retried_plain = False
+    retried_media = False  # retry sem imagem/áudio (modelo que não aceita a mídia)
     # Teto de iterações do loop agêntico. Num chat de Codespace (loop escreve → testa
     # → corrige) usamos um teto bem maior, como os agentes de código do mercado; nos
     # demais, o teto normal. O flag vem do scope.meta["codespace"] montado no loader.
@@ -3631,6 +3642,22 @@ async def run_turn(
                         finish_reason = choice["finish_reason"]
         except Exception as exc:  # noqa: BLE001
             _llm_exc = exc
+            # o provedor recusou a MÍDIA (imagem/áudio num modelo que não aceita):
+            # refaz UMA vez sem ela e memoriza — os próximos turnos já saem sem mídia
+            _presentes = (
+                media_support.media_kinds(messages)
+                if not got_chunk and not retried_media else set()
+            )
+            _recusadas = media_support.rejected_kinds(str(exc)) if _presentes else set()
+            if _recusadas:
+                logger.warning(
+                    "Provedor recusou mídia (%s) para %s; repetindo sem imagens/áudio: %s",
+                    sorted(_presentes), model, exc,
+                )
+                retried_media = True
+                media_support.remember_rejection(model, (_recusadas & _presentes) or _presentes)
+                messages[:] = media_support.strip_media(messages, _presentes)
+                continue
             optional_knobs = bool(stream_modalities) or auto_reasoning_off
             if not got_chunk and not retried_plain and optional_knobs:
                 logger.warning(

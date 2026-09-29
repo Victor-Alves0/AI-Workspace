@@ -143,10 +143,19 @@ async def history(messages: list[Any]) -> list[dict[str, Any]]:
     return out
 
 
+_IMG_LINE = re.compile(r"\[Imagem anexada: ([^\]\n]*)\]")
+
+
 def for_provider(history: list[dict[str, Any]], vision: bool) -> list[dict[str, Any]]:
-    """Tira as chaves privadas; com visão, as imagens recentes voltam como partes image_url."""
+    """Tira as chaves privadas; com visão, as imagens recentes voltam como partes image_url.
+    Sem visão (ex.: trocou para um modelo só-texto), a linha da imagem avisa que ele não
+    a vê — a foto antiga nunca vai como imagem e o chat segue normal."""
     out: list[dict[str, Any]] = []
     for m in history:
+        if not vision and m.get("role") == "user" and isinstance(m.get("content"), str) \
+                and "[Imagem anexada: " in m["content"]:
+            m = {**m, "content": _IMG_LINE.sub(
+                r"[imagem anexada: \1 — este modelo não vê imagens]", m["content"])}
         if "_images" not in m and "_files" not in m:
             out.append(m)
             continue
