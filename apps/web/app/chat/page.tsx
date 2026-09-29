@@ -19,6 +19,7 @@ import type { AskSpec, Attachment, Chat, ChatArtifact, CodespaceProject, Folder,
 import CodespaceFileBrowser, { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME, extLang, stripLineNumbers } from "@/components/CodespaceFileBrowser";
 import type { CodespaceDragPayload, CodespaceSnippetPayload } from "@/components/CodespaceFileBrowser";
 import Roundtable, { nextColor, RT_COLORS } from "@/components/Roundtable";
+import { CallStatsBar } from "@/components/CallStatsBar";
 import Markdown from "@/components/Markdown";
 import { ReasoningBlock, fmtTime } from "@/components/MessageItem";
 import { setFormatPrefs } from "@/lib/format";
@@ -305,7 +306,7 @@ export default function ChatPage() {
     toolEvents, setToolEvents, preparingTool, generatingImage, setGeneratingImage,
     consultingKnowledge, setConsultingKnowledge, transcribingAudio, setTranscribingAudio,
     guardNote, setGuardNote, liveArtifact, setLiveArtifact,
-    sending, setSending, streamPhase, setStreamPhase, stopRef, makeStreamHandler, resumeStream, handleStop,
+    sending, setSending, streamPhase, setStreamPhase, callStats, stopRef, makeStreamHandler, resumeStream, handleStop,
   } = gen;
   // mantém o espelho do chat ativo em dia (cobre todos os setActive de uma vez)
   useEffect(() => { activeIdRef.current = active?.id ?? null; }, [active?.id]);
@@ -2937,6 +2938,8 @@ export default function ChatPage() {
                           )}
                           <div ref={promptBoxRef}><PromptBox value={input} onChange={setInput} onSend={send} onStop={stopAndPauseQueue} onQueue={enqueue} queue={queueProps} sending={sending} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} /></div>
                         </div>
+                        {/* números da chamada atual/última; some ao trocar de chat */}
+                        {callStats && callStats.chatId === (active?.id ?? null) && <CallStatsBar stats={callStats} />}
                       </div>
                       {speakingMessageId && !imaginaiDocksShown && (
                         <SpeechController variant="desktop" progress={speechProgress} onClose={stopMessageSpeech} />

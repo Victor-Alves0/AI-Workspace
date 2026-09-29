@@ -51,7 +51,7 @@ function flattenRefs(refs: KnowledgeRef[]): RefDoc[] {
 import { API_URL, uploadFile } from "@/lib/api";
 import { isAudioFile, toModelAudio } from "@/lib/audioFormat";
 import { matchCommands, type ChatCommand } from "@/lib/commands";
-import { MenuItem, finePointer, useClickOutside } from "./ui";
+import { MenuItem, finePointer, useCenteredPopover, useClickOutside } from "./ui";
 import { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME } from "./CodespaceFileBrowser";
 import { toolCategoryIcon, toolCategoryTitle } from "./toolCategory";
 import TextAttachmentModal from "./TextAttachmentModal";
@@ -90,6 +90,7 @@ function ContextMeter({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useClickOutside<HTMLDivElement>(() => setOpen(false));
+  const pop = useCenteredPopover<HTMLDivElement>(open);
   const p = Math.max(0, Math.min(1, pct));
   const color = p < 0.5 ? "#4ade80" : p < 0.8 ? "#fbbf24" : "#f87171";
   const r = 8;
@@ -118,7 +119,7 @@ function ContextMeter({
         )}
       </button>
       {open && (
-        <div className="animate-pop absolute bottom-11 left-1/2 z-50 min-w-[230px] -translate-x-1/2 rounded-xl border border-border bg-surface p-1.5 shadow-menu">
+        <div ref={pop.ref} style={pop.style} className="animate-pop absolute bottom-11 left-1/2 z-50 min-w-[230px] -translate-x-1/2 rounded-xl border border-border bg-surface p-1.5 shadow-menu">
           <p className="px-2.5 pb-1 pt-1 text-[11px] text-muted">
             Contexto: <span className="font-medium text-ink-soft">{fmt(tokens)}{limit ? ` / ${fmt(limit)}` : ""}</span> tokens
           </p>
@@ -173,6 +174,7 @@ function ThinkingSelect({
   const active = value !== "off";
   const label = REASONING_LABELS[value] ?? "Desligado";
   const opts: ReasoningEffort[] = ["off", ...reasoningLevelsFor(modelId)];
+  const pop = useCenteredPopover<HTMLDivElement>(open);
   return (
     <div className="relative" ref={ref}>
       <button
@@ -187,7 +189,7 @@ function ThinkingSelect({
         {active && <span className="font-medium">{label}</span>}
       </button>
       {open && (
-        <div className="animate-pop absolute bottom-11 right-0 z-50 min-w-[160px] rounded-xl border border-border bg-surface p-1.5 shadow-menu">
+        <div ref={pop.ref} style={pop.style} className="animate-pop absolute bottom-11 left-1/2 z-50 min-w-[160px] -translate-x-1/2 rounded-xl border border-border bg-surface p-1.5 shadow-menu">
           <p className="px-2.5 pb-1 pt-1 text-[11px] font-medium uppercase tracking-wider text-muted">
             Raciocínio
           </p>
@@ -206,14 +208,15 @@ function ThinkingSelect({
   );
 }
 
-// Lista (com busca) das ferramentas que ESTE modelo pode usar. Abre para cima,
-// no canto inferior-esquerdo, ao clicar no ícone da chave inglesa.
+// Lista (com busca) das ferramentas que ESTE modelo pode usar: só os nomes (as
+// descrições poluíam a lista). Abre para cima, centrada na chave inglesa.
 function ToolsMenu({ tools }: { tools: { name: string; description?: string; category?: "native" | "codespace" | "integration"; integration?: string }[] }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const ref = useClickOutside<HTMLDivElement>(() => setOpen(false));
+  const pop = useCenteredPopover<HTMLDivElement>(open);
   const f = q.trim().toLowerCase();
-  const filtered = f ? tools.filter((t) => (t.name + " " + (t.description ?? "")).toLowerCase().includes(f)) : tools;
+  const filtered = f ? tools.filter((t) => t.name.toLowerCase().includes(f)) : tools;
   return (
     <div className="relative" ref={ref}>
       <button
@@ -226,8 +229,8 @@ function ToolsMenu({ tools }: { tools: { name: string; description?: string; cat
         {tools.length > 0 && <span className="text-xs">{tools.length}</span>}
       </button>
       {open && (
-        <div className="absolute bottom-11 left-0 z-50">
-          <div className="animate-pop w-72 overflow-hidden rounded-xl border border-border bg-surface shadow-menu">
+        <div ref={pop.ref} style={pop.style} className="absolute bottom-11 left-1/2 z-50 -translate-x-1/2">
+          <div className="animate-pop w-72 max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border border-border bg-surface shadow-menu">
             <div className="flex items-center gap-2 border-b border-border px-3 py-2">
               <Search size={14} className="text-muted" />
               <input
@@ -242,15 +245,12 @@ function ToolsMenu({ tools }: { tools: { name: string; description?: string; cat
                 </p>
               ) : (
                 filtered.map((t, i) => (
-                  <div key={i} className="px-3 py-1.5">
-                    <p className="flex items-center gap-1.5 text-sm text-ink">
-                      <span title={toolCategoryTitle(t.category, t.integration)} className="flex shrink-0 items-center text-accent-hover">
-                        {toolCategoryIcon(t.category)}
-                      </span>
-                      {t.name}
-                    </p>
-                    {t.description && <p className="mt-0.5 line-clamp-2 pl-[18px] text-xs text-muted">{t.description}</p>}
-                  </div>
+                  <p key={i} className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-ink">
+                    <span title={toolCategoryTitle(t.category, t.integration)} className="flex shrink-0 items-center text-accent-hover">
+                      {toolCategoryIcon(t.category)}
+                    </span>
+                    <span className="truncate">{t.name}</span>
+                  </p>
                 ))
               )}
             </div>
@@ -297,6 +297,7 @@ function MiniAppsMenu({
     [normalizedQuery],
   );
   const menuPosition = menuUp ? "bottom-11" : "top-11";
+  const pop = useCenteredPopover<HTMLDivElement>(open);
 
   return (
     <div className="relative" ref={ref}>
@@ -316,9 +317,11 @@ function MiniAppsMenu({
       </button>
       {open ? (
         <div
+          ref={pop.ref}
+          style={pop.style}
           role="dialog"
           aria-label="Mini Apps"
-          className={`animate-pop absolute left-0 z-50 w-[min(12rem,calc(100vw-1.25rem))] overflow-hidden rounded-xl border border-border bg-surface shadow-menu ${menuPosition}`}
+          className={`animate-pop absolute left-1/2 z-50 -translate-x-1/2 w-[min(12rem,calc(100vw-1.25rem))] overflow-hidden rounded-xl border border-border bg-surface shadow-menu ${menuPosition}`}
         >
           <div className="flex items-center gap-1.5 border-b border-border px-2.5 py-2">
             <Search size={14} className="shrink-0 text-muted" />
@@ -517,6 +520,8 @@ export default function PromptBox({
   const [chatPickOpen, setChatPickOpen] = useState(false);
   const [chatQuery, setChatQuery] = useState("");
   const chatPickRef = useClickOutside<HTMLDivElement>(() => setChatPickOpen(false));
+  const plusPop = useCenteredPopover<HTMLDivElement>(plusOpen);
+  const chatPickPop = useCenteredPopover<HTMLDivElement>(chatPickOpen);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -1268,7 +1273,7 @@ export default function PromptBox({
                 <Plus size={18} />
               </button>
               {plusOpen && (
-                <div className={`animate-pop absolute left-0 z-50 min-w-[240px] rounded-xl border border-border bg-surface p-1.5 shadow-menu ${menuUp ? "bottom-11" : "top-11"}`}>
+                <div ref={plusPop.ref} style={plusPop.style} className={`animate-pop absolute left-1/2 z-50 min-w-[240px] -translate-x-1/2 rounded-xl border border-border bg-surface p-1.5 shadow-menu ${menuUp ? "bottom-11" : "top-11"}`}>
                     {/* modelo sem a capacidade: diz o porquê (antes o menu só fechava,
                         e parecia que o botão estava quebrado) */}
                     <MenuItem
@@ -1279,7 +1284,7 @@ export default function PromptBox({
                         setAttachErr("Este modelo não aceita anexos: ative Visão ou Arquivos nas Capacidades.");
                       }}
                     >
-                      Carregar Arquivos
+                      Carregar arquivos
                     </MenuItem>
                     <MenuItem
                       icon={<Camera size={16} />}
@@ -1289,14 +1294,14 @@ export default function PromptBox({
                         setAttachErr("Este modelo não vê imagens: ative Visão ou o Roteador de Visão.");
                       }}
                     >
-                      Enviar Captura
+                      Enviar captura
                     </MenuItem>
                     <MenuItem
                       icon={<Database size={16} />}
                       onClick={() => {
                         setPlusOpen(false);
                         if (!refEntries.length) {
-                          setNotice("Sem Base de Conhecimento acoplada");
+                          setNotice("Sem base de conhecimento acoplada");
                           return;
                         }
                         // insere "#" no fim p/ abrir o menu de referências (garante que
@@ -1310,21 +1315,22 @@ export default function PromptBox({
                         });
                       }}
                     >
-                      Anexar Base de Conhecimento
+                      Anexar base de conhecimento
                     </MenuItem>
                     <MenuItem
                       icon={<MessagesSquare size={16} />}
                       onClick={() => { setPlusOpen(false); setChatQuery(""); setChatPickOpen(true); }}
                     >
-                      Chats de Referência
+                      Chats de referência
                     </MenuItem>
                 </div>
               )}
               {/* seletor de chats de referência: busca + lista, multi-seleção */}
               {chatPickOpen && (
                 <div
-                  ref={chatPickRef}
-                  className={`animate-pop absolute left-0 z-50 w-80 overflow-hidden rounded-xl border border-border bg-surface shadow-menu ${menuUp ? "bottom-11" : "top-11"}`}
+                  ref={(el) => { chatPickRef.current = el; chatPickPop.ref.current = el; }}
+                  style={chatPickPop.style}
+                  className={`animate-pop absolute left-1/2 z-50 w-80 max-w-[calc(100vw-1rem)] -translate-x-1/2 overflow-hidden rounded-xl border border-border bg-surface shadow-menu ${menuUp ? "bottom-11" : "top-11"}`}
                 >
                   <div className="flex items-center gap-2 border-b border-border px-3 py-2">
                     <Search size={14} className="text-muted" />
