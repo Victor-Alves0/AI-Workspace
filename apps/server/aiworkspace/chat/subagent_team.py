@@ -145,6 +145,9 @@ async def run_team(
     dependem umas das outras); senão, todos ao mesmo tempo (a fila do pool limita)."""
     n = len(members)
     results: list[dict | None] = [None] * n
+    from .agent_mailbox import current_ref
+
+    base_ref = current_ref.get()
 
     def _task_with_prior(i: int, m: dict) -> str:
         anteriores = [
@@ -164,6 +167,8 @@ async def run_team(
                 emit({"member": _i, "status": "running"})
             else:
                 emit({"member": _i, "status": "progress", **ev})
+        if base_ref:
+            current_ref.set(f"{base_ref}#{i}")
         try:
             tarefa = _task_with_prior(i, m) if chain else m["task"]
             res = await run("new", tarefa, {"name": m["name"], "instructions": m["instructions"],

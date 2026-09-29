@@ -40,6 +40,7 @@ import { recordingFilename } from "@/lib/audioFormat";
 import { describeToolCall } from "@/lib/activity";
 import { useDrawerSwipe } from "./useDrawerSwipe";
 import { SoundAutoplayContext } from "@/components/SoundChip";
+import { AgentChatContext } from "@/components/SubagentCard";
 import type { QueueItem } from "@/components/QueueTray";
 
 // fila de mensagens por chat (bandeja do composer), guardada no navegador
@@ -1255,6 +1256,11 @@ export default function ChatPage() {
     // Poll/geração do chat anterior pode terminar depois de o usuário navegar.
     if (activeIdRef.current === chatId) setMessages(rows);
   }, []);
+  const activeChatId = active?.id ?? null;
+  const agentCtx = useMemo(() => ({
+    chatId: activeChatId,
+    reload: () => { if (activeChatId) void reloadMessages(activeChatId); },
+  }), [activeChatId, reloadMessages]);
 
   const reloadArtifacts = useCallback(async (chatId: string) => {
     try {
@@ -2551,6 +2557,8 @@ export default function ChatPage() {
         />
       </div>
 
+      {/* painéis dos agentes: falam com o agente deste chat e recarregam a conversa */}
+      <AgentChatContext.Provider value={agentCtx}>
       <main className="flex min-w-0 flex-1 flex-col" style={{ paddingBottom: "var(--kb, 0px)" }}>
         {workspaceOpen ? (
           <WorkspaceView
@@ -3017,6 +3025,7 @@ export default function ChatPage() {
         </>
         )}
       </main>
+      </AgentChatContext.Provider>
 
       {/* Encaixe do painel de um AGENTE (SubagentCard renderiza aqui por portal): coluna
           do layout, como os Controles — o chat encolhe e recentraliza em vez de ficar

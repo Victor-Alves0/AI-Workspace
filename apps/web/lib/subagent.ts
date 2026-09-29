@@ -6,10 +6,11 @@ export function applySubagentProgress(live: SubagentLive, ev: Record<string, unk
   const timeline = [...live.timeline];
   const last = timeline[timeline.length - 1];
   const append = (kind: "reasoning" | "text", text: string) => {
-    if (last && last.kind === kind) timeline[timeline.length - 1] = { ...last, text: last.text + text };
+    if (last && last.kind === kind) timeline[timeline.length - 1] = { ...last, text: (last as { text: string }).text + text };
     else timeline.push({ kind, text });
   };
-  if (typeof ev.reasoning === "string") append("reasoning", ev.reasoning);
+  if (typeof ev.user === "string") timeline.push({ kind: "user", text: ev.user });
+  else if (typeof ev.reasoning === "string") append("reasoning", ev.reasoning);
   else if (typeof ev.text === "string") append("text", ev.text);
   else if (typeof ev.result === "string") {
     for (let i = timeline.length - 1; i >= 0; i--) {

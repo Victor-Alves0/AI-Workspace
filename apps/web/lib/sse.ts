@@ -248,6 +248,30 @@ export async function streamToolTrace(
   await readSSE(res, onEvent as (e: ChatEvent) => void);
 }
 
+/** Caixa de texto do painel de um agente. Trabalhando → a mensagem entra no loop dele
+ *  e volta `{mode: "steer"}`; já terminou → abre uma continuação, cujos eventos
+ *  (`progress` / `done` / `error`) chegam em `onEvent`. */
+export async function messageAgent(
+  chatId: string,
+  ref: string,
+  body: { content: string; think?: boolean },
+  onEvent: (e: Record<string, unknown>) => void,
+  signal?: AbortSignal,
+): Promise<"steer" | "followup"> {
+  const res = await authedFetch(`/chats/${chatId}/agents/${encodeURIComponent(ref)}/message`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (res.ok && (res.headers.get("Content-Type") || "").includes("application/json")) {
+    await res.json().catch(() => null);
+    return "steer";
+  }
+  await readSSE(res, onEvent as unknown as (e: ChatEvent) => void);
+  return "followup";
+}
+
 // Chat temporário: streama um turno sem persistir nada.
 export async function streamEphemeral(
   body: {

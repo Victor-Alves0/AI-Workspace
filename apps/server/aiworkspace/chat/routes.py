@@ -37,7 +37,7 @@ from ..schemas.chat import (
     MessageOut,
 )
 from ..secrets_service import OPENROUTER_KEY, get_secret
-from . import compaction_routes, messages_routes, roundtable_routes
+from . import agent_routes, compaction_routes, messages_routes, roundtable_routes
 
 # Compat: símbolos históricos re-exportados — importadores externos (automation,
 # integrations, playground, knowledge_routes) usavam `chat.routes._*`. Código
@@ -599,3 +599,4 @@ async def delete_all_chats(
 router.include_router(messages_routes.router)
 router.include_router(roundtable_routes.router)
 router.include_router(compaction_routes.router)
+router.include_router(agent_routes.router)

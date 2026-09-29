@@ -353,6 +353,8 @@ export interface ToolEvent {
 
 export type SubagentTimelineItem =
   | { kind: "reasoning" | "text"; text: string }
+  /** o usuário falou com o agente pelo painel dele (entrou no trabalho em andamento) */
+  | { kind: "user"; text: string }
   | { kind: "tool"; tool: string; detail?: string; ok?: boolean | null; args?: Record<string, unknown>;
       /** a chamada (parâmetros) e o começo do que voltou — abrem ao clicar no passo */
       call?: string; preview?: string };

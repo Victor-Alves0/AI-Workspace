@@ -921,6 +921,10 @@ async def _stream_subagents(
     q: asyncio.Queue = asyncio.Queue()
 
     async def _um(cid: str, fn: Any) -> None:
+        from . import agent_mailbox
+
+        # a caixa de texto do painel do agente fala com ELE pelo id da chamada
+        agent_mailbox.current_ref.set(cid)
         try:
             res = await fn(lambda ev, _c=cid: q.put_nowait(("progress", _c, ev)))
         except Exception as exc:  # noqa: BLE001 - a falha vira o resultado da tool
@@ -2814,8 +2818,15 @@ class _ToolDispatcher:
         yield {"type": "subagent", "status": "team_start", "id": tcid, "team": name, "goal": goal[:300],
                "chain": chain, "members": [{"name": m["name"], "task": m["task"][:200]} for m in members]}
         q: asyncio.Queue = asyncio.Queue()
-        job = asyncio.ensure_future(run_team(run, members, goal, q.put_nowait,
-                                             getattr(run, "synthesize", None), chain=chain))
+        from . import agent_mailbox
+
+        # os membros falam com o painel como `<id da chamada>#<n>`
+        _ref_tok = agent_mailbox.current_ref.set(tcid)
+        try:
+            job = asyncio.ensure_future(run_team(run, members, goal, q.put_nowait,
+                                                 getattr(run, "synthesize", None), chain=chain))
+        finally:
+            agent_mailbox.current_ref.reset(_ref_tok)
         try:
             while True:
                 pegar = asyncio.ensure_future(q.get())

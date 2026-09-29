@@ -1402,6 +1402,8 @@ function UsagePanel({ u }: { u: NonNullable<Message["usage"]> }) {
     artifacts: "Artefatos (instruções + conteúdo)",
     channel: "Canal (WhatsApp/Telegram)",
     guards: "Guardas de saída (reforços acionados)",
+    agent_notes: "Conversas diretas com os agentes",
+    sound_effects: "Efeitos sonoros (instruções)",
   };
   const perExtra = Object.entries(u.extra_breakdown ?? {}).sort((a, b) => b[1] - a[1]);
   // Extenso: PROVENIÊNCIA do prompt do sistema e do bloco de ferramentas — responde

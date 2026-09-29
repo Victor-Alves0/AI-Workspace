@@ -409,6 +409,16 @@ async def _artifacts_kwargs(
     entra quando a capacidade está ligada — economia de tokens por turno."""
     blocks: list[str] = []
     breakdown: dict[str, int] = {}
+    # o que o usuário conversou DIRETO com os agentes (painel deles) desde o último
+    # turno: a IA principal fica sabendo (e as notas são consumidas aqui)
+    from .agent_followup import take_notes_block
+    try:
+        notas = await take_notes_block(db, chat_id)
+    except Exception:  # noqa: BLE001 - nota é bônus; o turno segue sem ela
+        notas = ""
+    if notas:
+        blocks.append(notas)
+        breakdown["agent_notes"] = len(notas)
     if arts_on:
         txt = await _artifacts_extra(db, chat_id, user, model_config)
         if txt:
@@ -1125,9 +1135,23 @@ def _make_subagent_runner(
                        agent_id: str, memory: MemoryOpts, sub_opts: SubagentOpts | None,
                        isolated: bool, usage_mc: ModelConfig | None,
                        progress: Callable[[dict], None] | None = None,
-                       with_history: bool = True) -> dict:
+                       with_history: bool = True, prior: list[dict] | None = None) -> dict:
+        from . import agent_mailbox
+
+        # caixa de correio deste agente (o que o usuário escreve no painel dele entra
+        # no loop como steer); zera a ref para os agentes que ESTE criar não a herdarem
+        box = agent_mailbox.key(str(chat_id) if chat_id else None, agent_mailbox.current_ref.get())
+        agent_mailbox.current_ref.set(None)
+        effort = agent_mailbox.force_effort.get()
+        if effort:
+            params = {**(params or {}), "reasoning": {"effort": effort}}
+            agent_mailbox.force_effort.set(None)
         history: list[dict] = []
-        if with_history and pass_context and chat_id:
+        if prior is not None:
+            # conversa de continuação com o agente (painel dele): tarefa, relatório e o
+            # que já foi conversado entram como histórico
+            history = list(prior)
+        elif with_history and pass_context and chat_id:
             if "history" not in pool.cache:
                 pool.cache["history"] = await _db(lambda: _recent_history(db, chat_id))
             history = pool.cache["history"]
@@ -1183,6 +1207,8 @@ def _make_subagent_runner(
             pend["text"] += text
             if time.monotonic() - pend["at"] >= 0.3:
                 _flush_pend()
+        if box:
+            agent_mailbox.open_box(box)
         try:
             async for ev in run_turn(
                 api_key=api_key, model=model, history=history, user_text=task,
@@ -1194,11 +1220,18 @@ def _make_subagent_runner(
                     agent_id=agent_id,
                     codespace_project_id=proj_id,
                     codespace_worktree=wt_task_id,
+                    steer_drain=(lambda: agent_mailbox.drain(box)) if box else None,
                 ),
                 memory=memory, skills=skills, use_context=True, subagent=sub_opts,
             ):
                 t = ev.get("type")
-                if t == "token":
+                if t == "steer":
+                    # o usuário falou com o agente pelo painel: vira um balão na linha do tempo
+                    _flush_pend()
+                    timeline.append({"kind": "user", "text": ev.get("text", "")})
+                    if progress is not None:
+                        progress({"user": ev.get("text", "")})
+                elif t == "token":
                     collected += ev.get("text", "")
                     _trilha("text", ev.get("text", ""))
                 elif t == "reasoning":
@@ -1240,6 +1273,9 @@ def _make_subagent_runner(
                 except Exception:  # noqa: BLE001
                     pass
             return {"error": f"o subagente falhou: {exc}"}
+        finally:
+            if box:
+                agent_mailbox.close_box(box)
         # fecha o worktree como pronto p/ revisão (commita o resto + calcula o diff)
         if wt_task_id:
             from ..codespace import worktree_service
@@ -1307,7 +1343,7 @@ def _make_subagent_runner(
                             adhoc=True, isolation=bool(project_id or workspace), background=False)
 
     async def _run_new(new: dict, task: str, progress: Callable[[dict], None] | None,
-                       read_only: bool = False) -> dict:
+                       read_only: bool = False, prior: list[dict] | None = None) -> dict:
         # quem trabalha em paralelo no MESMO código só lê; worktree isolado pode tudo
         ro = (read_only or bool(new.get("read_only"))) and not new.get("isolated")
         prep = await _adhoc_prep(ro)
@@ -1321,6 +1357,7 @@ def _make_subagent_runner(
             skills=prep["skills"], code_mode=_code_mode(parent),
             agent_id=_mem_agent_id(parent, prep["model"]), memory=MemoryOpts(read=None, write="off"),
             sub_opts=_team_opts(), isolated=bool(new.get("isolated")), usage_mc=parent, progress=progress,
+            prior=prior,
         )
         if "error" not in out:
             out["adhoc"] = True
@@ -1346,7 +1383,7 @@ def _make_subagent_runner(
 
     async def run_subagent(key: str, task: str, new: dict | None = None,
                            progress: Callable[[dict], None] | None = None,
-                           read_only: bool = False) -> dict:
+                           read_only: bool = False, prior: list[dict] | None = None) -> dict:
         if not pool.take():
             return {"error": f"limite de {pool.limit} agentes deste turno atingido"}
         # fila: no máximo `concurrency` agentes deste nível trabalhando ao mesmo tempo. A
@@ -1356,13 +1393,13 @@ def _make_subagent_runner(
                 return {"error": "orçamento mensal atingido (modo pausar): agente não iniciado"}
             if progress is not None:
                 progress({"state": "running"})
-            return await _run_subagent(key, task, new, progress, read_only)
+            return await _run_subagent(key, task, new, progress, read_only, prior)
 
     async def _run_subagent(key: str, task: str, new: dict | None,
                             progress: Callable[[dict], None] | None,
-                            read_only: bool = False) -> dict:
+                            read_only: bool = False, prior: list[dict] | None = None) -> dict:
         if new is not None:
-            return await _run_new(new, task, progress, read_only)
+            return await _run_new(new, task, progress, read_only, prior)
         if key in ancestry:
             return {"error": "ciclo de subagentes detectado; delegação abortada"}
         try:
@@ -1411,6 +1448,7 @@ def _make_subagent_runner(
             code_mode=_code_mode(mc), agent_id=_mem_agent_id(mc, mc.base_model),
             memory=MemoryOpts(read=mem_read, write=mem_write, review=mem_review),
             sub_opts=sub_opts, isolated=key in isolate_keys, usage_mc=mc, progress=progress,
+            prior=prior,
         )
 
     def start_background(key: str, task: str, new: dict | None, label: str) -> str:
