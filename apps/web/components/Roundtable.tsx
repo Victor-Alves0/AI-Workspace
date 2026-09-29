@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { ChevronDown, Pause, Pencil, Play, Plus, Search, StepForward, Trash2, X } from "lucide-react";
 import type { Model, ModelConfig, RoundtableConfig, RoundtableParticipant } from "@/lib/types";
 import { useClickOutside, Select } from "./ui";
+import ModelPicker from "./ModelPicker";
 
 // paleta de cores dos participantes (atribuída por ordem de entrada)
 export const RT_COLORS = ["#f59e0b", "#3b82f6", "#10b981", "#ef4444", "#a855f7", "#ec4899", "#14b8a6", "#f97316"];
@@ -74,6 +75,7 @@ const selCls = "rounded-lg border border-border bg-surface2 px-2 py-1 text-xs te
 export default function Roundtable({
   participants, config, running, currentSpeakerId, models, custom,
   onAdd, onRemove, onUpdate, onConfigChange, onRun, onStep, onPause,
+  favorites, pinned, onToggleFavorite, onTogglePin,
 }: {
   participants: RoundtableParticipant[];
   config: RoundtableConfig;
@@ -88,11 +90,19 @@ export default function Roundtable({
   onRun: () => void;
   onStep: () => void;
   onPause: () => void;
+  favorites?: string[];
+  pinned?: string[];
+  onToggleFavorite?: (key: string) => void;
+  onTogglePin?: (key: string) => void;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
   const policy = config.turn_policy ?? "round_robin";
   const usedColors = participants.map((p) => p.color);
   const editP = participants.find((p) => p.id === editing) || null;
+  // moderador: mesmo seletor (visual + busca) do modelo do chat
+  const modCustom = config.moderator?.model_config_id ? custom.find((m) => m.id === config.moderator?.model_config_id) ?? null : null;
+  const modModel = config.moderator?.model ?? "";
+  const modLabel = modCustom?.name ?? (modModel ? models.find((m) => m.id === modModel)?.name ?? modModel : "");
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-2 px-1 py-1">
@@ -134,7 +144,7 @@ export default function Roundtable({
           <textarea
             value={editP.persona || ""}
             onChange={(e) => onUpdate(editP.id, { persona: e.target.value })}
-            placeholder="Persona/papel na mesa (ex.: 'Você é o cético e desafia as ideias'). Opcional — soma ao system do modelo."
+            placeholder="Função na equipe (ex.: 'revisa segurança e testes'). Opcional."
             rows={2}
             className="w-full resize-y rounded-lg border border-border bg-surface2 px-2.5 py-1.5 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
           />
@@ -160,11 +170,22 @@ export default function Roundtable({
           </Select>
         )}
         {policy === "moderator" && (
-          <Select value={config.moderator?.model ?? ""} onChange={(e) => onConfigChange({ moderator: { model: e.target.value } })} className={`${selCls} max-w-[160px]`} title="Modelo moderador">
-            <option value="">Moderador: escolha…</option>
-            {custom.map((m) => <option key={m.id} value={m.base_model}>{m.name}</option>)}
-            {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </Select>
+          <ModelPicker
+            variant="chip"
+            title="Modelo moderador"
+            label={modLabel ? `Moderador: ${modLabel}` : "Moderador: escolha…"}
+            avatar={modCustom?.avatar_url ?? null}
+            models={models}
+            custom={custom}
+            value={modModel}
+            activeCustomId={modCustom?.id ?? null}
+            favorites={favorites}
+            pinned={pinned}
+            onToggleFavorite={onToggleFavorite}
+            onTogglePin={onTogglePin}
+            onSelectExternal={(id) => onConfigChange({ moderator: { model: id, model_config_id: null } })}
+            onSelectCustom={(mc) => onConfigChange({ moderator: { model: mc.base_model, model_config_id: mc.id } })}
+          />
         )}
 
         <label className="flex items-center gap-1 text-xs text-muted">

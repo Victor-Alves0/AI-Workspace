@@ -103,12 +103,14 @@ sequenceDiagram
 | Channels (WA/TG/Discord/Slack) | `integrations/*_service.py` | `run_turn_guarded` |
 | Automation / Monitor | `automation/runner.py` | `run_turn` |
 | Public API `/v1` | `api/runner.py` | `run_turn` (raw — see note) |
-| Roundtable / Playground | `chat/roundtable_routes.py`, `playground/` | `run_turn` (raw — intentional) |
+| Roundtable (one agent turn per participant) | `chat/roundtable_routes.py` → `chat/roundtable.py::run_loop` | `run_turn_guarded` via `generation.start` |
+| Playground | `playground/` | `run_turn` (raw — intentional) |
 
 > **Guards coverage:** every path that produces a normal chat reply — send, regenerate,
-> **continue**, **wake**, channels, ephemeral — goes through `run_turn_guarded`, so a
+> **continue**, **wake**, channels, ephemeral, roundtable participants — goes through `run_turn_guarded`, so a
 > model's output guards apply consistently. The remaining raw `run_turn` paths are
-> deliberate: Playground/Roundtable are debug/multi-model surfaces, and the public API
+> deliberate: Playground is a debug surface (and the roundtable moderator only picks the next
+> speaker), and the public API
 > is a passthrough. Automation is a candidate follow-up (it produces a user-facing
 > message but currently runs raw).
 

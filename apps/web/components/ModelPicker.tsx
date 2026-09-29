@@ -44,6 +44,8 @@ export default function ModelPicker({
   onToggleFavorite,
   onTogglePin,
   onEditModel,
+  variant = "title",
+  title,
 }: {
   label: string;
   /** foto do modelo ativo, mostrada à esquerda do nome (opcional em Interface → Chat) */
@@ -60,6 +62,9 @@ export default function ModelPicker({
   onTogglePin?: (key: string) => void;
   /** abre o editor do modelo custom no Espaço de Trabalho */
   onEditModel?: (mc: ModelConfig) => void;
+  /** "title": gatilho grande do cabeçalho do chat; "chip": gatilho compacto (barras de config) */
+  variant?: "title" | "chip";
+  title?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"favorites" | "all" | "providers" | "custom" | "local">("all");
@@ -113,22 +118,37 @@ export default function ModelPicker({
 
   return (
     <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-lg font-semibold tracking-tight text-ink transition-colors hover:bg-hover"
-      >
-        {avatar && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={avatar} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
-        )}
-        <span title={label || "Selecionar modelo"} className="max-w-[140px] truncate sm:max-w-[240px]">{label || "Selecionar modelo"}</span>
-        <ChevronDown size={18} className="shrink-0 text-muted" />
-      </button>
+      {variant === "chip" ? (
+        <button
+          onClick={() => setOpen((v) => !v)}
+          title={title}
+          className="flex max-w-[200px] items-center gap-1 rounded-lg border border-border bg-surface2 px-2 py-1 text-xs text-ink outline-none transition-colors hover:border-accent/50"
+        >
+          {avatar && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={avatar} alt="" className="h-4 w-4 shrink-0 rounded-full object-cover" />
+          )}
+          <span className="truncate">{label}</span>
+          <ChevronDown size={13} className="shrink-0 text-muted" />
+        </button>
+      ) : (
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-lg font-semibold tracking-tight text-ink transition-colors hover:bg-hover"
+        >
+          {avatar && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={avatar} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
+          )}
+          <span title={label || "Selecionar modelo"} className="max-w-[140px] truncate sm:max-w-[240px]">{label || "Selecionar modelo"}</span>
+          <ChevronDown size={18} className="shrink-0 text-muted" />
+        </button>
+      )}
 
       {/* mobile: fixed na largura da tela (ancorado no botão ele estoura a borda
           direita — o gatilho não está no x=0); desktop: ancorado como antes */}
       {open && (
-        <div className="fixed inset-x-3 top-20 z-50 flex max-h-[75dvh] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-menu animate-pop sm:absolute sm:inset-x-auto sm:left-0 sm:top-11 sm:max-h-none sm:w-[380px] sm:max-w-[calc(100vw-1.5rem)]">
+        <div className={`fixed inset-x-3 top-20 z-50 flex max-h-[75dvh] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-menu animate-pop sm:absolute sm:inset-x-auto sm:left-0 ${variant === "chip" ? "sm:top-9" : "sm:top-11"} sm:max-h-none sm:w-[380px] sm:max-w-[calc(100vw-1.5rem)]`}>
           <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
             <Search size={16} className="shrink-0 text-muted" />
             <input

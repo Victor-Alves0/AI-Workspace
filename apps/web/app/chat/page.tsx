@@ -7,7 +7,7 @@ import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, ChevronDown, ChevronUp,
 import { api, ApiError } from "@/lib/api";
 import { CHAT_COMMANDS, parseCommand, splitRollArgs, type ParsedCommand } from "@/lib/commands";
 import { copyText } from "@/lib/clipboard";
-import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamRoundtable } from "@/lib/sse";
+import { streamContinue, streamEphemeral, streamMessage, streamRegenerate, streamResume, streamRoundtable } from "@/lib/sse";
 import { seekSpeaking, seekSpeakingTo, setSpeakingRate, speak, startBrowserDictation, startRecording, stopSpeaking, subscribeSpeechProgress, toggleSpeakingPaused, transcribe, type SpeechProgress } from "@/lib/voice";
 import { captureUtterance } from "@/lib/voiceSession";
 import { transcribeWhisper } from "@/lib/wakeword";
@@ -60,7 +60,7 @@ const ChatInfoModal = dynamic(() => import("@/components/ChatInfo"), { ssr: fals
 const CompactionHistory = dynamic(() => import("@/components/CompactionHistory"), { ssr: false });
 const WorkspaceView = dynamic(() => import("@/components/WorkspaceView"), { ssr: false });
 
-type RoundtableStream = { speaker: Speaker; content: string; reasoning: string };
+type RoundtableStream = { speaker: Speaker; content: string; reasoning: string; tools: ToolEvent[] };
 
 // Override reservado do composer, persistido no Chat sem alterar o preset do
 // modelo. O backend consome e remove esta chave antes de chamar o provider.
@@ -323,6 +323,8 @@ export default function ChatPage() {
   const [rtRunning, setRtRunning] = useState(false);
   const [rtStreaming, setRtStreaming] = useState<RoundtableStream | null>(null);
   const rtAbort = useRef<AbortController | null>(null);
+  // chat cujo stream da mesa está aberto (trocar de chat solta o stream; a mesa segue)
+  const rtChatRef = useRef<string | null>(null);
   // Mesa-redonda usa um SSE próprio e antes atualizava React por token. Espelhamos
   // o acumulador em ref e pintamos no mesmo ritmo do chat normal.
   const rtLiveRef = useRef<RoundtableStream | null>(null);
@@ -1117,7 +1119,7 @@ export default function ChatPage() {
     };
     return (ev: any) => {
       if (ev.type === "speaker_start") {
-        rtLiveRef.current = { speaker: ev.speaker, content: "", reasoning: "" };
+        rtLiveRef.current = { speaker: ev.speaker, content: "", reasoning: "", tools: [] };
         flush();
         setAtBottom(true);
       } else if (ev.type === "token") {
@@ -1132,58 +1134,116 @@ export default function ChatPage() {
           current.reasoning += ev.text || "";
           queuePaint();
         }
+      } else if (ev.type === "tool_call" || ev.type === "tool_result") {
+        // passos de ferramenta do agente da vez (mesma linha do tempo do chat normal)
+        const current = rtLiveRef.current;
+        if (current) {
+          const t: ToolEvent = ev.type === "tool_call"
+            ? { kind: "call", name: ev.name, data: ev.arguments, id: ev.id }
+            : { kind: "result", name: ev.name, data: ev.result, id: ev.id };
+          current.tools = [...current.tools, t];
+          // o texto antes da chamada era comentário do passo: a resposta recomeça
+          if (ev.type === "tool_call") current.content = "";
+          flush();
+        }
       } else if (ev.type === "speaker_end") {
         const current = rtLiveRef.current;
         flush();
-        // turno vazio (o backend não persistiu): não adiciona bolha vazia
-        if (current?.content.trim()) {
-          setMessages((m) => [...m, {
-            id: ev.message_id || `a-${Date.now()}`, role: "assistant", content: current.content,
-            reasoning: current.reasoning ? { text: current.reasoning } : null, speaker: ev.speaker,
-            created_at: new Date().toISOString(),
-          }]);
+        const content: string = typeof ev.content === "string" ? ev.content : current?.content ?? "";
+        const tools: ToolEvent[] | null = ev.tool_events ?? (current?.tools.length ? current.tools : null);
+        // turno vazio (o backend não persistiu): não adiciona bolha vazia. Retomada
+        // (F5) reenvia falas já carregadas: não duplica pelo id.
+        if (content.trim() || tools?.length) {
+          setMessages((m) => (ev.message_id && m.some((x) => x.id === ev.message_id) ? m : [...m, {
+            id: ev.message_id || `a-${Date.now()}`, role: "assistant", content,
+            reasoning: current?.reasoning ? { text: current.reasoning } : null, speaker: ev.speaker,
+            tool_events: tools, created_at: new Date().toISOString(),
+          }]));
         }
         rtLiveRef.current = null;
         setRtStreaming(null);
-      } else if (ev.type === "error") {
-        rtLiveRef.current = null;
-        if (rtFlushTimerRef.current !== null) clearTimeout(rtFlushTimerRef.current);
-        rtFlushTimerRef.current = null;
-        setRtStreaming(null);
+      } else if (ev.type === "error" && !rtLiveRef.current) {
+        // erro fora de uma fala (ex.: mesa sem instrução): vira aviso na conversa
+        setMessages((m) => [...m, { id: `e-${Date.now()}`, role: "assistant", content: `⚠️ ${ev.message || "Falha na mesa-redonda"}`, created_at: new Date().toISOString() }]);
       }
     };
   }
 
-  async function runRoundtable(steps: "auto" | "one", content?: string) {
+  function endRoundtableStream(chatId: string) {
+    rtLiveRef.current = null;
+    if (rtFlushTimerRef.current !== null) clearTimeout(rtFlushTimerRef.current);
+    rtFlushTimerRef.current = null;
+    setRtRunning(false);
+    setRtStreaming(null);
+    rtAbort.current = null;
+    rtChatRef.current = null;
+    reloadMessages(chatId);
+    reloadArtifacts(chatId);
+    refreshChats();
+  }
+
+  async function runRoundtable(
+    steps: "auto" | "one", content?: string,
+    extra?: { attachments?: Attachment[]; skillIds?: string[] },
+  ) {
     if (rtRunning) return;
     // 1º rodar/enviar num rascunho de mesa → cria o chat agora (não antes)
     const chat = await ensureRoundtableChat();
     if (!chat) return;
     setRtRunning(true);
     setAtBottom(true);
-    if (content && content.trim()) {
-      setMessages((m) => [...m, { id: `tmp-${Date.now()}`, role: "user", content, created_at: new Date().toISOString() }]);
+    const atts = extra?.attachments ?? [];
+    if ((content && content.trim()) || atts.length) {
+      setMessages((m) => [...m, { id: `tmp-${Date.now()}`, role: "user", content: content ?? "", attachments: atts, created_at: new Date().toISOString() }]);
     }
     const ac = new AbortController();
     rtAbort.current = ac;
+    rtChatRef.current = chat.id;
     try {
       await streamRoundtable(
         chat.id,
-        { content: content ?? "", steps, next: rtConfig.turn_policy === "manual" ? rtConfig.next ?? null : null },
+        {
+          content: content ?? "", steps, next: rtConfig.turn_policy === "manual" ? rtConfig.next ?? null : null,
+          attachments: atts, skill_ids: extra?.skillIds ?? [],
+        },
         makeRtHandler(),
         ac.signal,
       );
-    } catch { /* abortado / rede */ }
+    } catch { /* abortado / rede / recusado (o erro já virou aviso) */ }
     finally {
-      rtLiveRef.current = null;
-      if (rtFlushTimerRef.current !== null) clearTimeout(rtFlushTimerRef.current);
-      rtFlushTimerRef.current = null;
-      setRtRunning(false);
-      setRtStreaming(null);
-      rtAbort.current = null;
-      reloadMessages(chat.id);
-      refreshChats();
+      endRoundtableStream(chat.id);
     }
+  }
+
+  // mensagem enviada com a mesa rodando: instrução para a próxima fala
+  async function steerRoundtable() {
+    const text = input.trim();
+    if (!active || !text) return;
+    setInput("");
+    setMessages((m) => [...m, { id: `tmp-${Date.now()}`, role: "user", content: text, created_at: new Date().toISOString() }]);
+    try {
+      await streamRoundtable(active.id, { content: text }, () => {});
+    } catch { /* o poll/recarregar mostra o estado real */ }
+  }
+
+  // retomada (abrir o chat / F5) de uma mesa que segue rodando no servidor
+  async function resumeRoundtable(id: string) {
+    if (rtAbort.current) return;
+    const ac = new AbortController();
+    rtAbort.current = ac;
+    rtChatRef.current = id;
+    let started = false;
+    const handler = makeRtHandler();
+    try {
+      await streamResume(id, (ev) => {
+        if (ev.type === "idle") return;
+        if (!started) { started = true; setRtRunning(true); }
+        handler(ev);
+      }, ac.signal);
+    } catch { /* ignore */ }
+    if (rtAbort.current !== ac) return;
+    if (started) endRoundtableStream(id);
+    else rtAbort.current = null;
   }
 
   async function pauseRoundtable() {
@@ -1297,7 +1357,7 @@ export default function ChatPage() {
       if (!s.active) return;
       const cid = s.active.id;
       reloadMessages(cid).catch(() => {});
-      resumeAndFlow(cid);
+      resumeAndFlow(cid, s.active.mode);
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
@@ -1392,7 +1452,7 @@ export default function ChatPage() {
     }
     // se havia uma resposta sendo gerada quando o chat foi fechado/atualizado,
     // volta a acompanhá-la ao vivo em vez de mostrar só o que ficou salvo.
-    resumeAndFlow(id);
+    resumeAndFlow(id, detail.mode);
   }
 
   async function newChat() {
@@ -1618,8 +1678,11 @@ export default function ChatPage() {
     // (funciona no rascunho: runRoundtable cria o chat no 1º envio)
     if (isRoundtable) {
       if (rtRunning) return;
-      if (!override) setInput("");
-      await runRoundtable("auto", text);
+      const rtAtts = override ? [] : attachments;
+      const rtSkills = override ? [] : attachedSkillIds;
+      if (!text && rtAtts.length === 0) return;
+      if (!override) { setInput(""); setAttachments([]); setAttachedSkillIds([]); }
+      await runRoundtable("auto", text, { attachments: rtAtts, skillIds: rtSkills });
       return;
     }
     if ((!text && attachments.length === 0) || sending) return;
@@ -1866,7 +1929,13 @@ export default function ChatPage() {
 
   // retomada de uma geração em andamento (abrir o chat, F5): quando ela termina
   // normalmente, a fila daquele chat segue
-  function resumeAndFlow(id: string) {
+  function resumeAndFlow(id: string, mode?: Chat["mode"]) {
+    // mesa-redonda aberta noutro chat: solta o stream local (ela segue no servidor)
+    if (rtAbort.current && rtChatRef.current !== id) rtAbort.current.abort();
+    if (mode === "roundtable") {
+      void resumeRoundtable(id);
+      return;
+    }
     void resumeStream(id).then((ran) => {
       if (ran && !stoppedRef.current.delete(id)) setQueueReady((r) => ({ ...r, [id]: true }));
     });
@@ -2677,6 +2746,10 @@ export default function ChatPage() {
               onRun={() => runRoundtable("auto")}
               onStep={() => runRoundtable("one")}
               onPause={pauseRoundtable}
+              favorites={favorites}
+              pinned={pinnedKeys}
+              onToggleFavorite={toggleFavorite}
+              onTogglePin={togglePin}
             />
           </div>
         )}
@@ -2719,7 +2792,7 @@ export default function ChatPage() {
                   onDragLeave={() => setCsDropOver(false)}
                   onDrop={handleComposerFileDrop}
                 >
-                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={stopAndPauseQueue} onQueue={enqueue} queue={queueProps} sending={sending} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} />
+                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={isRoundtable && rtRunning ? pauseRoundtable : stopAndPauseQueue} onQueue={isRoundtable ? () => { void steerRoundtable(); } : enqueue} queue={isRoundtable ? undefined : queueProps} sending={sending || rtRunning} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} />
                 </div>
                 {/* menu do "+" abre para baixo aqui (há espaço); na conversa abre para cima */}
                 {temporary && <p className="mt-2 text-xs text-muted">Chat temporário — esta conversa não será salva.</p>}
@@ -2875,6 +2948,14 @@ export default function ChatPage() {
                             nameColor={rtStreaming.speaker.color ?? null}
                             reasoning={rtStreaming.reasoning ? { text: rtStreaming.reasoning } : null}
                             reasoningLive={!rtStreaming.content}
+                            toolEvents={rtStreaming.tools.length ? rtStreaming.tools : undefined}
+                            toolsLive
+                            status={statusFor({
+                              sending: true, phase: rtStreaming.content ? "streaming" : "thinking",
+                              streaming: rtStreaming.content, streamingReasoning: rtStreaming.reasoning,
+                              generatingImage: false, consultingKnowledge: false, transcribingAudio: false,
+                              toolEvents: rtStreaming.tools,
+                            })}
                           />
                         </div>
                       </div>
@@ -2936,7 +3017,7 @@ export default function ChatPage() {
                           {showAsk && askSpec && (
                             <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                           )}
-                          <div ref={promptBoxRef}><PromptBox value={input} onChange={setInput} onSend={send} onStop={stopAndPauseQueue} onQueue={enqueue} queue={queueProps} sending={sending} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} /></div>
+                          <div ref={promptBoxRef}><PromptBox value={input} onChange={setInput} onSend={send} onStop={isRoundtable && rtRunning ? pauseRoundtable : stopAndPauseQueue} onQueue={isRoundtable ? () => { void steerRoundtable(); } : enqueue} queue={isRoundtable ? undefined : queueProps} sending={sending || rtRunning} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} /></div>
                         </div>
                         {/* números da chamada atual/última; some ao trocar de chat */}
                         {callStats && callStats.chatId === (active?.id ?? null) && <CallStatsBar stats={callStats} />}

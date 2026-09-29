@@ -73,7 +73,7 @@ export interface RoundtableParticipant {
   name: string;
   avatar?: string | null;
   color?: string | null;
-  /** papel/instrução escrita direto na mesa (além do system do modelo) */
+  /** função do agente na equipe (soma ao system do modelo) */
   persona?: string | null;
 }
 
@@ -815,7 +815,7 @@ export type ChatEvent =
   | { type: "audio_router"; status: "start" | "done"; engine?: string; count?: number }
   // mesa-redonda: início/fim da fala de um participante + fim da rodada
   | { type: "speaker_start"; speaker: Speaker }
-  | { type: "speaker_end"; speaker: Speaker; message_id: string | null }
+  | { type: "speaker_end"; speaker: Speaker; message_id: string | null; content?: string; tool_events?: ToolEvent[] | null; outcome?: "done" | "ask" | null }
   | { type: "roundtable_done"; reason?: string }
   | { type: "roundtable_paused" }
   | { type: "idle" }

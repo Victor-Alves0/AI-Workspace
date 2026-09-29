@@ -1,113 +1,91 @@
-"""Rotas da MESA-REDONDA (multi-model chat): modelos conversam entre si, o
-usuário guia/pausa. Montado sob o router /chats (ver routes.py)."""
+"""Rotas da MESA-REDONDA: vários modelos trabalham em equipe no pedido do usuário.
+Montado sob o router /chats (ver routes.py).
+
+Cada fala é um turno de AGENTE completo — mesma preparação de um turno normal
+(tools/SIFT com o projeto do Codespace ou o espaço de trabalho do chat, skills,
+conhecimento, cérebro, memória, raciocínio, guardas, artefatos). A mesa roda como
+uma geração em background (generation.start): sobrevive a F5, o "Parar" do
+compositor interrompe na hora (o parcial é salvo) e uma mensagem do usuário no meio
+entra como nova instrução antes da próxima fala. A lógica pura está em roundtable.py.
+"""
 
 from __future__ import annotations
 
 import logging
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .. import budget_service, uploads_service
 from ..auth.deps import require_approved
 from ..db import SessionLocal, get_db
-from ..models import Message, ModelConfig, User
+from ..models import Chat, Message, User
+from ..schemas.chat import Attachment
+from ..tools.loader import get_sift_for_user
 from ..usage_service import usage_event_from_record
-from .orchestrator import TurnSession, run_turn
+from . import artifacts as artifacts_service
+from . import attachment_context, generation
+from . import roundtable as rt
+from .orchestrator import TurnSession, run_turn, run_turn_guarded
 from .turn_setup import (
+    _artifacts_enabled,
+    _artifacts_kwargs,
+    _brain_setup,
+    _code_mode,
     _get_model_config,
     _get_owned_chat,
+    _load_skills,
+    _media_opts,
+    _mem_agent_id,
+    _memory_opts,
+    _params_with_chat_reasoning,
+    _prepare_attachments,
+    _realtime_datetime,
+    _remember_tz,
+    _resolve_guards,
+    _resolve_knowledge,
     _resolve_provider,
-    _sse,
+    _session_tz,
+    _skill_learning,
     _sse_stream,
+    _subscribe,
     _tz_from_header,
     _usage_record,
+    _user_profile_dict,
+    _workspace_on,
 )
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-# --------------------------------------------------------------------------- #
-# Mesa-redonda (multi-model chat): modelos conversam entre si, o usuário guia.
-# --------------------------------------------------------------------------- #
-# chats com uma parada cooperativa pendente (o loop para após o turno atual).
-_roundtable_stop: set[str] = set()
-
-
 class RoundtableRunIn(BaseModel):
-    content: str = ""           # injeção do usuário antes de rodar (opcional)
-    steps: str = "auto"         # "one" (um turno) | "auto" (várias rodadas)
-    next: str | None = None     # id do participante que deve falar (modo manual)
+    content: str = Field(default="", max_length=100_000)  # instrução do usuário (opcional)
+    steps: str = "auto"         # "one" (um turno) | "auto" (até concluir/pausar/teto)
+    next: str | None = None     # id do participante que deve agir primeiro (modo manual)
+    attachments: list[Attachment] = Field(default_factory=list, max_length=50)
+    skill_ids: list[uuid.UUID] = Field(default_factory=list)
 
 
-def _rt_speaker(p: dict) -> dict:
-    return {
-        "id": p.get("id"),
-        "name": p.get("name") or "Modelo",
-        "model": p.get("model"),
-        "color": p.get("color"),
-    }
-
-
-def _rt_system(mc: ModelConfig | None, p: dict, names: list[str], self_name: str) -> str:
-    frame = (
-        f"Você participa de uma conversa em grupo (mesa-redonda) com: {', '.join(names)}. "
-        f"Você é {self_name}. Contribua de forma concisa e natural, avançando a discussão. "
-        "NÃO escreva as falas dos outros nem prefixe seu próprio nome; mensagens marcadas "
-        "com 'Nome:' são dos outros participantes."
-    )
-    parts = [mc.system_prompt if mc else None, p.get("persona"), frame]
-    return "\n\n".join([x for x in parts if x])
-
-
-def _rt_context(convo: list[dict], names: dict[str, str], target_pid: str) -> tuple[list[dict], str]:
-    """Mapeia o transcript compartilhado para a visão de um participante:
-    falas próprias = assistant; dos outros = user "Nome: ..."; humano = user."""
-    mapped: list[dict] = []
-    for c in convo:
-        if c["role"] == "user" or c.get("is_summary"):
-            mapped.append({"role": "user", "content": c["content"]})
-        elif c.get("speaker") == target_pid:
-            mapped.append({"role": "assistant", "content": c["content"]})
-        else:
-            nm = names.get(c.get("speaker")) or "Participante"
-            mapped.append({"role": "user", "content": f"{nm}: {c['content']}"})
-    if not mapped:
-        return [], "Inicie a conversa."
-    return mapped[:-1], mapped[-1]["content"]
-
-
-def _rt_next_rr(order: list[str], last: str | None) -> str:
-    if last in order:
-        return order[(order.index(last) + 1) % len(order)]
-    return order[0]
-
-
-async def _rt_moderator(mod: dict, resolved: list[dict], convo: list[dict], names: dict[str, str], user: User, user_tz: str) -> str | None:
-    """Pergunta ao moderador (LLM) quem fala em seguida — devolve o id do
-    participante, "STOP", ou None (fallback p/ round-robin)."""
-    labels = [r["p"].get("name") or "Modelo" for r in resolved]
-    transcript = "\n".join(
-        f'{(names.get(c.get("speaker")) if c["role"] == "assistant" else "Usuário") or "Usuário"}: {c["content"]}'
-        for c in convo
-    ) or "(a conversa ainda não começou)"
-    sysp = (
-        "Você é o moderador de uma mesa-redonda. Participantes: " + ", ".join(labels) + ". "
-        "Leia a conversa e responda APENAS com o nome do próximo participante que deve "
-        "falar, ou 'STOP' se a conversa já cumpriu seu objetivo ou está repetitiva."
-    )
+async def _moderator_pick(
+    mod: dict, parts: list[dict], convo: list[dict], names: dict, user_id: str, user_tz: str,
+) -> str | None:
+    """Pergunta ao moderador (LLM) quem age agora → id, "STOP" ou None (round-robin)."""
+    system, transcript = rt.moderator_prompt(parts, convo, names)
     text = ""
     try:
         async for ev in run_turn(
             api_key=mod["api_key"], model=mod["model"],
             history=[{"role": "user", "content": transcript}],
-            user_text="Quem deve falar agora? Responda só o nome, ou STOP.",
-            chat_system_prompt=sysp, params={},
-            session=TurnSession(user_id=str(user.id), user_tz=user_tz),
+            user_text="Quem deve agir agora? Responda só o número, ou FIM.",
+            chat_system_prompt=system, params={},
+            session=TurnSession(user_id=user_id, user_tz=user_tz),
             base_url=mod["base_url"], use_tools=False, use_context=True,
+            realtime_datetime=False,
         ):
             t = ev.get("type")
             if t == "token":
@@ -115,31 +93,34 @@ async def _rt_moderator(mod: dict, resolved: list[dict], convo: list[dict], name
             elif t == "done":
                 text = ev.get("content") or text
     except Exception:  # noqa: BLE001 - moderador é best-effort
+        logger.warning("Moderador da mesa-redonda falhou", exc_info=True)
         return None
-    ans = text.strip().lower()
-    if "stop" in ans:
-        return "STOP"
-    for r in resolved:
-        if (r["p"].get("name") or "").lower() and (r["p"]["name"].lower() in ans):
-            return r["p"]["id"]
-    return None
+    return rt.parse_moderator(text, parts)
 
 
-async def _rt_persist(chat_id: uuid.UUID, user: User, mc: ModelConfig | None, model: str, sp: dict, text: str, usage: dict | None, reasoning: dict | None) -> uuid.UUID:
-    async with SessionLocal() as s:
-        rec = _usage_record(usage, model, mc)
-        m = Message(
-            chat_id=chat_id, role="assistant", content=text or "", speaker=sp,
-            reasoning=reasoning, tokens=rec["total_tokens"] or None,
-            cost=rec["cost"] or None, usage=rec,
-        )
-        s.add(m)
-        await s.flush()
-        uev = usage_event_from_record(user.id, chat_id, m.id, rec)
-        if uev is not None:
-            s.add(uev)
-        await s.commit()
-        return m.id
+async def _load_convo(db: AsyncSession, chat_id: uuid.UUID) -> list[dict]:
+    """Transcript da mesa: texto + quem falou + anexos/raciocínio (para o replay)."""
+    rows = list(await db.scalars(
+        select(Message)
+        .where(Message.chat_id == chat_id, Message.role.in_(("user", "assistant")),
+               Message.compacted.is_(False))
+        .order_by(Message.created_at)
+    ))
+    kept = [m for m in rows if attachment_context.keep(m)]
+    entries = await attachment_context.history(kept)
+    convo: list[dict] = []
+    for m, e in zip(kept, entries):
+        convo.append({
+            "role": m.role,
+            "content": e.get("content") or "",
+            "speaker": (m.speaker or {}).get("id") if m.role == "assistant" else None,
+            "speaker_name": (m.speaker or {}).get("name") if m.role == "assistant" else None,
+            # o resumo da compactação entra como nota neutra, não como fala de alguém
+            "is_summary": bool(m.is_summary),
+            "tools": rt.tool_names(m.tool_events) if m.role == "assistant" else [],
+            "entry": e,
+        })
+    return convo
 
 
 @router.post("/{chat_id}/roundtable/run")
@@ -151,58 +132,63 @@ async def roundtable_run(
     user_tz: str = Depends(_tz_from_header),
 ):
     chat = await _get_owned_chat(db, chat_id, user)
+    cid = str(chat_id)
+    content = (body.content or "").strip()
+
+    # Mesa já rodando: a mensagem vira instrução para a PRÓXIMA fala (a atual segue);
+    # sem mensagem, só reassina o stream em curso.
+    active = generation.get_active(cid)
+    if active is not None and not active.done:
+        if not content:
+            return _sse_stream(_subscribe(active), trace_id=active.trace_id)
+        atts = await _prepare_attachments([a.model_dump() for a in body.attachments], None)
+        await uploads_service.bind(db, user.id, chat.id, atts)
+        db.add(Message(chat_id=chat.id, role="user", content=body.content,
+                       attachments=uploads_service.persistable(atts) or None))
+        await db.commit()
+        await active.enqueue(body.content, steer=True)
+        return {"queued": True}
+
     participants = list(chat.participants or [])
-    if len(participants) < 1:
+    if not participants:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Adicione participantes à mesa-redonda")
+    await budget_service.enforce_or_raise(db, user)
+    _remember_tz(user, user_tz)
     cfg = chat.roundtable_config or {}
     policy = cfg.get("turn_policy") or "round_robin"
     max_rounds = max(1, min(20, int(cfg.get("max_rounds") or 6)))
-    explicit_next = body.next or cfg.get("next")
+    explicit_next = body.next or (cfg.get("next") if policy == "manual" else None)
 
-    # resolve cada participante (provedor + modelo custom + system) ANTES de streamar,
-    # pois a `db` da request fecha ao retornar o StreamingResponse.
+    # valida cada participante (preset vivo + provedor) antes de abrir o stream; a
+    # preparação completa do turno é refeita a cada fala (artefatos/preset atuais).
     resolved: list[dict] = []
     for p in participants:
-        model = p.get("model") or ""
-        if not model:
-            continue
         mc = None
         if p.get("model_config_id"):
-            try:
-                mc = await _get_model_config(db, uuid.UUID(str(p["model_config_id"])), user)
-            except (ValueError, TypeError):
-                mc = None
-        # Participantes customizados também são referências vivas: a mesa não
-        # deve conservar o modelo-base que estava salvo quando ela foi criada.
-        runtime_model = mc.base_model if mc is not None and mc.base_model else model
+            mc = await _get_model_config(db, p["model_config_id"], user)
+        # participante customizado é referência viva: vale o modelo-base ATUAL do preset
+        model = mc.base_model if mc is not None and mc.base_model else (p.get("model") or "")
+        if not model:
+            continue
         try:
-            api_key, base_url = await _resolve_provider(db, user, runtime_model)
+            await _resolve_provider(db, user, model)
         except HTTPException:
             continue
-        runtime_participant = {
-            **p,
-            "model": runtime_model,
-            # O nome é apresentação, mas também entra no contexto da mesa. Atualiza
-            # junto com o preset para que reutilizar nomes não deixe a conversa com
-            # um rótulo antigo.
-            "name": mc.name if mc is not None else (p.get("name") or "Modelo"),
-        }
         resolved.append({
-            "p": runtime_participant, "mc": mc, "api_key": api_key, "base_url": base_url,
-            "system": "",  # preenchido após todos os nomes atuais serem conhecidos
-            "params": (mc.params if mc else {}) or {},
-            "model": runtime_model,
+            "p": {**p, "model": model, "name": mc.name if mc is not None else (p.get("name") or "Modelo")},
+            "mc_id": mc.id if mc is not None else None,
         })
     if not resolved:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Nenhum participante com provedor válido")
 
-    current_names = [r["p"]["name"] for r in resolved]
-    for r in resolved:
-        r["system"] = _rt_system(r["mc"], r["p"], current_names, r["p"]["name"])
-
     mod = None
     if policy == "moderator":
-        mm = (cfg.get("moderator") or {}).get("model")
+        mcfg = cfg.get("moderator") or {}
+        mm = mcfg.get("model")
+        if mcfg.get("model_config_id"):
+            mmc = await _get_model_config(db, mcfg["model_config_id"], user)
+            if mmc is not None and mmc.base_model:
+                mm = mmc.base_model
         if mm:
             try:
                 mkey, mbase = await _resolve_provider(db, user, mm)
@@ -210,104 +196,136 @@ async def roundtable_run(
             except HTTPException:
                 mod = None
 
-    # injeção do usuário (guia a conversa) — mensagem role=user, sem speaker
-    if (body.content or "").strip():
-        um = Message(chat_id=chat.id, role="user", content=body.content)
-        db.add(um)
+    # a instrução do usuário (com anexos) é a mensagem que a equipe vai executar
+    if content or body.attachments:
+        atts = await _prepare_attachments([a.model_dump() for a in body.attachments], None)
+        await uploads_service.bind(db, user.id, chat.id, atts)
+        db.add(Message(chat_id=chat.id, role="user", content=body.content,
+                       attachments=uploads_service.persistable(atts) or None))
         if chat.title == "Novo Chat":
-            chat.title = body.content[:60]
+            chat.title = (body.content[:60] or "Anexo")
         await db.commit()
 
-    rows = await db.scalars(
-        select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at)
-    )
-    convo: list[dict] = []
-    for m in rows:
-        if m.role in ("user", "assistant") and m.content and not m.compacted:
-            convo.append({
-                "role": m.role,
-                "content": m.content,
-                "speaker": (m.speaker or {}).get("id") if m.role == "assistant" else None,
-                # o resumo da compactação entra como nota de contexto neutra, não como
-                # fala de um "Participante" fantasma
-                "is_summary": bool(m.is_summary),
-            })
+    convo = await _load_convo(db, chat_id)
+    if not any(c["role"] == "user" and not c.get("is_summary") for c in convo):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Diga à mesa o que fazer")
     last_pid = next((c["speaker"] for c in reversed(convo) if c["role"] == "assistant"), None)
 
+    speakers = {r["p"]["id"]: rt.speaker_of(r["p"]) for r in resolved}
     by_id = {r["p"]["id"]: r for r in resolved}
     order = [r["p"]["id"] for r in resolved]
-    names_map = {r["p"]["id"]: (r["p"].get("name") or "Modelo") for r in resolved}
-    cid = str(chat_id)
+    names: dict[str | None, str] = {r["p"]["id"]: r["p"]["name"] for r in resolved}
+    # falas de participantes que já saíram da mesa continuam rotuladas pelo nome salvo
+    for c in convo:
+        sp = c.get("speaker")
+        if sp and sp not in names:
+            names[sp] = c.get("speaker_name") or "Participante"
+    user_id = user.id
+    extra_skills = list(body.skill_ids)
+    # runtime da última preparação de cada participante (usado ao persistir)
+    runtime: dict[str, dict[str, Any]] = {}
 
-    async def _source():
-        _roundtable_stop.discard(cid)
-        lp = last_pid
-        turns = 0
-        cap = 1 if body.steps == "one" else max_rounds * max(1, len(resolved))
-        try:
-            while turns < cap:
-                if cid in _roundtable_stop:
-                    yield _sse({"type": "roundtable_paused"})
-                    break
-                pid = None
-                if policy == "moderator" and mod is not None:
-                    pid = await _rt_moderator(mod, resolved, convo, names_map, user, user_tz)
-                    if pid == "STOP":
-                        yield _sse({"type": "roundtable_done", "reason": "moderator"})
-                        return
-                if pid is None or pid not in by_id:
-                    if turns == 0 and explicit_next in by_id:
-                        pid = explicit_next
-                    else:
-                        pid = _rt_next_rr(order, lp)
-                r = by_id[pid]
-                sp = _rt_speaker(r["p"])
-                sid = sp["id"]
-                yield _sse({"type": "speaker_start", "speaker": sp})
-                history, user_text = _rt_context(convo, names_map, sid)
-                text = ""
-                usage = None
-                reasoning_obj = None
-                try:
-                    async for ev in run_turn(
-                        api_key=r["api_key"], model=r["model"], history=history,
-                        user_text=user_text, chat_system_prompt=r["system"], params=r["params"],
-                        session=TurnSession(user_id=str(user.id), user_tz=user_tz, chat_id=cid),
-                        base_url=r["base_url"], use_tools=False, use_context=True,
-                    ):
-                        t = ev.get("type")
-                        if t == "token":
-                            text += ev.get("text", "")
-                            yield _sse({"type": "token", "text": ev.get("text", ""), "speaker": sid})
-                        elif t == "reasoning":
-                            yield _sse({"type": "reasoning", "text": ev.get("text", ""), "speaker": sid})
-                        elif t == "done":
-                            text = ev.get("content") or text
-                            usage = ev.get("usage")
-                            reasoning_obj = ev.get("reasoning")
-                        elif t == "error":
-                            yield _sse({"type": "error", "message": ev.get("message", "")})
-                except Exception as exc:  # noqa: BLE001 - erro de um turno não derruba a mesa
-                    logger.warning("Turno da mesa-redonda falhou: %s", exc)
-                    yield _sse({"type": "error", "message": str(exc)})
-                lp = sid
-                turns += 1
-                if text.strip():
-                    mid = await _rt_persist(chat_id, user, r["mc"], r["model"], sp, text, usage, reasoning_obj)
-                    convo.append({"role": "assistant", "content": text, "speaker": sid})
-                    yield _sse({"type": "speaker_end", "speaker": sp, "message_id": str(mid)})
-                else:
-                    # turno vazio (erro/sem saída): NÃO persiste nem entra no histórico
-                    # — uma mensagem de conteúdo vazio quebraria a próxima rodada em
-                    # provedores que rejeitam mensagens vazias no contexto.
-                    yield _sse({"type": "speaker_end", "speaker": sp, "message_id": None})
-                if body.steps == "one":
-                    break
-        finally:
-            _roundtable_stop.discard(cid)
-        yield _sse({"type": "roundtable_done"})
+    async def turn(pid: str, history: list[dict], user_text: str):
+        r = by_id[pid]
+        async with SessionLocal() as s:
+            u = await s.get(User, user_id)
+            ch = await s.get(Chat, chat_id)
+            # orçamento checado a cada fala: uma mesa longa não passa do teto
+            await budget_service.enforce_or_raise(s, u)
+            mc = await _get_model_config(s, r["mc_id"], u) if r["mc_id"] else None
+            model = mc.base_model if mc is not None and mc.base_model else r["p"]["model"]
+            api_key, base_url = await _resolve_provider(s, u, model)
+            project = str(ch.project_id) if ch.project_id else None
+            others = [names[o] for o in order if o != pid]
+            arts_on = _artifacts_enabled(u)
+            runtime[pid] = {"model": model, "mc": mc, "arts_on": arts_on}
+            kwargs = dict(
+                guards=await _resolve_guards(s, u, mc),
+                api_key=api_key, model=model, base_url=base_url,
+                history=history, user_text=user_text,
+                chat_system_prompt=rt.build_system(
+                    mc.system_prompt if mc is not None else None,
+                    r["p"].get("persona"), names[pid], others,
+                ),
+                params=_params_with_chat_reasoning(mc.params if mc is not None else {}, ch.params),
+                **(await _artifacts_kwargs(s, chat_id, u, arts_on, mc)),
+                session=TurnSession(
+                    user_id=str(user_id), user_tz=_session_tz(u, user_tz), chat_id=cid,
+                    agent_id=_mem_agent_id(mc, model), user_profile=_user_profile_dict(u),
+                    codespace_project_id=project,
+                ),
+                sift=await get_sift_for_user(
+                    s, u.id, mc, codespace_project_id=project, workspace=_workspace_on(ch, mc),
+                ),
+                code_mode=_code_mode(mc),
+                skills=await _load_skills(s, u, mc, extra_skills),
+                # a mesa É o contexto compartilhado: sem histórico o agente não sabe o pedido
+                use_context=True,
+                knowledge=_resolve_knowledge(ch, mc, u),
+                brain=await _brain_setup(s, u, ch, mc),
+                skill_learning=_skill_learning(mc),
+                realtime_datetime=_realtime_datetime(mc),
+                memory=_memory_opts(ch, mc, u),
+                media=await _media_opts(s, u, mc),
+            )
+        async for ev in run_turn_guarded(**kwargs):
+            yield ev
 
-    return _sse_stream(_source())
+    async def persist(pid: str, sp: dict, text: str, reasoning: dict | None, col: dict) -> dict | None:
+        info = runtime.get(pid) or {"model": by_id[pid]["p"]["model"], "mc": None, "arts_on": False}
+        rec = _usage_record(col.get("usage"), info["model"], info["mc"])
+        changed: list[str] = []
+        async with SessionLocal() as s:
+            if info["arts_on"] and text:
+                text, changed = await artifacts_service.extract_and_apply(s, chat_id, user_id, text)
+            m = Message(
+                chat_id=chat_id, role="assistant", content=text or "", speaker=sp,
+                reasoning=reasoning, tokens=rec["total_tokens"] or None,
+                cost=rec["cost"] or None, usage=rec, tool_events=col.get("tools"),
+                memories_used=col.get("memories"),
+            )
+            s.add(m)
+            await s.flush()
+            uev = usage_event_from_record(user_id, chat_id, m.id, rec)
+            if uev is not None:
+                s.add(uev)
+            await s.commit()
+            mid = str(m.id)
+        extra = [{"type": "artifacts", "ids": changed}] if changed else []
+        return {"message_id": mid, "content": text, "extra": extra}
+
+    parts = [{"id": r["p"]["id"], "name": r["p"]["name"], "role": r["p"].get("persona")} for r in resolved]
+
+    async def pick(cv: list[dict]) -> str | None:
+        return await _moderator_pick(mod, parts, cv, names, str(user_id), user_tz)
+
+    genbox: dict[str, Any] = {}
+
+    def drain_user() -> list[str]:
+        g = genbox.get("gen")
+        return (g.drain_steer() + g.drain_queue()) if g is not None else []
+
+    cap = max_rounds * len(resolved)
+
+    async def source():
+        async for ev in rt.run_loop(
+            order=order, speakers=speakers, names=names, convo=convo,
+            turn=turn, persist=persist, policy=policy, cap=cap,
+            one_step=body.steps == "one", explicit_next=explicit_next,
+            last_pid=last_pid, pick=pick if mod is not None else None,
+            drain_user=drain_user,
+        ):
+            yield ev
+
+    async def _on_finish(_collected: dict, _emit) -> None:
+        return None  # cada fala já é persistida no laço (inclusive o parcial ao parar)
+
+    gen = generation.start(
+        cid, source(), _on_finish, trace_user_id=str(user_id),
+        trace_attrs={"turn_kind": "roundtable", "participants": len(resolved), "policy": policy},
+    )
+    genbox["gen"] = gen
+    return _sse_stream(_subscribe(gen), trace_id=gen.trace_id)
 
 
 @router.post("/{chat_id}/roundtable/stop")
@@ -316,6 +334,7 @@ async def roundtable_stop(
     user: User = Depends(require_approved),
     db: AsyncSession = Depends(get_db),
 ):
+    """Pausa a mesa agora: interrompe a fala em curso (o parcial é salvo)."""
     await _get_owned_chat(db, chat_id, user)
-    _roundtable_stop.add(str(chat_id))
-    return {"ok": True}
+    gen = generation.get_active(str(chat_id))
+    return {"ok": True, "stopped": bool(gen and gen.stop())}
