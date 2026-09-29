@@ -42,6 +42,35 @@ export function useClickOutside<T extends HTMLElement>(onClose: () => void) {
   return ref;
 }
 
+/**
+ * Popover `absolute` CENTRADO no botão que o abriu (o pai `relative` do popover é
+ * o invólucro do botão). O elemento usa `left-1/2 -translate-x-1/2`; este hook mede
+ * e devolve um `marginLeft` que o empurra para dentro da viewport (margem de 8px)
+ * quando não há espaço. `margin` e não `translate`: a animação `pop` anima a
+ * propriedade `translate`, e as duas se somariam só durante a animação.
+ */
+export function useCenteredPopover<T extends HTMLElement>(open: boolean, margin = 8) {
+  const ref = useRef<T>(null);
+  const [shift, setShift] = useState(0);
+  useLayoutEffect(() => {
+    if (!open) { setShift(0); return; }
+    function place() {
+      const el = ref.current;
+      const anchor = el?.parentElement;
+      if (!el || !anchor) return;
+      const a = anchor.getBoundingClientRect();
+      const w = el.offsetWidth; // sem o `scale` da animação
+      const want = a.left + a.width / 2 - w / 2;
+      const left = Math.max(margin, Math.min(want, window.innerWidth - w - margin));
+      setShift(left - want);
+    }
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [open, margin]);
+  return { ref, style: { marginLeft: shift } as React.CSSProperties };
+}
+
 export function Menu({
   children,
   onClose,
@@ -78,7 +107,7 @@ export function AnchoredMenu({
 }: {
   anchorRef: React.RefObject<HTMLElement | null>;
   onClose: () => void;
-  align?: "left" | "right";
+  align?: "left" | "right" | "center";
   className?: string;
   children: React.ReactNode;
 }) {
@@ -101,7 +130,11 @@ export function AnchoredMenu({
       else s.top = r.bottom + gap;
       // horizontal: align="left" abre para a DIREITA (canto inferior-direito do
       // botão); "right" abre para a esquerda. Faz flip se estourar a viewport.
-      if (align === "left") {
+      if (align === "center") {
+        // centrado no botão; encostado na margem (8px) se estourar a viewport
+        const want = r.left + r.width / 2 - menuW / 2;
+        s.left = Math.max(8, Math.min(want, window.innerWidth - menuW - 8));
+      } else if (align === "left") {
         if (r.left + menuW + 8 <= window.innerWidth) s.left = r.left;
         else s.right = Math.max(8, window.innerWidth - r.right);
       } else {

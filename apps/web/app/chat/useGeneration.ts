@@ -65,6 +65,17 @@ export interface GenerationDeps {
  */
 export type PreparingTool = { name: string; action: string | null; chars: number };
 
+/** Números da chamada ATUAL (ou da última) para a barra sob o composer: por
+ *  resposta, nunca acumulado no chat. `exact` = veio do `usage` do `done`; antes
+ *  disso os tokens são estimados pelo texto streamado. */
+export interface CallStats {
+  chatId: string | null;
+  startedAt: number;
+  endedAt: number | null;
+  tokens: number;
+  exact: boolean;
+}
+
 export function useGeneration(getDeps: () => GenerationDeps) {
   const [streaming, setStreaming] = useState("");
   const [streamingReasoning, setReasoningText] = useState("");
@@ -86,6 +97,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
   // Mantém uma explicação curta durante intervalos sem tokens. Isso evita que uma
   // espera legítima por contexto/provider pareça um stream morto.
   const [streamPhase, setStreamPhase] = useState<StreamPhase>("idle");
+  const [callStats, setCallStats] = useState<CallStats | null>(null);
   // "Parar" durante a geração: como interromper o turno atual (cancel no servidor
   // p/ chats persistentes; abort local p/ temporários). null = nada para parar.
   const stopRef = useRef<(() => void) | null>(null);
@@ -153,6 +165,27 @@ export function useGeneration(getDeps: () => GenerationDeps) {
     // reabria o painel — se o usuário fechasse durante a geração, o próximo flush
     // (~70ms) reabria. Guardamos o id já aberto; só reabrimos p/ um artefato NOVO.
     let autoOpenedId: string | null = null;
+    // estatísticas da chamada: o relógio só começa no 1º evento real (a retomada
+    // cria o handler antes de saber se há algo rodando — "idle" não conta).
+    let statStart = 0;
+    let statEnd: number | null = null;
+    let statChars = 0;
+    let statExact: number | null = null;
+    const pushStats = () => {
+      if (!statStart || !paint()) return;
+      setCallStats({
+        chatId: getOwnerId ? getOwnerId() : null,
+        startedAt: statStart,
+        endedAt: statEnd,
+        // ~4 caracteres por token: estimativa só enquanto o `usage` real não chega
+        tokens: statExact ?? Math.round(statChars / 4),
+        exact: statExact !== null,
+      });
+    };
+    const endStats = () => {
+      if (statStart && statEnd === null) statEnd = Date.now();
+      pushStats();
+    };
     const flush = () => {
       if (flushTimer !== null) {
         clearTimeout(flushTimer);
@@ -160,6 +193,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       }
       lastFlush = Date.now();
       if (!paint()) return;
+      pushStats(); // pega carona no throttle do texto (~70ms), sem render extra por token
       if (selectionGesture || hasTextSelection()) {
         pendingPaint = true;
         return;
@@ -213,6 +247,10 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       document.addEventListener("pointercancel", onPointerUp, true);
     }
     const handler = (ev: any) => {
+      if (!statStart) {
+        statStart = Date.now();
+        pushStats();
+      }
       if (ev.type === "tool_preparing") {
         const prep = { name: String(ev.name || ""), action: ev.action ?? null, chars: Number(ev.chars) || 0 };
         preparingRef.current = prep;
@@ -228,11 +266,13 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         if (state.acc === "" && paint()) setGeneratingImage(false); // 1º token = respondendo em texto
         if (paint()) setStreamPhase("streaming");
         state.acc += ev.text;
+        statChars += String(ev.text ?? "").length;
         maybeFlush();
       } else if (ev.type === "reasoning") {
         if (state.acc) archiveCommentary();
         if (paint()) setStreamPhase("thinking");
         state.reason += ev.text;
+        statChars += String(ev.text ?? "").length;
         const last = state.steps[state.steps.length - 1];
         if (last?.kind === "reasoning") state.steps[state.steps.length - 1] = { ...last, text: last.text + ev.text };
         else state.steps.push({ kind: "reasoning", text: ev.text });
@@ -390,11 +430,13 @@ export function useGeneration(getDeps: () => GenerationDeps) {
           setTranscribingAudio(false);
         }
         flush();
+        endStats();
         armEndWatchdog();
       } else if (ev.type === "stopped") {
         // garante que o parcial que ainda estava no throttle apareça antes de o
         // chamador recarregar a mensagem persistida.
         flush();
+        endStats();
         armEndWatchdog();
       } else if (ev.type === "artifacts") {
         // resposta persistida criou/atualizou artefatos: abre o último no painel
@@ -420,7 +462,10 @@ export function useGeneration(getDeps: () => GenerationDeps) {
           if (evs.some((tool) => tool.name === "imaginai_world" || tool.name === "imaginai_setup")) state.imaginaiChanged = true;
           if (paint()) setToolEvents(evs);
         }
+        const out = Number(ev.usage?.completion_tokens);
+        if (out > 0) statExact = out;
         flush();
+        endStats();
         armEndWatchdog();
       } else if (ev.type === "title") {
         // título gerado por IA na 1ª troca: atualiza o cabeçalho na hora
@@ -428,6 +473,8 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       }
     };
     const dispose = () => {
+      // stream fechou sem done/stopped (abort, queda): o relógio para aqui
+      endStats();
       if (typeof document !== "undefined") {
         document.removeEventListener("selectionchange", onSelectionChange);
         document.removeEventListener("pointerdown", onPointerDown, true);
@@ -521,6 +568,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
     liveArtifact, setLiveArtifact,
     sending, setSending,
     streamPhase, setStreamPhase,
+    callStats,
     stopRef,
     makeStreamHandler,
     resumeStream,
