@@ -87,7 +87,10 @@ class SubagentPool:
 
 
 def team_members(args: dict) -> tuple[list[dict], str | None]:
-    """Normaliza os membros pedidos pela IA: [{name, instructions, task, isolated}]."""
+    """Normaliza os membros pedidos pela IA: [{name, instructions, task, isolated}] e,
+    quando pedidos, `tools` (escopo concedido) e `context` (dados só deste membro)."""
+    from ..tools.loader import normalize_grant
+
     shared = str(args.get("shared_instructions") or "").strip()
     raw = args.get("members")
     if not isinstance(raw, list) or not raw:
@@ -101,8 +104,15 @@ def team_members(args: dict) -> tuple[list[dict], str | None]:
         if not task:
             continue
         instr = "\n\n".join(p for p in (shared, str(m.get("instructions") or "").strip()) if p)
-        out.append({"name": name, "task": task, "instructions": instr[:8000] or "Do the task well.",
-                    "isolated": bool(m.get("isolated"))})
+        item = {"name": name, "task": task, "instructions": instr[:8000] or "Do the task well.",
+                "isolated": bool(m.get("isolated"))}
+        grant = normalize_grant(m.get("tools"))
+        if grant is not None:
+            item["tools"] = grant
+        ctx = str(m.get("context") or "").strip()
+        if ctx:
+            item["context"] = ctx[:60_000]
+        out.append(item)
     if not out:
         return [], "nenhum membro tem `task`"
     return out, None
@@ -138,11 +148,15 @@ async def run_team(
     emit: Callable[[dict], None],
     synthesize: Callable[[str, str], Awaitable[str]] | None,
     chain: bool = False,
+    attachments: list[dict] | None = None,
+    ask_lead: bool = True,
 ) -> dict:
     """Roda a equipe e devolve o resultado (kind `subagent_team`). `emit` recebe os eventos
     de cada membro: {"member": i, "status": "running"|"progress"|"done", ...}.
     `chain`: em sequência, e cada membro recebe os relatórios dos anteriores (etapas que
-    dependem umas das outras); senão, todos ao mesmo tempo (a fila do pool limita)."""
+    dependem umas das outras); senão, todos ao mesmo tempo (a fila do pool limita).
+    `attachments`: arquivos do usuário entregues a todos; `ask_lead` False (segundo
+    plano) tira dos membros o request_from_lead — não há orquestrador esperando."""
     n = len(members)
     results: list[dict | None] = [None] * n
     from .agent_mailbox import current_ref
@@ -171,11 +185,22 @@ async def run_team(
             current_ref.set(f"{base_ref}#{i}")
         try:
             tarefa = _task_with_prior(i, m) if chain else m["task"]
-            res = await run("new", tarefa, {"name": m["name"], "instructions": m["instructions"],
-                                                "isolated": m["isolated"],
-                                                # em paralelo, no MESMO código: só leitura
-                                                "read_only": not chain and not m["isolated"]},
-                            progress=prog)
+            spec = {"name": m["name"], "instructions": m["instructions"],
+                    "isolated": m["isolated"],
+                    # em paralelo, no MESMO código: só leitura
+                    "read_only": not chain and not m["isolated"]}
+            if m.get("tools") is not None:
+                spec["tools"] = m["tools"]
+            handoff: dict = {}
+            if m.get("context"):
+                handoff["context"] = m["context"]
+            if attachments:
+                handoff["attachments"] = attachments
+            if not ask_lead:
+                handoff["ask_lead"] = False
+            # kwargs novos só quando usados: runners antigos seguem valendo
+            res = await run("new", tarefa, spec, progress=prog,
+                            **({"handoff": handoff} if handoff else {}))
         except Exception as exc:  # noqa: BLE001 - a falha vira o resultado do membro
             logger.warning("membro da equipe falhou: %s", exc)
             res = {"error": f"o subagente falhou: {exc}"}
@@ -199,21 +224,29 @@ async def run_team(
     stored: list[dict] = []
     reports: list[str] = []
     ok = 0
-    for m, r in zip(members, results):
+    for i, (m, r) in enumerate(zip(members, results)):
         r = r or {"error": "sem resultado"}
         err = r.get("error")
         saida = str(r.get("output") or "")
+        needs = r.get("needs") if r.get("status") == "needs_input" else None
         if not err:
             ok += 1
-            reports.append(f"### {m['name']}\nTask: {m['task'][:300]}\n\n{saida}")
+            pedido = (f"\n\nNEEDS INPUT ({needs.get('kind')}): {needs.get('need')} — answer with "
+                      f"delegate(continue_agent=\"{base_ref}#{i}\", task=...)"
+                      if needs and base_ref else "")
+            reports.append(f"### {m['name']}\nTask: {m['task'][:300]}\n\n{saida}{pedido}")
         else:
             reports.append(f"### {m['name']}\nTask: {m['task'][:300]}\n\nFAILED: {err}")
         item = {"agent": r.get("agent") or m["name"], "task": m["task"], "adhoc": True,
                 "output": saida[:out_cap] + (" […]" if len(saida) > out_cap else ""),
                 "timeline": _trim_timeline(r.get("timeline") or [], tl_cap)}
-        for k in ("error", "task_id"):
+        for k in ("error", "task_id", "status", "needs", "tools_granted", "tools_not_granted"):
             if r.get(k):
                 item[k] = r[k]
+        if m.get("context"):
+            item["context"] = m["context"]
+        if base_ref:
+            item["ref"] = f"{base_ref}#{i}"
         stored.append(item)
 
     joined = "\n\n".join(reports)
@@ -263,9 +296,16 @@ def model_view(result: dict) -> dict:
     membros = result.get("members") or []
     if len(membros) <= 60:
         view["members"] = [
-            {"agent": m.get("agent"), "ok": not m.get("error"), **({"task_id": m["task_id"]} if m.get("task_id") else {})}
+            {"agent": m.get("agent"), "ok": not m.get("error"),
+             **{k: m[k] for k in ("task_id", "ref", "status", "needs", "tools_not_granted") if m.get(k)}}
             for m in membros
         ]
+    else:
+        # equipe grande: só quem pediu algo ao orquestrador aparece (para ele responder)
+        pediram = [{"agent": m.get("agent"), "ref": m.get("ref"), "needs": m.get("needs")}
+                   for m in membros if m.get("status") == "needs_input"]
+        if pediram:
+            view["needs_input"] = pediram[:60]
     if any(m.get("task_id") for m in membros):
         view["note"] = ("Some members worked on isolated worktrees: their changes are tasks awaiting "
                         "the user's review in the Tasks tab, not merged yet.")

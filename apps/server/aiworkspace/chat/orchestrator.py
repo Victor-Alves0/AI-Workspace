@@ -797,21 +797,71 @@ def _view_skill_tool() -> dict[str, Any]:
     }
 
 
+# quanto de `context` o orquestrador pode entregar a um agente (o resto vai por arquivo)
+_HANDOFF_CONTEXT_CAP = 60_000
+# texto de cada arquivo entregue a um agente (o resto ele lê com read_attachment)
+_HANDOFF_FILE_CAP = 60_000
+
+
+def _grantable_line(paths: list[str] | None) -> str:
+    if not paths:
+        return ""
+    lista = ", ".join(paths[:80]) + (" …" if len(paths) > 80 else "")
+    return f"\nTools you can grant (your own): {lista}"
+
+
+def _handoff_props() -> dict[str, Any]:
+    """Parâmetros de entrega de contexto, iguais no delegate e na equipe."""
+    return {
+        "context": {
+            "type": "string",
+            "description": "data the agent needs and cannot get itself: excerpts, numbers, prior "
+                           "findings, IDs, the user's constraints. It does not see this chat.",
+        },
+        "attachments": {
+            "description": "the user's attached files to hand over: true = all files of this "
+                           "chat turn, or a list of file names (earlier files of this chat too). "
+                           "Images go as images; text files as their content.",
+            "anyOf": [{"type": "boolean"}, {"type": "array", "items": {"type": "string"}}],
+        },
+    }
+
+
+def _tools_prop(for_member: bool = False) -> dict[str, Any]:
+    alvo = "this member" if for_member else "agent=new"
+    return {
+        "type": "array", "items": {"type": "string"},
+        "description": f"{alvo}: the tool paths the agent may use (e.g. web.search.query, "
+                       "code.files.browse, or a group like web.*). Only tools you have can be "
+                       "granted; others are refused and listed in the result. Omit to give it "
+                       "all your tools; [] = no tools.",
+    }
+
+
 def _delegate_tool(agents: list[dict[str, Any]], adhoc: bool = False,
-                   isolation: bool = False, background: bool = False) -> dict[str, Any]:
+                   isolation: bool = False, background: bool = False,
+                   grantable: list[str] | None = None) -> dict[str, Any]:
     """Tool injetada quando o modelo pode usar SUBAGENTES. `agent` = a chave de um
     agente do usuário (ModelConfig) ou "new" (a IA cria um agente para a tarefa, com
-    nome + instruções). `isolated` só existe com o worktree ligado."""
+    nome + instruções). `isolated` só existe com o worktree ligado. `grantable` = os
+    paths que o orquestrador tem (e portanto pode conceder a um agente novo)."""
     keys = [a["key"] for a in agents] + (["new"] if adhoc else [])
     lines = "\n".join(
         f"- {a['key']}: {a['name']}" + (f" — {a['description']}" if a.get("description") else "")
         for a in agents
     )
     desc = (
-        "Hand a self-contained sub-task to a subagent. It works in a fresh context with its "
-        "own tools and returns one final report for you to use; the user does not see it "
-        "directly. Use it for work that is independent, parallelizable or specialized; do "
-        "simple things yourself. Several delegate calls in the same turn may run in parallel."
+        "Hand a self-contained sub-task to a subagent. It works in a fresh context (it does "
+        "not see this chat) with its own tools and returns one final report for you to use; "
+        "the user does not see it directly. Use it for work that is independent, "
+        "parallelizable or specialized; do simple things yourself. Several delegate calls in "
+        "the same turn may run in parallel. Give it what it needs up front: data in `context`, "
+        "the user's files in `attachments`."
+        "\n\nIf the result has status \"needs_input\", the agent stopped to ask you for a tool "
+        "or data (`needs`). Answer by calling delegate again with continue_agent=<its "
+        "agent_ref> and your answer in `task` (plus `tools`, `context` or `attachments` if "
+        "that is what it asked for); it resumes with its previous work. If you cannot or should "
+        "not provide it, finish without it or ask the user."
     )
     if adhoc:
         desc += " To start many agents at once, use delegate_team instead."
@@ -820,15 +870,26 @@ def _delegate_tool(agents: list[dict[str, Any]], adhoc: bool = False,
     if adhoc:
         desc += (
             '\n\nagent="new" creates an agent for this task: give it a short `name` and '
-            "`instructions` (its role, focus and what to return). It has your tools and skills."
+            "`instructions` (its role, focus and what to return). By default it has your tools "
+            "and skills; pass `tools` to give it only what the task needs."
+            + _grantable_line(grantable)
         )
     props: dict[str, Any] = {
         "agent": {"type": "string", "enum": keys, "description": "agent key, or \"new\""},
-        "task": {"type": "string", "description": "complete, self-contained instructions for the task"},
+        "task": {"type": "string", "description": "complete, self-contained instructions for the "
+                                                  "task (with continue_agent: your answer)"},
     }
     if adhoc:
         props["name"] = {"type": "string", "description": "agent=new: short name shown to the user"}
         props["instructions"] = {"type": "string", "description": "agent=new: role, focus and expected output"}
+        props["tools"] = _tools_prop()
+    props.update(_handoff_props())
+    props["continue_agent"] = {
+        "type": "string",
+        "description": "the agent_ref of an agent that returned needs_input (or that you want "
+                       "to follow up with): resumes THAT agent with its history; `agent`, "
+                       "`name` and `instructions` are then ignored",
+    }
     if isolation:
         props["isolated"] = {
             "type": "boolean",
@@ -849,13 +910,14 @@ def _delegate_tool(agents: list[dict[str, Any]], adhoc: bool = False,
         "function": {
             "name": "delegate",
             "description": desc,
-            "parameters": {"type": "object", "properties": props, "required": ["agent", "task"]},
+            "parameters": {"type": "object", "properties": props, "required": ["task"]},
         },
     }
 
 
 def _delegate_team_tool(max_members: int, isolation: bool = False,
-                        background: bool = False) -> dict[str, Any]:
+                        background: bool = False,
+                        grantable: list[str] | None = None) -> dict[str, Any]:
     """Tool injetada quando a IA pode criar agentes: uma EQUIPE inteira numa chamada só."""
     desc = (
         f"Start a team of new agents in one call (up to {max_members} agents per turn, counting "
@@ -863,12 +925,18 @@ def _delegate_team_tool(max_members: int, isolation: bool = False,
         "(merged automatically when the team is large), and the user watches each agent work. "
         "Split the work so members do not overlap: give each a distinct slice (files, topics, "
         "channels, personas...). Put what all members share in `shared_instructions` and keep "
-        "each member's `task` specific and self-contained. Members run at the same time by "
+        "each member's `task` specific and self-contained. Members do not see this chat: hand "
+        "shared data in `context`, the user's files in `attachments`, and member-specific data "
+        "in the member's `context`. Give each member only the `tools` its slice needs. Members "
+        "run at the same time by "
         "default; set parallel=false when each step builds on the previous ones (e.g. research "
         "-> strategy -> copy): members then run in order and each receives the reports of the "
         "ones before it. For very large efforts, create a few "
         "lead agents and tell each one to build its own sub-team with delegate_team; leads "
-        "report back to you. Use delegate for a single agent."
+        "report back to you. Use delegate for a single agent. A member listed with "
+        "status needs_input asked you for something: answer it with delegate(continue_agent="
+        "<its ref>, task=<answer>)."
+        + _grantable_line(grantable)
     )
     member: dict[str, Any] = {
         "type": "object",
@@ -876,6 +944,8 @@ def _delegate_team_tool(max_members: int, isolation: bool = False,
             "name": {"type": "string", "description": "short name shown to the user"},
             "task": {"type": "string", "description": "this member's specific, self-contained task"},
             "instructions": {"type": "string", "description": "optional role/focus beyond shared_instructions"},
+            "context": {"type": "string", "description": "optional data only this member needs"},
+            "tools": _tools_prop(for_member=True),
         },
         "required": ["name", "task"],
     }
@@ -894,6 +964,7 @@ def _delegate_team_tool(max_members: int, isolation: bool = False,
                            "false: members run in the listed order, each building on the previous reports.",
         },
         "members": {"type": "array", "items": member, "maxItems": max_members},
+        **_handoff_props(),
     }
     if background:
         props["background"] = {
@@ -909,6 +980,52 @@ def _delegate_team_tool(max_members: int, isolation: bool = False,
             "parameters": {"type": "object", "properties": props, "required": ["team_name", "goal", "members"]},
         },
     }
+
+
+REQUEST_FROM_LEAD = "request_from_lead"
+
+
+def request_from_lead_tool() -> dict[str, Any]:
+    """Tool dos SUBAGENTES: pedir ao orquestrador uma tool ou um dado que falta."""
+    return {
+        "type": "function",
+        "function": {
+            "name": REQUEST_FROM_LEAD,
+            "description": (
+                "Ask the lead (the assistant that gave you this task) for a tool you do not have "
+                "or for data/files only it or the user can provide, when you cannot finish well "
+                "without it. This ENDS your run: after calling it, write your partial report "
+                "(what you did, what you found, exactly what you need and why) as your final "
+                "message. The lead then resumes you with the answer. Do not use it for things "
+                "your own tools can find, and ask for everything you need in one request."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["tool", "data"],
+                             "description": "tool: a tool you lack (give its path if you know it); "
+                                            "data: information, a file, a decision"},
+                    "need": {"type": "string", "description": "exactly what you need and why"},
+                },
+                "required": ["kind", "need"],
+            },
+        },
+    }
+
+
+def _task_with_context(task: str, context: str) -> str:
+    """Tarefa + os dados que o orquestrador entregou (o agente não vê o chat)."""
+    if not context:
+        return task
+    return f"{task}\n\n## Context from the lead\n{context}"
+
+
+def _output_with_needs(output: str, needs: Any) -> str:
+    """Relatório parcial + o pedido ao orquestrador (entra no histórico da retomada)."""
+    if not isinstance(needs, dict) or not needs.get("need"):
+        return output or "(sem relatório)"
+    return (f"{output or '(sem relatório)'}\n\n[I asked the lead for "
+            f"{needs.get('kind') or 'data'}: {needs.get('need')}]")
 
 
 async def _stream_subagents(
@@ -955,8 +1072,16 @@ def _delegate_target(args: dict, by_key: dict[str, dict[str, Any]], adhoc: bool,
         instructions = str(args.get("instructions") or "").strip()
         if not name or not instructions:
             return key, name, None, 'agent="new" exige `name` e `instructions`'
-        return key, name, {"name": name, "instructions": instructions[:8000],
-                           "isolated": bool(isolation and args.get("isolated"))}, None
+        new = {"name": name, "instructions": instructions[:8000],
+               "isolated": bool(isolation and args.get("isolated"))}
+        from ..tools.loader import normalize_grant
+
+        grant = normalize_grant(args.get("tools"))
+        if grant is not None:
+            new["tools"] = grant  # escopo concedido: o runner faz a interseção
+        return key, name, new, None
+    if not key:
+        return key, key, None, 'informe `agent` (ou `continue_agent` para retomar um agente)'
     spec = by_key.get(key)
     if spec is None:
         return key, key, None, f"subagente '{key}' não autorizado"
@@ -2050,12 +2175,14 @@ def _assemble_tools_and_prompt(
     a.subagents_by_key = {str(x.get("key")): x for x in subagents}
     a.subagents_on = bool((subagents or subagent_adhoc) and run_subagent is not None)
     if a.subagents_on:
+        # o que este modelo pode conceder a um agente novo (nunca mais que o dele)
+        grantable = list(sift_meta.get("tool_paths") or []) if a.has_tools else []
         a.tools = list(a.tools) + [_delegate_tool(subagents, subagent_adhoc, subagent_isolation,
-                                                  subagent_background)]
+                                                  subagent_background, grantable)]
         native_names.append("delegate")
         if subagent_adhoc:
             a.tools = list(a.tools) + [_delegate_team_tool(subagent_max_calls, subagent_isolation,
-                                                           subagent_background)]
+                                                           subagent_background, grantable)]
             native_names.append("delegate_team")
 
     # Ferramentas de domínio fornecidas pelo chamador do turno. O runner recebe
@@ -2375,8 +2502,14 @@ class _ToolDispatcher:
     # imagens que o usuário anexou NESTE turno — usadas como contexto de EDIÇÃO
     # pelo generate_image (estilo nano-banana: anexa imagem + "mude X").
     input_images: list[str] = field(default_factory=list)
+    # anexos JÁ PREPARADOS deste turno (imagens em data URL, arquivos com texto): o
+    # orquestrador pode entregá-los a um subagente (`attachments` do delegate)
+    attachments: list[dict[str, Any]] = field(default_factory=list)
     delegations_used: int = 0
     delegate_pre: dict[str, dict] = field(default_factory=dict)
+    # agentes que já rodaram NESTE turno, por agent_ref (id da chamada ou id#n): é o
+    # que `continue_agent` retoma antes de a mensagem existir no banco
+    agent_sessions: dict[str, dict] = field(default_factory=dict)
     result: Any = None
 
     async def run(self, name: str, args: dict, tc: dict) -> AsyncGenerator[dict[str, Any], None]:
@@ -2731,6 +2864,167 @@ class _ToolDispatcher:
             "content": content, "tags": tags[:10],
         }
 
+    # ------------------------------------------------------------------ #
+    # entrega ao subagente: contexto, anexos e retomada (continue_agent)  #
+    # ------------------------------------------------------------------ #
+    async def _pick_attachments(self, spec: Any) -> tuple[list[dict[str, Any]], list[str]]:
+        """Anexos que o orquestrador entrega ao agente: os deste turno (já preparados:
+        imagem em data URL, arquivo com texto) ou, por nome, os de mensagens anteriores
+        do chat (o começo do texto; o resto o agente lê com read_attachment)."""
+        if not spec:
+            return [], []
+        atuais = [x for x in (self.attachments or []) if isinstance(x, dict)]
+        faltam: list[str] = []
+        if spec is True or (isinstance(spec, str) and spec.strip().lower() in ("true", "all", "*")):
+            escolhidos = list(atuais)
+        else:
+            nomes = [spec] if isinstance(spec, str) else (spec if isinstance(spec, list) else [])
+            escolhidos = []
+            for n in nomes[:20]:
+                want = str(n or "").strip().lower()
+                if not want:
+                    continue
+                achou = next((x for x in atuais if str(x.get("name") or "").lower() == want), None) \
+                    or next((x for x in atuais if want in str(x.get("name") or "").lower()), None)
+                if achou is None and self.chat_id:
+                    try:
+                        r = await attachment_context.read_attachment(self.user_id, self.chat_id, {"name": want})
+                    except Exception as exc:  # noqa: BLE001 - arquivo antigo é best-effort
+                        logger.warning("anexo antigo p/ subagente falhou: %s", exc)
+                        r = {"error": str(exc)}
+                    if isinstance(r, dict) and not r.get("error") and r.get("text"):
+                        achou = {"type": "file", "name": r.get("name") or str(n), "text": r["text"],
+                                 "truncated": not r.get("end")}
+                if achou is None:
+                    faltam.append(str(n))
+                elif achou not in escolhidos:
+                    escolhidos.append(achou)
+        out: list[dict[str, Any]] = []
+        for x in escolhidos[:20]:
+            txt = x.get("text")
+            if x.get("type") == "file" and isinstance(txt, str) and len(txt) > _HANDOFF_FILE_CAP:
+                nome = x.get("name") or "arquivo"
+                x = {**x, "truncated": True, "text": txt[:_HANDOFF_FILE_CAP] + (
+                    f"\n\n[… arquivo cortado em {_HANDOFF_FILE_CAP} caracteres. Use "
+                    f"read_attachment(name=\"{nome}\", offset={_HANDOFF_FILE_CAP}) para ler o resto.]")}
+            out.append(x)
+        return out, faltam
+
+    async def _load_agent(self, ref: str) -> dict | str:
+        """Agente já rodado (neste turno ou gravado no chat) → identidade + histórico."""
+        sess = self.agent_sessions.get(ref)
+        if sess is not None:
+            return sess
+        if not self.chat_id:
+            return f"agente '{ref}' não encontrado"
+        from . import agent_followup
+
+        try:
+            cid = uuid.UUID(str(self.chat_id))
+        except (ValueError, TypeError):
+            return f"agente '{ref}' não encontrado"
+        try:
+            async with SessionLocal() as db:
+                return await agent_followup.load_chain(db, cid, ref)
+        except agent_followup.FollowupError as exc:
+            return f"{exc} (agent_ref '{ref}')"
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("retomar agente %s falhou: %s", ref, exc)
+            return f"não consegui retomar o agente '{ref}'"
+
+    async def _plan_delegate(self, args: dict) -> dict[str, Any]:
+        """Alvo + entrega de UMA delegação: {"error"} ou key/label/new/task/handoff/
+        prior/cont/missing. Usado pelo despacho sequencial e pelo paralelo."""
+        task = str(args.get("task") or "")
+        handoff: dict[str, Any] = {}
+        ctx = str(args.get("context") or "").strip()
+        if ctx:
+            handoff["context"] = ctx[:_HANDOFF_CONTEXT_CAP]
+        atts, faltam = await self._pick_attachments(args.get("attachments"))
+        if atts:
+            handoff["attachments"] = atts
+        cont = str(args.get("continue_agent") or "").strip()
+        prior: list[dict] | None = None
+        if cont:
+            sess = await self._load_agent(cont)
+            if isinstance(sess, str):
+                return {"error": sess}
+            key, label = str(sess["key"]), str(sess["name"])
+            new: dict | None = None
+            if sess.get("adhoc"):
+                if not self.subagent_adhoc:
+                    return {"error": "criar/retomar agentes da IA está desligado neste modelo"}
+                from ..tools.loader import normalize_grant
+
+                new = {"name": label, "instructions": sess.get("instructions") or (
+                    "Continue the task you already worked on."), "isolated": False}
+                antes, extra = sess.get("tools"), normalize_grant(args.get("tools"))
+                # a retomada só ACRESCENTA o que o agente pediu (a interseção com o
+                # escopo do orquestrador continua valendo no runner)
+                if antes is not None:
+                    new["tools"] = sorted(set(antes) | set(extra or []))
+            elif key not in self.subagents_by_key:
+                return {"error": f"subagente '{key}' não autorizado"}
+            prior = list(sess.get("history") or [])
+            handoff["ask_lead"] = True
+        else:
+            key, label, new, erro = _delegate_target(args, self.subagents_by_key, self.subagent_adhoc,
+                                                     self.subagent_isolation)
+            if erro:
+                return {"error": erro}
+        return {"key": key, "label": label, "new": new, "task": task, "handoff": handoff,
+                "prior": prior, "cont": cont or None, "missing": faltam}
+
+    @staticmethod
+    def _plan_call(run: Any, plan: dict[str, Any], read_only: bool | None = None) -> Any:
+        """fn(progress) do runner — só passa os kwargs novos quando usados (os runners
+        antigos/fakes seguem aceitando a chamada de sempre)."""
+        kw: dict[str, Any] = {}
+        if plan.get("prior") is not None:
+            kw["prior"] = plan["prior"]
+        if plan.get("handoff"):
+            kw["handoff"] = plan["handoff"]
+        if read_only is not None:
+            kw["read_only"] = read_only
+        key, task, new = plan["key"], plan["task"], plan["new"]
+        if new is not None:
+            return lambda prog: run(key, task, new, progress=prog, **kw)
+        return lambda prog: run(key, task, progress=prog, **kw)
+
+    def _finish_delegate(self, ref: str | None, plan: dict[str, Any], res: Any) -> Any:
+        """Marca o resultado com o agent_ref (p/ retomar) e guarda a sessão do agente."""
+        if not isinstance(res, dict) or res.get("error") or not ref:
+            if isinstance(res, dict) and plan.get("missing"):
+                res["attachments_not_found"] = plan["missing"]
+            return res
+        res["agent_ref"] = ref
+        ctx = (plan.get("handoff") or {}).get("context")
+        if ctx:
+            res["context"] = ctx
+        if plan.get("cont"):
+            res["continues"] = plan["cont"]
+        if plan.get("missing"):
+            res["attachments_not_found"] = plan["missing"]
+        if res.get("status") == "needs_input":
+            res["how_to_answer"] = (
+                f"The agent paused to ask you for something (`needs`). Answer with "
+                f"delegate(continue_agent=\"{ref}\", task=<your answer>"
+                + (", tools=[...]" if (res.get("needs") or {}).get("kind") == "tool" else "")
+                + "), or finish without it / ask the user.")
+        new = plan.get("new")
+        self.agent_sessions[ref] = {
+            "key": plan["key"], "name": str(res.get("agent") or plan["label"]),
+            "adhoc": new is not None,
+            "instructions": (new or {}).get("instructions") or "",
+            "tools": res.get("tools_granted") if isinstance(res.get("tools_granted"), list) else (new or {}).get("tools"),
+            "history": list(plan.get("prior") or []) + [
+                {"role": "user", "content": _task_with_context(plan["task"], ctx or "")},
+                {"role": "assistant", "content": _output_with_needs(
+                    str(res.get("output") or ""), res.get("needs"))},
+            ],
+        }
+        return res
+
     async def _delegate(self, args: dict, tc: dict) -> AsyncGenerator[dict[str, Any], None]:
         if not self.subagents_on:
             self.result = {"error": "subagentes não habilitados neste modelo"}
@@ -2743,16 +3037,17 @@ class _ToolDispatcher:
         if self.delegations_used >= self.subagent_max_calls:
             self.result = {"error": f"limite de {self.subagent_max_calls} delegações por turno atingido"}
             return
-        task = str(args.get("task") or "")
-        key, label, new, erro = _delegate_target(args, self.subagents_by_key, self.subagent_adhoc,
-                                                 self.subagent_isolation)
-        if erro:
-            self.result = {"error": erro}
+        plan = await self._plan_delegate(args)
+        if plan.get("error"):
+            self.result = {"error": plan["error"]}
             return
+        key, label, new, task = plan["key"], plan["label"], plan["new"], plan["task"]
         self.delegations_used += 1
         starter = getattr(self.run_subagent, "start_background", None)
-        if args.get("background") and self.subagent_background and starter is not None:
-            job = starter(key, task, new, label)
+        if args.get("background") and self.subagent_background and starter is not None \
+                and not plan.get("cont"):
+            extra = {"handoff": plan["handoff"]} if plan.get("handoff") else {}
+            job = starter(key, task, new, label, **extra)
             yield {"type": "subagent", "status": "background", "id": tcid, "agent": label,
                    "adhoc": new is not None}
             self.result = {
@@ -2765,15 +3060,14 @@ class _ToolDispatcher:
             return
         yield {"type": "subagent", "status": "start", "id": tcid, "agent": label, "task": task[:200],
                "adhoc": new is not None, "ctx": self.subagent_pass_context,
-               "mem": self.subagent_worker_memory and new is None}
-        run = self.run_subagent
-        fn = (lambda prog: run(key, task, new, progress=prog)) if new is not None \
-            else (lambda prog: run(key, task, progress=prog))
+               "mem": self.subagent_worker_memory and new is None,
+               **({"resumes": plan["cont"]} if plan.get("cont") else {})}
+        fn = self._plan_call(self.run_subagent, plan)
         async for kind, _cid, data in _stream_subagents([(tcid, fn)]):
             if kind == "progress":
                 yield {"type": "subagent", "status": "progress", "id": tcid, "agent": label, **data}
             else:
-                self.result = data
+                self.result = self._finish_delegate(tcid, plan, data)
         yield {"type": "subagent", "status": "done", "id": tcid, "agent": (self.result.get("agent") if isinstance(self.result, dict) else None) or label}
 
     async def _delegate_team(self, args: dict, tc: dict) -> AsyncGenerator[dict[str, Any], None]:
@@ -2796,6 +3090,12 @@ class _ToolDispatcher:
         if not self.subagent_isolation:
             for m in members:
                 m["isolated"] = False
+        # contexto comum vai para cada membro (cada um roda sem ver o chat)
+        comum = str(args.get("context") or "").strip()[:_HANDOFF_CONTEXT_CAP]
+        if comum:
+            for m in members:
+                m["context"] = "\n\n".join(p for p in (comum, m.get("context") or "") if p)
+        atts, faltam = await self._pick_attachments(args.get("attachments"))
         self.delegations_used += len(members)
         tcid = tc.get("id")
         name = " ".join(str(args.get("team_name") or "Equipe").split())[:60]
@@ -2804,7 +3104,7 @@ class _ToolDispatcher:
         run = self.run_subagent
         starter = getattr(run, "start_background_team", None)
         if args.get("background") and self.subagent_background and starter is not None:
-            job = starter(members, goal, name, chain)
+            job = starter(members, goal, name, chain, **({"attachments": atts} if atts else {}))
             yield {"type": "subagent", "status": "team_background", "id": tcid, "team": name,
                    "goal": goal[:300], "size": len(members)}
             self.result = {
@@ -2824,7 +3124,8 @@ class _ToolDispatcher:
         _ref_tok = agent_mailbox.current_ref.set(tcid)
         try:
             job = asyncio.ensure_future(run_team(run, members, goal, q.put_nowait,
-                                                 getattr(run, "synthesize", None), chain=chain))
+                                                 getattr(run, "synthesize", None), chain=chain,
+                                                 **({"attachments": atts} if atts else {})))
         finally:
             agent_mailbox.current_ref.reset(_ref_tok)
         try:
@@ -2843,6 +3144,21 @@ class _ToolDispatcher:
             if not job.done():
                 job.cancel()
         self.result = {**res, "team": name}
+        if faltam:
+            self.result["attachments_not_found"] = faltam
+        # cada membro pode ser retomado por `<id>#<n>` (ex.: respondeu needs_input)
+        for i, (m, item) in enumerate(zip(members, res.get("members") or [])):
+            if not tcid or item.get("error"):
+                continue
+            self.agent_sessions[f"{tcid}#{i}"] = {
+                "key": "new", "name": str(item.get("agent") or m["name"]), "adhoc": True,
+                "instructions": m.get("instructions") or "", "tools": item.get("tools_granted") if isinstance(item.get("tools_granted"), list) else m.get("tools"),
+                "history": [
+                    {"role": "user", "content": _task_with_context(m["task"], m.get("context") or "")},
+                    {"role": "assistant", "content": _output_with_needs(
+                        str(item.get("output") or ""), item.get("needs"))},
+                ],
+            }
         yield {"type": "subagent", "status": "team_done", "id": tcid, "team": name}
 
     async def _dispatch_tp(self, *call: Any) -> Any:
@@ -2956,8 +3272,9 @@ def _shape_tool_result(result: Any) -> tuple[str, Any]:
         from .subagent_team import model_view
         content = json.dumps(model_view(event_result), ensure_ascii=False, default=str)
     elif isinstance(event_result, dict) and event_result.get("kind") == "subagent":
-        # passos, linha do tempo e tarefa são para a UI; o modelo já sabe a tarefa
-        content = json.dumps({k: v for k, v in event_result.items() if k not in ("steps", "timeline", "task")},
+        # passos, linha do tempo, tarefa e contexto entregue são para a UI; o modelo já os sabe
+        content = json.dumps({k: v for k, v in event_result.items()
+                              if k not in ("steps", "timeline", "task", "context")},
                              ensure_ascii=False, default=str)
     elif isinstance(event_result, dict) and event_result.get("kind") == "skill_proposal":
         content = json.dumps({
@@ -3277,6 +3594,7 @@ async def run_turn(
         skills=skills, skills_by_slug=skills_by_slug,
         genimage_on=genimage_on, genimage=genimage,
         input_images=[a["url"] for a in (_md.attachments or []) if a.get("type") == "image" and a.get("url")],
+        attachments=[a for a in (_md.attachments or []) if isinstance(a, dict)],
         kb_tool_on=kb_tool_on, kb_bases=kb_bases, kb_k=kb_k, kb_ks=kb_ks, user_text=user_text,
         seen_kb_doc_ids=seen_kb_doc_ids,
         brain_on=asm.brain_on, brain_write=asm.brain_write,
@@ -3419,6 +3737,9 @@ async def run_turn(
     # em vez de moer até o teto de iterações (o que causou o giro de 170 chamadas do 83).
     _noprogress: dict[str, int] = {}
     _spin = {"stop": False}
+    # uma tool pediu o FIM do trabalho (ex.: subagente pediu algo ao orquestrador):
+    # a próxima volta é só-texto — o modelo redige o relatório e o loop acaba
+    _wrap_up = {"on": False}
     _spin_limit = max(2, int(settings.agent_noprogress_repeats))
     # modelo auxiliar (Config → Chats) p/ a síntese final camada B — a mesma escolha da
     # compactação. Resolvido uma vez: usado na trava in-loop e na rede do fim do turno.
@@ -3485,6 +3806,8 @@ async def run_turn(
         # últimas rodadas: retira as tools para OBRIGAR uma resposta final. Sem isto, um
         # modelo que continua chamando tools até o teto encerra o loop com texto vazio.
         if _iter > 0 and _iter >= max_iters - 1:
+            tools = None
+        if _wrap_up["on"]:
             tools = None
         # Antes de reenviar o prompt, limita resultados ANTIGOS de tools. Em chats
         # normais só atua ao cruzar o orçamento de contexto; Codespace conserva a
@@ -3789,7 +4112,7 @@ async def run_turn(
         if subagents_on and subagent_mode == "parallel":
             dcalls = [tc for tc in tool_calls if tc["function"]["name"] == "delegate"]
             if len(dcalls) > 1:
-                picked: list[tuple[str, str, str, dict | None]] = []
+                picked: list[tuple[str, dict[str, Any]]] = []
                 for tc in dcalls:
                     if disp.delegations_used >= subagent_max_calls:
                         break
@@ -3797,38 +4120,32 @@ async def run_turn(
                         a = json.loads(tc["function"]["arguments"] or "{}")
                     except json.JSONDecodeError:
                         a = {}
-                    key, label, new, erro = _delegate_target(a, subagents_by_key, subagent_adhoc,
-                                                             subagent_isolation)
-                    if erro:
-                        continue  # o despacho sequencial devolve o erro ao modelo
                     if a.get("background") and subagent_background:
                         continue  # soltar em segundo plano é instantâneo: fica com o sequencial
-                    task = str(a.get("task") or "")
-                    yield {"type": "subagent", "status": "start", "id": tc["id"], "agent": label,
-                           "task": task[:200], "parallel": True, "adhoc": new is not None,
-                           "ctx": subagent_pass_context, "mem": subagent_worker_memory and new is None}
+                    plan = await disp._plan_delegate(a)
+                    if plan.get("error"):
+                        continue  # o despacho sequencial devolve o erro ao modelo
+                    new = plan["new"]
+                    yield {"type": "subagent", "status": "start", "id": tc["id"], "agent": plan["label"],
+                           "task": plan["task"][:200], "parallel": True, "adhoc": new is not None,
+                           "ctx": subagent_pass_context, "mem": subagent_worker_memory and new is None,
+                           **({"resumes": plan["cont"]} if plan.get("cont") else {})}
                     disp.delegations_used += 1
-                    picked.append((tc["id"], key, task, new))
+                    picked.append((tc["id"], plan))
                 if picked:
                     # vários agentes ao mesmo tempo no MESMO código: só leitura (os de
                     # worktree isolado continuam podendo escrever/rodar)
                     ro = len(picked) > 1
-
-                    def _fn(k: str, t: str, n: dict | None) -> Any:
-                        if n is not None:
-                            return lambda prog: run_subagent(k, t, n, progress=prog, read_only=ro)
-                        return lambda prog: run_subagent(k, t, progress=prog, read_only=ro)
-
-                    nomes = {i: (n or {}).get("name") or subagents_by_key.get(k, {}).get("name", k)
-                             for (i, k, _t, n) in picked}
+                    planos = dict(picked)
+                    nomes = {i: pl["label"] for i, pl in picked}
                     async for kind, cid, data in _stream_subagents(
-                        [(i, _fn(k, t, n)) for (i, k, t, n) in picked]
+                        [(i, disp._plan_call(run_subagent, pl, read_only=ro)) for i, pl in picked]
                     ):
                         if kind == "progress":
                             yield {"type": "subagent", "status": "progress", "id": cid,
                                    "agent": nomes.get(cid), **data}
                         else:
-                            disp.delegate_pre[cid] = data
+                            disp.delegate_pre[cid] = disp._finish_delegate(cid, planos[cid], data)
 
         def _args_of(tc: dict) -> dict:
             try:
@@ -3859,6 +4176,8 @@ async def run_turn(
                         "tool": name, "code": event_result.get("error_code", "unknown"),
                     }, chat_id)
                 _spin["stop"] = True
+            if isinstance(event_result, dict) and event_result.get("end_tool_loop") is True:
+                _wrap_up["on"] = True
             # anti-spin: assina (ferramenta, args, resultado). Mesma assinatura repetida =
             # o agente está refazendo a mesma coisa sem aprender nada → sinaliza p/ o topo
             # do loop forçar a resposta final (não conta polling que MUDA de resultado).

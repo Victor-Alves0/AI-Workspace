@@ -28,6 +28,9 @@ export interface SubagentResult {
   adhoc?: boolean;
   task_id?: string;
   error?: string;
+  /** o agente parou para pedir algo ao orquestrador (request_from_lead) */
+  status?: "needs_input";
+  needs?: { kind?: "tool" | "data"; need?: string };
 }
 
 // ---------------------------------------------------------------------------
@@ -207,6 +210,7 @@ function resumo(call: ToolEvent | undefined, result: ToolEvent | undefined, live
     : queued ? "na fila"
     : background ? "em segundo plano"
     : error ? "falhou"
+    : res?.status === "needs_input" && res.needs?.need ? `precisa de: ${res.needs.need}`
     : tools.length === 0 ? "concluído" : tools.length === 1 ? "1 passo" : `${tools.length} passos`;
   return { name, task, background, running, timeline, failed, error, adhoc, queued, status, res };
 }
@@ -256,6 +260,14 @@ function AgentTimeline({ r, after }: { r: ReturnType<typeof resumo>; after?: Rea
           <div className="text-ink"><Markdown content={res.output} /></div>
         </Item>
       ) : null}
+      {res?.status === "needs_input" && res.needs?.need && (
+        <Item dot="bg-amber-400">
+          <p className="text-[11px] font-medium uppercase tracking-wider text-muted">
+            {res.needs.kind === "tool" ? "Pediu uma ferramenta" : "Pediu informação"}
+          </p>
+          <p className="whitespace-pre-wrap text-ink-soft">{res.needs.need}</p>
+        </Item>
+      )}
       {res?.task_id && (
         <Item dot="bg-muted">
           <p className="flex items-center gap-1.5 text-xs"><GitBranch size={12} /> Worktree isolado, aguardando revisão em Tarefas.</p>
