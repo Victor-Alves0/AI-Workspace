@@ -150,23 +150,31 @@ export async function streamMessage(
   return { queued: false };
 }
 
-// Mesa-redonda (multi-modelo): roda uma ou várias rodadas em que os participantes
-// conversam entre si. `content` (opcional) injeta uma mensagem do usuário antes de
-// rodar; `steps` "one" = um turno, "auto" = várias rodadas até parar/limite.
+// Mesa-redonda: os participantes trabalham em equipe no pedido do usuário (`content`,
+// opcional se já houver um). `steps` "one" = uma fala, "auto" = até concluir/pausar/teto.
+// Com a mesa já rodando, `content` vira instrução p/ a próxima fala ({queued:true}).
 export async function streamRoundtable(
   chatId: string,
-  body: { content?: string; steps?: "one" | "auto"; next?: string | null },
+  body: { content?: string; steps?: "one" | "auto"; next?: string | null; attachments?: unknown[]; skill_ids?: string[] },
   onEvent: (e: ChatEvent) => void,
   signal?: AbortSignal,
-): Promise<void> {
+): Promise<{ queued: boolean }> {
   const res = await authedFetch(`/chats/${chatId}/roundtable/run`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content: body.content ?? "", steps: body.steps ?? "auto", next: body.next ?? null }),
+    body: JSON.stringify({
+      content: body.content ?? "", steps: body.steps ?? "auto", next: body.next ?? null,
+      attachments: body.attachments ?? [], skill_ids: body.skill_ids ?? [],
+    }),
     signal,
   });
+  if (res.ok && (res.headers.get("content-type") || "").includes("application/json")) {
+    const body = await res.json().catch(() => null);
+    return { queued: !!body?.queued };
+  }
   await readSSE(res, onEvent);
+  return { queued: false };
 }
 
 // Re-assina uma geração em andamento (ex.: usuário deu F5 no meio da resposta).
