@@ -139,6 +139,22 @@ _CODESPACE_ALL = (*_CODESPACE_READ, *_CODESPACE_WORK, "task.ledger.track", "http
 # worktrees, jobs, ledger, sessão HTTP) é achado sob demanda pelo search_tools. Fixar
 # todas custava ~5 mil tokens em CADA turno de qualquer chat com ferramentas.
 _WORKSPACE_PINS = ("code.exec.run", "code.files.browse", "code.files.write")
+# POLÍTICA do espaço de trabalho num chat COMUM (o de projeto fixa tudo, acima):
+#   - DORMENTE (padrão): as tools de código ficam LIBERADAS (achadas pelo search_tools)
+#     mas NENHUMA vai fixa. Fixá-las sempre fazia o modelo agarrar o sandbox antes de
+#     pensar — pediram "um gráfico do Bitcoin" e ele listou a pasta, escreveu script e
+#     rodou Python 5x em vez de usar o gráfico nativo do chat, sem nunca responder.
+#   - ATIVO: fixa só _WORKSPACE_PINS. Vale quando a conversa PRECISA de arquivos/execução:
+#     o modelo fixou alguma no editor, a mensagem fala em repo/baixar/rodar/testar/arquivo
+#     de código, ou o espaço do chat já existe (a IA já trabalhou nele). Quem decide é o
+#     turn_setup (`_workspace_active`) — o loader só aplica.
+#   Nos dois estados o orchestrator avisa que o sandbox existe (diretiva curta no dormente)
+#   — sem isso o modelo nega capacidade que tem ("não consigo rodar"), o mesmo buraco de
+#   [[tool-exposure-hallucination]].
+# Visuais NATIVOS do chat (renderizados pela UI a partir do resultado da tool). Quando
+# liberados, o orchestrator diz ao modelo que são o caminho para "faça um gráfico/diagrama"
+# — antes do sandbox. Não são fixados: a nota nomeia o path, e execute_tool o chama direto.
+_NATIVE_VISUALS = ("chart.render.plot", "diagram.excalidraw.render")
 
 
 def _allow_match(path: str, allow: list[str]) -> bool:
@@ -461,6 +477,7 @@ async def get_sift_for_user(
     workspace: bool = False,
     read_only: bool = False,
     grant: list[str] | None = None,
+    workspace_active: bool | None = None,
 ):
     """`grant`: subagente com escopo concedido pelo orquestrador — interseção com o
     escopo deste modelo (nunca amplia); aceitos/recusados vão em scope.meta.
@@ -474,7 +491,12 @@ async def get_sift_for_user(
     # `workspace`: chat comum com o espaço de trabalho do chat (criado no 1º uso) —
     # mesmas tools de código de um projeto. `read_only`: sem escrita/execução (os
     # subagentes que analisam em paralelo no mesmo código, sem pisar um no outro).
+    # `workspace_active`: o espaço de um chat comum está em uso/necessário neste turno
+    # (fixa as essenciais); False = dormente (só descoberta). None = legado/subagente
+    # (operário delegado para um trabalho de código): ativo.
     in_codespace = bool(codespace_project_id) or workspace
+    if workspace_active is None:
+        workspace_active = workspace
     # Fora de um chat de projeto, sem ModelConfig ou com a SIFT desligada => sem
     # ferramentas. DENTRO de um projeto, um ModelConfig que desligou as tools
     # (tools_enabled=False) ainda manda — respeita a escolha explícita do usuário —,
@@ -541,7 +563,12 @@ async def get_sift_for_user(
             # modelo precisa adivinhar que elas existem via search_tools — o
             # caminho onde modelos fracos desistem e respondem "não tenho acesso
             # ao código" (ver [[tool-exposure-hallucination]]).
-            pin_paths = codespace_pins(pin_paths, allow, workspace_only=not codespace_project_id)
+            # Chat comum: só com o espaço ATIVO (ver política em _WORKSPACE_PINS);
+            # dormente, as tools seguem no allow e saem do search_tools.
+            if codespace_project_id:
+                pin_paths = codespace_pins(pin_paths, allow)
+            elif workspace_active:
+                pin_paths = codespace_pins(pin_paths, allow, workspace_only=True)
         if grant is not None:
             # escopo concedido: pin fora do allow derrubaria todos os pins (scope() recusa)
             pin_paths = [p for p in pin_paths if _allow_match(p, allow)]
@@ -591,6 +618,12 @@ async def get_sift_for_user(
         # (loop agêntico de código: escreve → testa → corrige, dezenas de passos).
         scope.meta["codespace"] = bool(codespace_project_id)
         scope.meta["workspace"] = bool(workspace and not codespace_project_id)
+        # ativo = pins do espaço aplicados (por decisão do turno OU fixados no editor):
+        # o orchestrator usa p/ a diretiva completa e o teto de iterações de código
+        scope.meta["workspace_active"] = scope.meta["workspace"] and bool(
+            workspace_active or any(p in (pin_paths or []) for p in _WORKSPACE_PINS)
+        )
+        scope.meta["native_visuals"] = [p for p in _NATIVE_VISUALS if _allow_match(p, allow)]
         scope.meta["read_only"] = bool(read_only)
         if grant is not None:
             scope.meta["grant"] = {"granted": grant_ok, "not_granted": grant_no}

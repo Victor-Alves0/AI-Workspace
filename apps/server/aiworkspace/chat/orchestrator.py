@@ -391,16 +391,43 @@ TOOL_ACTION_GUARD = (
 # passaram") sem chamar tool nenhuma — os dois modos de falha observados no chat do
 # Jenkins (kimi-k3, 30/07). É a mesma postura de um Codex/Claude Code: agir com as tools
 # e NUNCA inventar que agiu. Injetada no system prompt sempre que o escopo é codespace.
+# Chat COMUM com espaço de trabalho (sandbox privado do chat). Duas versões, conforme
+# scope.meta["workspace_active"] (política em tools/loader._WORKSPACE_PINS):
+#   - ATIVA: a conversa precisa de arquivos/execução; tools essenciais fixadas.
+#   - DORMENTE: nada fixo; uma linha avisa que o sandbox existe (e como achá-lo) para o
+#     modelo não negar capacidade, mas deixa claro que NÃO é o caminho padrão.
+# As duas dizem o mesmo limite: sandbox só quando a tarefa EXIGE arquivos/execução —
+# gráfico, tabela, resumo e resposta são feitos direto no chat (ver NATIVE_VISUALS_NOTE).
 WORKSPACE_DIRECTIVE = (
     "WORKSPACE — this chat has its own private sandbox: a folder with a real shell and code "
-    "tools, created on first use. Use it whenever a task needs files or execution: download "
-    "programs or repositories (code.exec.run with git clone / curl / wget), unpack, build, run "
-    "and test them, read and search files (code.files.browse) and write files "
-    "(code.files.write). More workspace tools are one search_tools away: code analysis "
-    "(code.graph.query, code.flow.analyze), a live preview server (code.preview.serve), "
-    "background jobs (code.exec.jobs) and a task ledger (task.ledger.track). These tools "
-    "ACTUALLY run — never say you cannot download, open or run something, and never invent "
-    "output you did not observe. No root, no Docker: install toolchains with mise."
+    "tools, created on first use. Use it ONLY when the task genuinely needs files or "
+    "execution: download programs or repositories (code.exec.run with git clone / curl / "
+    "wget), unpack, build, run and test them, read and search files (code.files.browse) and "
+    "write files (code.files.write). Do NOT use it for things the chat does by itself — "
+    "answering, summarizing, tables, charts or diagrams. More workspace tools are one "
+    "search_tools away: code analysis (code.graph.query, code.flow.analyze), a live preview "
+    "server (code.preview.serve), background jobs (code.exec.jobs) and a task ledger "
+    "(task.ledger.track). These tools ACTUALLY run — never say you cannot download, open or "
+    "run something, and never invent output you did not observe. No root, no Docker: "
+    "install toolchains with mise."
+)
+WORKSPACE_DORMANT_NOTE = (
+    "WORKSPACE (on demand) — this chat also has a private sandbox with a real shell and files "
+    "(code.exec.run, code.files.browse, code.files.write; find them with search_tools). Use "
+    "it ONLY when the task genuinely needs files or execution (download, build, run or test "
+    "a program or repository; process a file). It is NOT the default path: answer, "
+    "summarize, make tables, charts and diagrams directly in the chat. If a task does need "
+    "it, never say you cannot run or download something — the sandbox actually runs."
+)
+# Visuais nativos (tools cujo resultado a UI desenha: gráfico, diagrama). Sem esta nota o
+# modelo resolvia "faça um gráfico" escrevendo matplotlib no sandbox — imagem que nem
+# aparece no chat — e só usava o gráfico nativo quando o usuário mandava explicitamente.
+NATIVE_VISUALS_NOTE = (
+    "VISUALS — the chat renders these natively: {names}. When the user asks for a chart, "
+    "graph or diagram, first get the data you need (e.g. a web search), then call the matching "
+    "tool ONCE (directly if it is in your tool list, else via {meta} with its path). Never "
+    "build charts by writing or running code (matplotlib, HTML files…) unless the user "
+    "explicitly asks for a file or code."
 )
 
 READ_ONLY_DIRECTIVE = (
@@ -2103,7 +2130,13 @@ def _assemble_tools_and_prompt(
         if sift_meta.get("codespace"):
             a.sift_prompt += "\n\n" + CODESPACE_AGENT_DIRECTIVE
         elif sift_meta.get("workspace"):
-            a.sift_prompt += "\n\n" + WORKSPACE_DIRECTIVE
+            # default True: scopes antigos/fakes sem a chave mantêm a diretiva completa
+            active = sift_meta.get("workspace_active", True)
+            a.sift_prompt += "\n\n" + (WORKSPACE_DIRECTIVE if active else WORKSPACE_DORMANT_NOTE)
+        visuals = [p for p in (sift_meta.get("native_visuals") or []) if isinstance(p, str)]
+        if visuals:
+            a.sift_prompt += "\n\n" + NATIVE_VISUALS_NOTE.format(
+                names=", ".join(f"`{p}`" for p in visuals), meta=meta)
         if sift_meta.get("read_only"):
             a.sift_prompt += "\n\n" + READ_ONLY_DIRECTIVE
         # Grafo de Investigação: injeta a diretriz quando a tool está equipada (native,
@@ -3372,6 +3405,42 @@ def _synthesis_messages(user_text: str, tool_events: list[dict[str, Any]],
     ]
 
 
+# Continuação automática: quantas vezes, num turno, re-chamamos o modelo quando uma
+# volta termina SEM texto (só raciocínio / vazia) antes de cair na síntese em prompt
+# limpo. Cada cutucada é uma chamada com o contexto inteiro — 2 dá margem a um
+# "pensei, chamei mais uma tool, aí respondi" sem dobrar a conta do turno.
+_CONTINUE_NUDGE_MAX = 2
+# trecho final do raciocínio devolvido na cutucada: o raciocínio desta volta NÃO volta
+# ao provedor sozinho (não há mensagem de assistant com conteúdo p/ carregá-lo), então
+# sem isto o modelo recomeçaria a pensar do zero — e pagaria de novo.
+_NUDGE_REASONING_TAIL = 1500
+
+
+_MAX_STEPS_NOTE = (
+    "[harness] Tool budget for this turn is exhausted — tools are now disabled. Do NOT try "
+    "to call tools. Write the final answer to the user now, in their language, using what "
+    "you already found; if something is unfinished, say what remains and the next step."
+)
+
+
+def _continue_nudge(reasoning_tail: str, *, tools_on: bool) -> str:
+    """Mensagem de continuação quando o modelo parou só com raciocínio/sem texto."""
+    tail = (reasoning_tail or "").strip()
+    if len(tail) > _NUDGE_REASONING_TAIL:
+        tail = "…" + tail[-_NUDGE_REASONING_TAIL:]
+    parts = ["[harness] Your last turn ended with no reply to the user (only internal "
+             "reasoning, or nothing at all)."]
+    if tail:
+        parts.append(f"Your reasoning so far ended with:\n«{tail}»")
+    if tools_on:
+        parts.append("Continue from where you stopped: if you still need a tool, call it "
+                     "now; otherwise write the final answer to the user now, in their language.")
+    else:
+        parts.append("Tools are no longer available. Write the final answer to the user now, "
+                     "in their language, using what you already found. Text only.")
+    return "\n\n".join(parts)
+
+
 def _deterministic_final(tool_events: list[dict[str, Any]]) -> str:
     """Último recurso, sem LLM: apresenta o que foi apurado como resultado útil."""
     digest = _tool_digest(tool_events, limit=800)
@@ -3771,8 +3840,12 @@ async def run_turn(
     # → corrige) usamos um teto bem maior, como os agentes de código do mercado; nos
     # demais, o teto normal. O flag vem do scope.meta["codespace"] montado no loader.
     _meta = getattr(sift, "meta", {}) if sift is not None else {}
+    # Espaço de trabalho de chat comum só ganha o teto de código quando ATIVO (ver
+    # tools/loader._WORKSPACE_PINS): dormente, um pedido comum com 150 voltas virava
+    # um giro de sandbox que o usuário acabava parando sem resposta.
     _in_codespace = bool(session.codespace_project_id) or bool(
-        _meta.get("codespace") or _meta.get("workspace")
+        _meta.get("codespace")
+        or (_meta.get("workspace") and _meta.get("workspace_active", True))
     )
     max_iters = (
         settings.codespace_max_tool_iterations if _in_codespace
@@ -3785,6 +3858,8 @@ async def run_turn(
     # para voltarem no histórico dos próximos turnos — ver reasoning_details
     final_details: list[dict[str, Any]] = []
     final_details_text = ""
+    _nudges = 0  # cutucadas de continuação usadas neste turno (ver _CONTINUE_NUDGE_MAX)
+    _cap_noticed = False  # aviso de "tools esgotadas" já injetado (ver _MAX_STEPS_NOTE)
     for _iter in range(max_iters + 1):
         final_details, final_details_text = [], ""
         # STEER em tempo real: mensagens que o usuário enviou DURANTE o turno (steer=True)
@@ -3806,6 +3881,13 @@ async def run_turn(
         # últimas rodadas: retira as tools para OBRIGAR uma resposta final. Sem isto, um
         # modelo que continua chamando tools até o teto encerra o loop com texto vazio.
         if _iter > 0 and _iter >= max_iters - 1:
+            # Avisa UMA vez que as tools acabaram (o MAX_STEPS_PROMPT do opencode): cortar
+            # em silêncio deixa o modelo, com o histórico cheio de tool_calls, tentando
+            # chamar mais uma (vaza como texto) em vez de fechar a resposta.
+            if tools is not None and not _cap_noticed:
+                messages.append({"role": "user", "content": _MAX_STEPS_NOTE})
+                input_chars["user"] += len(_MAX_STEPS_NOTE)
+                _cap_noticed = True
             tools = None
         if _wrap_up["on"]:
             tools = None
@@ -4054,11 +4136,13 @@ async def run_turn(
         # Sem tool_calls estruturadas, tentamos reconstruí-las e seguir o loop como se
         # tivessem chegado no campo certo. Se nada aproveitável, re-emitimos o texto
         # (falso-positivo não perde conteúdo).
+        leak_discarded = False
         if leaked_text and not tool_buffer:
             # com tools ativas: reconstrói as chamadas e segue o loop. Na fase de resposta
             # final (tools=None) NÃO executamos mais nem re-emitimos — o modelo vazou tool
             # calls quando pedimos TEXTO; descartamos (a cutucada/fallback abaixo cuidam).
             salvaged = _salvage_leaked_tool_calls(leaked_text) if tools is not None else []
+            leak_discarded = tools is None
             if salvaged:
                 logger.info("Resgatadas %d tool_call(s) vazadas como texto (modelo %s)", len(salvaged), model)
                 for i, tc in enumerate(salvaged):
@@ -4076,6 +4160,29 @@ async def run_turn(
             # histórico poluído (que perpetua a trava de formato): sintetiza em prompt
             # LIMPO agora. No caminho normal (texto de verdade), só encerra.
             answer_empty = _MARKER_ONLY_RE.match(assistant_text or "") is not None
+            # CONTINUAÇÃO (antes da síntese): a volta terminou só com raciocínio ou
+            # vazia — o modelo "pensou e parou". Como o opencode faz após compactar
+            # ("Continue if you have next steps…"), cutucamos o PRÓPRIO loop com um
+            # "continue e responda agora", mantendo as tools se ainda não estamos no
+            # teto (ele pode precisar de mais uma). Limitado (_CONTINUE_NUDGE_MAX) e
+            # nunca na trava de formato (tool-call vazada como texto na fase só-texto):
+            # lá re-chamar no histórico poluído perpetua a trava, e a síntese em
+            # prompt limpo é o remédio certo. Se a cutucada também falhar, cai na
+            # síntese abaixo — o ⚠️ "não retornou resposta final" fica para o
+            # último caso (parada do usuário / erro).
+            if (answer_empty and not leak_discarded and _iter < max_iters
+                    and _nudges < _CONTINUE_NUDGE_MAX):
+                _nudges += 1
+                _nudge = _continue_nudge(reasoning_text[iter_reasoning_from:],
+                                         tools_on=tools is not None)
+                messages.append({"role": "user", "content": _nudge})
+                input_chars["user"] += len(_nudge)
+                logger.info("resposta vazia/só raciocínio no chat %s — cutucada de continuação %d/%d",
+                            chat_id, _nudges, _CONTINUE_NUDGE_MAX)
+                _health("continue_nudge", "nudge", "info",
+                        {"attempt": _nudges, "iteration": _iter, "tools": tools is not None}, chat_id)
+                assistant_text = ""
+                continue
             if answer_empty and (tool_events or reasoning_text.strip()):
                 _synth_text = ""
                 async for _ev in _final_synthesis(

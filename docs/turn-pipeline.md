@@ -160,7 +160,13 @@ discards the rejected attempt). Budget: per-guard `max_retries` (1–3) + a glob
 7. history appended (only if `use_context`) → user message + attachments
    (`_append_user_message`: files, audio via router, images via vision/OCR).
 8. **Agentic loop** `for _iter in range(max_iters + 1)`:
-   - cap fuse: last iterations strip `tools=None` to force a final answer;
+   - cap fuse: last iterations strip `tools=None` to force a final answer, injecting
+     `_MAX_STEPS_NOTE` once (tools are gone — answer now; opencode's MAX_STEPS_PROMPT);
+   - **continue nudge**: an iteration that ends with no text (reasoning-only or empty)
+     gets up to `_CONTINUE_NUDGE_MAX` "[harness] continue / answer now" user messages
+     (carrying the tail of its reasoning; tools kept if below the cap) before falling
+     to synthesis. Skipped when the empty answer was a leaked tool call in the
+     text-only phase (format lock → clean prompt is the fix);
    - **anti-spin**: `_absorb` signs `(tool, args, result)`; on repeat ≥
      `agent_noprogress_repeats` → clean-prompt synthesis + break (see below);
    - stream → if `tool_calls` → dispatch each (parallel when >1 and no `delegate`) →
@@ -238,7 +244,9 @@ highest recency/priority — and is rewritten by `run_turn_guarded` on each retr
 | `TOOL_ACTION_GUARD` | System prompt (always) · `orchestrator` | model tempted to claim an action without a tool | pushes toward `search_tools` |
 | Reasoning default | `run_turn` start | no `reasoning` key | inject `{enabled:false}` |
 | **Anti-spin** | Agentic loop · `_absorb` + loop top | same `(tool,args,result)` ×N / empty stop | clean-prompt synthesis + break |
-| Iteration cap (fuse) | Agentic loop · `range(max_iters+1)` | too many iterations | strip tools → force final |
+| Iteration cap (fuse) | Agentic loop · `range(max_iters+1)` | too many iterations | strip tools + `_MAX_STEPS_NOTE` → force final |
+| Continue nudge | Agentic loop · no-tool-call branch | iteration ended reasoning-only / empty | ≤2 "continue, answer now" re-calls, then synthesis |
+| Workspace dormant/active | Loader pins + `WORKSPACE_DIRECTIVE`/`WORKSPACE_DORMANT_NOTE` · `turn_setup._workspace_active` | ordinary chat w/ sandbox | code tools pinned (and codespace iteration cap) only when the turn needs files/execution |
 | Leaked tool-call salvage | Agentic loop · `_salvage_leaked_tool_calls` | tool-call syntax leaked as text (tools on) | reconstruct real call |
 | Final synthesis | End of loop · `_final_synthesis` | loop ended with no text | A same-model clean / B aux / C digest |
 | Confirmation cards | Inside SIFT tool path · `_cs_confirm_guard` | Codespace write/exec/push/merge | `ask_options` (bypassed if background) |
