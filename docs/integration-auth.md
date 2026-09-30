@@ -49,15 +49,36 @@ disponível para o caso remoto.
 
 | Integração | Situação |
 |---|---|
-| **Google Workspace** | OAuth completo implementado, mas o admin precisa criar o projeto no console e colar Client ID/Secret. O device flow do Google **não serve**: ele cobre um conjunto restrito de escopos que não inclui Gmail. |
-| **Notion, Slack** | Mesmo caso: app registrado pelo admin, secret, callback fixo. |
+| **Notion, Slack** | App registrado pelo admin, secret, callback fixo. Próximos a migrar para o modelo do Google (abaixo). |
 
-Para estes, o caminho de virar botão é o **app embutido**: registrar os apps uma vez,
-distribuir as credenciais com o build e deixar a tela do admin apenas como override.
-Esbarra em duas coisas reais: o secret não pode ir para um repositório público, e o
-`redirect_uri` teria que estar cadastrado para cada endereço de instalação possível.
-A saída usual é um endpoint de retorno hospedado por nós, que reencaminha para a
-instalação — infraestrutura que hoje não existe.
+### Google Workspace: app embutido + página de retorno
+
+"Conectar agora" abre o seletor de contas do Google **fora do app** (no desktop, no
+navegador do sistema) e a tela acompanha o resultado sozinha. Três peças:
+
+1. **App embutido** — um cliente OAuth do tipo Web, registrado uma vez pelo projeto
+   (`_BUILTIN_CLIENT_ID/SECRET` em `google_service.py`, ou `GOOGLE_APP_CLIENT_ID/SECRET`).
+   O app próprio do admin, se salvo na UI, tem prioridade. Cada conta guarda o
+   `client_id` que a emitiu, porque só aquele app renova o token.
+2. **Página de retorno** (`site/oauth/index.html`, publicada no GitHub Pages por
+   `.github/workflows/pages.yml`) — o único redirect cadastrado no Google. Ela lê
+   `ret` + `cb` do `state` e manda o navegador para a instalação: IP de LAN,
+   `localhost:41414` do desktop ou domínio. Endereço local segue direto; domínio
+   público pede um clique ("Continuar").
+3. **PKCE** — o `code` passa pela página, então sozinho não vale nada: o
+   verificador é derivado do `APP_SECRET` + nonce da tentativa e nunca sai da
+   instalação.
+
+O que isso **não** resolve: um app que pede Gmail precisa estar publicado ("Em
+produção") no Google — em teste o refresh token expira em 7 dias — e, até passar
+pela verificação do Google (escopos restritos exigem avaliação de segurança), a tela
+de consentimento mostra "o Google não verificou este app" e o limite é de 100
+usuários. O device flow do Google **não serve**: não cobre os escopos do Gmail.
+
+Como OpenClaw e Hermes Agent fazem (set/2026): cada usuário cria o próprio projeto no
+Google Cloud e aponta o `client_secret.json` (o Hermes cola a URL de retorno de
+volta no chat). O `gws auth setup` automatiza isso via `gcloud`. O OpenCode não tem
+integração Google.
 
 > **Armadilha já corrigida:** o `.env.example` documentava `GOOGLE_REDIRECT_URI` e
 > companhia, mas o `docker-compose.yml` não repassava essas variáveis ao container.

@@ -1,10 +1,10 @@
-"""Rotas de integrações externas (OAuth). Hoje: Google Workspace (Gmail + Agenda).
+"""Rotas de integrações externas (OAuth, chaves e contas).
 
-- Credenciais do app OAuth (client id/secret): globais, definidas pelo ADMIN na UI
-  (não em env), guardadas em app_settings.
-- Contas: cada usuário conecta VÁRIAS contas Google (tabela google_accounts). O
-  consentimento é identificado pelo `state` assinado (não pelo cookie), então o
-  callback funciona num redirect top-level.
+Google Workspace: app OAuth embutido do projeto ou próprio (admin, na UI); o login
+abre FORA do app e volta pela página de retorno do projeto para o callback daqui. O
+consentimento é identificado pelo `state` assinado (não pelo cookie), e a tela
+acompanha o resultado pela tentativa (`/google/connect/{nonce}`). Cada usuário
+conecta VÁRIAS contas; a primeira da ordem é a principal.
 """
 
 from __future__ import annotations
@@ -72,29 +72,52 @@ def _safe_http_origin(value: str | None) -> str:
 
 
 async def _accounts(db: AsyncSession, user_id: uuid.UUID) -> list[GoogleAccount]:
+    """Contas do usuário na ordem de uso: a primeira é a principal."""
     return list(
         await db.scalars(
             select(GoogleAccount)
             .where(GoogleAccount.user_id == user_id)
-            .order_by(GoogleAccount.created_at)
+            .order_by(GoogleAccount.position, GoogleAccount.created_at)
         )
     )
+
+
+def _renumber(accounts: list[GoogleAccount]) -> None:
+    for i, a in enumerate(accounts):
+        a.position = i
+
+
+def _fallback_on(user: User, key: str) -> bool:
+    """Preferência "se a principal falhar, usar a próxima" de uma integração."""
+    prefs = (user.profile or {}).get("account_fallback") or {}
+    return bool(prefs.get(key)) if isinstance(prefs, dict) else False
 
 
 @router.get("/google")
 async def google_status(
     user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
 ):
-    cfg = await google_service.get_oauth_config(db)
+    own = await google_service.own_app(db)
+    emb = google_service.builtin_app()
+    app = own or emb
     accounts = await _accounts(db, user.id)
     return {
-        "configured": cfg is not None,
+        "configured": app is not None,
+        "app": app["source"] if app else None,   # "own" | "builtin" | None
+        "builtin": emb is not None,
         "is_admin": user.role == "admin",
-        "client_id": cfg["client_id"] if cfg else "",  # não-secreto; ajuda o admin a conferir
-        "redirect_uri": get_settings().google_redirect_uri,
+        "client_id": own["client_id"] if own else "",  # não-secreto; ajuda o admin a conferir
+        "redirect_uri": own["redirect_uri"] if own else google_service.relay_uri(),
+        "fallback": _fallback_on(user, "google"),
         "accounts": [
-            {"id": str(a.id), "email": a.email, "connected_at": a.created_at.isoformat()}
-            for a in accounts
+            {
+                "id": str(a.id),
+                "email": a.email,
+                "connected_at": a.created_at.isoformat(),
+                "primary": i == 0,
+                "broken": a.broken_at is not None,
+            }
+            for i, a in enumerate(accounts)
         ],
     }
 
@@ -111,68 +134,125 @@ async def google_set_oauth(
     db: AsyncSession = Depends(get_db),
 ):
     if not body.client_id.strip():
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Client ID é obrigatório")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Informe o Client ID.")
     # exige secret na primeira configuração (quando ainda não há um salvo)
-    existing = await google_service.get_oauth_config(db)
+    existing = await google_service.own_app(db)
     if existing is None and not (body.client_secret or "").strip():
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Client Secret é obrigatório")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Informe o Client Secret.")
     await google_service.set_oauth_config(db, body.client_id, body.client_secret)
     return {"ok": True}
 
 
-@router.get("/google/connect")
+@router.delete("/google/oauth")
+async def google_clear_oauth(user: User = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    """Tira o app próprio: novas conexões voltam ao app embutido (as contas já
+    conectadas pelo app próprio continuam renovando enquanto ele existir no Google)."""
+    await google_service.clear_oauth_config(db)
+    return {"ok": True}
+
+
+class ConnectIn(BaseModel):
+    origin: str = ""  # origem da API como o navegador a vê (o retorno volta para cá)
+
+
+@router.post("/google/connect")
 async def google_connect(
-    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
+    body: ConnectIn,
+    request: Request,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
 ):
+    """Começa uma conexão: devolve a URL do Google (a tela abre FORA do app) e o
+    código da tentativa, que a tela consulta até o retorno chegar."""
     cfg = await google_service.get_oauth_config(db)
     if cfg is None:
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "Google não configurado. Um administrador precisa definir o Client ID/Secret.",
-        )
-    return RedirectResponse(google_service.authorization_url(str(user.id), cfg))
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Google indisponível: falta o app do Google.")
+    ret = _safe_http_origin(body.origin) or _safe_http_origin(str(request.base_url))
+    nonce = google_service.new_attempt(str(user.id))
+    return {"url": google_service.authorization_url(str(user.id), cfg, nonce=nonce, ret=ret), "attempt": nonce}
+
+
+@router.get("/google/connect/{nonce}")
+async def google_connect_status(nonce: str, user: User = Depends(require_approved)):
+    a = google_service.attempt(nonce, str(user.id))
+    if a is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tentativa não encontrada")
+    return {"status": a["status"], "email": a.get("email", ""), "error": a.get("error", "")}
+
+
+_CALLBACK_ERRORS = {
+    "access_denied": "Autorização cancelada.",
+    "invalid_state": "Link expirado. Conecte de novo pelo app.",
+    "not_configured": "O app do Google não está configurado.",
+    "exchange_failed": "O Google recusou o código. Tente de novo.",
+    "no_refresh_token": "O Google não liberou acesso contínuo. Remova o acesso em "
+                        "myaccount.google.com/permissions e conecte de novo.",
+    "user_not_found": "Usuário não encontrado.",
+}
+
+
+def _callback_page(ok: bool, text: str) -> HTMLResponse:
+    """Página que fica na aba do Google ao terminar (a do app não navegou)."""
+    title = "Conta conectada" if ok else "Não deu para conectar"
+    cor = "#22c55e" if ok else "#f43f5e"
+    icone = "&#10003;" if ok else "!"
+    fecha = "<script>setTimeout(function(){window.close()},1500)</script>" if ok else ""
+    return HTMLResponse(
+        f"""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title>
+<style>
+:root{{color-scheme:light dark;--bg:#fafafa;--fg:#18181b;--mu:#71717a;--card:#fff;--bd:#e4e4e7}}
+@media (prefers-color-scheme:dark){{:root{{--bg:#0f0f11;--fg:#f4f4f5;--mu:#a1a1aa;--card:#18181b;--bd:#27272a}}}}
+body{{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--fg);
+font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;padding:16px;box-sizing:border-box}}
+.c{{max-width:360px;width:100%;text-align:center;background:var(--card);border:1px solid var(--bd);
+border-radius:16px;padding:28px 24px}}
+.i{{width:44px;height:44px;border-radius:50%;margin:0 auto 12px;display:grid;place-items:center;
+font-weight:700;font-size:20px;color:#fff;background:{cor}}}
+h1{{font-size:17px;margin:0 0 6px}}p{{margin:0;color:var(--mu);font-size:14px;word-break:break-word}}
+</style></head><body><div class="c"><div class="i">{icone}</div><h1>{title}</h1>
+<p>{html.escape(text)}</p></div>{fecha}</body></html>""",
+        status_code=200 if ok else 400,
+    )
 
 
 @router.get("/google/callback")
 async def google_callback(
     state: str = "", code: str = "", error: str = "", db: AsyncSession = Depends(get_db)
 ):
-    web = get_settings().web_origin.rstrip("/")
+    data = google_service.verify_state(state)
+    nonce = (data or {}).get("n") or ""
 
-    def _back(status_kv: str) -> RedirectResponse:
-        return RedirectResponse(f"{web}/chat?{status_kv}")
+    def _fail(reason: str) -> HTMLResponse:
+        msg = _CALLBACK_ERRORS.get(reason, "Não deu para conectar. Tente de novo.")
+        google_service.finish_attempt(nonce, status="error", error=msg)
+        return _callback_page(False, msg)
 
+    if not data or not (code or error):
+        return _fail("invalid_state")
     if error:
-        return _back(f"google=error&reason={error}")
-    user_id = google_service.verify_state(state)
-    if not user_id or not code:
-        return _back("google=error&reason=invalid_state")
-
+        return _fail("access_denied" if error == "access_denied" else error)
     cfg = await google_service.get_oauth_config(db)
     if cfg is None:
-        return _back("google=error&reason=not_configured")
-
-    result = await google_service.exchange_code(code, cfg)
+        return _fail("not_configured")
+    result = await google_service.exchange_code(code, cfg, nonce)
     if result.get("error"):
-        return _back(f"google=error&reason={result['error'][:60]}")
+        return _fail(result["error"])
 
-    uid = uuid.UUID(user_id)
-    user = await db.get(User, uid)
-    if user is None:
-        return _back("google=error&reason=user_not_found")
+    uid = uuid.UUID(data["sub"])
+    if await db.get(User, uid) is None:
+        return _fail("user_not_found")
 
     email = result.get("email", "")
-    # upsert por e-mail: reconectar a mesma conta atualiza o refresh token
-    existing = None
-    if email:
-        existing = await db.scalar(
-            select(GoogleAccount).where(
-                GoogleAccount.user_id == uid, GoogleAccount.email == email
-            )
-        )
+    accounts = await _accounts(db, uid)
+    # upsert por e-mail: reconectar a mesma conta renova o token e tira o "expirada"
+    existing = next((a for a in accounts if email and a.email == email), None)
     if existing is not None:
         existing.refresh_token = result["refresh_token"]
         existing.scopes = result.get("scopes", "")
+        existing.client_id = cfg["client_id"]
+        existing.broken_at = None
+        existing.last_error = ""
         google_service.forget(str(existing.id))
     else:
         db.add(
@@ -181,12 +261,15 @@ async def google_callback(
                 email=email,
                 refresh_token=result["refresh_token"],
                 scopes=result.get("scopes", ""),
+                client_id=cfg["client_id"],
+                position=len(accounts),  # nova conta entra no fim; a 1ª vira principal
             )
         )
     await db.commit()
     # as tools google passam a existir/funcionar → reconstrói a SIFT do usuário
-    sift_service.invalidate(user_id)
-    return _back("google=connected")
+    sift_service.invalidate(str(uid))
+    google_service.finish_attempt(nonce, status="ok", email=email)
+    return _callback_page(True, f"{email or 'Conta Google'} — pode fechar esta aba.")
 
 
 @router.post("/google/accounts/{account_id}/test")
@@ -201,7 +284,43 @@ async def google_test_account(
     result = await google_service.test_account(str(acc.id))
     if result.get("ok"):
         return {"ok": True, "email": result.get("email") or acc.email}
-    return {"ok": False, "error": "Não foi possível acessar esta conta — reconecte (o acesso pode ter expirado)."}
+    return {"ok": False, "error": google_service.BROKEN_MSG}
+
+
+@router.post("/google/accounts/{account_id}/primary")
+async def google_make_primary(
+    account_id: uuid.UUID,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    """A conta vira a principal (a que a IA usa quando o pedido não diz qual)."""
+    accounts = await _accounts(db, user.id)
+    chosen = next((a for a in accounts if a.id == account_id), None)
+    if chosen is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Conta não encontrada")
+    _renumber([chosen] + [a for a in accounts if a is not chosen])
+    await db.commit()
+    sift_service.invalidate(str(user.id))
+    return {"ok": True}
+
+
+class AccountPrefsIn(BaseModel):
+    fallback: bool
+
+
+@router.put("/google/prefs")
+async def google_set_prefs(
+    body: AccountPrefsIn,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    prof = dict(user.profile or {})
+    fb = prof.get("account_fallback")
+    prof["account_fallback"] = {**(fb if isinstance(fb, dict) else {}), "google": body.fallback}
+    user.profile = prof  # reatribui p/ o ORM detectar a mudança do JSONB
+    await db.commit()
+    sift_service.invalidate(str(user.id))
+    return {"ok": True}
 
 
 class GmailSendIn(BaseModel):
@@ -236,7 +355,7 @@ async def google_gmail_send(
     acc = acc or accounts[0]
     token = await google_service.get_access_token(str(acc.id))
     if not token:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Não foi possível acessar esta conta — reconecte em Integrações.")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sem acesso a esta conta. Reconecte em Integrações.")
     try:
         res = await run_in_threadpool(
             google_service.gmail_send, token, body.to, body.subject, body.body, body.cc, body.html
@@ -259,6 +378,8 @@ async def google_disconnect_account(
         await google_service.revoke(acc.refresh_token)
     google_service.forget(str(acc.id))
     await db.delete(acc)
+    await db.flush()
+    _renumber([a for a in await _accounts(db, user.id) if a.id != account_id])
     await db.commit()
     sift_service.invalidate(str(user.id))
     return {"ok": True}

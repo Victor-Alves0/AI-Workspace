@@ -101,7 +101,13 @@ export async function openExternal(url: string): Promise<boolean> {
     }
     return false;
   }
-  return !!window.open(url, "_blank", "noopener,noreferrer");
+  // sem "noopener" na lista de features: com ele o window.open devolve SEMPRE null,
+  // e "abriu" ficava indistinguível de "o bloqueador de pop-up barrou". O corte do
+  // vínculo com esta página é feito à mão logo em seguida.
+  const w = window.open(url, "_blank");
+  if (!w) return false;
+  try { w.opener = null; } catch { /* outra origem: já está isolada */ }
+  return true;
 }
 
 /** Há uma atualização do APP DESKTOP pronta para instalar?

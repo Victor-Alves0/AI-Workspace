@@ -1,32 +1,41 @@
 """Google Workspace: OAuth + acesso a Gmail e Agenda (multi-conta).
 
-Divisão de responsabilidades (custo/escala):
-  - Credenciais do app OAuth (client id/secret) são GLOBAIS, configuradas na UI
-    (admin) e guardadas em `app_settings` — o secret cifrado (Fernet). Nada em env.
-  - Cada usuário conecta VÁRIAS contas Google (tabela `google_accounts`); guardamos
-    só o *refresh token* de cada uma (cifrado). O access token é buscado/renovado ao
-    vivo por conta e NUNCA entra na instância SIFT (senão o índice reconstruiria a
-    cada refresh).
-  - As chamadas de API (google-api-python-client) são SÍNCRONAS; as tools rodam no
-    threadpool de dispatch da SIFT, então blocam apenas um worker, não o event loop.
+Como a conexão funciona ("Conectar agora", sem o usuário tocar no Google Cloud):
+  - App OAuth: o EMBUTIDO do projeto (`builtin_app`) ou um PRÓPRIO que o admin salva
+    na UI (sobrepõe o embutido). Cada conta guarda o `client_id` que emitiu o token,
+    porque só aquele app consegue renová-lo.
+  - Retorno: o Google devolve o navegador à PÁGINA DE RETORNO do projeto
+    (`oauth_relay_url`, estática), que o reencaminha para `ret + cb` gravados no
+    `state`. Assim um único endereço cadastrado no Google serve a qualquer
+    instalação — IP de LAN, celular, desktop (localhost:41414) ou domínio.
+  - PKCE (S256): o `code` passa pela página de retorno, então sozinho não pode
+    valer nada. O verificador é derivado do `app_secret` + nonce da tentativa (não
+    sai do servidor e não precisa de tabela).
+  - Cada tentativa tem um nonce; a tela consulta `attempt(nonce)` até o callback
+    registrar o resultado (a aba do Google abre FORA do app — no desktop, no
+    navegador do sistema — e a página atual não navega).
 
-O `state` do OAuth é assinado com `app_secret` (pyjwt) carregando o user_id — sem
-tabela de estado. A troca/refresh do token é feita via httpx (sem google-auth-oauthlib).
+Guardamos só o *refresh token* de cada conta (cifrado). O access token é buscado/
+renovado ao vivo por conta e NUNCA entra na instância SIFT. Quando o Google recusa a
+renovação, a conta é marcada (`broken_at`) para a tela pedir "Reconectar".
 """
 
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import logging
 import re
+import secrets
 import time
+from datetime import datetime, timezone
 from email.message import EmailMessage
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 import jwt
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -49,18 +58,40 @@ SCOPES = [
     "https://www.googleapis.com/auth/userinfo.email",
 ]
 
-OAUTH_SETTING_KEY = "google_oauth"  # em app_settings: {client_id, client_secret_enc}
-_STATE_TTL = 600  # 10 min p/ concluir o consentimento
+OAUTH_SETTING_KEY = "google_oauth"  # em app_settings: {client_id, client_secret_enc, redirect_uri?}
+CALLBACK_PATH = "/integrations/google/callback"
+_STATE_TTL = 900  # 15 min p/ concluir o consentimento
+
+# App embutido do projeto. Tipo "Web" no Google Cloud, com a página de retorno
+# (`oauth_relay_url`) cadastrada como redirect. `GOOGLE_APP_CLIENT_ID/SECRET` no
+# ambiente sobrepõem estas constantes (ex.: build que injeta o segredo no CI).
+_BUILTIN_CLIENT_ID = ""
+_BUILTIN_CLIENT_SECRET = ""
 
 # account_id -> (access_token, expiry_epoch)
 _token_cache: dict[str, tuple[str, float]] = {}
 
+BROKEN_MSG = "O Google recusou o acesso (revogado ou expirado). Reconecte a conta."
+
 
 # --------------------------------------------------------------------------- #
-# Credenciais do app OAuth (globais, na UI) — app_settings
+# App OAuth: embutido ou próprio (admin, na UI)
 # --------------------------------------------------------------------------- #
-async def get_oauth_config(db: AsyncSession) -> dict[str, str] | None:
-    """Credenciais do app OAuth (client_id/secret + redirect). None = não configurado."""
+def relay_uri() -> str:
+    return (get_settings().oauth_relay_url or "").strip()
+
+
+def builtin_app() -> dict[str, str] | None:
+    s = get_settings()
+    cid = (s.google_app_client_id or _BUILTIN_CLIENT_ID).strip()
+    sec = (s.google_app_client_secret or _BUILTIN_CLIENT_SECRET).strip()
+    if not cid or not sec or not relay_uri():
+        return None
+    return {"client_id": cid, "client_secret": sec, "redirect_uri": relay_uri(), "source": "builtin"}
+
+
+async def own_app(db: AsyncSession) -> dict[str, str] | None:
+    """App próprio salvo pelo admin. None = não há (ou o APP_SECRET mudou)."""
     raw = await get_setting(db, OAUTH_SETTING_KEY)
     if not isinstance(raw, dict):
         return None
@@ -72,21 +103,51 @@ async def get_oauth_config(db: AsyncSession) -> dict[str, str] | None:
         secret = crypto.decrypt(enc)
     except Exception:  # noqa: BLE001 - APP_SECRET trocado invalida o ciphertext
         return None
+    # salvo antes da página de retorno (sem a chave) = retorno direto, como era
+    redirect = raw["redirect_uri"] if "redirect_uri" in raw else get_settings().google_redirect_uri
     return {
         "client_id": client_id,
         "client_secret": secret,
-        "redirect_uri": get_settings().google_redirect_uri,
+        "redirect_uri": (redirect or "").strip() or relay_uri(),
+        "source": "own",
     }
 
 
+async def get_oauth_config(db: AsyncSession) -> dict[str, str] | None:
+    """App em vigor para NOVAS conexões: o próprio, senão o embutido. None = nenhum."""
+    return await own_app(db) or builtin_app()
+
+
+async def creds_for_client(db: AsyncSession, client_id: str) -> dict[str, str] | None:
+    """Credenciais que renovam o token de uma conta: as do app que a emitiu. Conta
+    antiga (sem `client_id`) ou app que sumiu → o app em vigor."""
+    own, emb = await own_app(db), builtin_app()
+    for c in (own, emb):
+        if c and client_id and c["client_id"] == client_id:
+            return c
+    return own or emb
+
+
 async def set_oauth_config(db: AsyncSession, client_id: str, client_secret: str | None) -> None:
-    """Salva client_id/secret (secret cifrado). `client_secret=None/''` mantém o atual."""
+    """Salva o app próprio (secret cifrado). `client_secret` vazio mantém o atual.
+
+    O retorno passa a ser pela página do projeto; um app salvo no formato antigo
+    (retorno direto) mantém o dele enquanto o Client ID não mudar — senão o admin
+    que só trocou o secret perderia o redirect que cadastrou."""
     cur = await get_setting(db, OAUTH_SETTING_KEY)
     cur = cur if isinstance(cur, dict) else {}
     enc = cur.get("client_secret_enc") or ""
     if client_secret:
         enc = crypto.encrypt(client_secret.strip())
-    await set_setting(db, OAUTH_SETTING_KEY, {"client_id": client_id.strip(), "client_secret_enc": enc})
+    novo: dict[str, Any] = {"client_id": client_id.strip(), "client_secret_enc": enc}
+    if "redirect_uri" in cur or (cur.get("client_id") or "").strip() != client_id.strip():
+        novo["redirect_uri"] = cur.get("redirect_uri", "") if "redirect_uri" in cur else ""
+    await set_setting(db, OAUTH_SETTING_KEY, novo)
+
+
+async def clear_oauth_config(db: AsyncSession) -> None:
+    """Remove o app próprio (volta ao embutido, se houver)."""
+    await set_setting(db, OAUTH_SETTING_KEY, {})
 
 
 async def is_configured(db: AsyncSession) -> bool:
@@ -94,67 +155,116 @@ async def is_configured(db: AsyncSession) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# State assinado (CSRF) — sem tabela
+# PKCE + state assinado (CSRF) — sem tabela
 # --------------------------------------------------------------------------- #
-def sign_state(user_id: str) -> str:
+def _b64(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+
+
+def pkce_verifier(nonce: str) -> str:
+    key = get_settings().app_secret.encode()
+    return _b64(hmac.new(key, f"google-pkce:{nonce}".encode(), hashlib.sha256).digest())
+
+
+def pkce_challenge(verifier: str) -> str:
+    return _b64(hashlib.sha256(verifier.encode()).digest())
+
+
+def sign_state(user_id: str, nonce: str = "", ret: str = "") -> str:
+    """`ret` (origem da API vista pelo navegador) e `cb` são lidos pela página de
+    retorno — não são segredo; a assinatura impede a troca de usuário/tentativa."""
     now = int(time.time())
     return jwt.encode(
-        {"sub": user_id, "typ": "google_oauth", "iat": now, "exp": now + _STATE_TTL},
+        {"sub": user_id, "typ": "google_oauth", "n": nonce, "ret": ret, "cb": CALLBACK_PATH,
+         "iat": now, "exp": now + _STATE_TTL},
         get_settings().app_secret,
         algorithm="HS256",
     )
 
 
-def verify_state(state: str) -> str | None:
+def verify_state(state: str) -> dict[str, Any] | None:
     try:
         data = jwt.decode(state, get_settings().app_secret, algorithms=["HS256"])
     except jwt.PyJWTError:
         return None
-    if data.get("typ") != "google_oauth":
+    if data.get("typ") != "google_oauth" or not data.get("sub"):
         return None
-    return data.get("sub")
+    return data
+
+
+# --------------------------------------------------------------------------- #
+# Tentativas de conexão (a tela consulta até o callback responder)
+# --------------------------------------------------------------------------- #
+# processo único (lock de instância), então memória basta
+_attempts: dict[str, dict[str, Any]] = {}
+_ATTEMPT_TTL = 1800
+
+
+def new_attempt(user_id: str) -> str:
+    now = time.time()
+    for k in [k for k, v in _attempts.items() if now - v["ts"] > _ATTEMPT_TTL]:
+        _attempts.pop(k, None)
+    nonce = secrets.token_urlsafe(16)
+    _attempts[nonce] = {"user": user_id, "status": "pending", "ts": now}
+    return nonce
+
+
+def attempt(nonce: str, user_id: str) -> dict[str, Any] | None:
+    a = _attempts.get(nonce)
+    return a if a and a["user"] == user_id else None
+
+
+def finish_attempt(nonce: str, **fields: Any) -> None:
+    if nonce in _attempts:
+        _attempts[nonce].update(fields)
 
 
 # --------------------------------------------------------------------------- #
 # Fluxo OAuth (credenciais passadas explicitamente)
 # --------------------------------------------------------------------------- #
-def authorization_url(user_id: str, creds: dict[str, str]) -> str:
+def authorization_url(user_id: str, creds: dict[str, str], *, nonce: str = "", ret: str = "") -> str:
     params = {
         "client_id": creds["client_id"],
         "redirect_uri": creds["redirect_uri"],
         "response_type": "code",
         "scope": " ".join(SCOPES),
         "access_type": "offline",       # queremos refresh token
-        "prompt": "consent",            # força o refresh token mesmo em re-consentimento
+        # consent: força o refresh token mesmo em re-consentimento;
+        # select_account: sempre mostra o seletor (é "adicionar OUTRA conta")
+        "prompt": "consent select_account",
         "include_granted_scopes": "true",
-        "state": sign_state(user_id),
+        "state": sign_state(user_id, nonce, ret),
     }
+    if nonce:
+        params["code_challenge"] = pkce_challenge(pkce_verifier(nonce))
+        params["code_challenge_method"] = "S256"
     return str(httpx.URL(AUTH_URI, params=params))
 
 
-async def exchange_code(code: str, creds: dict[str, str]) -> dict[str, Any]:
+async def exchange_code(code: str, creds: dict[str, str], nonce: str = "") -> dict[str, Any]:
     """Troca o `code` por tokens e resolve o e-mail da conta.
 
     Retorna {refresh_token, email, scopes} ou {error}."""
+    data = {
+        "code": code,
+        "client_id": creds["client_id"],
+        "client_secret": creds["client_secret"],
+        "redirect_uri": creds["redirect_uri"],
+        "grant_type": "authorization_code",
+    }
+    if nonce:
+        data["code_verifier"] = pkce_verifier(nonce)
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.post(
-            TOKEN_URI,
-            data={
-                "code": code,
-                "client_id": creds["client_id"],
-                "client_secret": creds["client_secret"],
-                "redirect_uri": creds["redirect_uri"],
-                "grant_type": "authorization_code",
-            },
-        )
+        r = await client.post(TOKEN_URI, data=data)
         if r.status_code != 200:
-            return {"error": f"token exchange failed: {r.text[:300]}"}
+            logger.warning("Troca do código Google falhou: %s", r.text[:300])
+            return {"error": "exchange_failed"}
         tok = r.json()
         refresh = tok.get("refresh_token")
         access = tok.get("access_token")
         if not refresh:
-            # sem refresh token não conseguimos agir depois (usuário já consentiu antes
-            # sem revogar): peça pra remover o acesso em myaccount.google.com e reconectar.
+            # sem refresh token não conseguimos agir depois (consentimento antigo
+            # sem revogar): remova o acesso em myaccount.google.com e reconecte.
             return {"error": "no_refresh_token"}
         email = ""
         if access:
@@ -162,6 +272,10 @@ async def exchange_code(code: str, creds: dict[str, str]) -> dict[str, Any]:
             if ui.status_code == 200:
                 email = ui.json().get("email", "")
     return {"refresh_token": refresh, "email": email, "scopes": tok.get("scope", "")}
+
+
+class RefreshRejected(Exception):
+    """O Google recusou o refresh token (revogado, expirado, app trocado)."""
 
 
 async def _refresh_access_token(refresh_token: str, creds: dict[str, str]) -> tuple[str, float]:
@@ -175,6 +289,9 @@ async def _refresh_access_token(refresh_token: str, creds: dict[str, str]) -> tu
                 "grant_type": "refresh_token",
             },
         )
+    if r.status_code in (400, 401):
+        # invalid_grant / unauthorized_client / invalid_client: não passa sozinho
+        raise RefreshRejected(r.text[:200])
     r.raise_for_status()
     tok = r.json()
     return tok["access_token"], time.time() + int(tok.get("expires_in", 3600))
@@ -183,7 +300,8 @@ async def _refresh_access_token(refresh_token: str, creds: dict[str, str]) -> tu
 async def get_access_token(account_id: str) -> str | None:
     """Access token válido p/ uma conta conectada (renova se preciso).
 
-    None = conta inexistente, app não configurado, ou refresh revogado/expirado.
+    None = conta inexistente, app não configurado, ou refresh recusado — nesse caso
+    a conta fica marcada (`broken_at`) para a tela pedir "Reconectar".
     """
     from ..models import GoogleAccount
 
@@ -199,17 +317,28 @@ async def get_access_token(account_id: str) -> str | None:
         Session = async_sessionmaker(eng, expire_on_commit=False)
         async with Session() as db:
             acc = await db.get(GoogleAccount, _as_uuid(account_id))
-            refresh = acc.refresh_token if acc else None
-            creds = await get_oauth_config(db)
+            if acc is None or not acc.refresh_token:
+                return None
+            creds = await creds_for_client(db, acc.client_id or "")
+            if not creds:
+                return None
+            try:
+                token, exp = await _refresh_access_token(acc.refresh_token, creds)
+            except RefreshRejected as exc:
+                logger.warning("Google recusou renovar o token (conta %s): %s", account_id, exc)
+                acc.broken_at = datetime.now(timezone.utc)
+                acc.last_error = BROKEN_MSG
+                await db.commit()
+                return None
+            except Exception as exc:  # noqa: BLE001 - rede/5xx: passageiro, não marca
+                logger.warning("Refresh do token Google falhou (conta %s): %s", account_id, exc)
+                return None
+            if acc.broken_at is not None or acc.last_error:
+                acc.broken_at = None
+                acc.last_error = ""
+                await db.commit()
     finally:
         await eng.dispose()
-    if not refresh or not creds:
-        return None
-    try:
-        token, exp = await _refresh_access_token(refresh, creds)
-    except Exception as exc:  # noqa: BLE001 - token revogado/expirado (modo teste 7 dias)
-        logger.warning("Refresh do token Google falhou (conta %s): %s", account_id, exc)
-        return None
     _token_cache[account_id] = (token, exp)
     return token
 

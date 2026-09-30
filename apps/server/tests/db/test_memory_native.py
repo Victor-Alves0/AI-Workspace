@@ -136,7 +136,7 @@ def test_consolidacao_adiciona_atualiza_e_apaga_no_mesmo_escopo(mem, monkeypatch
     ms, (a, _) = mem
     chamadas: list[str] = []
 
-    def llm(api_key, system, user):
+    def llm(api_key, system, user, llm=None):
         chamadas.append(system[:20])
         if "extract durable facts" in system:
             return {"facts": respostas.pop(0)}

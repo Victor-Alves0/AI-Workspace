@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- o código de autorização está na URL: não vaza para o destino por Referer -->
+<meta name="referrer" content="no-referrer">
+<title>AI Workspace · Conectando</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fafafa; --fg:#18181b; --mu:#71717a; --card:#fff; --bd:#e4e4e7; --ac:#6366f1; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f0f11; --fg:#f4f4f5; --mu:#a1a1aa; --card:#18181b; --bd:#27272a; } }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--bg); color:var(--fg);
+         font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; padding:16px; box-sizing:border-box; }
+  .c { max-width:360px; width:100%; text-align:center; background:var(--card); border:1px solid var(--bd);
+       border-radius:16px; padding:28px 24px; }
+  h1 { font-size:17px; margin:0 0 6px; }
+  p { margin:0; color:var(--mu); font-size:14px; word-break:break-word; }
+  a.b { display:inline-block; margin-top:16px; padding:8px 18px; border-radius:999px; background:var(--ac);
+        color:#fff; text-decoration:none; font-size:14px; font-weight:500; }
+  .s { width:22px; height:22px; margin:0 auto 12px; border:2px solid var(--bd); border-top-color:var(--ac);
+       border-radius:50%; animation:r .8s linear infinite; }
+  @keyframes r { to { transform:rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .s { animation:none; } }
+</style>
+</head>
+<body>
+<div class="c" id="box"><div class="s"></div><h1>Conectando…</h1><p>Voltando para o AI Workspace.</p></div>
+<script>
+/*
+ * Página de retorno do OAuth do AI Workspace (self-hosted).
+ *
+ * O provedor (Google…) só aceita endereços de retorno cadastrados; cada instalação
+ * tem o seu (IP de LAN, localhost do desktop, domínio). Esta página é o ÚNICO
+ * endereço cadastrado: lê do `state` para onde voltar (`ret` + `cb`) e reencaminha
+ * o navegador para lá com a query intacta. Nada é enviado a servidor nenhum; o
+ * `state` é conferido (assinatura) pela instalação, e o `code` sozinho não vale
+ * nada sem o verificador PKCE, que nunca sai dela.
+ */
+(function () {
+  var box = document.getElementById("box");
+  function show(title, text, href, label) {
+    box.innerHTML = "";
+    var h = document.createElement("h1"); h.textContent = title; box.appendChild(h);
+    var p = document.createElement("p"); p.textContent = text; box.appendChild(p);
+    if (href) {
+      var a = document.createElement("a"); a.className = "b"; a.href = href; a.rel = "noreferrer";
+      a.textContent = label; box.appendChild(a);
+    }
+  }
+  function payload(state) {
+    try {
+      var part = (state || "").split(".")[1] || "";
+      part = part.replace(/-/g, "+").replace(/_/g, "/");
+      while (part.length % 4) part += "=";
+      return JSON.parse(decodeURIComponent(escape(atob(part))));
+    } catch (e) { return null; }
+  }
+  // endereços que só existem na máquina/rede do usuário: seguem direto
+  function local(host) {
+    host = host.replace(/^\[|\]$/g, "").toLowerCase();
+    if (host === "localhost" || host === "::1" || /\.local$/.test(host) || /\.ts\.net$/.test(host)) return true;
+    var m = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    if (!m) return false;
+    var a = +m[1], b = +m[2];
+    return a === 127 || a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31)
+      || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254);
+  }
+
+  var q = new URLSearchParams(location.search);
+  var data = payload(q.get("state"));
+  var ret, cb = data && data.cb;
+  try { ret = data && new URL(data.ret); } catch (e) { ret = null; }
+  if (!ret || !/^https?:$/.test(ret.protocol) || ret.username || ret.password
+      || typeof cb !== "string" || !/^\/integrations\/[a-z0-9_-]+(\/[a-z0-9_-]+)*\/callback$/.test(cb)) {
+    show("Link inválido", "Volte ao AI Workspace e conecte de novo.");
+    return;
+  }
+  var dest = ret.origin + cb + location.search;
+  if (local(ret.hostname)) {
+    location.replace(dest);
+    return;
+  }
+  // domínio público: confirma antes (ninguém usa esta página para mandar o
+  // navegador de alguém a um endereço que ele não reconhece)
+  show("Continuar?", "Voltar para " + ret.host + " para concluir a conexão.", dest, "Continuar");
+})();
+</script>
+</body>
+</html>

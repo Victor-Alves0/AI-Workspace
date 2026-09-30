@@ -317,3 +317,11 @@ def test_front_nao_usa_dialogos_do_navegador():
             if padrao.search(linha) and not linha.lstrip().startswith(("//", "*", "/*")):
                 achados.append(f"{path.relative_to(_REPO)}:{n}")
     assert not achados, f"use toast()/useConfirm no lugar do diálogo do navegador: {achados}"
+
+
+def test_engrenagem_de_tool_nao_tem_confirmacao_por_modelo():
+    """A confirmação antes de agir é UMA opção global (Configurações → Segurança): os
+    `*_config_from_secrets` ignoram `require_confirm` da config do modelo. Um toggle
+    por modelo na engrenagem da tool não fazia nada — falha silenciosa."""
+    painel = (_WEB / "components" / "toolPanels.tsx").read_text(encoding="utf-8")
+    assert '"require_confirm"' not in painel

@@ -398,16 +398,15 @@ export function DeepSearchPanel({ value, onChange, models = [] }: PanelProps) {
 export function GooglePanel({ value, onChange }: PanelProps) {
   const g = value ?? {};
   const gSet = (k: string, v: any) => onChange({ ...g, [k]: v });
-  const confirm = g.require_confirm !== false;
   const max = g.max_results === "" ? "" : g.max_results ?? 10;
   // ativação por operação (ausente = ligada); é o que "fragmenta" sem virar N tools
   const ops: Record<string, boolean> = g.ops && typeof g.ops === "object" ? g.ops : {};
   const opOn = (cap: string) => ops[cap] !== false;
   const toggleOp = (cap: string) => gSet("ops", { ...ops, [cap]: !opOn(cap) });
 
-  const [accounts, setAccounts] = useState<{ id: string; email: string }[]>([]);
+  const [accounts, setAccounts] = useState<{ id: string; email: string; primary?: boolean }[]>([]);
   useEffect(() => {
-    api.get<{ accounts: { id: string; email: string }[] }>("/integrations/google")
+    api.get<{ accounts: { id: string; email: string; primary?: boolean }[] }>("/integrations/google")
       .then((s) => setAccounts(s.accounts || []))
       .catch(() => {});
   }, []);
@@ -423,11 +422,10 @@ export function GooglePanel({ value, onChange }: PanelProps) {
 
   return (
     <div>
-      <p className="text-xs leading-5 text-muted">Contas, ativação e limites deste modelo para o Google. A conexão das contas fica em Configurações → Integrações.</p>
       <Heading>Contas liberadas</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
         {accounts.length === 0 ? (
-          <p className="py-2 text-xs text-muted">Nenhuma conta conectada. Conecte em Configurações → Integrações → Google Workspace.</p>
+          <p className="py-2 text-xs text-muted">Nenhuma conta. Conecte em Integrações → Google Workspace.</p>
         ) : (
           <>
             {accounts.map((a, i) => (
@@ -435,9 +433,9 @@ export function GooglePanel({ value, onChange }: PanelProps) {
                 <input type="checkbox" checked={effective.includes(a.id)} onChange={() => toggleAccount(a.id)}
                   className="h-4 w-4 shrink-0 accent-accent" />
                 <span className="min-w-0 flex-1 truncate text-ink">{a.email}</span>
+                {a.primary && <span className="shrink-0 text-[10px] text-muted">Principal</span>}
               </label>
             ))}
-            <p className="border-t border-border py-2 text-xs text-muted">Todas marcadas = este modelo pode usar qualquer conta.</p>
           </>
         )}
       </div>
@@ -452,12 +450,6 @@ export function GooglePanel({ value, onChange }: PanelProps) {
         <Row label="Ver e buscar"><Toggle on={opOn("cal_view")} onClick={() => toggleOp("cal_view")} /></Row>
         <div className="border-t border-border"><Row label="Criar e editar"><Toggle on={opOn("cal_create")} onClick={() => toggleOp("cal_create")} /></Row></div>
         <div className="border-t border-border"><Row label="Excluir eventos"><Toggle on={opOn("cal_delete")} onClick={() => toggleOp("cal_delete")} /></Row></div>
-      </div>
-      <Heading>Segurança</Heading>
-      <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <Row label="Pedir confirmação antes de escrever" sub="E-mail: abre um rascunho editável p/ revisar e enviar. Agenda: Confirmar/Cancelar. Desligado = age direto.">
-          <Toggle on={confirm} onClick={() => gSet("require_confirm", !confirm)} />
-        </Row>
       </div>
       <Heading>Limites</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
@@ -476,7 +468,6 @@ export function GooglePanel({ value, onChange }: PanelProps) {
 export function TuyaToolPanel({ value, onChange }: PanelProps) {
   const t = value ?? {};
   const tSet = (k: string, v: any) => onChange({ ...t, [k]: v });
-  const confirm = t.require_confirm !== false;
   const ops: Record<string, boolean> = t.ops && typeof t.ops === "object" ? t.ops : {};
   const opOn = (cap: string) => ops[cap] !== false;
   const toggleOp = (cap: string) => tSet("ops", { ...ops, [cap]: !opOn(cap) });
@@ -527,12 +518,6 @@ export function TuyaToolPanel({ value, onChange }: PanelProps) {
         <div className="border-t border-border"><Row label="Ar-condicionado" sub="Ligar e ajustar temperatura/modo"><Toggle on={opOn("tuya_ac")} onClick={() => toggleOp("tuya_ac")} /></Row></div>
         <div className="border-t border-border"><Row label="Disparar cenas" sub="Tap-to-run configuradas"><Toggle on={opOn("tuya_scene")} onClick={() => toggleOp("tuya_scene")} /></Row></div>
       </div>
-      <Heading>Segurança</Heading>
-      <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <Row label="Pedir confirmação antes de agir" sub="Mostra Confirmar/Cancelar antes de ligar, desligar ou disparar cena">
-          <Toggle on={confirm} onClick={() => tSet("require_confirm", !confirm)} />
-        </Row>
-      </div>
     </div>
   );
 }
@@ -541,7 +526,6 @@ export function TuyaToolPanel({ value, onChange }: PanelProps) {
 export function GithubToolPanel({ value, onChange }: PanelProps) {
   const g = value ?? {};
   const gSet = (k: string, v: any) => onChange({ ...g, [k]: v });
-  const confirm = g.require_confirm !== false;
   const ops: Record<string, boolean> = g.ops && typeof g.ops === "object" ? g.ops : {};
   const opOn = (cap: string) => ops[cap] !== false;
   const toggleOp = (cap: string) => gSet("ops", { ...ops, [cap]: !opOn(cap) });
@@ -592,12 +576,6 @@ export function GithubToolPanel({ value, onChange }: PanelProps) {
         <div className="border-t border-border"><Row label="Abrir pull requests"><Toggle on={opOn("gh_pr")} onClick={() => toggleOp("gh_pr")} /></Row></div>
         <div className="border-t border-border"><Row label="Commitar arquivos" sub="Criar/atualizar arquivos (commit direto)"><Toggle on={opOn("gh_commit")} onClick={() => toggleOp("gh_commit")} /></Row></div>
       </div>
-      <Heading>Segurança</Heading>
-      <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <Row label="Pedir confirmação antes de escrever" sub="Mostra Confirmar/Cancelar antes de criar issue/PR/comentário/commit. Desligado = age direto.">
-          <Toggle on={confirm} onClick={() => gSet("require_confirm", !confirm)} />
-        </Row>
-      </div>
     </div>
   );
 }
@@ -607,7 +585,6 @@ const MSG_PLAT_PT: Record<string, string> = { whatsapp: "WhatsApp", telegram: "T
 export function MessagingToolPanel({ value, onChange }: PanelProps) {
   const g = value ?? {};
   const gSet = (k: string, v: any) => onChange({ ...g, [k]: v });
-  const confirm = g.require_confirm !== false;
   const ops: Record<string, boolean> = g.ops && typeof g.ops === "object" ? g.ops : {};
   const opOn = (cap: string) => ops[cap] !== false;
   const toggleOp = (cap: string) => gSet("ops", { ...ops, [cap]: !opOn(cap) });
@@ -655,12 +632,6 @@ export function MessagingToolPanel({ value, onChange }: PanelProps) {
         <div className="border-t border-border"><Row label="Ler mensagens" sub="Ver o histórico de uma conversa (WhatsApp/Discord)"><Toggle on={opOn("msg_read")} onClick={() => toggleOp("msg_read")} /></Row></div>
         <div className="border-t border-border"><Row label="Enviar mensagens" sub="Mandar mensagem por você"><Toggle on={opOn("msg_send")} onClick={() => toggleOp("msg_send")} /></Row></div>
       </div>
-      <Heading>Segurança</Heading>
-      <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <Row label="Pedir confirmação antes de enviar" sub="Mostra Enviar/Cancelar antes de mandar uma mensagem. Desligado = envia direto.">
-          <Toggle on={confirm} onClick={() => gSet("require_confirm", !confirm)} />
-        </Row>
-      </div>
     </div>
   );
 }
@@ -673,7 +644,6 @@ export function MessagingToolPanel({ value, onChange }: PanelProps) {
 export function RemoteTerminalToolPanel({ value, onChange }: PanelProps) {
   const g = value ?? {};
   const gSet = (k: string, v: any) => onChange({ ...g, [k]: v });
-  const confirm = g.require_confirm !== false;
   const ops: Record<string, boolean> = g.ops && typeof g.ops === "object" ? g.ops : {};
   const opOn = (cap: string) => ops[cap] !== false;
   const toggleOp = (cap: string) => gSet("ops", { ...ops, [cap]: !opOn(cap) });
@@ -721,12 +691,6 @@ export function RemoteTerminalToolPanel({ value, onChange }: PanelProps) {
         <Row label="Rodar comandos" sub="Executar e esperar a saída"><Toggle on={opOn("run")} onClick={() => toggleOp("run")} /></Row>
         <div className="border-t border-border"><Row label="Comandos em segundo plano" sub="Instalações e builds longos (job_id)"><Toggle on={opOn("start")} onClick={() => toggleOp("start")} /></Row></div>
         <div className="border-t border-border"><Row label="Consultar jobs e política de rede" sub="Status de jobs, matar job e teste de vazamento"><Toggle on={opOn("manage")} onClick={() => toggleOp("manage")} /></Row></div>
-      </div>
-      <Heading>Segurança</Heading>
-      <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <Row label="Sempre pedir confirmação" sub="Vale mesmo nas máquinas configuradas para não perguntar. Cada máquina tem seu próprio pedido de confirmação.">
-          <Toggle on={confirm} onClick={() => gSet("require_confirm", !confirm)} />
-        </Row>
       </div>
     </div>
   );

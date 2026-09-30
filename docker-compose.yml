@@ -82,6 +82,11 @@ services:
       # uma string VAZIA quando a variável não existe no .env, e a vazia GANHA do
       # default do config.py — trocaria um bug por outro.
       GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:8000/integrations/google/callback}
+      # App Google embutido (vazio = constantes do código) e a página de retorno do
+      # projeto, que leva o login de volta a esta instalação.
+      GOOGLE_APP_CLIENT_ID: ${GOOGLE_APP_CLIENT_ID:-}
+      GOOGLE_APP_CLIENT_SECRET: ${GOOGLE_APP_CLIENT_SECRET:-}
+      OAUTH_RELAY_URL: ${OAUTH_RELAY_URL:-https://victor-alves0.github.io/AI-Workspace/oauth/}
       GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI:-http://localhost:8000/integrations/github/callback}
       NOTION_REDIRECT_URI: ${NOTION_REDIRECT_URI:-http://localhost:8000/integrations/notion/callback}
       SLACK_REDIRECT_URI: ${SLACK_REDIRECT_URI:-http://localhost:8000/integrations/slack/callback}

@@ -339,14 +339,20 @@ async def _assemble_configs(db: AsyncSession, user_id: uuid.UUID, model_config: 
     # config (é buscado ao vivo na tool) — só id+email das contas + permissões.
     g_prefs = tools_cfg.get("google") or {}
     allowed_ids = {str(x) for x in (g_prefs.get("accounts") or [])}
-    g_rows = list(await db.scalars(select(GoogleAccount).where(GoogleAccount.user_id == user_id)))
+    # na ordem do usuário: a 1ª liberada é a principal deste modelo
+    g_rows = list(await db.scalars(
+        select(GoogleAccount).where(GoogleAccount.user_id == user_id)
+        .order_by(GoogleAccount.position, GoogleAccount.created_at)
+    ))
     g_accounts = [
         {"id": str(a.id), "email": a.email}
         for a in g_rows
         if not allowed_ids or str(a.id) in allowed_ids
     ]
+    g_fb = prof.get("account_fallback") if isinstance(prof.get("account_fallback"), dict) else {}
     google_cfg = sift_service.google_config_from_secrets(
-        str(user_id), g_accounts, g_prefs, confirm_actions=confirm_actions
+        str(user_id), g_accounts, g_prefs, confirm_actions=confirm_actions,
+        fallback=bool(g_fb.get("google")),
     )
     # GitHub: contas conectadas do usuário (PAT/OAuth) filtradas pelas liberadas neste
     # modelo (tools_cfg.github.accounts; vazio = todas). O token NÃO entra na config

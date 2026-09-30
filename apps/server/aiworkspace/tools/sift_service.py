@@ -115,8 +115,9 @@ class GoogleConfig:
     require_confirm: bool = True     # pedir confirmação (opções) antes de escrever
     max_results: int = 10
     default_calendar: str = "primary"
-    accounts: list = field(default_factory=list)
+    accounts: list = field(default_factory=list)   # na ordem: a 1ª é a principal
     ops: dict = field(default_factory=dict)
+    fallback: bool = False           # principal sem acesso → tenta a próxima
 
 
 @dataclass
@@ -2951,7 +2952,8 @@ def _register_builtins(
         g_confirm = True if google_cfg is None else bool(google_cfg.require_confirm)
         g_max = (google_cfg.max_results if google_cfg else 10) or 10
         g_cal = (google_cfg.default_calendar if google_cfg else "primary") or "primary"
-        g_accounts = list(google_cfg.accounts) if google_cfg else []  # [{"id","email"}]
+        g_accounts = list(google_cfg.accounts) if google_cfg else []  # [{"id","email"}], 1ª = principal
+        g_fallback = bool(google_cfg.fallback) if google_cfg else False
         g_ops = google_cfg.ops if google_cfg else {}
 
         def _op_on(cap: str) -> bool:
@@ -2959,7 +2961,7 @@ def _register_builtins(
             return g_ops.get(cap, True) is not False
 
         _ASK_KEYS = ["kind", "question", "options", "allow_custom", "custom_label"]
-        _ACCOUNT_PARAM = "string:o::which connected Google account to use (email); omit if only one"
+        _ACCOUNT_PARAM = "string:o::which connected Google account to use (email); omit to use the primary one"
 
         def _g_truthy(v: Any) -> bool:
             if v is True:
@@ -2968,7 +2970,9 @@ def _register_builtins(
 
         def _g_pick_account(account: str = "") -> tuple[dict | None, dict | None]:
             """Escolhe a conta (dict {id,email}) sem buscar token. Retorna (conta,
-            bloqueio): bloqueio != None = não conectado / escolha de conta / erro."""
+            bloqueio): bloqueio != None = não conectado / conta inválida. Sem `account`
+            vale a PRINCIPAL (a 1ª da ordem que o usuário definiu) — perguntar "qual
+            conta?" a cada pedido era atrito puro."""
             if not g_accounts:
                 return None, {"error": "Google não conectado. Conecte uma conta em Configurações → Integrações."}
             if (account or "").strip():
@@ -2982,25 +2986,38 @@ def _register_builtins(
                     emails = ", ".join(x.get("email", "") for x in g_accounts)
                     return None, {"error": f"conta '{account}' não liberada para este modelo. Disponíveis: {emails}"}
                 return chosen, None
-            if len(g_accounts) == 1:
-                return g_accounts[0], None
-            from .interaction import ask_options
-            return None, ask_options(
-                "Qual conta Google devo usar?",
-                [{"label": x.get("email", ""), "value": f"Use a conta {x.get('email', '')}"} for x in g_accounts],
-                allow_custom=False,
-            )
+            return g_accounts[0], None
 
-        def _g_ctx(account: str = "") -> tuple[str | None, dict | None]:
-            """Resolve a conta e devolve (access_token, bloqueio)."""
+        def _g_ctx(account: str = "") -> tuple[str | None, dict | None, dict]:
+            """Resolve a conta e devolve (access_token, bloqueio, etiqueta). A etiqueta
+            vai no resultado para a IA saber de qual caixa/agenda veio (com várias
+            contas) e quando o fallback trocou de conta.
+
+            Fallback só quando o pedido NÃO nomeou a conta e o usuário ligou a opção:
+            pediu uma conta específica, recebe erro dela — nunca outra caixa no lugar."""
             chosen, block = _g_pick_account(account)
             if block is not None:
-                return None, block
+                return None, block, {}
             from ..integrations import google_service
+            tag = {"account_email": chosen.get("email", "")} if len(g_accounts) > 1 else {}
             tok = asyncio.run(google_service.get_access_token(str(chosen.get("id"))))
-            if not tok:
-                return None, {"error": f"não foi possível acessar a conta {chosen.get('email', '')} (reconecte em Integrações)."}
-            return tok, None
+            if tok:
+                return tok, None, tag
+            if g_fallback and not (account or "").strip():
+                for alt in g_accounts[1:]:
+                    t2 = asyncio.run(google_service.get_access_token(str(alt.get("id"))))
+                    if t2:
+                        return t2, None, {
+                            "account_email": alt.get("email", ""),
+                            "note": f"A conta principal ({chosen.get('email', '')}) está sem acesso; "
+                                    f"usei {alt.get('email', '')}. Diga isso ao usuário.",
+                        }
+            return None, {"error": f"sem acesso à conta {chosen.get('email', '')} — o usuário precisa reconectá-la em Integrações."}, {}
+
+        def _g_tag(res: Any, tag: dict) -> Any:
+            if tag and isinstance(res, dict) and "error" not in res:
+                return {**res, **{k: v for k, v in tag.items() if k not in res}}
+            return res
 
         def _g_guard(summary: str, confirm: Any) -> dict | None:
             """Confirmação antes de escrever. Retorna ask, ou None p/ prosseguir.
@@ -3096,11 +3113,11 @@ def _register_builtins(
                     blocked = _g_guard(f"{act} no e-mail selecionado?", confirm)
                     if blocked is not None:
                         return blocked
-                tok, block = _g_ctx(account)
+                tok, block, g_tag = _g_ctx(account)
                 if block is not None:
                     return block
                 from ..integrations import google_service
-                try:
+                def _do() -> Any:
                     if act == "search":
                         return google_service.gmail_search(tok, query, _g_search_n(max_results))
                     if act == "read":
@@ -3117,6 +3134,8 @@ def _register_builtins(
                         tok, id,
                         {"archive": "archive", "trash": "trash", "mark_read": "read", "mark_unread": "unread"}[act],
                     )
+                try:
+                    return _g_tag(_do(), g_tag)
                 except Exception as exc:  # noqa: BLE001
                     return {"error": str(exc)}
 
@@ -3150,7 +3169,8 @@ def _register_builtins(
                     "confirm": "boolean:o::set true only after the user confirmed a write",
                     "account": _ACCOUNT_PARAM,
                 },
-                returns=["events", "id", "title", "start", "end", "location", "ok", "deleted", "action", "error", *_ASK_KEYS],
+                returns=["events", "id", "title", "start", "end", "location", "ok", "deleted", "action", "error",
+                         "account_email", "note", *_ASK_KEYS],
                 risk=True,
                 examples=["what's on my calendar tomorrow", "schedule a meeting friday 3pm", "delete that event", "reschedule my dentist appointment"],
             )
@@ -3174,13 +3194,13 @@ def _register_builtins(
                     blocked = _g_guard(summary_txt, confirm)
                     if blocked is not None:
                         return blocked
-                tok, block = _g_ctx(account)
+                tok, block, g_tag = _g_ctx(account)
                 if block is not None:
                     return block
                 from ..integrations import google_service
                 cal = calendar_id or g_cal
                 tz = toolctx.user_tz.get()  # fuso do usuário → horas locais na agenda
-                try:
+                def _do() -> Any:
                     if act == "list":
                         tmin = time_min or _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                         return google_service.cal_list(tok, tmin, time_max, _g_n(max_results), cal)
@@ -3197,6 +3217,8 @@ def _register_builtins(
                     if not (event_id or "").strip():
                         return {"error": "`event_id` is required"}
                     return google_service.cal_delete(tok, event_id, cal)
+                try:
+                    return _g_tag(_do(), g_tag)
                 except Exception as exc:  # noqa: BLE001
                     return {"error": str(exc)}
 
@@ -4840,7 +4862,8 @@ def _signature(
     gg = (
         (google_cfg.require_confirm, google_cfg.max_results, google_cfg.default_calendar,
          tuple(sorted(google_cfg.ops.items())),
-         tuple(sorted(str(a.get("id")) for a in google_cfg.accounts)))
+         # ORDEM importa: a 1ª conta é a principal
+         tuple(str(a.get("id")) for a in google_cfg.accounts), google_cfg.fallback)
         if google_cfg else ()
     )
     # config Tuya: conexão global (id + versão do catálogo) + gating por-modelo.
@@ -5177,7 +5200,7 @@ def deep_config_from_secrets(
 
 def google_config_from_secrets(
     user_id: str, accounts: list[dict] | None = None, google_prefs: dict | None = None,
-    *, confirm_actions: bool = False,
+    *, confirm_actions: bool = False, fallback: bool = False,
 ) -> "GoogleConfig":
     """Config das tools Google. `accounts` = contas liberadas p/ este modelo
     ([{"id","email"}]); vazio → as tools existem mas respondem 'não conectado'.
@@ -5199,6 +5222,7 @@ def google_config_from_secrets(
         default_calendar=str(p.get("default_calendar") or "primary"),
         accounts=list(accounts or []),
         ops=p.get("ops") if isinstance(p.get("ops"), dict) else {},
+        fallback=bool(fallback),
     )
 
 

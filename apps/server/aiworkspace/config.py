@@ -101,10 +101,18 @@ class Settings(BaseSettings):
     # CORS
     web_origin: str = "http://localhost:3000"
 
-    # Integração Google Workspace (OAuth). O Client ID/Secret são configurados na
-    # UI (Integrações → Google Workspace, admin) e ficam em app_settings — NÃO no
-    # env. Só o redirect_uri fica aqui (não é segredo); precisa estar registrado no
-    # console do Google e ser alcançado via localhost (política do Google).
+    # Integração Google Workspace (OAuth). O login volta pela PÁGINA DE RETORNO do
+    # projeto (`oauth_relay_url`, estática no GitHub Pages), que reencaminha o
+    # navegador para a instalação que começou o login — por isso funciona em IP de
+    # LAN, celular e desktop sem cadastrar endereço por instalação.
+    #  - App embutido: `google_app_client_id/secret` (vazio = constantes do
+    #    google_service). É o que faz "Conectar agora" funcionar sem configurar nada.
+    #  - App próprio (admin, na UI) sobrepõe o embutido.
+    #  - `google_redirect_uri` só vale para app próprio salvo ANTES do retorno pelo
+    #    projeto (retorno direto, que exige localhost/HTTPS cadastrado).
+    oauth_relay_url: str = "https://victor-alves0.github.io/AI-Workspace/oauth/"
+    google_app_client_id: str = ""
+    google_app_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:8000/integrations/google/callback"
 
     # Integração GitHub (OAuth App, opcional — o caminho principal é colar um PAT).
