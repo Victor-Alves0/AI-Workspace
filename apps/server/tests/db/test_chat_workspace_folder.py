@@ -79,6 +79,8 @@ def test_pasta_principal_escolha_e_sem_pasta(cliente, monkeypatch):
 
     r = c.post("/chats", json={"title": "x"})
     assert r.status_code == 200, r.text
+    assert r.json()["workspace"] == "off"                     # chat novo nasce sem pasta
+    r = c.post("/chats", json={"title": "x", "workspace": "home"})
     chat = r.json()
     assert chat["workspace"] is None
     uid = c.get("/auth/me").json()["id"]

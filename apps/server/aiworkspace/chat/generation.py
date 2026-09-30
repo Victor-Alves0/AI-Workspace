@@ -178,6 +178,7 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
         started = time.monotonic()
         first_token_ms: float | None = None
         first_reasoning_ms: float | None = None
+        latency_sent = False
         tool_calls = 0
         tool_results = 0
         collected: Collected = {
@@ -210,6 +211,12 @@ def start(chat_id: str, source: AsyncIterator[dict], on_finish: OnFinish,
                 elif t == "reasoning" and first_reasoning_ms is None:
                     first_reasoning_ms = elapsed_ms
                     tracing.annotate(first_reasoning_ms=first_reasoning_ms)
+                # latência para a barra sob o composer: do início da geração até a 1ª
+                # coisa que a IA escreve (texto ou raciocínio). Vai no buffer, então
+                # quem re-assina (F5) recebe o mesmo número, não o do replay.
+                if t in ("token", "reasoning") and not latency_sent:
+                    latency_sent = True
+                    await gen._append({"type": "latency", "ms": elapsed_ms})
                 elif t == "tool_call":
                     tool_calls += 1
                 elif t == "tool_result":

@@ -407,7 +407,9 @@ export default function ChatPage() {
   // padrão atual); null = chat sem projeto
   const [csProject, setCsProject] = useState<CodespaceProject | null>(null);
   // pasta de trabalho escolhida ANTES de o chat existir (tela de novo chat)
-  const [draftWorkspace, setDraftWorkspace] = useState<string | null>(null);
+  // chat novo nasce SEM pasta; null = pasta principal
+  const [homeFolderId, setHomeFolderId] = useState<string | null>(null);
+  const [draftWorkspace, setDraftWorkspace] = useState<string | null>("off");
   const [dismissedFolderReq, setDismissedFolderReq] = useState<string | null>(null);
   useEffect(() => {
     const pid = active?.project_id;
@@ -1758,11 +1760,12 @@ export default function ChatPage() {
             params: initialParams,
             model_config_id: curCustomId,
             // pasta escolhida no seletor antes do 1º envio
-            ...(draftWorkspace ? { workspace: draftWorkspace } : {}),
+            workspace: draftWorkspace ?? "home",
             // a campanha nasce com o chat — o 1º turno já encontra o mundo pronto
             ...(turnMiniApp ? { mini_app: turnMiniApp } : {}),
           });
           if (turnMiniApp) setDraftMiniApp(null);
+          setDraftWorkspace("off"); // o próximo chat novo também nasce sem pasta
           setActive(chat);
           activeIdRef.current = chat.id;
           ownerId = chat.id; // rascunho virou chat real: o stream agora tem dono
@@ -2533,6 +2536,12 @@ export default function ChatPage() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // id da pasta principal, para o botão "Arquivos do projeto" dos chats que a usam
+  useEffect(() => {
+    if (!active || active.project_id || active.workspace || homeFolderId) return;
+    api.get<{ home: { id: string } }>("/workspace/folders").then((d) => setHomeFolderId(d.home.id)).catch(() => {});
+  }, [active, homeFolderId]);
+
   if (!user) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3">
@@ -2576,6 +2585,10 @@ export default function ChatPage() {
   const folderReq = !sending && !streaming && lastMsg?.role === "assistant" ? findFolderRequest(lastMsg.tool_events ?? []) : null;
   const showFolderReq = !!folderReq && dismissedFolderReq !== lastMsg?.id;
   const folderValue = active ? (active.workspace ?? null) : draftWorkspace;
+  // pasta ligada ao chat (projeto do Codespace, pasta escolhida ou a principal): é ela
+  // que o botão "Arquivos do projeto" abre. "Sem pasta" = sem botão.
+  const filesProjectId = active?.project_id
+    ?? (active && active.workspace !== "off" ? (active.workspace ?? homeFolderId) : null);
   async function changeFolder(v: string | null) {
     if (!active) { setDraftWorkspace(v); return; }
     const prev = active;
@@ -2750,7 +2763,7 @@ export default function ChatPage() {
             >
               <MessageSquareDashed size={18} />
             </button>
-            {active?.project_id && (
+            {filesProjectId && (
               <button
                 onClick={() => setCsFilesOpen((v) => !v)}
                 title="Arquivos do projeto"
@@ -3100,7 +3113,7 @@ export default function ChatPage() {
           {/* Arquivos do projeto: mesma coluna do lado, só quando o chat está vinculado.
               Desktop: largura controlada pelo DIVISOR arrastável (var CSS + estado);
               mobile: tela cheia, sem divisor. */}
-          {csFilesOpen && active?.project_id && (
+          {csFilesOpen && filesProjectId && (
             <div
               ref={csFilesRef}
               style={{ "--csw": `${csFilesW}px` } as React.CSSProperties}
@@ -3119,8 +3132,8 @@ export default function ChatPage() {
                   <button onClick={() => setCsFilesOpen(false)} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><X size={16} /></button>
                 </div>
                 <CodespaceFileBrowser
-                  key={active.project_id}
-                  projectId={active.project_id}
+                  key={filesProjectId}
+                  projectId={filesProjectId}
                   dense
                   useLabel="Inserir no chat"
                   onUse={(path, content) => {

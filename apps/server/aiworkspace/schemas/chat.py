@@ -20,8 +20,9 @@ class ChatCreate(BaseModel):
     project_id: uuid.UUID | None = None
     # Mini App que o chat É desde o nascimento ("imaginai" = nova campanha)
     mini_app: str | None = Field(default=None, pattern=r"^(imaginai)$")
-    # pasta de trabalho: None = principal, "off" = sem pasta, ou id de projeto
-    workspace: str | None = Field(default=None, max_length=64)
+    # pasta de trabalho: "home" = principal, "off" = sem pasta, ou id de projeto.
+    # Chat novo nasce SEM pasta: a IA pede uma (request_folder) quando precisar.
+    workspace: str | None = Field(default="off", max_length=64)
 
 
 class ChatUpdate(BaseModel):

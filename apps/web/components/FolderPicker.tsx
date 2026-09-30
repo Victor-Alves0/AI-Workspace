@@ -7,9 +7,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, Check, ChevronRight, Folder, FolderOpen, FolderPlus, FolderX, HardDrive, Home, Loader2, X } from "lucide-react";
+import { ArrowUp, Check, ChevronRight, Folder, FolderOpen, FolderPlus, FolderX, HardDrive, Home, Loader2, Search, X } from "lucide-react";
 import { api } from "@/lib/api";
-import { useClickOutside } from "./ui";
+import { finePointer, useClickOutside } from "./ui";
 
 export interface WorkspaceFolder { id: string; name: string; path: string; source: string; home: boolean }
 interface FoldersData { home: WorkspaceFolder; folders: WorkspaceFolder[]; browse_anywhere: boolean }
@@ -26,7 +26,9 @@ export default function FolderPicker({ value, onChange, lockedName, menuUp }: {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<FoldersData | null>(null);
   const [browse, setBrowse] = useState(false);
+  const [q, setQ] = useState("");
   const ref = useClickOutside<HTMLDivElement>(() => setOpen(false));
+  useEffect(() => { if (!open) setQ(""); }, [open]);
 
   const load = useCallback(async () => {
     try { setData(await api.get<FoldersData>("/workspace/folders")); } catch { /* sem pasta disponível */ }
@@ -45,6 +47,9 @@ export default function FolderPicker({ value, onChange, lockedName, menuUp }: {
   const atual = off ? null : value ? data?.folders.find((f) => f.id === value) ?? null : data?.home ?? null;
   const rotulo = off ? "Sem pasta" : atual?.name ?? "Pasta principal";
   const escolher = (v: string | null) => { onChange(v); setOpen(false); };
+  const termo = q.trim().toLowerCase();
+  const lista = (data ? [data.home, ...data.folders] : [])
+    .filter((f) => !termo || f.name.toLowerCase().includes(termo) || f.path.toLowerCase().includes(termo));
 
   return (
     <div ref={ref} className="relative">
@@ -56,22 +61,27 @@ export default function FolderPicker({ value, onChange, lockedName, menuUp }: {
         <span className="truncate">{rotulo}</span>
       </button>
       {open && (
-        <div className={`absolute left-0 z-50 w-80 overflow-hidden rounded-xl border border-border bg-surface shadow-menu ${menuUp ? "bottom-full mb-2" : "top-full mt-2"}`}>
-          <p className="px-3 pt-2.5 text-[11px] font-medium uppercase tracking-wider text-muted">Pasta de trabalho</p>
-          <div className="max-h-72 overflow-y-auto p-1.5">
-            {data && (
-              <Opcao icon={<Home size={15} />} nome={data.home.name} sub={data.home.path}
-                ativo={!off && !value} onClick={() => escolher(null)} />
-            )}
-            {(data?.folders ?? []).slice(0, 12).map((f) => (
-              <Opcao key={f.id} icon={<Folder size={15} />} nome={f.name} sub={f.path}
-                ativo={value === f.id} onClick={() => escolher(f.id)} />
+        <div className={`animate-pop absolute left-0 z-50 w-80 max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border border-border bg-surface shadow-menu ${menuUp ? "bottom-full mb-2" : "top-full mt-2"}`}>
+          <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+            <Search size={14} className="text-muted" />
+            <input autoFocus={finePointer()} value={q} onChange={(e) => setQ(e.target.value)}
+              placeholder="Buscar pastas…" aria-label="Buscar pastas"
+              className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted" />
+          </div>
+          {/* ~3 pastas à vista; o resto rola aqui dentro */}
+          <div className="max-h-[156px] overflow-y-auto p-1.5">
+            {lista.length === 0 ? (
+              <p className="px-3 py-4 text-center text-xs text-muted">{data ? "Nada encontrado." : "Carregando…"}</p>
+            ) : lista.map((f) => (
+              <Opcao key={f.id} icon={f.home ? <Home size={15} /> : <Folder size={15} />} nome={f.name} sub={f.path}
+                ativo={f.home ? !off && !value : value === f.id} onClick={() => escolher(f.home ? null : f.id)} />
             ))}
+          </div>
+          <div className="border-t border-border p-1.5">
             <button type="button" onClick={() => { setBrowse(true); setOpen(false); }}
               className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">
               <FolderOpen size={15} className="shrink-0 text-muted" /> Escolher pasta…
             </button>
-            <div className="my-1 border-t border-border" />
             <Opcao icon={<FolderX size={15} />} nome="Sem pasta" sub="Sem criar, editar ou baixar arquivos"
               ativo={off} onClick={() => escolher("off")} />
           </div>

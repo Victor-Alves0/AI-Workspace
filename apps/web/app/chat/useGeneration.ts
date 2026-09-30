@@ -74,6 +74,8 @@ export interface CallStats {
   endedAt: number | null;
   tokens: number;
   exact: boolean;
+  /** ms do início da geração até a 1ª coisa que a IA escreveu (medido no servidor) */
+  latencyMs: number | null;
 }
 
 export function useGeneration(getDeps: () => GenerationDeps) {
@@ -171,6 +173,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
     let statEnd: number | null = null;
     let statChars = 0;
     let statExact: number | null = null;
+    let statLatency: number | null = null;
     const pushStats = () => {
       if (!statStart || !paint()) return;
       setCallStats({
@@ -180,6 +183,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         // ~4 caracteres por token: estimativa só enquanto o `usage` real não chega
         tokens: statExact ?? Math.round(statChars / 4),
         exact: statExact !== null,
+        latencyMs: statLatency,
       });
     };
     const endStats = () => {
@@ -250,6 +254,11 @@ export function useGeneration(getDeps: () => GenerationDeps) {
       if (!statStart) {
         statStart = Date.now();
         pushStats();
+      }
+      if (ev.type === "latency") {
+        statLatency = Number(ev.ms) || 0;
+        pushStats();
+        return;
       }
       if (ev.type === "tool_preparing") {
         const prep = { name: String(ev.name || ""), action: ev.action ?? null, chars: Number(ev.chars) || 0 };

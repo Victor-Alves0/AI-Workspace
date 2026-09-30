@@ -917,8 +917,10 @@ export default function PromptBox({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, attachedAgent]);
 
+  // sem padding em cima: o fade do chat termina EXATAMENTE na borda da caixa — uma
+  // faixa sólida aqui fazia o texto sumir antes de "entrar por trás" dela
   return (
-    <div className="px-4 pt-2 pb-[max(0.6rem,env(safe-area-inset-bottom))] md:pb-5">
+    <div className="px-4 pb-[max(0.6rem,env(safe-area-inset-bottom))] md:pb-5">
       {queue && <QueueTray {...queue} />}
       <div
         /* só realça o que REALMENTE dá pra soltar aqui: arquivos do sistema, um
@@ -937,7 +939,7 @@ export default function PromptBox({
         }}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
-        className={`relative mx-auto max-w-3xl rounded-3xl border bg-surface px-3 py-2.5 shadow-prompt transition-colors duration-200 focus-within:border-accent/50 hover:border-accent/30 ${dragOver ? "border-accent border-dashed" : temporary ? "border-dashed border-ink-soft/60" : "border-border"}`}
+        className={`relative mx-auto max-w-3xl rounded-3xl border bg-surface px-3 py-2.5 transition-colors duration-200 focus-within:border-accent/50 hover:border-accent/30 ${dragOver ? "border-accent border-dashed" : temporary ? "border-dashed border-ink-soft/60" : "border-border"}`}
       >
         {dragOver && (
           <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-3xl bg-accent/5 text-sm font-medium text-accent-hover">
