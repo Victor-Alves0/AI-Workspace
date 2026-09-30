@@ -21,6 +21,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..tracing import traced
 from ..config import get_settings
 from ..models import GithubAccount, GoogleAccount, NotionAccount, SlackAccount, Tool, User
 from ..secrets_service import (
@@ -469,6 +470,7 @@ async def build_full_sift_for_user(db: AsyncSession, user_id: uuid.UUID):
     )
 
 
+@traced("setup:tools")
 async def get_sift_for_user(
     db: AsyncSession,
     user_id: uuid.UUID,

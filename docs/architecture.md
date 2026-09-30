@@ -61,7 +61,8 @@ Async FastAPI, served by Uvicorn. Responsibilities:
 - **Mini Apps** (`imaginai/`) — a domain that takes over a conversation with its own tools and
   rules. The rules run on the server, so the model narrates but does not decide outcomes.
 - **Public API** (`/v1`) — OpenAI-compatible endpoints + key management.
-- **Observability** — every request becomes a trace; spans measure database, LLM and tool time.
+- **Observability** — every request, turn and background job becomes a trace; spans measure each
+  step (setup, model, tools, agents, external HTTP, search) — see [observability.md](observability.md).
 
 The route code is split into 37 routers (`main.py` registers them). Central configuration
 comes from environment variables via `pydantic-settings` (see [configuration.md](configuration.md)).

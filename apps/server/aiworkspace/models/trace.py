@@ -77,3 +77,9 @@ class ObsSpan(Base):
     http_ms: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
 
     attrs: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+
+    # análise por operação (período → agrupa por nome) e soma dos filhos (tempo próprio)
+    __table_args__ = (
+        Index("ix_obs_spans_started_name", "started_at", "name"),
+        Index("ix_obs_spans_parent", "parent_id"),
+    )

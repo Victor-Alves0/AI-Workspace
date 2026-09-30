@@ -50,6 +50,11 @@ def _keep(tr: Trace) -> bool:
     s = get_settings()
     if tr.status == "error":
         return True
+    # tarefas de 2º plano sem NENHUM trabalho medido (push, expirar buffer, timers)
+    # são ruído: não dizem nada sobre gargalo e enchem a lista
+    if ((getattr(tr, "attrs", None) or {}).get("bg") and not getattr(tr, "spans", None)
+            and not (getattr(tr, "root_db_reads", 0) or getattr(tr, "root_db_writes", 0))):
+        return False
     if tr.duration_ms >= float(getattr(s, "obs_slow_ms", 1500)):
         return True
     rate = float(getattr(s, "obs_sample_rate", 1.0))

@@ -196,15 +196,20 @@ async def _single_flight(key: tuple, make) -> list[SearchResult]:
     """Cache curto + UMA ida aos motores para buscas iguais simultâneas (vale entre
     threads/loops: quem chega depois espera o Future de quem já está buscando)."""
     agora = time.monotonic()
+    from .. import tracing
+
     with _LOCK:
         hit = _CACHE.get(key)
         if hit and hit[0] > agora:
+            tracing.annotate(cache="hit")
             return list(hit[1])
         fut = _INFLIGHT.get(key)
         dono = fut is None
         if dono:
             fut = Future()
             _INFLIGHT[key] = fut
+    # "shared" = pegou carona na mesma busca de outro agente (voo único)
+    tracing.annotate(cache="miss" if dono else "shared")
     if not dono:
         return list(await asyncio.wrap_future(fut))
     try:
@@ -231,8 +236,11 @@ async def _with_retries(provider: str, query: str, cfg: SearchConfig) -> list[Se
     tentativas = (_ATTEMPTS if provider in ("metasearch", "searxng", "duckduckgo")
                   else 1 if provider == "browser" else 2)
     ultimo: Exception | None = None
+    from .. import tracing
+
     for i in range(tentativas):
         _ATTEMPT.set(i)
+        tracing.annotate(attempts=i + 1)
         try:
             return await fn(query, cfg)
         except _NoKey:
@@ -260,10 +268,21 @@ def _fallbacks(provider: str, cfg: SearchConfig) -> list[str]:
 
 
 async def _resilient(provider: str, query: str, cfg: SearchConfig) -> list[SearchResult]:
+    from .. import tracing
+
     erros: list[str] = []
     for prov in [provider, *_fallbacks(provider, cfg)]:
         try:
-            found = await _with_retries(prov, query, cfg)
+            # um span por motor/provedor tentado (com as novas tentativas dentro)
+            with tracing.span(f"search:{prov}", kind="http", provider=prov,
+                              fallback=prov != provider) as _sp:
+                try:
+                    found = await _with_retries(prov, query, cfg)
+                except Exception as exc:  # noqa: BLE001
+                    _sp.status = "error"
+                    _sp.error = (str(exc).strip() or type(exc).__name__)[:300]
+                    raise
+                _sp.set(results=len(found))
         except Exception as exc:  # noqa: BLE001
             erros.append(f"{prov}: {(str(exc).strip() or type(exc).__name__)[:200]}")
             continue
@@ -279,11 +298,16 @@ async def _one(
     provider = (provider or "metasearch").lower()
     if provider not in _PROVIDERS:
         provider = "metasearch"
+    from .. import tracing
+
     try:
-        found = await asyncio.wait_for(
-            _single_flight(_cache_key(provider, query, cfg), lambda: _resilient(provider, query, cfg)),
-            timeout=_SEARCH_DEADLINE,
-        )
+        with tracing.span("search:query", kind="internal", provider=provider,
+                          query_chars=len(query)) as _qs:
+            found = await asyncio.wait_for(
+                _single_flight(_cache_key(provider, query, cfg), lambda: _resilient(provider, query, cfg)),
+                timeout=_SEARCH_DEADLINE,
+            )
+            _qs.set(results=len(found))
         return found, None
     except asyncio.TimeoutError:
         return [], f"{provider}: a busca demorou demais (muitas buscas na fila); tente de novo"
@@ -346,9 +370,15 @@ async def _metasearch(query: str, cfg: SearchConfig, engines: str | None = None)
         if len(pool) > 3:
             backend = ",".join(random.sample(pool, 3))
 
+    from .. import tracing
+
+    marcas: dict[str, float] = {"submit": time.monotonic()}
+
     def _run() -> list[SearchResult]:
         from ddgs import DDGS
         from ddgs.exceptions import DDGSException
+
+        marcas["start"] = time.monotonic()
 
         try:
             found = DDGS(timeout=6).text(
@@ -369,7 +399,14 @@ async def _metasearch(query: str, cfg: SearchConfig, engines: str | None = None)
             for r in found or []
         ]
 
-    return await asyncio.wrap_future(_POOL.submit(_run))
+    try:
+        return await asyncio.wrap_future(_POOL.submit(_run))
+    finally:
+        # fila do pool (buscas demais ao mesmo tempo) vs tempo nos motores
+        fim = time.monotonic()
+        ini = marcas.get("start", fim)
+        tracing.annotate(backend=backend, pool_queue_ms=round((ini - marcas["submit"]) * 1000, 1),
+                         engines_ms=round((fim - ini) * 1000, 1))
 
 
 class _NoKey(SearchProviderError):

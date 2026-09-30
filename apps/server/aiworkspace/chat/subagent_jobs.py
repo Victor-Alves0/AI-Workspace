@@ -92,7 +92,8 @@ def start(chat_id: str, name: str, task: str, run: Callable[[], Awaitable[dict]]
             _patches.setdefault(chat_id, []).append((jid, card))
         _deliver(chat_id, nota, jid if durable else None)
 
-    bg.spawn(_go(), name=f"subagent-bg-{jid}")
+    # trace próprio (kind worker), ligado ao turno que soltou o trabalho
+    bg.spawn(_go(), name=f"subagent-bg-{jid}", trace=f"agentes-bg:{name[:80]}")
     _gc()
     return jid
 

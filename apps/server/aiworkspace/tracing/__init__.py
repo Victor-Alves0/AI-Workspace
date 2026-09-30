@@ -28,6 +28,7 @@ from .context import (
     current_span,
     current_trace,
     get_open_trace,
+    linked_trace,
     record_error,
     new_trace,
     set_trace_user,
@@ -35,6 +36,7 @@ from .context import (
     start_trace,
     trace_id_of_current,
 )
+from .decorators import traced
 from . import sink
 
 __all__ = [
@@ -45,6 +47,8 @@ __all__ = [
     "current_span",
     "current_trace",
     "get_open_trace",
+    "linked_trace",
+    "traced",
     "record_error",
     "new_trace",
     "set_trace_user",

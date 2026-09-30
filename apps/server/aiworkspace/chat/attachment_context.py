@@ -26,6 +26,7 @@ from typing import Any
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 
+from ..tracing import traced
 from ..providers import reasoning_details as _reasoning_details
 
 logger = logging.getLogger(__name__)
@@ -79,6 +80,7 @@ async def _image_url(a: dict, rows: dict[str, Any]) -> str | None:
     return f"data:{row.mime or 'image/png'};base64,{base64.b64encode(data).decode()}"
 
 
+@traced("setup:history_attachments")
 async def history(messages: list[Any]) -> list[dict[str, Any]]:
     """Mensagens gravadas (já filtradas e em ordem) → histórico para o modelo, com os anexos."""
     msgs = [m for m in messages if keep(m)]

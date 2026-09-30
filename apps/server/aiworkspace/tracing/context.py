@@ -81,6 +81,15 @@ class Span:
             self.status = "error"
             self.error = _clip(error)
 
+    def elapsed_ms(self) -> float:
+        """Tempo desde a abertura do span (para marcos: 1º byte, 1º token…)."""
+        return round((_now() - self._t0) * 1000, 3)
+
+    def mark(self, key: str) -> None:
+        """Grava `key` = ms desde a abertura, só na PRIMEIRA vez (marco)."""
+        if key not in self.attrs:
+            self.attrs[key] = self.elapsed_ms()
+
 
 @dataclass
 class Trace:
@@ -106,6 +115,9 @@ class Trace:
     root_db_reads: int = 0
     root_db_writes: int = 0
     root_db_ms: float = 0.0
+    # fechado e entregue ao sink: spans que chegarem depois (corpo de um streaming
+    # que roda após a resposta) se perderiam — quem precisa abre um trace novo
+    closed: bool = False
 
     def set(self, **kv: Any) -> None:
         for k, v in kv.items():
@@ -128,6 +140,7 @@ class Trace:
 
     def close(self, error: str = "") -> None:
         self.duration_ms = round((_now() - self._t0) * 1000, 3)
+        self.closed = True
         if error:
             self.status = "error"
             self.error = error[:_MAX_ATTR_LEN]
@@ -194,12 +207,36 @@ def new_trace(name: str, *, kind: str, user_id: str | None = None,
     Gerações de chat continuam depois que a request SSE devolve os headers. Elas
     não podem herdar o trace HTTP já fechado; por isso o driver cria este trace
     antes de entrar na task e o ativa somente durante a sua vida inteira.
+
+    CADEIA: se há um trace ativo (quem disparou este trabalho), o novo guarda
+    `parent_trace`/`parent_span` e herda o usuário — o painel liga os dois
+    ("POST /messages → geração → equipe em 2º plano → turno acordado").
     """
+    parent = _current_trace.get()
     tr = Trace(id=uuid.uuid4().hex, name=name[:200], kind=kind,
-               started_wall=time.time(), _t0=_now(), user_id=user_id,
+               started_wall=time.time(), _t0=_now(),
+               user_id=user_id or (parent.user_id if parent is not None else None),
                method=method, path=path[:300])
+    if parent is not None:
+        tr.set(parent_trace=parent.id, parent_name=parent.name)
+        sp = _current_span.get()
+        if sp is not None:
+            tr.set(parent_span=sp.id, parent_span_name=sp.name)
+        # o pai aponta para os filhos (lista curta, só para navegação)
+        kids = parent.attrs.setdefault("child_traces", [])
+        if isinstance(kids, list) and len(kids) < 50:
+            kids.append(tr.id)
     tr.set(**attrs)
     return tr
+
+
+@contextmanager
+def linked_trace(name: str, *, kind: str = "worker", **attrs: Any) -> Iterator[Trace]:
+    """Trabalho destacado (task em 2º plano, corpo de streaming): trace PRÓPRIO,
+    ligado ao corrente como pai. Use quando o trabalho sobrevive a quem o disparou."""
+    tr = new_trace(name, kind=kind, **attrs)
+    with activate_trace(tr):
+        yield tr
 
 
 @contextmanager
@@ -243,7 +280,7 @@ def start_trace(name: str, *, kind: str, user_id: str | None = None,
     um no-op reutilizando o corrente, então instrumentar um caminho que já roda
     dentro de um trace não cria traces duplicados."""
     existing = _current_trace.get()
-    if existing is not None:
+    if existing is not None and not existing.closed:
         yield existing
         return
 

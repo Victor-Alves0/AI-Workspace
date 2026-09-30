@@ -28,6 +28,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..tracing import traced
 from .. import extraction
 from ..config import get_settings
 from ..db import SessionLocal
@@ -134,6 +135,7 @@ async def _get_owned_chat(db: AsyncSession, chat_id: uuid.UUID, user: User) -> C
     return chat
 
 
+@traced("setup:model_config")
 async def _get_model_config(
     db: AsyncSession, model_config_id, user: User
 ) -> ModelConfig | None:
@@ -207,6 +209,7 @@ def _usage_record(usage: dict | None, model: str, model_config: ModelConfig | No
     return rec
 
 
+@traced("setup:skills")
 async def _load_skills(
     db: AsyncSession,
     user: User,
@@ -248,6 +251,7 @@ async def _load_skills(
     ]
 
 
+@traced("setup:provider")
 async def _resolve_provider(db: AsyncSession, user: User, model: str) -> tuple[str, str | None]:
     """Resolve o provedor a partir do id do modelo → (api_key, base_url).
     Modelo `ollama/*` → servidor Ollama local do usuário (OpenAI-compat, sem chave);
@@ -325,6 +329,7 @@ def _workspace_intent(text: str | None, attachments: list[dict] | None = None) -
     return False
 
 
+@traced("setup:workspace")
 async def _workspace_active(
     db: AsyncSession, chat: Chat | None, model_config: ModelConfig | None,
     text: str | None = None, attachments: list[dict] | None = None,
@@ -359,6 +364,7 @@ async def _workspace_active(
         return False
 
 
+@traced("setup:prepare_turn")
 async def _prepare_turn(db: AsyncSession, user: User, chat: Chat):
     """Prepara um turno e devolve também seus valores efetivos de runtime.
 
@@ -479,6 +485,7 @@ async def _artifacts_extra(
     return artifacts_service.system_block(rows)
 
 
+@traced("setup:chat_blocks")
 async def _artifacts_kwargs(
     db: AsyncSession, chat_id: uuid.UUID, user: User, arts_on: bool,
     model_config: ModelConfig | None,
@@ -536,6 +543,7 @@ def _memory_opts(chat: Chat, model_config: ModelConfig | None, user: User) -> Me
     )
 
 
+@traced("setup:media")
 async def _media_opts(
     db: AsyncSession, user: User, model_config: ModelConfig | None,
     attachments: list[dict] | None = None,
@@ -673,6 +681,7 @@ def _resolve_brain(chat: Chat | None, model_config: ModelConfig | None, user: Us
     }
 
 
+@traced("setup:brain")
 async def _brain_setup(
     db: AsyncSession, user: User, chat: Chat | None, model_config: ModelConfig | None,
 ) -> dict | None:
@@ -735,6 +744,7 @@ def _skill_learning(model_config: ModelConfig | None) -> bool | None:
     return v if isinstance(v, bool) else None
 
 
+@traced("setup:ref_docs")
 async def _ref_docs(
     db: AsyncSession, user: User, chat: Chat | None,
     model_config: ModelConfig | None, ids: list[uuid.UUID],
@@ -769,6 +779,7 @@ async def _ref_docs(
     return out
 
 
+@traced("setup:ref_chats")
 async def _ref_chats(
     db: AsyncSession, user: User, ids: list[uuid.UUID],
 ) -> list[dict]:
@@ -920,6 +931,7 @@ _GROUNDING_REINFORCE = (
 )
 
 
+@traced("setup:guards")
 async def _resolve_guards(
     db: AsyncSession, user: User, model_config: ModelConfig | None
 ) -> list[dict]:
@@ -1065,6 +1077,7 @@ async def _resolve_subagents(
     return specs, conf
 
 
+@traced("setup:agents")
 async def subagents_for_turn(
     db: AsyncSession, user: User, chat_id: uuid.UUID | None, project_id: str | None,
     model_config: ModelConfig | None, workspace: bool = False,
@@ -1592,12 +1605,29 @@ def _make_subagent_runner(
             return {"error": f"limite de {pool.limit} agentes deste turno atingido"}
         # fila: no máximo `concurrency` agentes deste nível trabalhando ao mesmo tempo. A
         # vaga vem ANTES de qualquer await, para a fila seguir a ordem da equipe
+        from .. import tracing
+
+        _fila_t0 = time.perf_counter()
         async with pool.slot(depth):
-            if await pool.budget_blocked():
-                return {"error": "orçamento mensal atingido (modo pausar): agente não iniciado"}
-            if progress is not None:
-                progress({"state": "running"})
-            return await _run_subagent(key, task, new, progress, read_only, prior, handoff)
+            nome = (new or {}).get("name") or key
+            # um span por agente: dentro dele ficam as chamadas ao modelo e as
+            # ferramentas DESTE agente; `queue_ms` = tempo esperando vaga no pool
+            with tracing.span(f"agent:{str(nome)[:60]}", kind="agent", depth=depth,
+                              adhoc=new is not None, continuation=prior is not None,
+                              queue_ms=round((time.perf_counter() - _fila_t0) * 1000, 1)) as _asp:
+                if await pool.budget_blocked():
+                    return {"error": "orçamento mensal atingido (modo pausar): agente não iniciado"}
+                if progress is not None:
+                    progress({"state": "running"})
+                out = await _run_subagent(key, task, new, progress, read_only, prior, handoff)
+                if isinstance(out, dict):
+                    tl = out.get("timeline") or []
+                    _asp.set(steps=sum(1 for t in tl if isinstance(t, dict) and t.get("kind") == "tool"),
+                             output_chars=len(str(out.get("output") or "")))
+                    if out.get("error"):
+                        _asp.status = "error"
+                        _asp.error = str(out["error"])[:500]
+                return out
 
     async def _run_subagent(key: str, task: str, new: dict | None,
                             progress: Callable[[dict], None] | None,
@@ -1775,6 +1805,7 @@ async def _resolve_upload(a: dict, ex_cfg: dict) -> dict | None:
         return out
 
 
+@traced("setup:attachments")
 async def _prepare_attachments(raw: Any, model_config: ModelConfig | None) -> list[dict]:
     """Prepara anexos p/ o turno.
 
@@ -1854,6 +1885,7 @@ async def _subscribe(gen: generation.Generation):
         yield _sse(event)
 
 
+@traced("setup:history_load")
 async def _ordered_messages(db: AsyncSession, chat_id: uuid.UUID) -> list[Message]:
     rows = await db.scalars(
         select(Message).where(Message.chat_id == chat_id).order_by(Message.created_at)
@@ -1861,6 +1893,7 @@ async def _ordered_messages(db: AsyncSession, chat_id: uuid.UUID) -> list[Messag
     return list(rows)
 
 
+@traced("setup:imaginai")
 async def _imaginai_turn_kwargs(
     db: AsyncSession,
     user: User,

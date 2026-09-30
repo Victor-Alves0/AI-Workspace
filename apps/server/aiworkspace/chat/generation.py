@@ -347,12 +347,14 @@ async def _finalize(gen: Generation, on_finish: OnFinish, collected: Collected) 
         collected["tools"] = collected["tools_streamed"]
     try:
         # `shield`: mesmo se o driver estiver sendo cancelado (shutdown), o commit
-        # da resposta completa em vez de se perder.
-        await asyncio.shield(on_finish(collected, gen._append))
+        # da resposta completa em vez de se perder. Span: gravar a resposta, o uso, o
+        # título e os artefatos — o tempo entre "a IA terminou" e "a UI destrava".
+        with tracing.span("turn:persist", kind="internal"):
+            await asyncio.shield(on_finish(collected, gen._append))
     except Exception:  # noqa: BLE001 - persistência best-effort; não derruba o loop
         logger.exception("Falha ao persistir geração (chat %s)", gen.chat_id)
     await gen._finish()
-    bg.spawn(_expire(gen))
+    bg.spawn(_expire(gen), trace=False)  # timer: não é trabalho a medir
 
 
 async def _expire(gen: Generation) -> None:

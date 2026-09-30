@@ -22,6 +22,7 @@ import json
 import logging
 import re
 import time
+from urllib.parse import urlparse
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field, replace
@@ -2557,8 +2558,11 @@ class _ToolDispatcher:
     async def run(self, name: str, args: dict, tc: dict) -> AsyncGenerator[dict[str, Any], None]:
         # cada execução de tool vira um span (kind=tool): duração, erro e — como o
         # dispatch da SIFT também roda queries — as leituras/escritas de banco DELA
-        with tracing.span(f"tool:{name}", kind="tool", tool=name,
-                          arg_keys=sorted(args.keys())[:12]):
+        # meta-tool da SIFT: o que roda de verdade é o `path` (web.search.query…)
+        inner = args.get("path") if name == "execute_tool" and isinstance(args.get("path"), str) else None
+        with tracing.span(f"tool:{inner or name}", kind="tool", tool=name, inner=inner,
+                          arg_keys=sorted(args.keys())[:12],
+                          args_chars=len(json.dumps(args, ensure_ascii=False, default=str))) as _tsp:
             try:
                 async for ev in self._run(name, args, tc):
                     yield ev
@@ -2569,8 +2573,18 @@ class _ToolDispatcher:
                 # capturado (BaseException), portanto "Parar" continua imediato.
                 logger.warning("Tool '%s' falhou: %s", name, exc)
                 self.result = {"error": f"a ferramenta '{name}' falhou: {exc}"}
+            try:
+                _tsp.set(result_chars=len(self.result) if isinstance(self.result, str)
+                         else len(json.dumps(self.result, ensure_ascii=False, default=str)))
+            except Exception:  # noqa: BLE001
+                pass
             if isinstance(self.result, dict) and self.result.get("error"):
-                tracing.annotate(tool_error=str(self.result["error"])[:200])
+                _err = str(self.result["error"])
+                _tsp.set(tool_error=_err[:200])
+                _tsp.status = "error"
+                _tsp.error = _err[:500]
+                if "timeout" in _err.lower() or "tempo limite" in _err.lower() or "excedeu" in _err.lower():
+                    _tsp.set(timed_out=True)
 
     async def _run(self, name: str, args: dict, tc: dict) -> AsyncGenerator[dict[str, Any], None]:
         if name == "view_skill":
@@ -3628,12 +3642,13 @@ async def run_turn(
 
     # 1. contexto do turno: memória (mem0) + Base de Conhecimento (auto) + "#"refs
     g = _GatheredContext()
-    async for ev in _gather_context(
-        g, api_key=api_key, user_text=user_text, session=session,
-        memory=_mem, knowledge=knowledge, exclude_doc_ids=auto_excluded_kb_ids,
-        ref_docs=ref_docs, ref_chats=ref_chats,
-    ):
-        yield ev
+    with tracing.span("turn:context", kind="internal"):
+        async for ev in _gather_context(
+            g, api_key=api_key, user_text=user_text, session=session,
+            memory=_mem, knowledge=knowledge, exclude_doc_ids=auto_excluded_kb_ids,
+            ref_docs=ref_docs, ref_chats=ref_chats,
+        ):
+            yield ev
     mem_items, memories = g.mem_items, g.memories
     knowledge_block, ref_block = g.knowledge_block, g.ref_block
     ref_chat_block = g.ref_chat_block
@@ -3646,15 +3661,18 @@ async def run_turn(
     # 2. montagem das tools anunciadas + seção de ferramentas do system prompt
     skills = skills or []
     subagents = subagents or []
-    asm = _assemble_tools_and_prompt(
-        sift=sift, use_tools=use_tools, code_mode=code_mode, skills=skills,
-        genimage=genimage, kb_tool_on=bool(g.kb_bases_tool), kb_present=bool(g.kb_bases),
-        brain=brain, skill_learning=skill_learning,
-        subagents=subagents, run_subagent=run_subagent,
-        native=_native,
-        subagent_adhoc=subagent_adhoc, subagent_isolation=subagent_isolation,
-        subagent_background=subagent_background, subagent_max_calls=subagent_max_calls,
-    )
+    # síncrono (roda NO event loop): se isto ficar lento, trava o servidor inteiro
+    with tracing.span("turn:tools_prompt", kind="internal") as _asm_sp:
+        asm = _assemble_tools_and_prompt(
+            sift=sift, use_tools=use_tools, code_mode=code_mode, skills=skills,
+            genimage=genimage, kb_tool_on=bool(g.kb_bases_tool), kb_present=bool(g.kb_bases),
+            brain=brain, skill_learning=skill_learning,
+            subagents=subagents, run_subagent=run_subagent,
+            native=_native,
+            subagent_adhoc=subagent_adhoc, subagent_isolation=subagent_isolation,
+            subagent_background=subagent_background, subagent_max_calls=subagent_max_calls,
+        )
+        _asm_sp.set(tools_n=len(asm.tools or []), prompt_chars=len(asm.sift_prompt or ""))
     tools: Any = asm.tools
     # anexos de mensagens anteriores que não voltaram inteiros: a IA os reabre sob demanda
     # (só num turno que já anuncia tools: injetar tools num modelo sem suporte quebra)
@@ -3739,10 +3757,12 @@ async def run_turn(
 
     # 3. mensagem do usuário + anexos (arquivos, áudio, imagens) — Fase 3
     _att: dict[str, int] = {"attach_chars": 0}
-    async for ev in _append_user_message(
-        _att, messages, user_text=user_text, media=_md, api_key=api_key,
-    ):
-        yield ev
+    with tracing.span("turn:user_message", kind="internal",
+                      attachments=len(_md.attachments or [])):
+        async for ev in _append_user_message(
+            _att, messages, user_text=user_text, media=_md, api_key=api_key,
+        ):
+            yield ev
     attach_chars = _att["attach_chars"]
     # nenhuma parte de mídia que o modelo não aceita sai daqui — em NENHUMA mensagem
     # (histórico vindo da API pública, ou foto de um turno com outro modelo)
@@ -3979,6 +3999,15 @@ async def run_turn(
         _llm_span_cm = tracing.span(f"llm:{model}", kind="llm", model=model,
                                     iteration=_iter, has_tools=bool(tools))
         _llm_span = _llm_span_cm.__enter__()
+        # o que foi mandado (tamanhos, não conteúdo): explica por que uma chamada
+        # demora — contexto grande = 1º byte lento
+        _llm_span.set(
+            prompt_msgs=len(messages),
+            prompt_chars=sum(len(str(m.get("content") or "")) for m in messages),
+            tools_n=len(tools or []),
+            provider=(urlparse(base_url).hostname if base_url else "openrouter"),
+            retry=("media" if retried_media else "plain" if retried_plain else None),
+        )
         _llm_exc: BaseException | None = None
         try:
             async for chunk in openrouter.stream_chat(
@@ -3992,6 +4021,7 @@ async def run_turn(
                     yield chunk
                     continue
                 got_chunk = True
+                _llm_span.mark("ttfb_ms")  # 1º pedaço do provedor
                 if chunk.get("usage"):
                     usage = chunk["usage"]
                 for choice in chunk.get("choices", []):
@@ -4003,6 +4033,7 @@ async def run_turn(
                     # sai dos próprios blocos — nunca os dois, que são o mesmo conteúdo
                     _piece = delta.get("reasoning") or reasoning_details.text_of(_details)
                     if _piece and not iter_text_started:
+                        _llm_span.mark("first_reasoning_ms")
                         now = time.monotonic()
                         if reasoning_started is None:
                             reasoning_started = now
@@ -4010,6 +4041,7 @@ async def run_turn(
                         yield {"type": "reasoning", "text": _piece}
                     if delta.get("content"):
                         iter_text_started = True
+                        _llm_span.mark("first_token_ms")
                         c = delta["content"]
                         if suppressing_leak:
                             leaked_text += c  # dentro de um bloco vazado: não transmite
@@ -4037,6 +4069,7 @@ async def run_turn(
                                 assistant_text += c
                                 yield {"type": "token", "text": c}
                     if delta.get("tool_calls"):
+                        _llm_span.mark("first_tool_call_ms")
                         _accumulate_tool_calls(tool_buffer, delta["tool_calls"])
                         for aviso in _tool_preparing_events(tool_buffer, tool_preparing):
                             yield aviso
@@ -4106,7 +4139,29 @@ async def run_turn(
                 _llm_span.set(total_tokens=usage.get("total_tokens"),
                               completion_tokens=usage.get("completion_tokens"),
                               prompt_tokens=usage.get("prompt_tokens"))
+                _det_in = usage.get("prompt_tokens_details") or {}
+                _det_out = usage.get("completion_tokens_details") or {}
+                _llm_span.set(
+                    cached_tokens=_det_in.get("cached_tokens") if isinstance(_det_in, dict) else None,
+                    reasoning_tokens=_det_out.get("reasoning_tokens") if isinstance(_det_out, dict) else None,
+                    cost=usage.get("cost"),
+                )
             _llm_span.set(finish_reason=finish_reason, streamed=got_chunk)
+            # tempo gerando = do 1º byte ao fim; velocidade só com tokens reais
+            try:
+                _tot = _llm_span.elapsed_ms()
+                _ttfb = float(_llm_span.attrs.get("ttfb_ms") or 0)
+                _gen = max(0.0, _tot - _ttfb)
+                _llm_span.set(generation_ms=round(_gen, 1))
+                _out = (usage or {}).get("completion_tokens")
+                if _out and _gen > 0:
+                    _llm_span.set(tokens_per_s=round(float(_out) / (_gen / 1000), 1))
+                _fr = _llm_span.attrs.get("first_reasoning_ms")
+                _ft = _llm_span.attrs.get("first_token_ms") or _llm_span.attrs.get("first_tool_call_ms")
+                if _fr is not None:
+                    _llm_span.set(reasoning_ms=round(float(_ft or _tot) - float(_fr), 1))
+            except Exception:  # noqa: BLE001 - métrica nunca quebra o turno
+                pass
             # marca o erro no span à mão e sai LIMPO: passar a exceção ao __exit__ a
             # relançaria aqui dentro do finally (o @contextmanager a joga no yield)
             if _llm_exc is not None:
@@ -4578,6 +4633,28 @@ async def run_turn_guarded(
     reação (reforçar o system prompt OU trocar p/ o modelo de fallback), emite
     ``guard``/``guard_reset`` (o front limpa o buffer) e refaz. No fim, emite um
     único ``done`` com o usage somado das tentativas."""
+    # Sem trace aberto (canais WhatsApp/Telegram/Discord/Slack) ou com o trace da
+    # request JÁ FECHADO (corpo de um streaming da API, que roda depois dos headers):
+    # o turno ganha trace próprio, ligado a quem o disparou — senão cada etapa sumia.
+    tr = tracing.current_trace()
+    if tr is None or tr.closed:
+        sess = turn_kwargs.get("session")
+        with tracing.linked_trace(
+            "turn:" + ("canal" if getattr(sess, "background", False) else "api"),
+            kind="channel" if getattr(sess, "background", False) else "api",
+            user_id=getattr(sess, "user_id", None), chat_id=getattr(sess, "chat_id", None),
+            model=turn_kwargs.get("model"),
+        ):
+            async for ev in _run_turn_guarded(guards=guards, **turn_kwargs):
+                yield ev
+        return
+    async for ev in _run_turn_guarded(guards=guards, **turn_kwargs):
+        yield ev
+
+
+async def _run_turn_guarded(
+    *, guards: list[dict] | None = None, **turn_kwargs: Any
+) -> AsyncGenerator[dict[str, Any], None]:
     guards = [g for g in (guards or []) if g.get("enabled", True)]
     if not guards:
         async for ev in run_turn(**turn_kwargs):

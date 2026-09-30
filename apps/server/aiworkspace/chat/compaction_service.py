@@ -15,6 +15,7 @@ from datetime import timedelta
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..tracing import traced
 from ..config import get_settings
 from ..models import Chat, ChatCompaction, Message, ModelConfig, User
 from ..providers import openrouter
@@ -214,6 +215,7 @@ async def _model_window(db: AsyncSession, user: User, model: str) -> int:
     return 0
 
 
+@traced("setup:autocompact")
 async def maybe_autocompact(db: AsyncSession, user: User, chat: Chat,
                             model_config: ModelConfig | None) -> bool:
     """Se o contexto passou do limiar da janela do modelo, compacta ANTES do turno

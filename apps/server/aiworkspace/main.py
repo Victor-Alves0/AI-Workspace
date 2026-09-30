@@ -74,6 +74,9 @@ async def lifespan(app: FastAPI):
         from .db import engine as _db_engine
         from .tracing import instrument as _obs_instrument
         _obs_instrument.install(_db_engine.sync_engine)
+        _obs_instrument.install_httpx()
+        from .tracing import runtime as _obs_runtime
+        _obs_runtime.start()
         await tracing.sink.start()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível iniciar a observabilidade (%s)", exc)
@@ -329,7 +332,15 @@ def _route_template(request: Request, fallback: str) -> str:
     cardinalidade baixa para agregar por rota. Só existe DEPOIS do roteamento."""
     route = request.scope.get("route")
     tmpl = getattr(route, "path", None)
-    return tmpl or fallback
+    if not tmpl:
+        return fallback
+    # routers montados dentro de outro (prefixo do pai): o `route.path` vem sem o
+    # prefixo ("/{chat_id}/messages"). Completa com os segmentos iniciais do path real.
+    real = [p for p in fallback.split("/") if p]
+    tpl = [p for p in tmpl.split("/") if p]
+    if len(real) > len(tpl):
+        return "/" + "/".join(real[: len(real) - len(tpl)] + tpl)
+    return tmpl
 
 
 def _trace_kind(path: str) -> str:
@@ -374,6 +385,13 @@ async def _run_traced(request: Request, call_next, start: float, traced: bool):
         metrics.record(request.method, path, 500, ms)
         logger.exception("Erro não tratado em %s %s", request.method, path)
         return None, ms, None
+
+
+# contexto SSL compartilhado: cada httpx.AsyncClient() carregava as CAs de novo,
+# travando o event loop (ver net.py)
+from . import net as _net  # noqa: E402
+
+_net.install_ssl_cache()
 
 
 def create_app() -> FastAPI:

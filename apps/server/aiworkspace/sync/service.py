@@ -279,7 +279,12 @@ async def run_cycle(peer_id: str, client: httpx.AsyncClient | None = None, *, wa
         return {"busy": True}
     async with lock:
         try:
-            return await _cycle(peer_id, client)
+            from .. import tracing
+
+            # ciclo do agendador (sem request): trace próprio; pelo botão, entra no da request
+            with tracing.start_trace("sync:cycle", kind="worker") as _tr:
+                _tr.set(peer=peer_id)
+                return await _cycle(peer_id, client)
         except Exception as exc:  # noqa: BLE001 - vai para a UI
             msg = str(exc) if isinstance(exc, SyncError) else f"{type(exc).__name__}: {exc}"
             async with _db_engine().begin() as conn:

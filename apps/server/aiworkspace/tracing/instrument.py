@@ -127,3 +127,101 @@ def httpx_event_hooks() -> dict[str, list]:
             sp.set(http_status=response.status_code, http_host=response.request.url.host)
 
     return {"request": [_on_request], "response": [_on_response]}
+
+
+# --------------------------------------------------------------------------- #
+# httpx GLOBAL: toda requisição externa vira um span (instrumenta o TRANSPORTE,
+# não cada ponto de chamada — provedores de IA, buscadores, integrações, tudo)
+# --------------------------------------------------------------------------- #
+
+_ID_SEG = re.compile(r"/(?:[0-9a-f]{8}-[0-9a-f-]{27,}|[0-9a-f]{16,}|\d{3,}|[A-Za-z0-9_-]{24,})(?=/|$)", re.I)
+_httpx_installed = False
+
+
+def _http_path(url) -> str:  # noqa: ANN001
+    """Caminho sem query (pode ter token/chave) e com ids trocados por :id — assim
+    chamadas iguais se agrupam na análise por operação."""
+    try:
+        return _ID_SEG.sub("/:id", url.path or "/")[:160]
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _open_http_span(request):  # noqa: ANN001
+    from .context import span
+
+    if current_trace() is None:
+        return None
+    host = request.url.host or "?"
+    cm = span(f"http:{host}", kind="http", method=request.method, host=host,
+              path=_http_path(request.url))
+    try:
+        sp = cm.__enter__()
+    except Exception:  # noqa: BLE001
+        return None
+    return cm, sp
+
+
+def _close_http_span(opened, response=None, exc: BaseException | None = None, stream: bool = False) -> None:  # noqa: ANN001
+    if opened is None:
+        return
+    cm, sp = opened
+    try:
+        if response is not None:
+            sp.set(status_code=response.status_code,
+                   resp_bytes=int(response.headers.get("content-length") or 0) or None,
+                   # stream: o span mede até os CABEÇALHOS (tempo até o 1º byte do
+                   # provedor); o corpo segue sendo lido por quem chamou
+                   until="headers" if stream else "body")
+            if response.status_code >= 400:
+                sp.status = "error"
+                sp.error = f"HTTP {response.status_code}"
+        if exc is not None:
+            sp.status = "error"
+            sp.error = f"{type(exc).__name__}: {exc}"[:500]
+        sp.http_ms = sp.elapsed_ms()
+    finally:
+        try:
+            cm.__exit__(None, None, None)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def install_httpx() -> None:
+    """Liga a medição em `httpx.AsyncClient.send` e `httpx.Client.send`. Idempotente.
+    Sem trace ativo não faz nada (nem aloca span)."""
+    global _httpx_installed
+    if _httpx_installed:
+        return
+    import httpx
+
+    orig_async = httpx.AsyncClient.send
+    orig_sync = httpx.Client.send
+
+    async def send_async(self, request, *args: Any, **kwargs: Any):  # noqa: ANN001
+        opened = _open_http_span(request)
+        if opened is None:
+            return await orig_async(self, request, *args, **kwargs)
+        try:
+            resp = await orig_async(self, request, *args, **kwargs)
+        except BaseException as exc:
+            _close_http_span(opened, exc=exc)
+            raise
+        _close_http_span(opened, resp, stream=bool(kwargs.get("stream")))
+        return resp
+
+    def send_sync(self, request, *args: Any, **kwargs: Any):  # noqa: ANN001
+        opened = _open_http_span(request)
+        if opened is None:
+            return orig_sync(self, request, *args, **kwargs)
+        try:
+            resp = orig_sync(self, request, *args, **kwargs)
+        except BaseException as exc:
+            _close_http_span(opened, exc=exc)
+            raise
+        _close_http_span(opened, resp, stream=bool(kwargs.get("stream")))
+        return resp
+
+    httpx.AsyncClient.send = send_async  # type: ignore[method-assign]
+    httpx.Client.send = send_sync  # type: ignore[method-assign]
+    _httpx_installed = True

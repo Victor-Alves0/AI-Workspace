@@ -28,7 +28,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..chat.orchestrator import MediaOpts, MemoryOpts, TurnSession, run_turn
+from ..chat.orchestrator import MediaOpts, MemoryOpts, TurnSession, run_turn_guarded
 from ..chat.turn_setup import (
     _code_mode,
     _load_skills,
@@ -314,7 +314,8 @@ async def run_platform_turn(
     brain = _resolve_brain(None, mc, user)
     tz = str((user.profile or {}).get("timezone") or "")
 
-    async for event in run_turn(
+    # guarded sem guardas = run_turn; ganha trace próprio quando o da request já fechou (streaming)
+    async for event in run_turn_guarded(
         api_key=rm.api_key,
         base_url=rm.base_url,
         model=rm.base_model,
