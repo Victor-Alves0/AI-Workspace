@@ -164,6 +164,10 @@ class Settings(BaseSettings):
     # (Windows, sem Docker) o Start-AIWorkspace.ps1 aponta para <DataDir>\codespace.
     # Hardcodar "/data/codespace" quebrava o Codespace fora do Linux/Docker.
     codespace_data_dir: str = "/data/codespace"
+    # Pasta PRINCIPAL de cada usuário (padrão do seletor de pastas do chat). "{user}"
+    # vira o id do usuário. Vazio = no Windows (app desktop) `~/AI Workspace`; no
+    # servidor `<codespace_data_dir>/<usuário>/home`.
+    workspace_home: str = ""
 
     # Anexos do chat: o arquivo sobe direto para o disco e a mensagem guarda só a
     # referência (ver models/upload.py). Os tetos seguem os apps de referência —

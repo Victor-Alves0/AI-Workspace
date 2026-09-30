@@ -20,6 +20,8 @@ class ChatCreate(BaseModel):
     project_id: uuid.UUID | None = None
     # Mini App que o chat É desde o nascimento ("imaginai" = nova campanha)
     mini_app: str | None = Field(default=None, pattern=r"^(imaginai)$")
+    # pasta de trabalho: None = principal, "off" = sem pasta, ou id de projeto
+    workspace: str | None = Field(default=None, max_length=64)
 
 
 class ChatUpdate(BaseModel):
@@ -35,6 +37,8 @@ class ChatUpdate(BaseModel):
     folder_id: uuid.UUID | None = None
     model_config_id: uuid.UUID | None = None
     project_id: uuid.UUID | None = None
+    # pasta de trabalho (seletor de pastas): None/"home" = principal, "off", ou id
+    workspace: str | None = Field(default=None, max_length=64)
     # memória por-chat: {"write": "...", "read": {...}} (null = herda modelo/perfil)
     memory_config: dict[str, Any] | None = None
     # base de conhecimento por-chat: {"enabled": b, "bases": [...], "mode": "auto|tool", "k": int}
@@ -96,6 +100,7 @@ class ChatOut(BaseModel):
     folder_id: uuid.UUID | None
     model_config_id: uuid.UUID | None
     project_id: uuid.UUID | None = None
+    workspace: str | None = None
     mini_app: str | None = None
     memory_config: dict[str, Any] | None = None
     knowledge_config: dict[str, Any] | None = None

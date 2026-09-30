@@ -1793,6 +1793,32 @@ def _accumulate_tool_calls(buffer: dict[int, dict], deltas: list[dict]) -> None:
 # continuam FLAT de propósito: o run_turn_guarded os sobrescreve entre tentativas.
 # --------------------------------------------------------------------------- #
 
+# Pasta de trabalho do chat (seletor de pastas). As ferramentas de arquivo/execução
+# só existem com uma pasta e só alcançam o que está dentro dela; trabalhar fora dela
+# (ou num chat "sem pasta") exige o OK do usuário — como o external_directory do opencode.
+REQUEST_FOLDER_TOOL: dict[str, Any] = {
+    "type": "function",
+    "function": {
+        "name": "request_folder",
+        "description": (
+            "Ask the user to let you work in a folder on their computer/server. Use it when "
+            "the user wants files created, downloaded or edited but this chat has no folder "
+            "(no file tools), or when they ask for a location outside the current folder. The "
+            "user sees an approval card; after calling it, end your reply and wait. Never "
+            "claim files were written anywhere without file tools confirming it."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "absolute folder path, or a folder name to create inside the user's main folder"},
+                "reason": {"type": "string", "description": "one short sentence: what you will do there"},
+                "create": {"type": "boolean", "description": "true if the folder does not exist yet and should be created"},
+            },
+            "required": ["path", "reason"],
+        },
+    },
+}
+
 @dataclass
 class TurnSession:
     """Identidade e ambiente do turno (quem, onde, fuso, autônomo?)."""
@@ -2598,6 +2624,16 @@ class _ToolDispatcher:
         elif name == "brain":
             async for ev in self._brain(args):
                 yield ev
+        elif name == "request_folder":
+            pasta = str(args.get("path") or "").strip()
+            self.result = {
+                "kind": "folder_request", "path": pasta[:1000],
+                "reason": str(args.get("reason") or "").strip()[:400],
+                "create": bool(args.get("create")),
+                "note": ("Asked the user to approve this folder. END your reply now and wait: "
+                         "their next message says whether it was approved (then your file tools "
+                         "work there) or declined."),
+            }
         elif name == "read_attachment":
             self.result = await attachment_context.read_attachment(self.user_id, self.chat_id, args)
         elif name == "propose_skill":
@@ -3679,6 +3715,10 @@ async def run_turn(
     cortado_agora = any(isinstance(a, dict) and a.get("truncated") for a in (_md.attachments or []))
     if tools and chat_id and ((use_context and attachment_context.has_files(history)) or cortado_agora):
         tools = list(tools) + [attachment_context.read_attachment_tool()]
+    # pasta de trabalho: pedir uma (chat "sem pasta") ou outra (fora da atual) passa
+    # SEMPRE pelo usuário — a permissão de diretório externo do opencode
+    if tools and chat_id and not session.background and not session.codespace_project_id:
+        tools = list(tools) + [REQUEST_FOLDER_TOOL]
     _base_tools = tools  # tools originais: p/ reabrir após um corte (ex.: steer)
     sift_prompt = asm.sift_prompt
     skills_by_slug = asm.skills_by_slug

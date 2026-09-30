@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 from fastapi import Header, HTTPException, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import Text, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..tracing import traced
@@ -33,7 +33,7 @@ from .. import extraction
 from ..config import get_settings
 from ..db import SessionLocal
 from ..integrations import chatgpt_service, ollama_service, providers_service
-from ..models import Artifact, Chat, CodespaceProject, KnowledgeBase, KnowledgeDoc, Message, ModelConfig, Skill, User
+from ..models import Artifact, Chat, KnowledgeBase, KnowledgeDoc, Message, ModelConfig, Skill, User
 from ..secrets_service import IMAGEGEN_KEY, OPENROUTER_KEY, VOICE_KEY, get_secret
 from ..tools.loader import get_sift_for_user, tool_config
 from ..usage_service import usage_event_from_record
@@ -292,9 +292,13 @@ async def _resolve_provider(db: AsyncSession, user: User, model: str) -> tuple[s
 
 
 def _workspace_on(chat: Chat | None, model_config: ModelConfig | None) -> bool:
-    """Espaço de trabalho do chat (recurso "Espaço de trabalho", padrão ligado): um chat
-    comum, sem projeto, ganha pasta + shell + análise de código, criados no 1º uso."""
+    """Pasta de trabalho do chat (seletor de pastas; recurso "Espaço de trabalho" do
+    modelo, padrão ligado): um chat comum, sem projeto, trabalha na pasta escolhida — a
+    principal por padrão. "Sem pasta" (`workspace="off"`) = sem ferramentas de
+    arquivo/execução/download."""
     if chat is None or chat.project_id or model_config is None or not model_config.tools_enabled:
+        return False
+    if (getattr(chat, "workspace", None) or "") == "off":
         return False
     return (model_config.capabilities or {}).get("workspace", True) is not False
 
@@ -352,11 +356,15 @@ async def _workspace_active(
             text, attachments = last.content, (last.attachments or None)
     if _workspace_intent(text, attachments if isinstance(attachments, list) else None):
         return True
+    # o usuário ESCOLHEU uma pasta no seletor: a conversa é sobre ela (ferramentas prontas)
+    if getattr(chat, "workspace", None):
+        return True
     try:
+        # a IA já trabalhou em arquivos nesta conversa: segue ativo
         row = (await db.scalars(
-            select(CodespaceProject.id).where(
-                CodespaceProject.user_id == chat.user_id,
-                CodespaceProject.scope["chat_workspace"].astext == str(chat.id),
+            select(Message.id).where(
+                Message.chat_id == chat.id, Message.role == "assistant",
+                Message.tool_events.cast(Text).like('%"code__files__write"%'),
             ).limit(1)
         )).first()
         return row is not None
@@ -485,6 +493,40 @@ async def _artifacts_extra(
     return artifacts_service.system_block(rows)
 
 
+async def _folder_block(db: AsyncSession, chat_id: uuid.UUID, user: User,
+                        model_config: ModelConfig | None) -> str:
+    """Uma linha dizendo à IA em que pasta ela trabalha — ou que não há pasta. Sem isto
+    ela gravava num lugar que o usuário não via e dizia "criei os arquivos"."""
+    chat = await db.get(Chat, chat_id)
+    if chat is None or chat.project_id or model_config is None or not model_config.tools_enabled:
+        return ""
+    if (model_config.capabilities or {}).get("workspace", True) is False:
+        return ""
+    if (chat.workspace or "") == "off":
+        return ("This chat has NO working folder: you cannot create, download or edit files. If "
+                "the user wants files, call request_folder (they approve a folder) instead of "
+                "writing code into the reply as if it were saved.")
+    from ..codespace import graph_service
+    from ..models import CodespaceProject
+
+    proj = None
+    if chat.workspace:
+        try:
+            proj = await db.get(CodespaceProject, uuid.UUID(chat.workspace))
+        except ValueError:
+            proj = None
+        if proj is not None and proj.user_id != user.id:
+            proj = None
+    if proj is None:
+        nome, caminho = "main folder", str(graph_service.workspace_home(str(user.id)))
+    else:
+        nome = proj.name
+        caminho = proj.local_path or str(graph_service.working_copy_path(str(user.id), str(proj.id)))
+    return (f"Working folder of this chat: {nome} ({caminho}). File/exec tools work inside it; "
+            "tell the user where files were saved using this path. For another location, call "
+            "request_folder.")
+
+
 @traced("setup:chat_blocks")
 async def _artifacts_kwargs(
     db: AsyncSession, chat_id: uuid.UUID, user: User, arts_on: bool,
@@ -505,6 +547,14 @@ async def _artifacts_kwargs(
     if notas:
         blocks.append(notas)
         breakdown["agent_notes"] = len(notas)
+    # pasta de trabalho do chat (seletor de pastas): onde os arquivos vão parar
+    try:
+        pasta = await _folder_block(db, chat_id, user, model_config)
+    except Exception:  # noqa: BLE001 - bônus: sem ele o turno segue
+        pasta = ""
+    if pasta:
+        blocks.append(pasta)
+        breakdown["folder"] = len(pasta)
     # agentes/equipes em segundo plano ainda rodando: o placar real (senão a IA chuta)
     from .subagent_jobs import status_block
     placar = status_block(str(chat_id))

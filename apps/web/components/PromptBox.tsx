@@ -434,6 +434,7 @@ export default function PromptBox({
   onHistory,
   compacting = false,
   temporary = false,
+  folder,
   activeMiniApp = null,
   onActiveMiniAppChange,
   placeholder = "Como posso ajudar você hoje?",
@@ -508,6 +509,8 @@ export default function PromptBox({
   /** mini aplicação atualmente aberta no chat; controla os docks contextuais */
   activeMiniApp?: MiniAppId | null;
   onActiveMiniAppChange?: (app: MiniAppId | null) => void;
+  /** seletor de pastas (pasta de trabalho do chat), ao lado das ferramentas */
+  folder?: React.ReactNode;
 }) {
   // Enviar SÓ anexos é válido ("analise este arquivo" sem escrever nada), mas não
   // no meio de um upload: o anexo ainda é um placeholder e o servidor o descartaria
@@ -1380,6 +1383,7 @@ export default function PromptBox({
             </div>
             <MiniAppsMenu menuUp={menuUp} activeApp={activeMiniApp} onActiveAppChange={onActiveMiniAppChange} />
             <ToolsMenu tools={modelTools} />
+            {folder}
           </div>
 
           <div className="flex items-center gap-1.5">

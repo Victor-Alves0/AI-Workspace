@@ -43,6 +43,11 @@ class Chat(Base):
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("codespace_projects.id", ondelete="SET NULL"), nullable=True
     )
+    # PASTA de trabalho do chat (seletor de pastas do composer): onde a IA lê/grava
+    # arquivos e roda comandos. None = a pasta principal do usuário; "off" = sem pasta
+    # (sem ferramentas de arquivo/execução/download); senão o id de um projeto do
+    # Codespace (pasta local ou repositório). `project_id` (chat de projeto) manda.
+    workspace: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Mini App que É o chat (ex.: "imaginai" — uma mesa de RPG). Define o chat, não um
     # turno: a interface mostra o selo na barra lateral e os painéis sempre que ele abre.
     mini_app: Mapped[str | None] = mapped_column(String(32), nullable=True)

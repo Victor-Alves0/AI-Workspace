@@ -36,6 +36,7 @@ from sift.sandbox import SubprocessSandbox
 from .. import deep_search, finance
 from ..config import get_settings
 from ..search import SearchConfig, web_search, web_search_detailed
+from . import embed_cache
 from . import toolctx
 from .sandbox import extract_valves, run_in_subprocess
 
@@ -5072,6 +5073,9 @@ def build_user_sift(
             ),
             on_result=_record_call,
             index_cache=_index_cache_path(user_id),
+            # um modelo para todos + cache por TEXTO: só descrição nova/mudada é
+            # embutida (antes, mudar uma re-embutia ~80 → ~75 s na 1ª mensagem)
+            embedder=embed_cache.shared(s.sift_index_cache_dir),
         )
         _register_builtins(sift, search_cfg, None, finance_cfg, deep_cfg, user_id, google_cfg, tuya_cfg, github_cfg, messaging_cfg, browser_cfg, higgsfield_cfg, notion_cfg, slack_cfg, elevenlabs_cfg, vercel_cfg, spotify_cfg, remote_cfg, civitai_cfg)
         for t in tool_rows:
@@ -5404,3 +5408,17 @@ def run_user_code(code: str, params: dict[str, Any], valves: dict[str, Any] | No
 def valves_defaults(code: str) -> dict[str, Any]:
     """Defaults das valves (dict VALVES) declaradas no código."""
     return extract_valves(code)
+
+
+def prewarm() -> None:
+    """Boot: calcula (ou carrega) os vetores das ferramentas nativas ANTES da 1ª
+    mensagem. Síncrono e pesado — rodar numa thread. O cache é por texto e
+    compartilhado, então o índice de cada usuário depois só calcula o que é dele."""
+    import time
+
+    t0 = time.perf_counter()
+    try:
+        build_user_sift([], SearchConfig(), None)
+        logger.info("índice das ferramentas aquecido em %.1fs", time.perf_counter() - t0)
+    except Exception as exc:  # noqa: BLE001 - aquecimento é bônus
+        logger.warning("aquecimento do índice das ferramentas falhou: %s", exc)

@@ -112,6 +112,21 @@ async def list_chats(
     return list(rows)
 
 
+async def _owned_workspace(db: AsyncSession, user: User, value: str | None) -> str | None:
+    """Pasta do chat: None/"home" = principal, "off" = sem pasta, ou o id de um
+    projeto DESTE usuário (id de outro vira a principal — nunca a pasta alheia)."""
+    v = (value or "").strip().lower()
+    if not v or v == "home":
+        return None
+    if v == "off":
+        return "off"
+    try:
+        pid = uuid.UUID(v)
+    except ValueError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "pasta inválida") from None
+    return str(pid) if await _owned_project_id(db, user, pid) else None
+
+
 async def _owned_project_id(db: AsyncSession, user: User, project_id: uuid.UUID | None) -> uuid.UUID | None:
     """Só devolve o project_id se pertencer a este usuário — o Codespace expõe
     CÓDIGO-FONTE via tool; vincular o chat ao projeto de outro usuário vazaria
@@ -148,6 +163,7 @@ async def create_chat(
         model_config_id=body.model_config_id,
         project_id=project_id,
         memory_config=memory_config,
+        workspace=await _owned_workspace(db, user, body.workspace),
     )
     db.add(chat)
     await db.commit()
@@ -225,6 +241,8 @@ async def update_chat(
     fields = body.model_dump(exclude_unset=True)
     if "project_id" in fields:
         fields["project_id"] = await _owned_project_id(db, user, fields["project_id"])
+    if "workspace" in fields:
+        fields["workspace"] = await _owned_workspace(db, user, fields["workspace"])
     for field, value in fields.items():
         setattr(chat, field, value)
     await db.commit()
@@ -409,7 +427,7 @@ class CloneIn(BaseModel):
 
 # configuração da conversa que a cópia herda (o fork continua "igual" ao original)
 _CLONE_CHAT_FIELDS = (
-    "folder_id", "model_config_id", "project_id", "mini_app", "system_prompt", "model",
+    "folder_id", "model_config_id", "project_id", "workspace", "mini_app", "system_prompt", "model",
     "mode", "participants", "roundtable_config", "params", "memory_config",
     "knowledge_config", "brain_config", "tags",
 )

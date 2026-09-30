@@ -47,6 +47,8 @@ export interface Chat {
   model_config_id: string | null;
   /** Codespace: projeto vinculado (habilita code.graph.query/code.files.browse) */
   project_id?: string | null;
+  /** pasta de trabalho (seletor de pastas): null = principal, "off" = sem pasta, ou id */
+  workspace?: string | null;
   /** Mini App que o chat É ("imaginai" = mesa de RPG) — selo e painéis ao abrir */
   mini_app?: string | null;
   /** memória por-chat (null = herda do modelo/perfil) */

@@ -1100,7 +1100,8 @@ def safe_path(root: Path, rel: str) -> Path:
     root_r = root.resolve()
     candidate = (root_r / rel).resolve() if rel else root_r
     if candidate != root_r and root_r not in candidate.parents:
-        raise ValueError("caminho fora do projeto")
+        raise ValueError("caminho fora da pasta do chat — para trabalhar em outra pasta, "
+                         "peça ao usuário com a ferramenta request_folder")
     return candidate
 
 
@@ -1770,7 +1771,79 @@ _ws_locks: dict[str, threading.Lock] = {}
 _ws_locks_guard = threading.Lock()
 
 
+def workspace_home(user_id: str) -> Path:
+    """Pasta principal do usuário (criada se não existe). Ver Settings.workspace_home."""
+    import os
+
+    conf = (get_settings().workspace_home or "").strip()
+    if conf:
+        p = Path(conf.replace("{user}", str(user_id))).expanduser()
+    elif os.name == "nt":
+        # app desktop: o servidor roda na máquina da pessoa — pasta visível no Windows
+        p = Path.home() / "AI Workspace"
+    else:
+        p = _DATA_ROOT / str(user_id) / "home"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def within_home(user_id: str, path: str | Path) -> bool:
+    try:
+        alvo = Path(path).expanduser().resolve()
+        home = workspace_home(user_id).resolve()
+    except (OSError, RuntimeError):
+        return False
+    return alvo == home or home in alvo.parents
+
+
+async def ensure_home_project(db: Any, user_id: Any) -> CodespaceProject:
+    """O projeto (source='folder') da pasta principal do usuário, criado no 1º uso."""
+    uid = uuid.UUID(str(user_id))
+    row = (await db.scalars(
+        select(CodespaceProject).where(
+            CodespaceProject.user_id == uid,
+            CodespaceProject.scope["home"].astext == "true",
+        )
+    )).first()
+    home = str(workspace_home(str(uid)))
+    if row is None:
+        row = CodespaceProject(
+            user_id=uid, name="Pasta principal", source="folder", repo_url="", branch="main",
+            local_path=home, scope={"home": True}, index_status="pending",
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+    elif row.local_path != home:
+        row.local_path = home  # WORKSPACE_HOME mudou: segue a configuração
+        await db.commit()
+    register_folder(row)
+    return row
+
+
+async def folder_project(db: Any, user_id: Any, path: str, name: str | None = None) -> CodespaceProject:
+    """Projeto de uma pasta do disco (reusa o que já aponta para o mesmo caminho)."""
+    uid = uuid.UUID(str(user_id))
+    real = str(Path(path).expanduser().resolve())
+    row = (await db.scalars(
+        select(CodespaceProject).where(CodespaceProject.user_id == uid,
+                                       CodespaceProject.local_path == real)
+    )).first()
+    if row is None:
+        row = CodespaceProject(
+            user_id=uid, name=(name or Path(real).name or real)[:255], source="folder",
+            repo_url="", branch="main", local_path=real, scope={}, index_status="pending",
+        )
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+    register_folder(row)
+    return row
+
+
 async def _ensure_chat_workspace(user_id: str, chat_id: str) -> str | None:
+    """Pasta do chat (seletor de pastas): a do projeto do chat; "off" = nenhuma; um
+    projeto escolhido; ou a pasta principal do usuário (padrão)."""
     from ..models import Chat
 
     eng = create_async_engine(get_settings().database_url, poolclass=NullPool)
@@ -1786,21 +1859,20 @@ async def _ensure_chat_workspace(user_id: str, chat_id: str) -> str | None:
                 return None
             if chat.project_id:
                 return str(chat.project_id)
-            row = (await db.scalars(
-                select(CodespaceProject).where(
-                    CodespaceProject.user_id == uid,
-                    CodespaceProject.scope["chat_workspace"].astext == str(cid),
-                )
-            )).first()
+            ws = (chat.workspace or "").strip()
+            if ws == "off":
+                return None
+            row = None
+            if ws:
+                try:
+                    row = await db.get(CodespaceProject, uuid.UUID(ws))
+                except ValueError:
+                    row = None
+                if row is not None and row.user_id != uid:
+                    row = None
             if row is None:
-                row = CodespaceProject(
-                    user_id=uid, name=f"Espaço do chat: {(chat.title or 'chat')[:60]}",
-                    source="local", repo_url="", branch="main",
-                    scope={"chat_workspace": str(cid)}, index_status="pending",
-                )
-                db.add(row)
-                await db.commit()
-                await db.refresh(row)
+                row = await ensure_home_project(db, uid)
+            register_folder(row)
             pid, status = row.id, row.index_status
     finally:
         await eng.dispose()

@@ -15,6 +15,7 @@ import { onVoiceActivate } from "@/lib/desktop";
 import { browserNotify, playChime, requestNotifPermission } from "@/lib/notify";
 import { downloadJSON, downloadPDF, downloadTXT } from "@/lib/download";
 import SuggestionChips from "@/components/SuggestionChips";
+import FolderPicker, { FolderRequestCard, findFolderRequest } from "@/components/FolderPicker";
 import type { ActivityStep, AskSpec, Attachment, Chat, ChatArtifact, CodespaceProject, Folder, KnowledgeRef, ListenConfig, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User, VoiceSession } from "@/lib/types";
 import CodespaceFileBrowser, { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME, extLang, stripLineNumbers } from "@/components/CodespaceFileBrowser";
 import type { CodespaceDragPayload, CodespaceSnippetPayload } from "@/components/CodespaceFileBrowser";
@@ -405,6 +406,9 @@ export default function ChatPage() {
   // projeto do chat ativo (pro botão "Definir como padrão do projeto" saber o
   // padrão atual); null = chat sem projeto
   const [csProject, setCsProject] = useState<CodespaceProject | null>(null);
+  // pasta de trabalho escolhida ANTES de o chat existir (tela de novo chat)
+  const [draftWorkspace, setDraftWorkspace] = useState<string | null>(null);
+  const [dismissedFolderReq, setDismissedFolderReq] = useState<string | null>(null);
   useEffect(() => {
     const pid = active?.project_id;
     if (!pid) { setCsProject(null); return; }
@@ -1753,6 +1757,8 @@ export default function ChatPage() {
             system_prompt: initialSystemPrompt,
             params: initialParams,
             model_config_id: curCustomId,
+            // pasta escolhida no seletor antes do 1º envio
+            ...(draftWorkspace ? { workspace: draftWorkspace } : {}),
             // a campanha nasce com o chat — o 1º turno já encontra o mundo pronto
             ...(turnMiniApp ? { mini_app: turnMiniApp } : {}),
           });
@@ -2566,6 +2572,26 @@ export default function ChatPage() {
   const lastMsg = messages[messages.length - 1];
   const askSpec = !sending && !streaming && lastMsg?.role === "assistant" ? findAsk(lastMsg.tool_events ?? []) : null;
   const showAsk = !!askSpec && dismissedAsk !== lastMsg?.id;
+  // a IA pediu uma pasta (request_folder): cartão de aprovação acima do composer
+  const folderReq = !sending && !streaming && lastMsg?.role === "assistant" ? findFolderRequest(lastMsg.tool_events ?? []) : null;
+  const showFolderReq = !!folderReq && dismissedFolderReq !== lastMsg?.id;
+  const folderValue = active ? (active.workspace ?? null) : draftWorkspace;
+  async function changeFolder(v: string | null) {
+    if (!active) { setDraftWorkspace(v); return; }
+    const prev = active;
+    setActive({ ...active, workspace: v });
+    try {
+      const upd = await api.patch<Chat>(`/chats/${active.id}`, { workspace: v ?? "home" });
+      setActive((a) => (a && a.id === upd.id ? { ...a, workspace: upd.workspace ?? null } : a));
+      setChats((cs) => cs.map((c) => (c.id === upd.id ? { ...c, workspace: upd.workspace ?? null } : c)));
+    } catch {
+      setActive(prev);
+    }
+  }
+  const folderPicker = (up: boolean) => (
+    <FolderPicker value={folderValue} onChange={(v) => void changeFolder(v)} menuUp={up}
+      lockedName={active?.project_id ? (csProject?.name ?? "Projeto") : null} />
+  );
   const picker = (
     <ModelPicker
       label={modelLabel}
@@ -2804,7 +2830,7 @@ export default function ChatPage() {
                   onDragLeave={() => setCsDropOver(false)}
                   onDrop={handleComposerFileDrop}
                 >
-                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={isRoundtable && rtRunning ? pauseRoundtable : stopAndPauseQueue} onQueue={isRoundtable ? () => { void steerRoundtable(); } : enqueue} queue={isRoundtable ? undefined : queueProps} sending={sending || rtRunning} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} />
+                  <PromptBox value={input} onChange={setInput} onSend={send} onStop={isRoundtable && rtRunning ? pauseRoundtable : stopAndPauseQueue} onQueue={isRoundtable ? () => { void steerRoundtable(); } : enqueue} queue={isRoundtable ? undefined : queueProps} sending={sending || rtRunning} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} folder={folderPicker(false)} />
                 </div>
                 {/* menu do "+" abre para baixo aqui (há espaço); na conversa abre para cima */}
                 {temporary && <p className="mt-2 text-xs text-muted">Chat temporário — esta conversa não será salva.</p>}
@@ -3010,10 +3036,15 @@ export default function ChatPage() {
                               <ArrowDown size={18} />
                             </button>
                           )}
+                          {showFolderReq && folderReq && (
+                            <FolderRequestCard req={folderReq} anywhere={user?.role === "admin"}
+                              onApproved={(f) => { setDismissedFolderReq(lastMsg?.id ?? null); void changeFolder(f.home ? null : f.id).then(() => send(`Pasta liberada: ${f.path}`)); }}
+                              onDecline={() => { setDismissedFolderReq(lastMsg?.id ?? null); void send("Não liberei a pasta."); }} />
+                          )}
                           {showAsk && askSpec && (
                             <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                           )}
-                          <div ref={promptBoxRef}><PromptBox value={input} onChange={setInput} onSend={send} onStop={isRoundtable && rtRunning ? pauseRoundtable : stopAndPauseQueue} onQueue={isRoundtable ? () => { void steerRoundtable(); } : enqueue} queue={isRoundtable ? undefined : queueProps} sending={sending || rtRunning} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} /></div>
+                          <div ref={promptBoxRef}><PromptBox value={input} onChange={setInput} onSend={send} onStop={isRoundtable && rtRunning ? pauseRoundtable : stopAndPauseQueue} onQueue={isRoundtable ? () => { void steerRoundtable(); } : enqueue} queue={isRoundtable ? undefined : queueProps} sending={sending || rtRunning} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} folder={folderPicker(true)} /></div>
                         </div>
                         {/* números da chamada atual/última; some ao trocar de chat */}
                         {callStats && callStats.chatId === (active?.id ?? null) && <CallStatsBar stats={callStats} />}

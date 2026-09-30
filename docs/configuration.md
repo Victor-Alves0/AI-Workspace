@@ -166,6 +166,7 @@ registered in each provider's console — on a public domain all five change. Se
 | Variable | Default | Description |
 |---|---|---|
 | `CODESPACE_DATA_DIR` | `/data/codespace` | Where project working copies live. |
+| `WORKSPACE_HOME` | *(empty)* | Each user's **main folder** (default of the chat's folder picker; `{user}` = user id). Empty = `~/AI Workspace` on the Windows desktop app, `<CODESPACE_DATA_DIR>/<user>/home` on a server. |
 | `CODE_RUNNER_URL` / `CODE_RUNNER_TOKEN` | empty | Optional container runner for `code.exec.run`; empty runs on the host. |
 | `CODE_EXEC_TIMEOUT_SECONDS` / `CODE_EXEC_CPU_SECONDS` / `CODE_EXEC_OUTPUT_BYTES` | `900` / `1800` / `200000` | Limits of a foreground command. |
 | `CODE_EXEC_BG_WAIT_CEILING_SECONDS` | `1200` | How long the agent waits inline on a background command before releasing the turn (it is woken up at the end). |

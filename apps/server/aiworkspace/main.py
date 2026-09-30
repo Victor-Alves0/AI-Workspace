@@ -25,6 +25,7 @@ from .memory_routes import router as memory_router
 from .brain_routes import router as brain_router
 from .knowledge_routes import router as knowledge_router
 from .codespace_routes import router as codespace_router
+from .workspace_routes import router as workspace_router
 from .investigation_routes import router as investigation_router
 from .share_routes import router as share_router
 from .telegram_routes import router as telegram_router
@@ -164,6 +165,11 @@ async def lifespan(app: FastAPI):
         bg.spawn(exec_jobs.recover_orphans())
         from .chat import subagent_jobs as _subagent_jobs
         bg.spawn(_subagent_jobs.recover())
+        # índice das ferramentas: calcula os vetores no boot (thread), não na 1ª mensagem
+        import threading as _th
+
+        from .tools import sift_service as _sift_service
+        _th.Thread(target=_sift_service.prewarm, name="sift-prewarm", daemon=True).start()
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível iniciar o reaper de exec_jobs (%s)", exc)
     # sincronização entre instâncias: troca periódica com os pares que esta instância
@@ -529,6 +535,7 @@ def create_app() -> FastAPI:
     app.include_router(learning_router)
     app.include_router(knowledge_router)
     app.include_router(codespace_router)
+    app.include_router(workspace_router)
     app.include_router(investigation_router)
     app.include_router(remote_router)
     app.include_router(brain_router)
