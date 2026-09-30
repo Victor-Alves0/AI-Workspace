@@ -498,6 +498,12 @@ async def _artifacts_kwargs(
     if notas:
         blocks.append(notas)
         breakdown["agent_notes"] = len(notas)
+    # agentes/equipes em segundo plano ainda rodando: o placar real (senão a IA chuta)
+    from .subagent_jobs import status_block
+    placar = status_block(str(chat_id))
+    if placar:
+        blocks.append(placar)
+        breakdown["agent_notes"] = breakdown.get("agent_notes", 0) + len(placar)
     if arts_on:
         txt = await _artifacts_extra(db, chat_id, user, model_config)
         if txt:
@@ -1608,6 +1614,7 @@ def _make_subagent_runner(
         from . import subagent_jobs
 
         user_id, parent_id = user.id, (parent.id if parent is not None else None)
+        box: dict[str, str] = {}
 
         async def _job() -> dict:
             async with SessionLocal() as s:
@@ -1622,10 +1629,15 @@ def _make_subagent_runner(
                     parent=p, adhoc_model=adhoc_model, pool=bg_pool, workspace=workspace,
                 )
                 # em segundo plano ninguém está esperando para responder um pedido
-                return await runner(key, task, new, handoff={**(handoff or {}), "ask_lead": False})
+                res = await runner(key, task, new, handoff={**(handoff or {}), "ask_lead": False},
+                                   progress=lambda ev: subagent_jobs.progress(box.get("jid"), ev))
+                if isinstance(res, dict) and not res.get("error"):
+                    res = {**res, "card": {k: v for k, v in res.items() if k != "note"}}
+                return res
 
         bg_pool = pool.fork()
-        return subagent_jobs.start(str(chat_id), label, task, _job)
+        box["jid"] = subagent_jobs.start(str(chat_id), label, task, _job)
+        return box["jid"]
 
     def start_background_team(members: list[dict], goal: str, label: str, chain: bool = False,
                               attachments: list[dict] | None = None) -> str:
@@ -1635,6 +1647,7 @@ def _make_subagent_runner(
 
         user_id, parent_id = user.id, (parent.id if parent is not None else None)
         bg_pool = pool.fork()
+        box: dict[str, str] = {}
 
         async def _job() -> dict:
             async with SessionLocal() as s:
@@ -1648,12 +1661,17 @@ def _make_subagent_runner(
                     project_id=project_id, isolate_keys=isolate_keys,
                     parent=p, adhoc_model=adhoc_model, pool=bg_pool, workspace=workspace,
                 )
-                res = await run_team(runner, members, goal, lambda ev: None, runner.synthesize,
-                                     chain=chain, attachments=attachments, ask_lead=False)
+                res = await run_team(runner, members, goal,
+                                     lambda ev: subagent_jobs.progress(box.get("jid"), ev),
+                                     runner.synthesize, chain=chain, attachments=attachments,
+                                     ask_lead=False)
                 return {"output": res["report"],
-                        "note": f"{res['succeeded']} of {res['size']} agents succeeded."}
+                        "note": f"{res['succeeded']} of {res['size']} agents succeeded.",
+                        # o card da mensagem passa a ter a equipe inteira (membros + relatórios)
+                        "card": {**res, "team": label}}
 
-        return subagent_jobs.start(str(chat_id), label, goal, _job)
+        box["jid"] = subagent_jobs.start(str(chat_id), label, goal, _job, members=members)
+        return box["jid"]
 
     # segundo plano só com um chat para acordar
     run_subagent.start_background = start_background if chat_id else None  # type: ignore[attr-defined]

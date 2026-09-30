@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { Ban, Bold, BookmarkPlus, Brain, ChevronDown, ChevronRight, Copy, Check, Download, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Loader2, Mail, MessageSquarePlus, Pencil, Play, RotateCcw, Send, ShieldAlert, Square, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench, X } from "lucide-react";
+import { Ban, Bold, BookmarkPlus, Bot, Brain, ChevronDown, Clock, ChevronRight, Copy, Check, Download, FileText, Heading1, Heading2, Info, Italic, List, ListOrdered, Loader2, Mail, MessageSquarePlus, Pencil, Play, RotateCcw, Send, ShieldAlert, Square, Strikethrough, TriangleAlert, Trash2, Underline, Volume2, Wrench, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import type { ActivityStep, BrainNoteEvent, ChartSpec, ChatArtifact, DeepResearch, Message, SkillProposal, StockQuote, ToolEvent } from "@/lib/types";
 import { api, ApiError, API_URL } from "@/lib/api";
@@ -1227,8 +1227,10 @@ function fmtThinkTime(s: number) {
   return `${m} minuto${m === 1 ? "" : "s"}`;
 }
 
-/** Raciocínio do modelo: colapsado por padrão ("Pensou por Xs"); ao vivo
- *  durante o streaming aparece aberto como "Pensando…". */
+/** Raciocínio e agentes da resposta: duas abas em ícone, lado a lado, logo abaixo do
+ *  nome do modelo — o cérebro abre o pensamento (etapas, ferramentas, o que o usuário
+ *  mandou no meio), o robô abre a lista dos agentes. Uma aberta por vez; tocar de novo
+ *  fecha. Ao vivo o pensamento começa aberto. */
 export function ReasoningBlock({
   text,
   seconds,
@@ -1244,42 +1246,62 @@ export function ReasoningBlock({
   tools?: ToolEvent[];
   openRequested?: boolean;
 }) {
-  const [open, setOpen] = useState(live);
-  useEffect(() => { if (openRequested) setOpen(true); }, [openRequested]);
   const timeline = pairAgents(steps?.length ? steps : [
     ...(text ? [{ kind: "reasoning" as const, text }] : []),
     ...tools.map((event) => ({ kind: "tool" as const, event })),
   ]);
   const agents = timeline.filter((s): s is AgentItem => s.kind === "agent");
-  const label = live
+  const hasThought = timeline.some((s) => s.kind !== "agent");
+  const [tab, setTab] = useState<"think" | "agents" | null>(live ? "think" : null);
+  useEffect(() => { if (openRequested) setTab("think"); }, [openRequested]);
+  const toggle = (t: "think" | "agents") => setTab((cur) => (cur === t ? null : t));
+  const thinkLabel = live
     ? "Pensando…"
     : seconds && seconds > 0
       ? `Pensou por ${fmtThinkTime(seconds)}`
       : "Pensou";
+  const agentsLabel = `${agents.length} agente${agents.length === 1 ? "" : "s"}`;
+  const tabCls = (on: boolean) =>
+    `flex h-7 items-center gap-1 rounded-full px-2 text-xs transition-colors ${
+      on ? "bg-surface2 text-ink" : "text-muted hover:bg-hover hover:text-ink-soft"}`;
   return (
     <div className="mb-2">
-      <button
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className={`flex items-center gap-1 text-sm transition-colors hover:text-ink-soft ${live ? "animate-pulse text-muted" : "text-muted"}`}
-      >
-        {label}
-        <ChevronDown size={14} className={`transition-transform duration-150 ${open ? "" : "-rotate-90"}`} />
-      </button>
-      {!open && agents.length > 0 && (
+      <div className="-ml-2 flex items-center gap-0.5">
+        {hasThought && (
+          <button type="button" onClick={() => toggle("think")} aria-expanded={tab === "think"}
+            title={thinkLabel} aria-label={thinkLabel} className={tabCls(tab === "think")}>
+            <Brain size={16} className={live ? "animate-pulse" : ""} />
+          </button>
+        )}
+        {agents.length > 0 && (
+          <button type="button" onClick={() => toggle("agents")} aria-expanded={tab === "agents"}
+            title={agentsLabel} aria-label={agentsLabel} className={tabCls(tab === "agents")}>
+            <Bot size={16} />
+            <span className="tabular-nums">{agents.length}</span>
+          </button>
+        )}
+      </div>
+      {tab === "agents" && agents.length > 0 && (
         <div className="mt-2 space-y-1.5">
           {agents.map((a, i) => <AgentStep key={a.call?.id ?? a.result?.id ?? i} item={a} live={live} />)}
         </div>
       )}
-      {open && (
+      {tab === "think" && hasThought && (
         <ol className="ml-1.5 mt-3 space-y-4 border-l border-border pb-2 pl-5 text-sm leading-6 text-muted" aria-label="Etapas da resposta">
           {timeline.map((step, index) => (
             <li key={step.kind === "agent" ? `a:${step.call?.id ?? step.result?.id ?? index}` : index} className="relative min-w-0 [overflow-wrap:anywhere]">
-              <span aria-hidden className={`absolute -left-[25px] top-2 h-2 w-2 rounded-full ${step.kind === "tool" ? "bg-emerald-400" : step.kind === "agent" ? "bg-accent" : "bg-muted"}`} />
+              <span aria-hidden className={`absolute -left-[25px] ${step.kind === "user" ? "top-[14px]" : "top-2"} h-2 w-2 rounded-full ${step.kind === "tool" ? "bg-emerald-400" : step.kind === "agent" || step.kind === "user" ? "bg-accent" : "bg-muted"}`} />
               {step.kind === "agent" ? (
                 <AgentStep item={step} live={live} />
               ) : step.kind === "tool" ? (
                 <ToolEventRow event={step.event} running={live && index === timeline.length - 1 && step.event.kind === "call"} />
+              ) : step.kind === "user" ? (
+                <div className="flex flex-col items-end gap-0.5">
+                  <div className="max-w-[92%] whitespace-pre-wrap rounded-2xl bg-accent/15 px-3 py-1.5 text-ink">{step.text}</div>
+                  {step.pending && (
+                    <span className="flex items-center gap-1 text-[11px] text-muted"><Clock size={10} /> entra no próximo passo</span>
+                  )}
+                </div>
               ) : step.kind === "reasoning" ? (
                 <div className="whitespace-pre-wrap">{step.text}</div>
               ) : (

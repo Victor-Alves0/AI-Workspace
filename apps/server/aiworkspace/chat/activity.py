@@ -36,6 +36,12 @@ class ActivityTrace:
             if event.get("id"):
                 tool["id"] = event["id"]
             self.steps.append({"kind": "tool", "event": tool})
+        elif kind == "steer":
+            # o usuário escreveu DURANTE a geração ("Enviar agora"): o balão dele fica
+            # na linha do tempo, no ponto em que a mensagem entrou no turno
+            self.archive()
+            if event.get("text"):
+                self.steps.append({"kind": "user", "text": event["text"]})
         elif kind == "reasoning_answer":
             # o último bloco de raciocínio era a resposta: sai das etapas
             if self.steps and self.steps[-1]["kind"] == "reasoning":

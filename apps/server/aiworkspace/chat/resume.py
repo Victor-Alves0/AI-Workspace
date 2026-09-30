@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 
 from ..db import SessionLocal
-from ..models import Chat, Message, Notification, User
+from ..models import Chat, Message, ModelConfig, Notification, User
 from ..usage_service import usage_event_from_record
 from . import artifacts as artifacts_service
 from . import attachment_context
@@ -41,6 +41,8 @@ from .turn_setup import (
     _usage_record,
     _use_context,
     _user_profile_dict,
+    _workspace_on,
+    subagents_for_turn,
 )
 
 logger = logging.getLogger(__name__)
@@ -171,6 +173,22 @@ async def resume_chat_turn(
             imaginai_kwargs = await _imaginai_turn_kwargs(
                 db, user, chat, turn_key, mini_app=turn_mini_app
             )
+            chat_project = str(chat.project_id) if chat.project_id else None
+            chat_workspace = _workspace_on(chat, model_config)
+            mc_id = model_config.id if model_config is not None else None
+        # delegação no wake: o turno acordado pelo relatório de uma equipe precisa poder
+        # soltar a PRÓXIMA (ondas: a Wave 2 parte do relatório da Wave 1). O runner usa a
+        # sessão de banco ao longo do turno inteiro — uma sessão própria, fechada no fim.
+        sub_db = SessionLocal()
+        try:
+            sub_user = await sub_db.get(User, user.id)
+            sub_mc = await sub_db.get(ModelConfig, mc_id) if mc_id else None
+            subagent_opts = await subagents_for_turn(
+                sub_db, sub_user, cid, chat_project, sub_mc, workspace=chat_workspace,
+            ) if sub_user is not None else None
+        except Exception:  # noqa: BLE001 - sem delegação o wake ainda responde
+            logger.exception("resume: delegação indisponível no wake (chat %s)", cid)
+            subagent_opts = None
 
         async def _finish(collected: dict, emit) -> None:
             # Mesmo contrato do envio normal: preserva texto/raciocínio parcial e a
@@ -254,7 +272,17 @@ async def resume_chat_turn(
             realtime_datetime=_realtime_datetime(model_config),
             memory=memory,
             media=media,
+            subagent=subagent_opts,
         )
+
+        async def _closing(src):
+            try:
+                async for ev in src:
+                    yield ev
+            finally:
+                await sub_db.close()
+
+        source = _closing(source)
         # CLAIM atômico (fim do setup): entre o guard inicial (get_active lá em cima) e aqui
         # houve muitos awaits (prepare_turn, auto-compactação, leituras de banco). Nesse meio
         # tempo outra geração pode ter começado — outro wake (o reaper do exec_jobs e o
@@ -267,6 +295,7 @@ async def resume_chat_turn(
         # (continue/regenerate), a continuação não dispara — recuperável (o usuário reenvia).
         existing = generation.get_active(str(cid))
         if existing is not None and not existing.done:
+            await sub_db.close()  # este `source` não vai rodar
             if _attempt >= 1:
                 logger.warning("resume: chat %s seguiu ocupado; desisto do wake", cid)
                 return

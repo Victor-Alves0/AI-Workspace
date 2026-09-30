@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..auth.deps import require_approved
 from ..db import get_db
 from ..models import User
-from . import agent_followup
+from . import agent_followup, subagent_jobs
 from .turn_setup import _get_owned_chat
 
 router = APIRouter()
@@ -51,3 +51,15 @@ async def message_agent(
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.get("/{chat_id}/agents/jobs/{job_id}")
+async def agent_job(
+    chat_id: uuid.UUID, job_id: str,
+    user: User = Depends(require_approved), db: AsyncSession = Depends(get_db),
+):
+    """Progresso ao vivo de um agente/equipe em segundo plano (o painel lê enquanto roda).
+    `unknown` = já terminou há tempo ou o servidor reiniciou: o card da mensagem vale."""
+    await _get_owned_chat(db, chat_id, user)
+    snap = subagent_jobs.snapshot(str(chat_id), job_id[:40])
+    return snap or {"status": "unknown"}

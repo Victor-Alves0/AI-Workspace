@@ -435,6 +435,8 @@ export interface ChartSpec {
 
 export type ActivityStep =
   | { kind: "reasoning" | "commentary"; text: string }
+  /** o usuário escreveu DURANTE a geração ("Enviar agora"); `pending` = ainda não entrou no turno */
+  | { kind: "user"; text: string; pending?: boolean }
   | { kind: "tool"; event: ToolEvent };
 
 export interface MessageReasoning {
@@ -807,6 +809,7 @@ export type ChatEvent =
   | { type: "usage"; usage: Record<string, unknown> }
   | { type: "done"; content: string; usage?: MessageUsage | null; reasoning?: MessageReasoning | null; tool_events?: ToolEvent[] | null }
   | { type: "reasoning"; text: string }
+  | { type: "steer"; text: string }
   // provider recusou o nível de raciocínio pedido; o backend rebaixou (o seletor reflete)
   | { type: "reasoning_effort"; effort: string }
   | { type: "title"; title: string }

@@ -3,7 +3,8 @@
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { ArrowDown, ArrowLeft, ArrowUp, Brain, Check, ChevronDown, ChevronRight, ChevronUp, Clock, GitBranch, Loader2, Mic, Sparkles, Square, TriangleAlert, Users, X } from "lucide-react";
-import type { SubagentLive, SubagentTimelineItem, ToolEvent } from "@/lib/types";
+import type { SubagentLive, SubagentTimelineItem, TeamLive, ToolEvent } from "@/lib/types";
+import { api } from "@/lib/api";
 import { applySubagentProgress, timelineFromSteps } from "@/lib/subagent";
 import { messageAgent } from "@/lib/sse";
 import { startRecording, transcribe } from "@/lib/voice";
@@ -189,6 +190,39 @@ function SidePanel({
   );
 }
 
+/** Progresso de um agente/equipe em segundo plano, lido do servidor enquanto roda. */
+interface BgJob {
+  status: "running" | "done" | "failed" | "unknown";
+  timeline?: SubagentTimelineItem[];
+  members?: { name: string; task: string; state: "queued" | "running" | "done" | "failed"; timeline: SubagentTimelineItem[] }[];
+  synthesizing?: boolean;
+}
+
+function useBgJob(jobId: string | undefined): BgJob | null {
+  const { chatId, reload } = useContext(AgentChatContext);
+  const [job, setJob] = useState<BgJob | null>(null);
+  useEffect(() => {
+    if (!jobId || !chatId) return;
+    let vivo = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = async () => {
+      try {
+        const j = await api.get<BgJob>(`/chats/${chatId}/agents/jobs/${encodeURIComponent(jobId)}`);
+        if (!vivo) return;
+        setJob(j);
+        if (j.status === "running") timer = setTimeout(tick, 2500);
+        // terminou: o card da mensagem recebe o resultado quando o chat fica ocioso
+        else if (j.status !== "unknown") timer = setTimeout(() => reload?.(), 4000);
+      } catch {
+        if (vivo) timer = setTimeout(tick, 8000);
+      }
+    };
+    void tick();
+    return () => { vivo = false; if (timer) clearTimeout(timer); };
+  }, [jobId, chatId]); // eslint-disable-line react-hooks/exhaustive-deps
+  return job;
+}
+
 /** Tudo o que a UI precisa saber de um agente, do resultado final ou do estado ao vivo. */
 function resumo(call: ToolEvent | undefined, result: ToolEvent | undefined, live: boolean) {
   const args = (call?.data ?? {}) as { agent?: string; name?: string; task?: string };
@@ -196,9 +230,11 @@ function resumo(call: ToolEvent | undefined, result: ToolEvent | undefined, live
   const now = call?.live;
   const name = res?.agent || now?.name || args.name || (args.agent && args.agent !== "new" ? args.agent : "") || "Agente";
   const task = res?.task || now?.task || args.task || "";
-  const background = res?.kind === "subagent_started" || !!now?.background;
-  const running = !res && !background && (now ? now.running : live);
-  const timeline = res?.timeline ?? (res ? timelineFromSteps(res.steps) : now?.timeline ?? []);
+  const started = res?.kind === "subagent_started";
+  const background = started || !!now?.background;
+  // em segundo plano: o estado ao vivo vem do servidor (useBgJob) até o card receber o resultado
+  const running = started ? !!now?.running : !res && !now?.background && (now ? now.running : live);
+  const timeline = res && !started ? (res.timeline ?? timelineFromSteps(res.steps)) : now?.timeline ?? [];
   const tools = timeline.filter((t) => t.kind === "tool");
   const failed = tools.filter((t) => t.kind === "tool" && t.ok === false).length;
   const error = typeof res?.error === "string" ? res.error : "";
@@ -206,9 +242,9 @@ function resumo(call: ToolEvent | undefined, result: ToolEvent | undefined, live
   const lastItem = timeline[timeline.length - 1];
   const queued = !res && now?.state === "queued";
   const status = running
-    ? lastItem?.kind === "tool" ? describeStep(lastItem.tool, lastItem.detail, lastItem.args) : lastItem?.kind === "reasoning" ? "pensando…" : lastItem?.kind === "text" ? "escrevendo…" : "começando…"
+    ? (started ? "em segundo plano · " : "") + (lastItem?.kind === "tool" ? describeStep(lastItem.tool, lastItem.detail, lastItem.args) : lastItem?.kind === "reasoning" ? "pensando…" : lastItem?.kind === "text" ? "escrevendo…" : "começando…")
     : queued ? "na fila"
-    : background ? "em segundo plano"
+    : started ? "em segundo plano"
     : error ? "falhou"
     : res?.status === "needs_input" && res.needs?.need ? `precisa de: ${res.needs.need}`
     : tools.length === 0 ? "concluído" : tools.length === 1 ? "1 passo" : `${tools.length} passos`;
@@ -237,7 +273,7 @@ function AgentTimeline({ r, after }: { r: ReturnType<typeof resumo>; after?: Rea
         </Item>
       )}
       {timeline.map((t, i) => (
-        <Item key={i} dot={t.kind === "tool" ? (t.ok === false ? "bg-amber-400" : "bg-emerald-400") : "bg-muted"}>
+        <Item key={i} bubble={t.kind === "user"} dot={t.kind === "tool" ? (t.ok === false ? "bg-amber-400" : "bg-emerald-400") : t.kind === "user" ? "bg-accent" : "bg-muted"}>
           {t.kind === "tool" ? (
             <ToolStepRow step={t} spinning={t.ok == null && running && i === timeline.length - 1} />
           ) : t.kind === "user" ? (
@@ -284,7 +320,7 @@ function FollowupItems({ items, live }: { items: AgentFollowup[]; live?: Subagen
   return (
     <>
       {items.map((f, i) => (
-        <Item key={i} dot={f.role === "user" ? "bg-accent" : "bg-muted"}>
+        <Item key={i} bubble={f.role === "user"} dot={f.role === "user" ? "bg-accent" : "bg-muted"}>
           {f.role === "user" ? <UserBubble text={f.content} /> : (
             <div className="space-y-2">
               {(f.timeline ?? []).filter((t) => t.kind === "tool").map((t, j) => (
@@ -463,7 +499,7 @@ function AgentPanel({ r, agentRef, icon, subtitle, onClose, onBack }: {
       ) : undefined}>
       <AgentTimeline r={r} after={
         <>
-          {steers.map((t, i) => <Item key={`s${i}`} dot="bg-accent"><UserBubble text={t} pending /></Item>)}
+          {steers.map((t, i) => <Item key={`s${i}`} bubble dot="bg-accent"><UserBubble text={t} pending /></Item>)}
           <FollowupItems items={itens} live={local?.live} />
         </>
       } />
@@ -554,7 +590,12 @@ export function SubagentStep({ call, result, live = false }: { call?: ToolEvent;
   const fallback = useId();
   const key = `a:${call?.id ?? result?.id ?? fallback}`;
   const open = usePanelOpen(key);
-  const r = resumo(call, result, live);
+  const started = (result?.data as { kind?: string; job_id?: string } | undefined);
+  const job = useBgJob(started?.kind === "subagent_started" ? started.job_id : undefined);
+  const callVivo: ToolEvent | undefined = job && job.status !== "unknown" && call && started?.kind === "subagent_started"
+    ? { ...call, live: { name: "", running: job.status === "running", background: true, timeline: job.timeline ?? [] } }
+    : call;
+  const r = resumo(callVivo, result, live);
   const icon = r.adhoc ? <Sparkles size={13} className={`shrink-0 ${r.queued ? "text-muted" : "text-accent-hover"}`} /> : <Users size={13} className="shrink-0 text-accent-hover" />;
   return (
     <div className="min-w-0">
@@ -581,6 +622,7 @@ interface TeamResult {
   chained?: boolean;
   members?: (SubagentResult & { agent?: string })[];
   error?: string;
+  job_id?: string;
 }
 
 const PAGE = 60;
@@ -595,10 +637,17 @@ export function TeamStep({ call, result, live = false }: { call?: ToolEvent; res
   const [shown, setShown] = useState(PAGE);
   const args = (call?.data ?? {}) as { team_name?: string; goal?: string; members?: { name?: string; task?: string }[] };
   const res = (result?.data && typeof result.data === "object" ? result.data : undefined) as TeamResult | undefined;
-  const now = call?.team;
+  const job = useBgJob(res?.kind === "subagent_team_started" ? res.job_id : undefined);
+  const bgLive: TeamLive | undefined = job?.members && res?.kind === "subagent_team_started" ? {
+    name: res?.team || args.team_name || "Equipe", goal: res?.goal, size: job.members.length,
+    running: job.status === "running", background: true, synthesizing: job.synthesizing,
+    members: job.members.map((m) => ({ name: m.name, task: m.task, adhoc: true, running: m.state === "running", state: m.state, timeline: m.timeline })),
+  } : undefined;
+  const now = call?.team ?? bgLive;
   const name = res?.team || now?.name || args.team_name || "Equipe";
   const goal = res?.goal || now?.goal || args.goal || "";
   const background = res?.kind === "subagent_team_started" || !!now?.background;
+  const bgRunning = res?.kind === "subagent_team_started" && job?.status === "running";
   const running = !res && !background && (now ? now.running : live);
   const error = typeof res?.error === "string" ? res.error : "";
 
@@ -620,7 +669,8 @@ export function TeamStep({ call, result, live = false }: { call?: ToolEvent; res
 
   const chain = res?.chained ?? now?.chain ?? false;
   const status = error ? "falhou"
-    : background ? `em segundo plano · ${size} agentes`
+    : bgRunning ? (now?.synthesizing ? "em segundo plano · consolidando…" : `em segundo plano · ${done}/${size} · ${working} trabalhando`)
+    : res?.kind === "subagent_team_started" ? `em segundo plano · ${size} agentes`
     : running ? (now?.synthesizing ? "consolidando relatórios…"
       : chain ? `etapa ${Math.min(done + 1, size)} de ${size}` : `${done}/${size} · ${working} trabalhando`)
     : chain ? `${size} etapas` : `${size} agentes`;
@@ -630,14 +680,14 @@ export function TeamStep({ call, result, live = false }: { call?: ToolEvent; res
 
   return (
     <div className="min-w-0">
-      <Chip running={running} icon={<Users size={13} className="shrink-0 text-accent-hover" />} name={name} status={status}
+      <Chip running={running || bgRunning} icon={<Users size={13} className="shrink-0 text-accent-hover" />} name={name} status={status}
         failed={failed} background={background} open={open} onClick={() => { setSel(null); setPanel(open ? null : key); }} />
       {open && (membro ? (
         <AgentPanel r={membro} agentRef={call?.id && sel != null ? `${call.id}#${sel}` : null}
           icon={membro.adhoc ? <Sparkles size={16} /> : <Users size={16} />}
           subtitle={`${name} · ${membro.status}`} onClose={close} onBack={() => setSel(null)} />
       ) : (
-        <SidePanel icon={<Users size={16} />} title={name} subtitle={status} running={running} onClose={close}>
+        <SidePanel icon={<Users size={16} />} title={name} subtitle={status} running={running || bgRunning} onClose={close}>
           <div className="space-y-5 text-sm">
             {goal && (
               <div>
@@ -645,7 +695,7 @@ export function TeamStep({ call, result, live = false }: { call?: ToolEvent; res
                 <p className="mt-1 whitespace-pre-wrap text-ink-soft">{goal}</p>
               </div>
             )}
-            {size > 0 && !background && (
+            {size > 0 && (!background || !!bgLive) && (
               <div className="flex items-center gap-2 text-xs text-muted">
                 <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-border">
                   <div className="h-full rounded-full bg-accent transition-[width] duration-300" style={{ width: `${Math.round((done / size) * 100)}%` }} />
@@ -702,10 +752,10 @@ export function TeamStep({ call, result, live = false }: { call?: ToolEvent; res
   );
 }
 
-function Item({ dot, children }: { dot: string; children: React.ReactNode }) {
+function Item({ dot, bubble, children }: { dot: string; bubble?: boolean; children: React.ReactNode }) {
   return (
     <li className="relative min-w-0 [overflow-wrap:anywhere]">
-      <span aria-hidden className={`absolute -left-[25px] top-2 h-2 w-2 rounded-full ${dot}`} />
+      <span aria-hidden className={`absolute -left-[25px] ${bubble ? "top-[14px]" : "top-2"} h-2 w-2 rounded-full ${dot}`} />
       {children}
     </li>
   );

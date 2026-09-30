@@ -3087,8 +3087,9 @@ class _ToolDispatcher:
                 "kind": "subagent_started", "agent": label, "task": task, "job_id": job,
                 "adhoc": new is not None,
                 "note": "Running in the background. Do not wait or poll: its report arrives in a "
-                        "new turn when it finishes. Tell the user it is running, then continue "
-                        "or end your turn.",
+                        "new turn when it finishes. Tell the user in ONE short sentence that it is "
+                        "running (its card already shows the task live; do not restate the plan), "
+                        "then continue or end your turn.",
             }
             return
         yield {"type": "subagent", "status": "start", "id": tcid, "agent": label, "task": task[:200],
@@ -3144,8 +3145,11 @@ class _ToolDispatcher:
                 "kind": "subagent_team_started", "team": name, "goal": goal, "size": len(members),
                 "job_id": job,
                 "note": "The team is running in the background. Do not wait or poll: its merged "
-                        "report arrives in a new turn. Tell the user it is running, then continue "
-                        "or end your turn.",
+                        "report arrives in a new turn. Tell the user in ONE short sentence that it "
+                        "is running (its card already lists every member live; no tables, do not "
+                        "restate the plan), then continue or end your turn. If more waves depend "
+                        "on this report, launch them when it arrives — delegate_team stays "
+                        "available in that turn.",
             }
             return
         yield {"type": "subagent", "status": "team_start", "id": tcid, "team": name, "goal": goal[:300],
@@ -3874,7 +3878,8 @@ async def run_turn(
                 messages.append({"role": "user", "content": (
                     "[O usuário interveio durante a geração — priorize esta instrução]:\n" + _st)})
                 input_chars["user"] += len(_st)
-                yield {"type": "steer", "text": _st[:200]}
+                # o texto inteiro: a UI mostra o balão do usuário no ponto em que entrou
+                yield {"type": "steer", "text": _st[:4000]}
                 _health("steering", "injected", "info", {"chars": len(_st)}, chat_id)
                 if tools is None and _base_tools is not None:
                     tools = _base_tools  # reabre tools p/ agir sobre a nova instrução

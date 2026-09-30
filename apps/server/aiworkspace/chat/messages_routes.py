@@ -320,6 +320,29 @@ async def send_message(
     auto_title = first_exchange and bool(iface.get("auto_title"))
     title_model = (iface.get("title_model") or "").strip()
     title_prompt = iface.get("title_prompt") or ""
+    # como o opencode: o título sai da 1ª mensagem, em PARALELO com a resposta — não
+    # espera o turno acabar nem disputa um teto apertado no fim (modelos de raciocínio
+    # estouravam os 8s e o chat ficava com a mensagem crua de título)
+    title_task: asyncio.Task | None = None
+    if auto_title and (body.content or "").strip():
+        from .. import bg
+
+        # valores fixados agora (um @agente reatribui model/api_key logo abaixo)
+        async def _make_title(key=api_key, mdl=title_model or model,
+                              url=None if title_model else base_url) -> str:
+            t = await generate_title(key, mdl, body.content, "", title_prompt, base_url=url)
+            if t:
+                async with SessionLocal() as s:
+                    c = await s.get(Chat, chat_id)
+                    # só troca o provisório: o usuário pode ter renomeado nesse meio tempo
+                    if c is not None and c.title == (body.content[:60] or "Anexo"):
+                        c.title = t
+                        await s.commit()
+                    else:
+                        return ""
+            return t
+
+        title_task = bg.spawn(_make_title(), name=f"title-{chat_id}")
 
     # SIFT do usuário, filtrada pelas ferramentas do modelo personalizado do chat
     sift = await get_sift_for_user(
@@ -381,24 +404,15 @@ async def send_message(
         # lento aqui prendia a UI ("gerando", com o texto já completo e o Parar sem
         # efeito). O teto curto garante que o stream feche; o título perdido reaparece
         # no próximo refresh da lista de chats.
-        new_title = ""
-        if auto_title and collected["content"]:
+        # o título já está sendo gerado desde o início do turno (ver `title_task`); aqui
+        # só espera um pouco para a UI recebê-lo no stream. Se passar do teto, ele segue
+        # em segundo plano, é gravado e aparece no próximo refresh da lista.
+        if title_task is not None:
             try:
-                new_title = await asyncio.wait_for(
-                    generate_title(
-                        api_key, title_model or model, user_text, collected["content"],
-                        title_prompt, base_url=base_url if not title_model else None,
-                    ),
-                    timeout=8.0,
-                )
-            except (TimeoutError, asyncio.TimeoutError):
+                new_title = await asyncio.wait_for(asyncio.shield(title_task), timeout=8.0)
+            except Exception:  # noqa: BLE001 - timeout/falha: segue sem o evento
                 new_title = ""
             if new_title:
-                async with SessionLocal() as s:
-                    c = await s.get(Chat, chat_id)
-                    if c is not None:
-                        c.title = new_title
-                        await s.commit()
                 await emit({"type": "title", "title": new_title})
 
     guards = await _resolve_guards(db, user, model_config)

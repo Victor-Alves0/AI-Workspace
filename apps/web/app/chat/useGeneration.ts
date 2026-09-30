@@ -277,6 +277,11 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         if (last?.kind === "reasoning") state.steps[state.steps.length - 1] = { ...last, text: last.text + ev.text };
         else state.steps.push({ kind: "reasoning", text: ev.text });
         maybeFlush();
+      } else if (ev.type === "steer") {
+        // "Enviar agora": a mensagem entrou no turno — o balão fica na linha do tempo
+        archiveCommentary();
+        state.steps.push({ kind: "user", text: String(ev.text ?? "") });
+        maybeFlush();
       } else if (ev.type === "reasoning_answer") {
         // o modelo escreveu a resposta no canal de raciocínio e encerrou ali: esse
         // bloco sai do "Pensou por…" (o texto chega em seguida como resposta)

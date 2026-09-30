@@ -15,7 +15,7 @@ import { onVoiceActivate } from "@/lib/desktop";
 import { browserNotify, playChime, requestNotifPermission } from "@/lib/notify";
 import { downloadJSON, downloadPDF, downloadTXT } from "@/lib/download";
 import { pickSuggestions, type Suggestion } from "@/lib/suggestions";
-import type { AskSpec, Attachment, Chat, ChatArtifact, CodespaceProject, Folder, KnowledgeRef, ListenConfig, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User, VoiceSession } from "@/lib/types";
+import type { ActivityStep, AskSpec, Attachment, Chat, ChatArtifact, CodespaceProject, Folder, KnowledgeRef, ListenConfig, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User, VoiceSession } from "@/lib/types";
 import CodespaceFileBrowser, { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME, extLang, stripLineNumbers } from "@/components/CodespaceFileBrowser";
 import type { CodespaceDragPayload, CodespaceSnippetPayload } from "@/components/CodespaceFileBrowser";
 import Roundtable, { nextColor, RT_COLORS } from "@/components/Roundtable";
@@ -1952,8 +1952,26 @@ export default function ChatPage() {
     handleStop();
   }
 
+  // "Enviar agora" durante a geração: o item sai da bandeja e vira um balão na linha do
+  // tempo da resposta (pendente até o servidor confirmar que entrou no turno)
+  const pendingSteers: ActivityStep[] = (active ? queues[active.id] ?? [] : [])
+    .filter((q) => q.sent && !streamingSteps.some((st) => st.kind === "user" && st.text.trim() === q.text.trim()))
+    .map((q) => ({ kind: "user" as const, text: q.text, pending: true }));
+  const liveSteps = pendingSteers.length ? [...streamingSteps, ...pendingSteers] : streamingSteps;
+  // a mensagem do "Enviar agora" também fica gravada como mensagem do usuário (histórico
+  // do modelo); na tela ela já aparece dentro da resposta — não repete o balão solto
+  const steerShown = useMemo(() => {
+    const out = new Set<string>();
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i];
+      if (m.role !== "user") continue;
+      const next = messages.slice(i + 1).find((x) => x.role === "assistant");
+      if (next?.reasoning?.steps?.some((st) => st.kind === "user" && st.text.trim() === (m.content || "").trim())) out.add(m.id);
+    }
+    return out;
+  }, [messages]);
   const queueProps = active ? {
-    items: queues[active.id] ?? [],
+    items: (queues[active.id] ?? []).filter((q) => !q.sent),
     onSendNow: (id: string) => { void sendQueuedNow(id); },
     onDelete: (id: string) => updateQueue(active.id, (q) => q.filter((x) => x.id !== id)),
     onEdit: (id: string, text: string) => updateQueue(active.id, (q) => q.map((x) => (x.id === id ? { ...x, text } : x))),
@@ -2851,6 +2869,7 @@ export default function ChatPage() {
                     </div>
                   )}
                   {messages.map((m) => {
+                    if (steerShown.has(m.id)) return null;
                     // mesa-redonda: cada fala tem um `speaker`; o avatar é o do
                     // MODELO daquele falante (não o do composer) e vai À ESQUERDA do texto.
                     const isRt = !!m.speaker && !m.is_summary && !temporary;
@@ -2962,14 +2981,14 @@ export default function ChatPage() {
                     </div>
                   )}
                   {isRoundtable && rtRunning && !rtStreaming && <Thinking />}
-                  {!isRoundtable && (streaming || streamingReasoning || generatingImage || consultingKnowledge || transcribingAudio || (sending && toolEvents.length > 0) ? (
+                  {!isRoundtable && (streaming || streamingReasoning || generatingImage || consultingKnowledge || transcribingAudio || (sending && (toolEvents.length > 0 || pendingSteers.length > 0)) ? (
                     <SoundAutoplayContext.Provider value={sfxAutoplay}>
                     <MessageBubble
                       role="assistant"
                       content={streaming}
                       streaming={!!streaming}
                       name={modelLabel}
-                      reasoning={streamingReasoning || streamingSteps.length ? { text: streamingReasoning, steps: streamingSteps } : null}
+                      reasoning={streamingReasoning || liveSteps.length ? { text: streamingReasoning, steps: liveSteps } : null}
                       reasoningLive={sending}
                       toolEvents={toolEvents.length ? toolEvents : undefined}
                       toolsLive={sending}
