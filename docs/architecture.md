@@ -73,6 +73,12 @@ worktrees, live previews) and the media-delivery poller. Work that is *owed* to 
 shadow and a boot recovery, so a restart never swallows it silently — see
 [harness-coupling.md](harness-coupling.md).
 
+The server is **one process per database**. Live generations (stop, F5, queue and steer find
+them in memory), the scheduler and the channel pollers all assume it. This is checked at
+startup: the process holds a Postgres advisory lock for its whole life
+(`single_instance.py`). A second worker or replica waits up to 45 s, in case the old one is
+still exiting on a restart, and then refuses to start with a clear error.
+
 ### Frontend (`apps/web`)
 
 Next.js 16 (App Router) + React 19 + Tailwind. It's a **built image** (`next start`), not a dev

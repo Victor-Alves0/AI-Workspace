@@ -9,9 +9,10 @@ resposta. Ao reabrir o chat, o front re-assina e vê a resposta continuar ao viv
 início.
 
 Como é tudo um único event loop (servidor de processo único, como o scheduler
-das automações), um ``dict`` em memória basta. Se um dia houver múltiplos
-workers, trocar o transporte por Redis pub/sub — a interface pública
-(``start`` / ``get_active`` / ``Generation.subscribe``) não muda.
+das automações), um ``dict`` em memória basta. A premissa é VERIFICADA no boot:
+um segundo processo no mesmo banco se recusa a subir (``single_instance.py``).
+Se um dia houver múltiplos workers, trocar o transporte por Redis pub/sub — a
+interface pública (``start`` / ``get_active`` / ``Generation.subscribe``) não muda.
 """
 
 from __future__ import annotations

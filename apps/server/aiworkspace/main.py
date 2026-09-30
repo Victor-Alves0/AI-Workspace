@@ -68,6 +68,11 @@ logger = logging.getLogger("aiworkspace")
 async def lifespan(app: FastAPI):
     install_logging()
     settings = get_settings()
+    # UM processo por banco: gerações, agendador e canais vivem na memória dele. Um
+    # segundo worker/réplica se recusa a subir (ver single_instance.py).
+    from . import single_instance
+    from .db import engine as _lock_engine
+    await single_instance.acquire(_lock_engine)
     # observabilidade: instrumenta o engine (conta/cronometra cada query) e sobe o
     # escritor em lote dos traces. Envolto em try: nunca impede o app de subir.
     try:
@@ -266,6 +271,8 @@ async def lifespan(app: FastAPI):
             await tracing.sink.stop()
         except Exception:  # noqa: BLE001
             pass
+        # por último: o próximo processo (restart/deploy) pode subir
+        await single_instance.release()
 
 
 async def _worktree_reaper() -> None:
