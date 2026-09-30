@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import get_settings
+from .. import execution
 from . import exec_service
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ class Preview:
     # -- liveness calculada ao vivo -----------------------------------------
     def _port_open(self) -> bool:
         try:
-            with socket.create_connection(("127.0.0.1", self.port), timeout=0.4):
+            with socket.create_connection((execution.target_host(), self.port), timeout=0.4):
                 return True
         except OSError:
             return False
@@ -349,7 +350,7 @@ def request_preview(user_id: str, project_id: str | None, preview_id: str,
         return {"error": "preview não encontrado — suba um com 'start' ou veja o id em 'list'"}
     m = (method or "GET").upper()
     p = "/" + (path or "/").lstrip("/")
-    url = f"http://127.0.0.1:{pv.port}{p}"
+    url = f"http://{execution.target_host()}:{pv.port}{p}"
     content = body.encode("utf-8", "replace") if isinstance(body, str) else body
     try:
         with httpx.Client(timeout=15, follow_redirects=False) as c:

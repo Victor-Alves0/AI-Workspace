@@ -56,11 +56,9 @@ class Settings(BaseSettings):
     # devolve erro ao modelo (que estreita o escopo) em vez de pendurar. 0 = sem teto.
     builtin_tool_timeout_seconds: int = 120
     # Off-switch global do "code mode" (run_code): executa código GERADO PELO
-    # MODELO no sandbox de subprocesso. É o vetor de maior risco (RCE por design).
-    # O sandbox limita CPU/memória/tempo, mas NÃO isola rede nem /proc — um processo
-    # filho (mesmo usuário) pode ler /proc/<ppid>/environ (APP_SECRET, DATABASE_URL).
-    # Deixe False em deploys multiusuário não confiáveis, ou isole o sandbox
-    # (rede desligada, hidepid, nsjail/gVisor) e entregue segredos por arquivo.
+    # MODELO. No perfil servidor ele roda no executor isolado (container `runner`, sem
+    # segredos nem banco); sem executor em produção, fica desligado de qualquer jeito
+    # (execution.mode() == "off"). No desktop roda na máquina do próprio usuário.
     allow_code_mode: bool = True
 
     # Sandbox do code mode da SIFT (run_code). A partir da SIFT 0.4.1 o processo
@@ -196,12 +194,16 @@ class Settings(BaseSettings):
     # gigante era lido inteiro na memória até derrubar o processo.
     max_json_body_bytes: int = 32 * 1024 * 1024
 
-    # Sandbox de execução do Codespace (tool "code.exec.run"): roda testes/build do
-    # projeto. Baseline UNIVERSAL = subprocesso no host (funciona em Win/Linux/desktop,
-    # sem Docker). `code_runner_url` (opt-in) encaminha para um container `runner`
-    # (--profile runner) com isolamento mais forte; vazio = subprocesso no host.
+    # Onde roda o código decidido pela IA (exec do Codespace, previews, run_code e as
+    # ferramentas criadas) — ver execution.py. `code_runner_url` aponta o executor
+    # isolado (serviço `runner` do docker-compose, ligado por padrão lá); o token vem do
+    # arquivo que o runner cria no volume compartilhado. Sem executor: desktop/dev rodam
+    # na própria máquina; PRODUÇÃO desliga a execução (rodar dentro do server exporia os
+    # segredos dele). `code_exec_isolation` força: auto | runner | host | off.
     code_runner_url: str = ""
     code_runner_token: str = ""
+    code_runner_token_file: str = ""
+    code_exec_isolation: str = "auto"
     # caps do exec (host): timeout por comando, CPU (rlimit Linux) e teto de saída.
     # code_exec_cpu_seconds é BACKSTOP p/ o run SÍNCRONO — o bound primário é o timeout
     # de wall-clock. Deve ser >= o timeout (senão um build CPU-bound morre com SIGXCPU/

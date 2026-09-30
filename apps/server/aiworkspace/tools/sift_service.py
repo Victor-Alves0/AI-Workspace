@@ -5007,8 +5007,14 @@ def build_user_sift(
         # chega ao modelo quando o chamador envia code_tools() — a exposição é
         # decidida por modelo (ModelConfig.code_mode), não aqui.
         # index_cache: warm start do índice entre restarts (validado por hash na SIFT).
+        # perfil servidor: o filho que roda o código do modelo nasce no executor
+        # isolado (sem segredos/banco); desktop/dev: subprocesso local
+        from .. import execution
+        _sandbox_cls = SubprocessSandbox
+        if execution.mode() == "runner":
+            from .runner_sandbox import RunnerSandbox as _sandbox_cls
         sift = Sift(
-            sandbox=SubprocessSandbox(
+            sandbox=_sandbox_cls(
                 timeout=float(s.sift_code_timeout_seconds),
                 cpu_seconds=s.tool_cpu_seconds,
                 memory_mb=s.sift_code_mem_mb,

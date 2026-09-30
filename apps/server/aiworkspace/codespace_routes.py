@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from . import execution
 from .auth.deps import require_approved
 from .codespace import graph_service, preview_service, worktree_service
 from .db import get_db
@@ -154,6 +155,12 @@ async def create_project(
         if not local_path or not os.path.isdir(local_path):
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
                                 "informe local_path — um diretório existente no servidor")
+        # servidor: a pasta fica na área de projetos (o resto do container é o backend,
+        # com os segredos dele — ver graph_service.folders_anywhere)
+        if not graph_service.folders_anywhere() and not graph_service.within_data_root(local_path):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "no servidor, a pasta precisa ficar dentro da área de projetos "
+                                f"({graph_service.data_root()})")
 
     gh_id: uuid.UUID | None = None
     if source == "git" and body.github_account_id:
@@ -413,7 +420,7 @@ async def preview_proxy(
     if not await run_in_threadpool(preview_service.port_owned_by, str(user.id), port):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "preview não encontrado (ou não é seu)")
     prefix = f"/codespace/preview/{port}"
-    target = f"http://127.0.0.1:{port}/{path}"
+    target = f"http://{execution.target_host()}:{port}/{path}"
     fwd_headers = {k: v for k, v in request.headers.items() if k.lower() not in _HOP_BY_HOP}
     body = await request.body()
     try:
@@ -482,7 +489,7 @@ async def preview_ws(
     import websockets as wslib
 
     qs = websocket.url.query
-    upstream_url = f"ws://127.0.0.1:{port}/{path}" + (f"?{qs}" if qs else "")
+    upstream_url = f"ws://{execution.target_host()}:{port}/{path}" + (f"?{qs}" if qs else "")
     subs = websocket.headers.get("sec-websocket-protocol")
     sub_list = [s.strip() for s in subs.split(",")] if subs else None
     try:

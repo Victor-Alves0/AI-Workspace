@@ -156,7 +156,7 @@ registered in each provider's console — on a public domain all five change. Se
 
 | Variable | Default | Description |
 |---|---|---|
-| `ALLOW_CODE_MODE` | `true` | Runs **model-generated** code in a subprocess sandbox (RCE by design: CPU/memory/time are capped, network and `/proc` are not). Turn it off in untrusted multi-user deployments. |
+| `ALLOW_CODE_MODE` | `true` | Lets models with code mode run **model-generated** code (`run_code`). On a server it runs in the isolated runner. Production without a runner turns it off regardless. |
 | `SIFT_CODE_TIMEOUT_SECONDS` / `SIFT_CODE_MEM_MB` | `30` / `512` | Limits of that sandbox. |
 | `TOOL_TIMEOUT_SECONDS` / `TOOL_CPU_SECONDS` / `TOOL_MEM_MB` | `10` / `5` / `256` | Limits of one native tool call. |
 | `BUILTIN_TOOL_TIMEOUT_SECONDS` | `120` | Wall-clock ceiling per tool call: a stuck tool returns an error instead of hanging the turn. `0` = no ceiling. |
@@ -167,7 +167,10 @@ registered in each provider's console — on a public domain all five change. Se
 |---|---|---|
 | `CODESPACE_DATA_DIR` | `/data/codespace` | Where project working copies live. |
 | `WORKSPACE_HOME` | *(empty)* | Each user's **main folder** (default of the chat's folder picker; `{user}` = user id). Empty = `~/AI Workspace` on the Windows desktop app, `<CODESPACE_DATA_DIR>/<user>/home` on a server. |
-| `CODE_RUNNER_URL` / `CODE_RUNNER_TOKEN` | empty | Optional container runner for `code.exec.run`; empty runs on the host. |
+| `CODE_RUNNER_URL` | `ws://runner:8765` in compose | The isolated runner: Codespace commands, previews, `run_code` and custom tools run there, away from the server's secrets. Empty: host on desktop/dev, **off** in production. |
+| `CODE_RUNNER_TOKEN_FILE` / `CODE_RUNNER_TOKEN` | `/run/runner/token` in compose | The runner's bearer token. The runner creates the file on first boot in the `runner_state` volume. |
+| `CODE_EXEC_ISOLATION` | `auto` | Force `runner`, `host` or `off`. `auto` picks the runner when one is set, otherwise `host` in dev and `off` in production. |
+| `RUNNER_CPUS` / `RUNNER_MEMORY` / `RUNNER_PIDS` | `2` / `3g` / `1024` | Runner container limits (compose). |
 | `CODE_EXEC_TIMEOUT_SECONDS` / `CODE_EXEC_CPU_SECONDS` / `CODE_EXEC_OUTPUT_BYTES` | `900` / `1800` / `200000` | Limits of a foreground command. |
 | `CODE_EXEC_BG_WAIT_CEILING_SECONDS` | `1200` | How long the agent waits inline on a background command before releasing the turn (it is woken up at the end). |
 | `CODE_EXEC_BG_CPU_SECONDS` / `CODE_EXEC_BG_MAX_SECONDS` | `0` / `7200` | CPU (`0` = unlimited, a long build is the use case) and the watchdog that kills it. |

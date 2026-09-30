@@ -1408,8 +1408,87 @@ def search_files(user_id: str, project_id: str, scope: dict | None, query: str,
 _GIT_AUTHOR = ("Codespace AI", "codespace-ai@ai-workspace.local")
 
 
+# O git EXECUTA programas nomeados na config do repo (hooks, fsmonitor, filtros, pager,
+# drivers de diff/merge, sshCommand…). Os comandos da IA rodam no executor isolado, mas
+# gravam na MESMA pasta — um `.git/config` plantado ali faria o git do SERVIDOR (commit
+# automático, status, diff, push) rodar código aqui dentro, ao lado dos segredos. Então
+# todo git do servidor numa pasta de projeto: (1) desliga hooks e fsmonitor por `-c`, e
+# (2) antes, tira da config do repo toda chave que aponta um programa.
+_GIT_NEUTRAL = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
+                "-c", "core.pager=cat", "-c", "protocol.ext.allow=never")
+_GIT_EXEC_KEY = re.compile(
+    r"^(core\.(hookspath|fsmonitor|sshcommand|pager|editor|askpass|gitproxy|alternaterefscommand|worktree)"
+    r"|sequence\.editor|diff\.external|diff\..+\.(command|textconv)|filter\..+"
+    r"|merge\..+\.driver|credential(\..+)?\.helper|gpg\.(.+\.)?program|include\.path|includeif\..+"
+    r"|uploadpack\..+|receive\..+|remote\..+\.(uploadpack|receivepack|vcs)|pager\..+"
+    r"|submodule\..+\.update|(merge|diff)tool\..+|protocol\..+\.allow)$"
+)
+_git_cfg_seen: dict[str, tuple[float, int]] = {}
+
+
+def _git_dirs(root: Path) -> list[Path]:
+    """Arquivos de config que o git leria em `root` — resolvidos SEM rodar git ali
+    (worktree: `.git` é um arquivo `gitdir: …`; a config comum fica no commondir)."""
+    dot = root / ".git"
+    if dot.is_dir():
+        gitdir = dot
+    elif dot.is_file():
+        try:
+            line = dot.read_text(encoding="utf-8", errors="ignore").strip()
+        except OSError:
+            return []
+        if not line.startswith("gitdir:"):
+            return []
+        gitdir = Path(line[7:].strip())
+        if not gitdir.is_absolute():
+            gitdir = (root / gitdir).resolve()
+    else:
+        return []
+    out = [gitdir / "config.worktree", gitdir / "config"]
+    common = gitdir / "commondir"
+    if common.is_file():
+        try:
+            c = Path(common.read_text(encoding="utf-8", errors="ignore").strip())
+            c = c if c.is_absolute() else (gitdir / c).resolve()
+            out.append(c / "config")
+        except OSError:
+            pass
+    return [f for f in out if f.is_file()]
+
+
+def _git_scrub(root: Path) -> None:
+    """Remove da config do repo as chaves que executam programas (ver _GIT_EXEC_KEY).
+    Só olha de novo quando o arquivo mudou (mtime/tamanho)."""
+    for cfg in _git_dirs(root):
+        try:
+            st = cfg.stat()
+        except OSError:
+            continue
+        sig = (st.st_mtime, st.st_size)
+        if _git_cfg_seen.get(str(cfg)) == sig:
+            continue
+        # `--file` num arquivo solto: sem repo, sem hooks, sem include → só lê
+        lst = subprocess.run(["git", "config", "--file", str(cfg), "--list", "--null"],
+                             capture_output=True, text=True, timeout=15)
+        ruins = sorted({item.split("\n", 1)[0] for item in (lst.stdout or "").split("\0")
+                        if item and _GIT_EXEC_KEY.match(item.split("\n", 1)[0].lower())})
+        for key in ruins:
+            subprocess.run(["git", "config", "--file", str(cfg), "--unset-all", key],
+                           capture_output=True, text=True, timeout=15)
+        if ruins:
+            logger.warning("codespace: config git de %s tinha chaves que executam programas "
+                           "(removidas): %s", root, ", ".join(ruins))
+        try:
+            st = cfg.stat()
+            _git_cfg_seen[str(cfg)] = (st.st_mtime, st.st_size)
+        except OSError:
+            pass
+
+
 def _git(root: Path, *args: str, timeout: float = 30) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=timeout)
+    _git_scrub(root)
+    return subprocess.run(["git", *_GIT_NEUTRAL, "-C", str(root), *args],
+                          capture_output=True, text=True, timeout=timeout)
 
 
 def _git_commit(root: Path, message: str) -> dict | None:
@@ -1716,8 +1795,12 @@ def git_diff(user_id: str, project_id: str, scope: dict | None, path: str = "", 
     return {"diff": diff or "(sem mudanças)"}
 
 
-def _push(root: Path, branch: str, token: str | None, ssh_key: str | None = None) -> None:
-    cmd = ["git", "-C", str(root)]
+def _push(root: Path, branch: str, token: str | None, ssh_key: str | None = None,
+          repo_url: str = "") -> None:
+    """Envia para o URL CADASTRADO do projeto, não para o `origin` da config: a pasta é
+    gravável pelos comandos da IA, e um `origin` trocado levaria o token junto."""
+    _git_scrub(root)
+    cmd = ["git", *_GIT_NEUTRAL, "-C", str(root)]
     env = None
     keyfile = None
     if ssh_key:
@@ -1725,7 +1808,7 @@ def _push(root: Path, branch: str, token: str | None, ssh_key: str | None = None
         env = {**os.environ, **env_extra}
     elif token:
         cmd += ["-c", f"http.extraHeader={_auth_header(token)}"]
-    cmd += ["push", "origin", f"HEAD:{branch}"]
+    cmd += ["push", repo_url or "origin", f"HEAD:{branch}"]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_CLONE_TIMEOUT_S, env=env)
     finally:
@@ -1756,7 +1839,8 @@ async def push(user_id: str, project_id: str) -> dict:
 
         token = await github_service.get_token(str(proj.github_account_id))
     try:
-        await run_in_threadpool(_push, root, proj.branch, token, proj.ssh_private_key)
+        await run_in_threadpool(_push, root, proj.branch, token, proj.ssh_private_key,
+                                proj.repo_url or "")
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)[:400]}
     return {"ok": True, "branch": proj.branch}
@@ -1785,6 +1869,24 @@ def workspace_home(user_id: str) -> Path:
         p = _DATA_ROOT / str(user_id) / "home"
     p.mkdir(parents=True, exist_ok=True)
     return p
+
+
+def folders_anywhere() -> bool:
+    """Pasta de trabalho fora da área de projetos só onde o disco É do usuário (desktop/
+    dev). No servidor, "o disco" é o container do backend — com o token do updater, o
+    /proc do servidor e os caches; uma pasta ali daria às ferramentas de arquivo (que
+    rodam no server) o que o executor isolado esconde."""
+    from .. import execution
+    return execution.mode() == "host"
+
+
+def within_data_root(path: str | Path) -> bool:
+    try:
+        alvo = Path(path).expanduser().resolve()
+        root = data_root().resolve()
+    except (OSError, RuntimeError):
+        return False
+    return alvo == root or root in alvo.parents
 
 
 def within_home(user_id: str, path: str | Path) -> bool:

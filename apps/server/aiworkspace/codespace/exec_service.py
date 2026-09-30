@@ -10,9 +10,12 @@ Shell: no Linux, /bin/sh. No Windows, o bash do Git for Windows quando instalado
 prompts ensinam bash; `&&`, `ls`, `grep` e aspas funcionam igual), senão o cmd.exe —
 e `environment_note()` diz ao modelo qual ele tem.
 
-Se `settings.code_runner_url` estiver setado, encaminha para um container `runner`
-(isolamento mais forte) via HTTP; senão, roda no host. O chamador é sempre síncrono
-(rodado em threadpool pela SIFT), como as demais tools do Codespace.
+No perfil servidor NADA disso roda no host: `execution.mode() == "runner"` troca o
+subprocesso por um `RemoteProc` no container isolado (sem segredos, sem banco) — o
+resto da lógica (timeout, teto de saída, matar a árvore) é a mesma. Produção sem
+executor ("off") recusa. O CWD dentro do projeto NÃO é uma prisão: um shell faz `cd /`.
+O que isola é o executor ser outro container. O chamador é sempre síncrono (rodado em
+threadpool pela SIFT), como as demais tools do Codespace.
 """
 
 from __future__ import annotations
@@ -27,9 +30,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-import httpx
-
-from .. import winjob
+from .. import execution, winjob
 from ..config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ def environment_note() -> str:
     """Frase para a descrição do code.exec.run: o sistema e o shell REAIS. Os prompts
     falam de bash e mise (a imagem Docker tem os dois); no Windows de um usuário pode
     não ter nenhum — e o modelo precisa saber antes de escrever o comando."""
-    if not _IS_WINDOWS or get_settings().code_runner_url:
+    if not _IS_WINDOWS or execution.mode() == "runner":
         return ""
     mise = "`mise` IS available" if shutil.which("mise") else \
         "`mise` is NOT installed (use the toolchains already on the machine, or ask the user)"
@@ -119,6 +120,9 @@ def _rlimit_preexec(cpu_seconds: int):
 
 
 def _kill_tree(proc: subprocess.Popen) -> None:
+    if isinstance(proc, execution.RemoteProc):
+        proc.kill()  # o executor mata o GRUPO inteiro do processo
+        return
     job = getattr(proc, "_aiw_job", None)
     if job is not None:
         # o job pega a árvore inteira — inclusive netos cujo pai já saiu, que o
@@ -154,6 +158,9 @@ def spawn_host(command: str, root: Path, env_extra: dict | None = None,
     s = get_settings()
     if cpu_seconds is None:
         cpu_seconds = int(s.code_exec_cpu_seconds)
+    remote = _remote(command, root, env_extra, cpu_seconds=max(0, int(cpu_seconds)))
+    if remote is not None:
+        return remote
     if _IS_WINDOWS:
         return _spawn_windows(command, root, env_extra, cpu_seconds=max(0, int(cpu_seconds)))
     preexec = _rlimit_preexec(int(cpu_seconds)) if int(cpu_seconds) > 0 else _setsid_preexec()
@@ -163,6 +170,19 @@ def spawn_host(command: str, root: Path, env_extra: dict | None = None,
         text=True, errors="replace", env=_clean_env(env_extra),
         preexec_fn=preexec,
     )
+
+
+def _remote(command: str, root: Path, env_extra: dict | None, *, cpu_seconds: int):
+    """No executor isolado quando ele existe; recusa em produção sem executor; None =
+    siga no host. O env vai só com o que o comando precisa (o executor tem o dele,
+    sem segredo nenhum)."""
+    m = execution.mode()
+    if m == "off":
+        raise OSError(execution.OFF_MESSAGE)
+    if m != "runner":
+        return None
+    extra = {str(k): str(v) for k, v in (env_extra or {}).items()}
+    return execution.RemoteProc(shell=command, cwd=root, env=extra, cpu_seconds=cpu_seconds)
 
 
 def _spawn_windows(command: str, root: Path, env_extra: dict | None, *, cpu_seconds: int) -> subprocess.Popen:
@@ -210,6 +230,9 @@ def spawn_server(command: str, root: Path, env_extra: dict | None = None) -> sub
     backend) roda por horas e o limite de CPU o mataria. Mantém o env higienizado e o
     grupo de processos próprio (p/ `kill_tree` derrubar a árvore). Só o preview_service
     usa isto — o run normal continua com o limite de CPU."""
+    remote = _remote(command, root, env_extra, cpu_seconds=0)
+    if remote is not None:
+        return remote
     if _IS_WINDOWS:
         return _spawn_windows(command, root, env_extra, cpu_seconds=0)
     return subprocess.Popen(
@@ -268,30 +291,11 @@ def _run_host(command: str, root: Path, timeout: int, env_extra: dict | None) ->
     }
 
 
-def _run_via_runner(command: str, rel_cwd: str, timeout: int, env_extra: dict | None) -> dict[str, Any]:
-    """Encaminha p/ o container `runner` (opt-in). Contrato mínimo:
-    POST {url}/run {command, cwd (relativo ao codespace_data montado), timeout, env}
-    -> {exit_code, output, seconds, truncated, timed_out}. Bearer = code_runner_token."""
-    s = get_settings()
-    headers = {"Authorization": f"Bearer {s.code_runner_token}"} if s.code_runner_token else {}
-    try:
-        r = httpx.post(
-            s.code_runner_url.rstrip("/") + "/run",
-            json={"command": command, "cwd": rel_cwd, "timeout": timeout, "env": env_extra or {}},
-            headers=headers, timeout=timeout + 30,
-        )
-        r.raise_for_status()
-        return r.json()
-    except httpx.HTTPError as exc:
-        logger.warning("runner exec falhou: %s", exc)
-        return {"error": f"o serviço runner não respondeu ({str(exc)[:200]}) — verifique CODE_RUNNER_URL "
-                         "ou desative-o para rodar no host"}
-
-
 def run_command(root: Path, command: str, *, data_root: Path | None = None,
                 timeout: int | None = None, env_extra: dict | None = None) -> dict[str, Any]:
-    """Roda `command` com CWD=`root`. `root` deve estar dentro do codespace_data
-    (jail garantido pelo chamador). Devolve {exit_code, output, seconds, ...} ou {error}."""
+    """Roda `command` com CWD=`root` (dentro do codespace_data — isso escolhe a pasta,
+    não prende o comando; o isolamento é o executor). Devolve {exit_code, output,
+    seconds, ...} ou {error}."""
     command = (command or "").strip()
     if not command:
         return {"error": "comando vazio"}
@@ -300,11 +304,6 @@ def run_command(root: Path, command: str, *, data_root: Path | None = None,
         return {"error": "diretório de trabalho do projeto não existe"}
     s = get_settings()
     timeout = int(timeout or s.code_exec_timeout_seconds)
-    if s.code_runner_url:
-        # o runner monta o mesmo volume; passa o caminho RELATIVO ao data_root
-        try:
-            rel = str(root.relative_to(data_root)) if data_root else str(root)
-        except ValueError:
-            rel = str(root)
-        return _run_via_runner(command, rel, timeout, env_extra)
+    if execution.mode() == "off":
+        return {"error": execution.OFF_MESSAGE}
     return _run_host(command, root, timeout, env_extra)

@@ -103,9 +103,10 @@ RUN chmod +x entrypoint.sh
 # nomeado montado sobre um caminho que não existe na imagem nasce do root, e o
 # processo (não-root) não consegue escrever. Foi o que derrubou os anexos —
 # /data/uploads faltava nesta linha e todo upload virava erro interno.
+# /run/runner: token do executor isolado (volume runner_state, compartilhado com o server).
 RUN useradd --create-home --uid 10001 app \
-    && mkdir -p /home/app/.cache /data/codespace /data/uploads /data/whatsapp \
-    && chown -R app:app /home/app /data/codespace /data/uploads /data/whatsapp
+    && mkdir -p /home/app/.cache /data/codespace /data/uploads /data/whatsapp /run/runner \
+    && chown -R app:app /home/app /data/codespace /data/uploads /data/whatsapp /run/runner
 USER app
 # HOME/caches de modelos (fastembed→/tmp por padrão; redirecionados p/ o volume mlcache).
 # mise: dirs no volume codespace_data (persistem os toolchains instalados); MISE_YES

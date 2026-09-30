@@ -41,9 +41,13 @@ terceiros (página web, e-mail, issue, mensagem de canal, PDF, transcrição).
 
 1. **Injeção de prompt → execução.** Conteúdo hostil convence o modelo a rodar um comando.
    Vale mesmo com **um único usuário**: o alvo é o segredo da instância, não o vizinho.
-   - Mitigação: segredos **fora do ambiente do processo** (ver `APP_SECRET_FILE` em
-     `config.py` e `docs/`), confirmação em ações de risco, e — no perfil servidor — o
-     backend `runner` para execução.
+   - Mitigação: no perfil servidor, **todo código da IA roda no executor isolado**
+     (container `runner`: sem segredos, sem banco, só o volume dos projetos, disco
+     somente-leitura, sem capabilities — ver `execution.py` e `docs/security.md`).
+     Produção sem executor **não executa**. O git do servidor ignora programas
+     plantados na config dos repositórios, e as pastas ficam dentro da área de
+     projetos. Segredos por arquivo (`APP_SECRET_FILE`) continuam valendo como camada
+     extra.
 2. **Exposição de rede não intencional.** Preview/porta alcançável por quem não deveria.
    - Mitigação: `PREVIEW_BIND` (padrão `127.0.0.1`) + proxy autenticado
      (`/codespace/preview/<porta>/`, com `port_owned_by`).

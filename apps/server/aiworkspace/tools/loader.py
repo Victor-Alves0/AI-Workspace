@@ -542,7 +542,9 @@ async def get_sift_for_user(
     sift_config = getattr(model_config, "sift_config", None) or {}
     # mesmo critério do chat (_code_mode): o flag do modelo SÓ vale com o off-switch
     # global ligado — senão o turno roda em modo normal e os PINS devem valer.
-    code_mode = bool(getattr(model_config, "code_mode", False)) and get_settings().allow_code_mode
+    from .. import execution
+    code_mode = (bool(getattr(model_config, "code_mode", False)) and get_settings().allow_code_mode
+                 and execution.mode() != "off")
     try:
         # Pins POR-ESCOPO (SIFT >= 0.7): ferramentas "quentes" viram specs de 1ª
         # classe (sem discovery) direto no scope — sem mutar estado do Sift

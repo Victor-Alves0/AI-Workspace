@@ -1,7 +1,10 @@
 """Execução isolada do código de tools do usuário.
 
-O código do usuário NÃO roda no processo do servidor. Cada execução acontece em
-um subprocesso Python isolado (`python -I`), com:
+O código do usuário NÃO roda no processo do servidor. No perfil servidor, o
+subprocesso nasce no executor isolado (container `runner`, sem segredos nem banco —
+ver execution.py); `python -I` e os limites abaixo só controlam RECURSOS, não isolam
+arquivos/rede. No desktop/dev, cada execução é um subprocesso Python local
+(`python -I`), com:
   - timeout rígido (mata o processo se estourar)
   - limites de CPU e memória (RLIMIT_*) quando o SO suporta (Linux/containers)
   - comunicação por stdin/stdout em JSON (sem acesso ao estado do servidor)
@@ -18,6 +21,7 @@ import subprocess
 import sys
 from typing import Any
 
+from .. import execution
 from ..config import get_settings
 
 # Runner executado dentro do subprocesso. Lê {code, params} de stdin, executa o
@@ -108,6 +112,23 @@ def _run_windows(args: list[str], stdin: str, timeout: float, env: dict[str, str
     return _Done(proc.returncode, out, err)
 
 
+def _run_remote(args: list[str], stdin: str, timeout: float, env: dict[str, str],
+                cpu_seconds: int, memory_mb: int) -> _Done:
+    """No executor isolado: mesmo contrato (stdin JSON → stdout JSON), outro container."""
+    try:
+        proc = execution.RemoteProc(argv=args, cwd="/tmp", env=env,
+                                    cpu_seconds=cpu_seconds, mem_mb=memory_mb,
+                                    stdin=True, merge_stderr=False)
+    except OSError as exc:
+        raise ToolExecutionError(str(exc)) from exc
+    try:
+        out, err = proc.communicate(stdin, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        raise
+    return _Done(proc.returncode if proc.returncode is not None else -9, out, err or "")
+
+
 def _exec(runner: str, payload: dict[str, Any]) -> Any:
     s = get_settings()
     env = {
@@ -121,7 +142,10 @@ def _exec(runner: str, payload: dict[str, Any]) -> Any:
         env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", r"C:\Windows")
     args = [sys.executable, "-I", "-c", runner]
     try:
-        if windows:
+        if execution.mode() == "runner":
+            proc = _run_remote(args, json.dumps(payload), s.tool_timeout_seconds, env,
+                               int(s.tool_cpu_seconds), int(s.tool_mem_mb))
+        elif windows:
             proc = _run_windows(args, json.dumps(payload), s.tool_timeout_seconds, env,
                                 int(s.tool_cpu_seconds), int(s.tool_mem_mb))
         else:

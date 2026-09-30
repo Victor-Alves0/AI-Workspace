@@ -220,11 +220,39 @@ def self_check() -> dict:
     # prompt basta) recupera APP_SECRET/DATABASE_URL de /proc/1/environ e, com eles, os
     # tokens de integração de todos os usuários. Alarma p/ o admin em vez de depender de
     # alguém lembrar. Some ao migrar p/ APP_SECRET_FILE. Ver docs/trust-model.md.
+    # onde roda o código da IA: executor isolado (ok), máquina do usuário (desktop/dev),
+    # ou desligado (produção sem executor — avisa, senão ninguém entende por que o
+    # Codespace não roda comandos). No modo executor, confere se ele responde.
+    try:
+        from . import execution
+        modo = execution.mode()
+        results["execution"] = modo
+        if modo == "off":
+            record("execution", "off", severity="degraded", detail={
+                "reason": "produção sem executor isolado: comandos, previews e run_code "
+                          "desligados — suba o serviço `runner` do docker-compose"})
+        elif modo == "runner":
+            import httpx
+            base = get_settings().code_runner_url.replace("ws://", "http://").replace("wss://", "https://")
+            try:
+                ok = httpx.get(base.rstrip("/") + "/health", timeout=5).status_code == 200
+            except Exception:  # noqa: BLE001
+                ok = False
+            results["runner"] = ok
+            if not ok:
+                record("execution", "runner_down", severity="degraded", detail={
+                    "reason": "o executor isolado não respondeu — comandos do Codespace vão falhar",
+                    "url": base})
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("self-check de execução falhou: %s", exc)
+
     try:
         s = get_settings()
         leaking = s.secrets_in_env
         results["secrets_from_file"] = not leaking
-        if leaking and s.allow_code_mode:
+        # com o executor isolado, o código da IA não vê o /proc do server
+        from . import execution as _ex
+        if leaking and s.allow_code_mode and _ex.mode() == "host":
             record("secrets", "in_env", severity="degraded", detail={
                 "vars": ",".join(leaking),
                 "reason": "segredo via ambiente fica legível em /proc/1/environ para "

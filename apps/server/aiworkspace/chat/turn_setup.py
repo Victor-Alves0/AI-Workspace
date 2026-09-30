@@ -400,8 +400,10 @@ def _sse(event: dict) -> str:
 
 def _code_mode(model_config: ModelConfig | None) -> bool:
     """Code mode da SIFT vale só quando o mestre (tools_enabled) está ligado — e
-    quando o operador não desligou o off-switch global (allow_code_mode)."""
-    if not get_settings().allow_code_mode:
+    quando o operador não desligou o off-switch global (allow_code_mode) — e há onde
+    rodar (produção sem executor isolado não roda código do modelo; execution.py)."""
+    from .. import execution
+    if not get_settings().allow_code_mode or execution.mode() == "off":
         return False
     return bool(model_config and model_config.tools_enabled and model_config.code_mode)
 

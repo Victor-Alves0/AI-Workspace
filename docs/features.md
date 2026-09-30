@@ -72,8 +72,9 @@ The AI discovers and executes tools on demand. Categories: **native**, **Codespa
   - A slow generation does not hold the turn: it is queued and **delivered to the chat by
     itself** when it is ready, as a tool result — no second model call. The queue survives a
     restart (`media_jobs`), because the media is already paid for.
-- **Python code**: the AI writes and executes code in an **isolated sandbox** (a subprocess with
-  CPU/memory/time limits).
+- **Python code**: the AI writes and executes code in an **isolated sandbox**. On a server, that
+  sandbox is a separate container with no secrets and no database access. On the desktop, it
+  is a local process with CPU, memory and time limits.
 - **Messaging agency**: the AI acts on your WhatsApp/Telegram/Discord connections
   (list/read/send).
 - **Security research**: CVEs from the **NVD**, entries in the **Exploit-DB** catalog and public

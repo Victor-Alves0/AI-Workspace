@@ -42,19 +42,55 @@ model-generated code. This page describes the security model and the operational
 - **Public API**: per key — RPM, RPD, monthly, tokens, concurrency and budget (see
   [public-api.md](public-api.md)).
 
-## Tool execution (sandbox)
+## Code execution (isolated runner)
 
-The AI can write and execute **Python code** (the highest-risk vector — RCE by design).
-Mitigations:
+The AI runs code in four ways: Codespace commands, live previews, `run_code` (code mode), and
+tools written by you or by the AI. All four are RCE by design, and the threat is prompt
+injection (see [trust-model.md](trust-model.md)).
 
-- Code runs in an **isolated subprocess** (`python -I`), **not** in the server process.
-- **CPU**, **memory** and **wall-clock** limits (`TOOL_*`, `SIFT_CODE_TIMEOUT_SECONDS`).
-- **Anti-SSRF guard** on the browsing/page-reading tools (blocks internal IPs, no `file://`).
+**On a server (Docker), none of it runs in the backend.** It runs in the `runner` container,
+which has:
 
-> ⚠️ The sandbox limits CPU/memory/time, but does **not** isolate the network or `/proc`. In an
-> **untrusted multi-user** deployment, consider turning off `ALLOW_CODE_MODE`, or hardening the
-> sandbox (network off, `hidepid`, nsjail/gVisor) and delivering secrets by file. In a
-> **single-user self-hosted** install (the common case), the risk is your own code.
+- **No secrets.** Nothing in its environment, no secret files, and no updater token.
+- **Only the projects volume** (`/data/codespace`). No uploads, no WhatsApp sessions, no model
+  cache.
+- **No route to the database, updater or browser.** It sits on its own `sandbox` network,
+  shared only with the server.
+- **Tight container limits.** Read-only root filesystem, no Linux capabilities,
+  `no-new-privileges`, and caps on CPU, memory and PIDs (`RUNNER_CPUS`, `RUNNER_MEMORY`,
+  `RUNNER_PIDS`).
+- **A bearer token** for every request. The token is created by the runner and read by the
+  server from a shared volume.
+
+The server keeps the credentials. In `run_code`, the snippet runs in the runner, but each
+tool it calls runs back in the server, so the model's code never touches a token.
+
+Two gaps close along with it:
+
+- **Git.** The runner writes to the same folders the server runs `git` in. Before each call,
+  the server strips repo config keys that name a program (hooks, fsmonitor, filters, pagers,
+  diff/merge drivers, `sshCommand`, includes…). It also pushes to the project's registered
+  URL, never to an `origin` someone could have rewritten.
+- **Folders.** On a server, a chat or project folder must live inside the projects area. The
+  rest of the backend container holds its secrets.
+
+**If there is no runner in production, execution is off.** Commands, previews and `run_code`
+refuse with an error that says how to turn them on, and the health check raises an alarm.
+
+**On the desktop app,** code runs on your own machine, and access to it is the feature. CPU,
+memory and wall-clock limits still apply (`TOOL_*`, `SIFT_CODE_TIMEOUT_SECONDS`).
+
+The browsing and page-reading tools keep their **anti-SSRF guard**: internal IPs are blocked
+and `file://` is refused.
+
+**Internet for the runner** is on by default, because package managers need it. Its secrets
+are not there to exfiltrate. For a runner with no network, set the `sandbox` network to
+`internal: true` in a `docker-compose.override.yml`. Previews and installs will then stop
+working.
+
+**Actions without a person watching** follow the same logic. Automations, the API and open
+channels only act in categories the owner allowed beforehand. The model's `confirm=true`
+does not count as approval (see [trust-model.md](trust-model.md)).
 
 ## Remote Terminal (your own machines)
 

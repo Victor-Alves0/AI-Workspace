@@ -15,7 +15,8 @@ Modelo de concorrência (thread-safe p/ tools da SIFT, que rodam em threadpool):
   o chat não tem geração ativa, dispara o WAKE no loop principal.
 
 Registro em memória por-processo (como `generation._active`): não sobrevive a restart — o
-subprocesso também não sobreviveria. Escopo v1: caminho HOST (o `runner` HTTP segue síncrono).
+subprocesso também não sobreviveria. No perfil servidor o processo roda no executor isolado
+(`execution.RemoteProc`), com a mesma lógica.
 """
 
 from __future__ import annotations

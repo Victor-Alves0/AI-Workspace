@@ -88,6 +88,14 @@ services:
       OPENROUTER_REDIRECT_URI: ${OPENROUTER_REDIRECT_URI:-http://localhost:8000/integrations/providers/openrouter/callback}
       # Client ID público do "Entrar com GitHub" por código (device flow).
       GITHUB_DEVICE_CLIENT_ID: ${GITHUB_DEVICE_CLIENT_ID:-}
+      # Executor isolado (serviço `runner` abaixo): TODO código decidido pela IA roda
+      # lá — comandos do Codespace, previews, run_code e ferramentas criadas. O token
+      # nasce no runner e chega aqui pelo volume `runner_state` (só leitura).
+      CODE_RUNNER_URL: ${CODE_RUNNER_URL:-ws://runner:8765}
+      CODE_RUNNER_TOKEN_FILE: /run/runner/token
+    networks:
+      - default
+      - sandbox
     volumes:
       # persiste modelos de embedding (fastembed/HF) e índices SIFT (.npz)
       # entre recriações do container — cold start rápido
@@ -102,6 +110,8 @@ services:
       - whatsapp_data:/data/whatsapp
       # token do updater (só leitura): é assim que o painel pede "Atualizar agora"
       - updater_state:/run/updater:ro
+      # token do executor isolado (só leitura)
+      - runner_state:/run/runner:ro
       # Cookies do yt-dlp (anti-bloqueio da transcrição). Descomente e ajuste o
       # caminho do host; depois no .env: TRANSCRIBE_COOKIES_DIR=/data/yt-cookies
       # - ./secrets/yt-cookies:/data/yt-cookies:ro
@@ -118,6 +128,43 @@ services:
       # localhost:1455; esta publicação permite concluir o OAuth sem copiar URL
       # quando o navegador roda na mesma máquina do AI Workspace.
       - "${CHATGPT_OAUTH_BIND:-127.0.0.1}:${CHATGPT_OAUTH_PORT:-1455}:8000"
+
+  # Executor isolado: o ÚNICO lugar onde roda código decidido pela IA (comandos do
+  # Codespace, servidores de preview, run_code, ferramentas criadas). Mesma imagem do
+  # server, mas sem NADA que valha roubar: nenhum segredo no ambiente, só o volume dos
+  # projetos, fora da rede do banco/updater/navegador (rede `sandbox`: só o server
+  # o alcança), disco somente-leitura, sem capabilities e com teto de CPU/memória/
+  # processos. Uma injeção de prompt que vire comando encontra só os projetos.
+  # Sem internet para o executor: ver docs/configuration.md (override `internal`).
+  runner:
+    build:
+      context: ./apps/server
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-}
+    command: ["python", "-m", "aiworkspace.runner"]
+    restart: unless-stopped
+    environment:
+      RUNNER_TOKEN_FILE: /run/runner/token
+      RUNNER_ROOTS: /data/codespace:/tmp
+    networks:
+      - sandbox
+    volumes:
+      # os projetos (mesmo caminho que no server) + a casa dos toolchains do mise
+      - codespace_data:/data/codespace
+      - runner_state:/run/runner
+      # HOME próprio e persistente: caches de npm/Maven/Gradle/pip sobrevivem a restart
+      - runner_home:/home/app
+    read_only: true
+    tmpfs:
+      - /tmp:size=2g,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: ${RUNNER_PIDS:-1024}
+    mem_limit: ${RUNNER_MEMORY:-3g}
+    cpus: ${RUNNER_CPUS:-2}
+    ports:
       # Codespace: previews "own-origin" — a IA sobe um app numa porta deste range,
       # publicada no host, pra apps completos (Metabase etc.) rodarem na RAIZ da própria
       # origem (login/redirect/SPA/websocket funcionam). DEVE bater com code_preview_port_*.
@@ -205,6 +252,12 @@ services:
       - .:/project
       - updater_state:/run/updater
 
+networks:
+  default:
+  # server ↔ runner. O banco, o updater e o navegador ficam só na `default`: o código
+  # que roda no executor não tem rota para eles.
+  sandbox:
+
 volumes:
   pgdata:
   mlcache:
@@ -214,3 +267,5 @@ volumes:
   caddy_data:
   caddy_config:
   updater_state:
+  runner_state:
+  runner_home:

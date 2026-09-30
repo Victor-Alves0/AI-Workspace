@@ -33,8 +33,16 @@ def _is_admin(user: User) -> bool:
     return getattr(user, "role", "") == "admin"
 
 
+def _anywhere(user: User) -> bool:
+    return _is_admin(user) and graph_service.folders_anywhere()
+
+
 def _allowed(user: User, path: str | Path) -> bool:
-    return _is_admin(user) or graph_service.within_home(str(user.id), path)
+    if _anywhere(user):
+        return True
+    if _is_admin(user):  # servidor: o admin navega a área de projetos inteira
+        return graph_service.within_data_root(path)
+    return graph_service.within_home(str(user.id), path)
 
 
 def _folder_out(p: CodespaceProject) -> dict:
@@ -54,7 +62,7 @@ async def list_folders(user: User = Depends(require_approved), db: AsyncSession 
     return {
         "home": _folder_out(home),
         "folders": [_folder_out(p) for p in rows if p.id != home.id],
-        "browse_anywhere": _is_admin(user),
+        "browse_anywhere": _anywhere(user),
     }
 
 
@@ -102,7 +110,9 @@ async def browse(
     return {
         "path": str(alvo), "parent": parent, "home": str(home), "dirs": dirs[:500],
         "truncated": len(dirs) > 500,
-        "roots": _roots() if _is_admin(user) else [{"name": "Pasta principal", "path": str(home)}],
+        "roots": (_roots() if _anywhere(user)
+                  else [{"name": "Projetos", "path": str(graph_service.data_root().resolve())}] if _is_admin(user)
+                  else [{"name": "Pasta principal", "path": str(home)}]),
     }
 
 
