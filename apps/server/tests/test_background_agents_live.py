@@ -61,7 +61,7 @@ def test_placar_para_a_ia_so_com_o_que_roda():
 
 def test_equipe_terminada_deixa_o_card_para_gravar(monkeypatch):
     entregues = []
-    monkeypatch.setattr(subagent_jobs, "_deliver", lambda chat, nota: entregues.append(nota))
+    monkeypatch.setattr(subagent_jobs, "_deliver", lambda chat, nota, jid=None: entregues.append(nota))
 
     async def run():
         return {"output": "relatório", "note": "2 of 2", "card": {"kind": "subagent_team", "members": []}}

@@ -159,6 +159,8 @@ async def lifespan(app: FastAPI):
         # durabilidade: destrava chats cujos jobs de background foram cortados por um
         # restart (o "wake que nunca chega"). Em background p/ não atrasar o readiness.
         bg.spawn(exec_jobs.recover_orphans())
+        from .chat import subagent_jobs as _subagent_jobs
+        bg.spawn(_subagent_jobs.recover())
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível iniciar o reaper de exec_jobs (%s)", exc)
     # sincronização entre instâncias: troca periódica com os pares que esta instância

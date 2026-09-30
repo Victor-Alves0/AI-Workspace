@@ -30,7 +30,7 @@ EXCLUDED = frozenset({
     "telegram_connections", "telegram_threads",
     "slack_channel_connections", "slack_channel_threads",
     "whatsapp_connections", "whatsapp_chats", "whatsapp_messages", "whatsapp_threads",
-    "sync_peers",
+    "sync_peers", "subagent_jobs",
 })
 
 # tabelas fora do ORM (SQL cru) que também são dado do usuário

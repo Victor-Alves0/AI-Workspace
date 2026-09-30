@@ -150,13 +150,17 @@ async def run_team(
     chain: bool = False,
     attachments: list[dict] | None = None,
     ask_lead: bool = True,
+    done: dict[int, dict] | None = None,
+    checkpoint: Callable[[int, dict], None] | None = None,
 ) -> dict:
     """Roda a equipe e devolve o resultado (kind `subagent_team`). `emit` recebe os eventos
     de cada membro: {"member": i, "status": "running"|"progress"|"done", ...}.
     `chain`: em sequência, e cada membro recebe os relatórios dos anteriores (etapas que
     dependem umas das outras); senão, todos ao mesmo tempo (a fila do pool limita).
     `attachments`: arquivos do usuário entregues a todos; `ask_lead` False (segundo
-    plano) tira dos membros o request_from_lead — não há orquestrador esperando."""
+    plano) tira dos membros o request_from_lead — não há orquestrador esperando.
+    `done`: resultados de membros que já terminaram (equipe retomada após um restart —
+    não rodam de novo); `checkpoint(i, resultado)` é chamado a cada membro concluído."""
     n = len(members)
     results: list[dict | None] = [None] * n
     from .agent_mailbox import current_ref
@@ -176,6 +180,11 @@ async def run_team(
         return f"{m['task']}\n\nWork from the previous steps of your team (build on it):\n\n{contexto}"
 
     async def _one(i: int, m: dict) -> None:
+        if done and i in done:
+            results[i] = done[i]
+            emit({"member": i, "status": "done", "ok": not results[i].get("error")})
+            return
+
         def prog(ev: dict, _i: int = i) -> None:
             if ev.get("state") == "running":
                 emit({"member": _i, "status": "running"})
@@ -205,6 +214,11 @@ async def run_team(
             logger.warning("membro da equipe falhou: %s", exc)
             res = {"error": f"o subagente falhou: {exc}"}
         results[i] = res if isinstance(res, dict) else {"output": str(res)}
+        if checkpoint is not None:
+            try:
+                checkpoint(i, results[i])
+            except Exception:  # noqa: BLE001 - checkpoint é bônus; a equipe segue
+                logger.exception("checkpoint do membro %d falhou", i)
         emit({"member": i, "status": "done", "ok": not results[i].get("error")})
 
     if chain:

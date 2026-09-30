@@ -1087,6 +1087,56 @@ async def subagents_for_turn(
     return _subagent_opts(specs, {**conf, "worktree": conf.get("worktree") and bool(project_id or workspace)}, runner)
 
 
+async def run_background_spec(jid: str, user_id: uuid.UUID, chat_id: uuid.UUID, spec: dict,
+                              done: dict[int, dict] | None = None) -> dict:
+    """Roda um agente/equipe em segundo plano a partir da receita gravada (`spec`) —
+    tanto no lançamento quanto na retomada após um restart (`done` = membros que já
+    tinham terminado). Sessão de banco própria."""
+    from . import subagent_jobs
+    from .subagent_team import run_team
+
+    r = spec.get("runner") or {}
+    async with SessionLocal() as s:
+        u = await s.get(User, user_id)
+        if u is None:
+            return {"error": "usuário não encontrado"}
+        p = None
+        if r.get("parent_id"):
+            try:
+                p = await s.get(ModelConfig, uuid.UUID(str(r["parent_id"])))
+            except ValueError:
+                p = None
+        runner = _make_subagent_runner(
+            s, u, chat_id, int(r.get("max_depth") or 2),
+            pass_context=bool(r.get("pass_context")), worker_memory=bool(r.get("worker_memory")),
+            depth=int(r.get("depth") or 0), ancestry=frozenset(r.get("ancestry") or []),
+            project_id=r.get("project_id"), isolate_keys=frozenset(r.get("isolate_keys") or []),
+            parent=p, adhoc_model=r.get("adhoc_model") or "", workspace=bool(r.get("workspace")),
+            pool=SubagentPool(int(r.get("pool_limit") or 1), int(r.get("concurrency") or 8), u.id),
+        )
+
+        def prog(ev: dict) -> None:
+            subagent_jobs.progress(jid, ev)
+
+        if spec.get("kind") == "agent":
+            a = spec.get("agent") or {}
+            # em segundo plano ninguém está esperando para responder um pedido
+            res = await runner(a.get("key") or "new", a.get("task") or "", a.get("new"),
+                               handoff={**(a.get("handoff") or {}), "ask_lead": False}, progress=prog)
+            if isinstance(res, dict) and not res.get("error"):
+                res = {**res, "card": {k: v for k, v in res.items() if k != "note"}}
+            return res
+        t = spec.get("team") or {}
+        res = await run_team(runner, t.get("members") or [], t.get("goal") or "", prog,
+                             runner.synthesize, chain=bool(t.get("chain")),
+                             attachments=t.get("attachments"), ask_lead=False, done=done,
+                             checkpoint=lambda i, out: subagent_jobs.checkpoint(jid, i, out))
+        return {"output": res["report"],
+                "note": f"{res['succeeded']} of {res['size']} agents succeeded.",
+                # o card da mensagem passa a ter a equipe inteira (membros + relatórios)
+                "card": {**res, "team": t.get("label") or ""}}
+
+
 async def _recent_history(db: AsyncSession, chat_id: uuid.UUID, limit: int = 20) -> list[dict]:
     """Últimas mensagens (não-compactadas) do chat, no formato do modelo — p/ dar
     contexto da conversa a um operário quando a opção estiver ligada."""
@@ -1607,71 +1657,37 @@ def _make_subagent_runner(
             ask_lead=_ask_lead(handoff, prior) and bool(mc.tools_enabled),
         )
 
+    def _runner_spec() -> dict:
+        """Como recriar ESTE runner noutro processo (agente retomado após restart)."""
+        return {
+            "max_depth": max_depth, "pass_context": pass_context, "worker_memory": worker_memory,
+            "depth": depth, "ancestry": sorted(ancestry), "project_id": project_id,
+            "isolate_keys": sorted(isolate_keys), "adhoc_model": adhoc_model,
+            "workspace": workspace, "parent_id": str(parent.id) if parent is not None else None,
+            "pool_limit": pool.remaining or 1, "concurrency": pool.concurrency,
+        }
+
     def start_background(key: str, task: str, new: dict | None, label: str,
                          handoff: dict | None = None) -> str:
         """Solta o subagente em segundo plano; o chat é acordado com o relatório. Roda
-        numa sessão de banco PRÓPRIA: a do turno fecha quando o turno acaba."""
+        numa sessão de banco PRÓPRIA (a do turno fecha quando o turno acaba) e fica
+        registrado no banco para ser retomado se o servidor reiniciar."""
         from . import subagent_jobs
 
-        user_id, parent_id = user.id, (parent.id if parent is not None else None)
-        box: dict[str, str] = {}
-
-        async def _job() -> dict:
-            async with SessionLocal() as s:
-                u = await s.get(User, user_id)
-                p = await s.get(ModelConfig, parent_id) if parent_id else None
-                if u is None:
-                    return {"error": "usuário não encontrado"}
-                runner = _make_subagent_runner(
-                    s, u, chat_id, max_depth, pass_context=pass_context,
-                    worker_memory=worker_memory, depth=depth, ancestry=ancestry,
-                    project_id=project_id, isolate_keys=isolate_keys,
-                    parent=p, adhoc_model=adhoc_model, pool=bg_pool, workspace=workspace,
-                )
-                # em segundo plano ninguém está esperando para responder um pedido
-                res = await runner(key, task, new, handoff={**(handoff or {}), "ask_lead": False},
-                                   progress=lambda ev: subagent_jobs.progress(box.get("jid"), ev))
-                if isinstance(res, dict) and not res.get("error"):
-                    res = {**res, "card": {k: v for k, v in res.items() if k != "note"}}
-                return res
-
-        bg_pool = pool.fork()
-        box["jid"] = subagent_jobs.start(str(chat_id), label, task, _job)
-        return box["jid"]
+        spec = {"kind": "agent", "runner": _runner_spec(),
+                "agent": {"key": key, "task": task, "new": new, "handoff": handoff}}
+        return subagent_jobs.start_spec(str(chat_id), user.id, label, task, spec)
 
     def start_background_team(members: list[dict], goal: str, label: str, chain: bool = False,
                               attachments: list[dict] | None = None) -> str:
-        """Solta a equipe inteira em segundo plano; o chat acorda com o relatório final."""
+        """Solta a equipe inteira em segundo plano; o chat acorda com o relatório final.
+        Cada membro que termina vira checkpoint: um restart retoma só os que faltavam."""
         from . import subagent_jobs
-        from .subagent_team import run_team
 
-        user_id, parent_id = user.id, (parent.id if parent is not None else None)
-        bg_pool = pool.fork()
-        box: dict[str, str] = {}
-
-        async def _job() -> dict:
-            async with SessionLocal() as s:
-                u = await s.get(User, user_id)
-                p = await s.get(ModelConfig, parent_id) if parent_id else None
-                if u is None:
-                    return {"error": "usuário não encontrado"}
-                runner = _make_subagent_runner(
-                    s, u, chat_id, max_depth, pass_context=pass_context,
-                    worker_memory=worker_memory, depth=depth, ancestry=ancestry,
-                    project_id=project_id, isolate_keys=isolate_keys,
-                    parent=p, adhoc_model=adhoc_model, pool=bg_pool, workspace=workspace,
-                )
-                res = await run_team(runner, members, goal,
-                                     lambda ev: subagent_jobs.progress(box.get("jid"), ev),
-                                     runner.synthesize, chain=chain, attachments=attachments,
-                                     ask_lead=False)
-                return {"output": res["report"],
-                        "note": f"{res['succeeded']} of {res['size']} agents succeeded.",
-                        # o card da mensagem passa a ter a equipe inteira (membros + relatórios)
-                        "card": {**res, "team": label}}
-
-        box["jid"] = subagent_jobs.start(str(chat_id), label, goal, _job, members=members)
-        return box["jid"]
+        spec = {"kind": "team", "runner": _runner_spec(),
+                "team": {"members": members, "goal": goal, "label": label, "chain": chain,
+                         "attachments": attachments}}
+        return subagent_jobs.start_spec(str(chat_id), user.id, label, goal, spec, members=members)
 
     # segundo plano só com um chat para acordar
     run_subagent.start_background = start_background if chat_id else None  # type: ignore[attr-defined]

@@ -12,12 +12,16 @@ principal vê o placar no próximo turno (`status_block`). Ao terminar, o result
 completo (membros, relatórios, passos) é gravado no próprio card da mensagem que soltou
 o trabalho — o painel continua mostrando tudo depois de recarregar.
 
-Registro em memória, por processo (como `generation._active`): um restart perde os
-agentes em andamento — o turno deles também morreria.
+Durável (como o Claude Code guarda a transcrição de cada subagente para retomá-lo):
+cada trabalho tem uma linha em `subagent_jobs` com a receita (`spec`) e o checkpoint de
+cada membro que terminou. No boot, `recover()` retoma os interrompidos só com o que
+faltava e entrega os que terminaram sem chegar a acordar o chat. O progresso AO VIVO
+(passos de cada agente) fica só em memória — após um restart o membro recomeça a tarefa.
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -35,17 +39,22 @@ _KEEP_DONE_S = 2 * 3600      # quanto tempo o painel ainda lê um trabalho que t
 _TEXT_CAP = 4000             # texto/raciocínio ao vivo por item (guarda o fim)
 _TIMELINE_CAP = 120          # itens ao vivo por agente
 
+_MAX_ATTEMPTS = 3            # restarts seguidos que um trabalho aguenta antes de desistir
+
 _jobs: dict[str, dict[str, Any]] = {}
-_pending: dict[str, list[str]] = {}
+_pending: dict[str, list[tuple[str | None, str]]] = {}   # chat → (job, nota do wake)
 _patches: dict[str, list[tuple[str, dict]]] = {}   # chat → (job, resultado p/ o card)
 _wakers: dict[str, asyncio.Task] = {}
 
 
 def start(chat_id: str, name: str, task: str, run: Callable[[], Awaitable[dict]],
-          members: list[dict] | None = None) -> str:
+          members: list[dict] | None = None, *, jid: str | None = None,
+          durable: bool = False, done: dict[int, dict] | None = None) -> str:
     """Solta o agente; devolve o id do trabalho. `run()` executa o agente inteiro.
-    `members` (equipe): nome e tarefa de cada membro, para o progresso ao vivo."""
-    jid = uuid.uuid4().hex[:10]
+    `members` (equipe): nome e tarefa de cada membro, para o progresso ao vivo.
+    `durable`: o trabalho tem linha no banco (resultado gravado ao terminar);
+    `done`: membros que já tinham terminado (retomada)."""
+    jid = jid or uuid.uuid4().hex[:10]
     live: dict[str, Any] = {"timeline": []}
     if members is not None:
         live = {"members": [{"name": str(m.get("name") or f"Agente {i + 1}"),
@@ -53,6 +62,9 @@ def start(chat_id: str, name: str, task: str, run: Callable[[], Awaitable[dict]]
                              "state": "queued", "timeline": []}
                             for i, m in enumerate(members)],
                 "synthesizing": False}
+    for i, r in (done or {}).items():
+        if members is not None and 0 <= i < len(live["members"]):
+            live["members"][i]["state"] = "failed" if r.get("error") else "done"
     _jobs[jid] = {"chat_id": chat_id, "name": name, "task": task, "status": "running",
                   "started": time.time(), "live": live}
 
@@ -71,9 +83,14 @@ def start(chat_id: str, name: str, task: str, run: Callable[[], Awaitable[dict]]
                     m["state"] = "failed"
             job["live"]["synthesizing"] = False
         card = result.get("card") if isinstance(result, dict) else None
+        nota = note_for(name, task, result)
+        if durable:
+            falhou = isinstance(result, dict) and bool(result.get("error"))
+            await _db_finish(jid, "failed" if falhou else "done", nota,
+                             card if isinstance(card, dict) else None)
         if isinstance(card, dict):
             _patches.setdefault(chat_id, []).append((jid, card))
-        _deliver(chat_id, note_for(name, task, result))
+        _deliver(chat_id, nota, jid if durable else None)
 
     bg.spawn(_go(), name=f"subagent-bg-{jid}")
     _gc()
@@ -199,8 +216,8 @@ def note_for(name: str, task: str, result: Any) -> str:
             "Continue a partir deste resultado.")
 
 
-def _deliver(chat_id: str, note: str) -> None:
-    _pending.setdefault(chat_id, []).append(note)
+def _deliver(chat_id: str, note: str, jid: str | None = None) -> None:
+    _pending.setdefault(chat_id, []).append((jid, note))
     waker = _wakers.get(chat_id)
     if waker is None or waker.done():
         _wakers[chat_id] = bg.spawn(_waker(chat_id), name=f"subagent-wake-{chat_id}")
@@ -271,9 +288,10 @@ async def _waker(chat_id: str) -> None:
                     _pending.pop(chat_id, None)
                     return
                 await asyncio.sleep(1.0)
-            notas = _pending.pop(chat_id, [])
-            if not notas:
+            fila = _pending.pop(chat_id, [])
+            if not fila:
                 break
+            notas = [n for _, n in fila]
             # o turno que soltou o trabalho já foi gravado (o chat está ocioso)
             try:
                 await _persist_cards(chat_id)
@@ -286,8 +304,159 @@ async def _waker(chat_id: str) -> None:
                 else f"{len(notas)} agentes em segundo plano concluídos",
                 notify_body=", ".join(nomes)[:200],
             )
+            await _db_delivered([j for j, _ in fila if j])
             await asyncio.sleep(1.0)  # a geração do wake se registra antes da próxima volta
     except Exception:  # noqa: BLE001 - wake é best-effort, nunca derruba o processo
         logger.exception("wake de subagentes falhou (chat %s)", chat_id)
     finally:
         _wakers.pop(chat_id, None)
+
+
+# ---------------------------------------------------------------------------
+# Durabilidade: registro no banco, checkpoint por membro, retomada no boot
+# ---------------------------------------------------------------------------
+
+def _jsonable(x: Any) -> Any:
+    return json.loads(json.dumps(x, default=str))
+
+
+def start_spec(chat_id: str, user_id: Any, name: str, task: str, spec: dict,
+               members: list[dict] | None = None) -> str:
+    """Solta um trabalho descrito por uma receita (`turn_setup.run_background_spec`) e o
+    registra no banco antes de rodar — é o que permite retomá-lo após um restart."""
+    jid = uuid.uuid4().hex[:10]
+    spec = _jsonable(spec)
+
+    async def _run() -> dict:
+        from .turn_setup import run_background_spec
+
+        await _db_insert(jid, chat_id, user_id, name, task, spec)
+        return await run_background_spec(jid, uuid.UUID(str(user_id)), uuid.UUID(chat_id), spec)
+
+    return start(chat_id, name, task, _run, members=members, jid=jid, durable=True)
+
+
+def checkpoint(jid: str, i: int, result: dict) -> None:
+    """Membro `i` terminou: grava o resultado dele (um restart não o roda de novo)."""
+    bg.spawn(_db_checkpoint(jid, i, _jsonable(result)), name=f"subagent-ckpt-{jid}")
+
+
+async def _db_insert(jid: str, chat_id: str, user_id: Any, name: str, task: str, spec: dict) -> None:
+    from ..db import SessionLocal
+    from ..models import SubagentJob
+
+    try:
+        async with SessionLocal() as db:
+            db.add(SubagentJob(job_key=jid, chat_id=uuid.UUID(chat_id), user_id=uuid.UUID(str(user_id)),
+                               kind=str(spec.get("kind") or "agent"), name=name[:200], task=task,
+                               spec=spec, results={}))
+            await db.commit()
+    except Exception:  # noqa: BLE001 - sem o registro o trabalho roda igual (só não é retomável)
+        logger.exception("não registrei o trabalho em segundo plano %s", jid)
+
+
+async def _db_checkpoint(jid: str, i: int, result: dict) -> None:
+    from sqlalchemy import text
+
+    from ..db import SessionLocal
+
+    try:
+        async with SessionLocal() as db:
+            await db.execute(text(
+                "UPDATE subagent_jobs SET results = results || jsonb_build_object(CAST(:k AS text), "
+                "CAST(:v AS jsonb)), updated_at = now() WHERE job_key = :j"),
+                {"k": str(i), "v": json.dumps(result), "j": jid})
+            await db.commit()
+    except Exception:  # noqa: BLE001
+        logger.exception("checkpoint do trabalho %s (membro %d) falhou", jid, i)
+
+
+async def _db_finish(jid: str, status: str, note: str, card: dict | None) -> None:
+    from sqlalchemy import update
+
+    from ..db import SessionLocal
+    from ..models import SubagentJob
+
+    try:
+        async with SessionLocal() as db:
+            await db.execute(update(SubagentJob).where(SubagentJob.job_key == jid).values(
+                status=status, note=note, card=_jsonable(card) if card is not None else None))
+            await db.commit()
+    except Exception:  # noqa: BLE001
+        logger.exception("não gravei o fim do trabalho %s", jid)
+
+
+async def _db_delivered(jids: list[str]) -> None:
+    if not jids:
+        return
+    from sqlalchemy import update
+
+    from ..db import SessionLocal
+    from ..models import SubagentJob
+
+    try:
+        async with SessionLocal() as db:
+            await db.execute(update(SubagentJob).where(SubagentJob.job_key.in_(jids)).values(delivered=True))
+            await db.commit()
+    except Exception:  # noqa: BLE001
+        logger.exception("não marquei a entrega de %s", jids)
+
+
+async def recover() -> None:
+    """BOOT: retoma o que um restart interrompeu. Trabalho rodando que não está neste
+    processo → roda de novo só com os membros sem checkpoint (até _MAX_ATTEMPTS
+    restarts; depois avisa o chat que falhou). Terminado mas não entregue → entrega
+    (card + wake). Nunca levanta."""
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import delete, select
+
+    from ..db import SessionLocal
+    from ..models import SubagentJob
+
+    try:
+        async with SessionLocal() as db:
+            await db.execute(delete(SubagentJob).where(
+                SubagentJob.delivered.is_(True),
+                SubagentJob.updated_at < datetime.now(timezone.utc) - timedelta(days=7)))
+            rows = list(await db.scalars(select(SubagentJob).where(SubagentJob.delivered.is_(False))))
+            retomar: list[SubagentJob] = []
+            for j in rows:
+                if j.job_key in _jobs:
+                    continue
+                if j.status == "running":
+                    if j.attempts >= _MAX_ATTEMPTS:
+                        j.status = "failed"
+                        j.note = note_for(j.name, j.task, {"error": (
+                            f"interrompido {j.attempts} vezes por reinícios do servidor; "
+                            "não foi retomado de novo")})
+                    else:
+                        j.attempts += 1
+                        retomar.append(j)
+            await db.commit()
+            pendentes = [(str(j.chat_id), j.job_key, j.note, j.card) for j in rows
+                         if j.job_key not in _jobs and j.status in ("done", "failed")]
+            relancar = [(str(j.chat_id), j.user_id, j.job_key, j.name, j.task, dict(j.spec or {}),
+                         dict(j.results or {})) for j in retomar]
+    except Exception:  # noqa: BLE001
+        logger.exception("recuperação dos agentes em segundo plano falhou")
+        return
+
+    for chat_id, jid, nota, card in pendentes:
+        if isinstance(card, dict):
+            _patches.setdefault(chat_id, []).append((jid, card))
+        if nota:
+            _deliver(chat_id, nota, jid)
+    for chat_id, user_id, jid, name, task, spec, results in relancar:
+        done = {int(k): v for k, v in results.items() if str(k).isdigit() and isinstance(v, dict)}
+        membros = (spec.get("team") or {}).get("members") if spec.get("kind") == "team" else None
+
+        async def _run(jid=jid, user_id=user_id, chat_id=chat_id, spec=spec, done=done) -> dict:
+            from .turn_setup import run_background_spec
+
+            return await run_background_spec(jid, user_id, uuid.UUID(chat_id), spec, done=done)
+
+        start(chat_id, name, task, _run, members=membros, jid=jid, durable=True, done=done)
+    if pendentes or relancar:
+        logger.warning("agentes em segundo plano: %d retomado(s), %d entregue(s) após restart",
+                       len(relancar), len(pendentes))

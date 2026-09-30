@@ -623,11 +623,20 @@ _EXPLICIT_CACHE_PROVIDERS = ("anthropic", "google")
 _REF_FULLTEXT_LIMIT = 24000
 
 
+# o chat mostra o nome do arquivo no cabeçalho do bloco de código (Markdown.tsx
+# parseFenceInfo); sem isso aparece só a linguagem
+_CODE_FENCE_NOTE = (
+    "Code blocks: always name the language after the fence (```python). When the code is, "
+    "or belongs in, a specific file, add its name: ```python title=\"app/main.py\"."
+)
+
+
 def _build_static_system(chat_system_prompt: str | None, sift_prompt: str) -> str:
     """Parte ESTÁVEL do system (prompt do chat + SIFT) — o prefixo cacheável."""
     parts: list[str] = []
     if chat_system_prompt:
         parts.append(chat_system_prompt.strip())
+    parts.append(_CODE_FENCE_NOTE)
     if sift_prompt:
         parts.append(sift_prompt)
     return "\n\n".join(p for p in parts if p)

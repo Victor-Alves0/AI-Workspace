@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUpRight, Bell, BookOpen, Check, ChevronDown, ChevronUp, Code2, Copy, Dices, FlaskConical, GitBranch, Image as ImageIcon, Link2, Loader2, Menu, MessageSquareDashed, Mic, Pause, Play, RotateCcw, RotateCw, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Sparkles, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
+import { ArrowDown, Bell, BookOpen, Check, ChevronDown, ChevronUp, Code2, Copy, Dices, FlaskConical, GitBranch, Image as ImageIcon, Link2, Loader2, Menu, MessageSquareDashed, Mic, Pause, Play, RotateCcw, RotateCw, Search, Scissors, Share2, ShieldAlert, SlidersHorizontal, Square, Trash2, Users, Volume2, Wrench, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { CHAT_COMMANDS, parseCommand, splitRollArgs, type ParsedCommand } from "@/lib/commands";
 import { copyText } from "@/lib/clipboard";
@@ -14,7 +14,7 @@ import { transcribeWhisper } from "@/lib/wakeword";
 import { onVoiceActivate } from "@/lib/desktop";
 import { browserNotify, playChime, requestNotifPermission } from "@/lib/notify";
 import { downloadJSON, downloadPDF, downloadTXT } from "@/lib/download";
-import { pickSuggestions, type Suggestion } from "@/lib/suggestions";
+import SuggestionChips from "@/components/SuggestionChips";
 import type { ActivityStep, AskSpec, Attachment, Chat, ChatArtifact, CodespaceProject, Folder, KnowledgeRef, ListenConfig, Message, Model, ModelConfig, Prompt, RoundtableConfig, RoundtableParticipant, Skill, Speaker, SystemTool, Tool, ToolEvent, User, VoiceSession } from "@/lib/types";
 import CodespaceFileBrowser, { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME, extLang, stripLineNumbers } from "@/components/CodespaceFileBrowser";
 import type { CodespaceDragPayload, CodespaceSnippetPayload } from "@/components/CodespaceFileBrowser";
@@ -484,7 +484,6 @@ export default function ChatPage() {
   const [micStream, setMicStream] = useState<MediaStream | null>(null);
   // o composer registra aqui o seu `addFiles`: a gravação vira anexo de áudio
   const addFilesRef = useRef<((files: File[]) => Promise<void>) | null>(null);
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   // notificações (toast + som), controladas pela config "Notificações" da Conta
   const [toasts, setToasts] = useState<{ id: number; title: string; body?: string }[]>([]);
   const recorderRef = useRef<{ stop: () => Promise<Blob>; stream: MediaStream } | null>(null);
@@ -560,10 +559,6 @@ export default function ChatPage() {
     if (typeTimer.current) clearInterval(typeTimer.current);
   }, []);
 
-  // sorteia sugestões ao montar (rotaciona a cada visita à página)
-  useEffect(() => {
-    setSuggestions(pickSuggestions(3));
-  }, []);
 
   const refreshChats = useCallback(async () => {
     const list = await api.get<Chat[]>("/chats");
@@ -1296,7 +1291,6 @@ export default function ChatPage() {
     setChatArtifacts([]);
     setArtifactOpen(null);
     setLiveArtifact(null);
-    setSuggestions(pickSuggestions(3));
     setWorkspaceOpen(false);
   }
 
@@ -2815,24 +2809,7 @@ export default function ChatPage() {
                 {/* menu do "+" abre para baixo aqui (há espaço); na conversa abre para cima */}
                 {temporary && <p className="mt-2 text-xs text-muted">Chat temporário — esta conversa não será salva.</p>}
                 <div className="mt-5 w-full max-w-3xl px-4">
-                  <p className="mb-2.5 flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-muted">
-                    <Sparkles size={13} /> Sugerido
-                  </p>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    {suggestions.map((s) => (
-                      <button
-                        key={s.title}
-                        onClick={() => typeSuggestion(`${s.title} ${s.sub}`)}
-                        className="group rounded-2xl border border-border bg-surface/60 px-4 py-3.5 text-left transition-all duration-200 hover:border-accent/40 hover:bg-surface"
-                      >
-                        <span className="flex items-start justify-between gap-2">
-                          <span className="text-sm font-medium text-ink">{s.title}</span>
-                          <ArrowUpRight size={15} data-touch="decorative" className="mt-0.5 shrink-0 text-muted opacity-0 transition-opacity group-hover:opacity-100" />
-                        </span>
-                        <span className="mt-1 block text-xs leading-5 text-muted">{s.sub}</span>
-                      </button>
-                    ))}
-                  </div>
+                  <SuggestionChips onPick={typeSuggestion} />
                 </div>
               </div>
             ) : (
