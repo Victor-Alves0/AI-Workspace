@@ -108,3 +108,5 @@ class KnowledgeChunk(Base):
     )
     ordinal: Mapped[int] = mapped_column(Integer, default=0)
     text: Mapped[str] = mapped_column(Text, default="")
+    # modelo que gerou o embedding ("" = o antigo): ver knowledge/reembed.py
+    embed_model: Mapped[str] = mapped_column(String(120), default="", server_default="")

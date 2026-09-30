@@ -74,7 +74,7 @@ export interface CallStats {
   endedAt: number | null;
   tokens: number;
   exact: boolean;
-  /** ms do início da geração até a 1ª coisa que a IA escreveu (medido no servidor) */
+  /** latência do provedor: pedido → 1º byte da resposta, da chamada mais recente ao modelo */
   latencyMs: number | null;
 }
 

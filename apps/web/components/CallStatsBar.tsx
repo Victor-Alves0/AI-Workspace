@@ -38,7 +38,7 @@ export function CallStatsBar({ stats }: { stats: CallStats }) {
         <Layers size={12} />
         {stats.exact ? "" : "~"}{fmtInt.format(stats.tokens)} tokens
       </span>
-      <span className="flex items-center gap-1" title="Latência: da mensagem até a IA começar a escrever">
+      <span className="flex items-center gap-1" title="Latência do provedor: do pedido ao 1º byte da resposta (última chamada ao modelo)">
         <Gauge size={12} />
         {stats.latencyMs === null ? "—" : fmtLatency(stats.latencyMs)}
       </span>

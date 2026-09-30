@@ -35,8 +35,9 @@ _DEFAULT_MODEL = "openai/gpt-4o-mini"
 
 @dataclass
 class DeepSearchConfig:
-    api_key: str | None = None            # chave OpenRouter (p/ os passos internos)
+    api_key: str | None = None            # chave do provedor dos passos internos
     model: str = ""                        # modelo dos passos internos (barato)
+    base_url: str | None = None            # None = OpenRouter; senão Ollama/provedor próprio
     max_subqueries: int = 3                # amplitude (sub-perguntas por rodada)
     max_rounds: int = 2                    # profundidade (iterações c/ reflexão)
     max_results_per_query: int = 4
@@ -127,7 +128,8 @@ async def run(query: str, cfg: DeepSearchConfig) -> dict:
     if not query:
         return {"error": "provide a research topic/question"}
     if not cfg.api_key:
-        return {"error": "OpenRouter key not configured (needed for deep search)"}
+        return {"error": "no model available for deep search: add an OpenRouter key, or pick "
+                         "the deep-search model in the tool settings"}
     if not cfg.web_search:
         return {"error": "web search unavailable (configure a search engine)"}
 
@@ -139,7 +141,7 @@ async def run(query: str, cfg: DeepSearchConfig) -> dict:
                 cfg.api_key, model,
                 [{"role": "system", "content": system}, {"role": "user", "content": user}],
                 params={"max_tokens": max_tokens, "temperature": 0.2},
-                timeout=90.0,
+                timeout=90.0, base_url=cfg.base_url,
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("deep_search llm falhou: %s", exc)
@@ -214,7 +216,7 @@ async def run(query: str, cfg: DeepSearchConfig) -> dict:
         f"Topic: {query}\n\nNotes:\n" + "\n\n".join(notes) + f"\n\nSources:\n{src_list}", 1300,
     )
     if not brief:
-        return {"error": "synthesis failed (check the deep-search model / OpenRouter key)"}
+        return {"error": f"synthesis failed (check the deep-search model '{model}' and its provider)"}
 
     return {
         "kind": "deep_research",

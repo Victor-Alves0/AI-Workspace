@@ -316,7 +316,24 @@ async def _assemble_configs(db: AsyncSession, user_id: uuid.UUID, model_config: 
     alpha = await get_secret(db, user_id, ALPHAVANTAGE_KEY)
     fin_cfg = sift_service.finance_config_from_secrets(finnhub, alpha, tools_cfg.get("finance"))
     openrouter_key = await get_secret(db, user_id, OPENROUTER_KEY)
-    deep_cfg = sift_service.deep_config_from_secrets(openrouter_key, tools_cfg.get("deep_search"))
+    # Pesquisa profunda: o modelo escolhido para ela, no PROVEDOR dele. Sem escolha e
+    # sem chave do OpenRouter, usa o próprio modelo do chat — antes ela só existia com
+    # OpenRouter, e quem usa Ollama/provedor próprio ficava sem.
+    deep_prefs = dict(tools_cfg.get("deep_search") or {})
+    deep_model = str(deep_prefs.get("model") or "").strip()
+    if not deep_model and not openrouter_key and model_config is not None:
+        deep_model = (getattr(model_config, "base_model", "") or "").strip()
+    deep_key, deep_base = openrouter_key, None
+    if deep_model and u is not None:
+        from fastapi import HTTPException
+
+        from ..chat.turn_setup import _resolve_provider
+        try:
+            deep_key, deep_base = await _resolve_provider(db, u, deep_model)
+            deep_prefs["model"] = deep_model
+        except HTTPException:
+            pass  # provedor dele indisponível: fica no padrão (OpenRouter, se houver chave)
+    deep_cfg = sift_service.deep_config_from_secrets(deep_key, deep_prefs, base_url=deep_base)
     # Google (Gmail+Agenda): contas conectadas do usuário filtradas pelas liberadas
     # neste modelo (tools_cfg.google.accounts; vazio = todas). O token NÃO entra na
     # config (é buscado ao vivo na tool) — só id+email das contas + permissões.

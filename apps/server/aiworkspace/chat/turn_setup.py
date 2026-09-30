@@ -505,9 +505,12 @@ async def _folder_block(db: AsyncSession, chat_id: uuid.UUID, user: User,
     if (model_config.capabilities or {}).get("workspace", True) is False:
         return ""
     if (chat.workspace or "") == "off":
-        return ("This chat has NO working folder: you cannot create, download or edit files. If "
-                "the user wants files, call request_folder (they approve a folder) instead of "
-                "writing code into the reply as if it were saved.")
+        # neutro de propósito: "sem pasta" é o normal. Uma nota que puxa para arquivos
+        # fazia a IA pedir pasta para o que ela sempre respondeu no chat (código, texto).
+        return ("This chat has no working folder, which is normal: answer in the chat as usual "
+                "(code, scripts, documents and tables go in the reply). Only if the user "
+                "explicitly asks to save, download or run files on their machine, call "
+                "request_folder. Never say a file was saved.")
     from ..codespace import graph_service
     from ..models import CodespaceProject
 
@@ -817,17 +820,27 @@ async def _ref_docs(
         d = await db.get(KnowledgeDoc, did)
         if d is None or d.user_id != user.id or str(d.base_id) not in allowed:
             continue
+        # o usuário APONTOU este documento: se não der para ler, a IA precisa saber —
+        # antes ele sumia calado e a resposta seguia como se o anexo não existisse
+        motivo = ""
+        text = ""
         if not d.data:
-            continue
-        try:
-            text = await run_in_threadpool(kb_ingest.extract_text, d.filename, d.mime, bytes(d.data))
-        except Exception:  # noqa: BLE001
-            continue
-        if text and text.strip():
-            out.append({
-                "id": str(d.id), "filename": d.filename,
-                "base_id": str(d.base_id), "text": text,
-            })
+            motivo = "o arquivo não tem conteúdo salvo"
+        else:
+            try:
+                text = await run_in_threadpool(kb_ingest.extract_text, d.filename, d.mime, bytes(d.data))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("documento referenciado %s ilegível: %s", d.id, exc)
+                motivo = f"a extração falhou ({str(exc)[:120]})"
+            if not motivo and not (text or "").strip():
+                motivo = "nenhum texto foi extraído (ex.: PDF escaneado sem OCR)"
+        if motivo:
+            text = (f"[The document '{d.filename}' could not be read: {motivo}. Tell the user "
+                    "instead of guessing its content.]")
+        out.append({
+            "id": str(d.id), "filename": d.filename,
+            "base_id": str(d.base_id), "text": text,
+        })
     return out
 
 
@@ -984,6 +997,19 @@ _GROUNDING_REINFORCE = (
 
 
 @traced("setup:guards")
+def _guard_skipped(guard: dict, field: str, exc: Exception) -> None:
+    detail = getattr(exc, "detail", None) or str(exc)
+    logger.warning("guarda de saída '%s' desligado neste turno: %s '%s' indisponível (%s)",
+                   guard.get("name"), field, guard.get(field), detail)
+    try:
+        from .. import health_service
+        health_service.record_bg("output_guard", "skipped", severity="degraded",
+                                 detail={"guard": guard.get("name"), field: guard.get(field),
+                                         "reason": str(detail)[:200]})
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def _resolve_guards(
     db: AsyncSession, user: User, model_config: ModelConfig | None
 ) -> list[dict]:
@@ -1028,8 +1054,11 @@ async def _resolve_guards(
                 continue  # juiz sem modelo ou sem critério → inválido, ignora
             try:
                 jk, jb = await _resolve_provider(db, user, guard["judge_model"])
-            except HTTPException:
-                continue  # provedor do juiz indisponível
+            except HTTPException as exc:
+                # provedor do juiz indisponível: o guarda sai deste turno — mas avisado,
+                # senão o dono acha que ele está protegendo e não está
+                _guard_skipped(guard, "judge_model", exc)
+                continue
             guard["_judge_api_key"] = jk
             guard["_judge_base_url"] = jb
         if action == "fallback_model":
@@ -1037,8 +1066,9 @@ async def _resolve_guards(
                 continue  # fallback sem modelo → guarda inútil, ignora
             try:
                 key, base = await _resolve_provider(db, user, guard["fallback_model"])
-            except HTTPException:
-                continue  # provedor do fallback indisponível (ex.: Ollama off)
+            except HTTPException as exc:
+                _guard_skipped(guard, "fallback_model", exc)  # ex.: Ollama off
+                continue
             guard["_api_key"] = key
             guard["_base_url"] = base
         elif not guard["inject_text"].strip():
@@ -1540,8 +1570,8 @@ def _make_subagent_runner(
                     if uev is not None:
                         s.add(uev)
                         await s.commit()
-            except Exception:  # noqa: BLE001 - ledger é best-effort
-                pass
+            except Exception as exc:  # noqa: BLE001 - ledger é best-effort, mas não mudo
+                logger.warning("uso do subagente não foi registrado (custo some da analítica): %s", exc)
         _flush_pend()
         # o texto que fecha a linha do tempo é o próprio relatório: não duplica
         if timeline and timeline[-1]["kind"] == "text":

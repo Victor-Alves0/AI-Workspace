@@ -153,6 +153,13 @@ async def lifespan(app: FastAPI):
         bg.spawn(_prewarm_memory())
     except Exception as exc:  # noqa: BLE001
         logger.warning("Não foi possível agendar o pré-aquecimento da memória (%s)", exc)
+    # vetores de outro modelo de embedding (troca de modelo, ou vindos pela sincronização)
+    # são refeitos aos poucos — senão a busca na Base/memória devolve lixo para eles
+    try:
+        from .knowledge import reembed
+        bg.spawn(reembed.loop(), trace=False)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Não foi possível agendar o recálculo de embeddings (%s)", exc)
     # reaper dos worktrees isolados ociosos do Codespace (ciclo de vida das tarefas)
     _wt_reaper_task = None
     try:

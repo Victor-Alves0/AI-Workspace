@@ -1,4 +1,10 @@
-"""Embeddings locais (FastEmbed `BAAI/bge-small-en-v1.5`, 384 dims, ONNX, sem chave).
+"""Embeddings locais (FastEmbed, multilíngue, 384 dims, ONNX, sem chave).
+
+MODELO: `paraphrase-multilingual-MiniLM-L12-v2`. Era o `bge-small-en-v1.5`, só inglês —
+a busca na Base de Conhecimento e na memória funcionava mal com textos em português (e
+nos demais idiomas). Mesmo tamanho de vetor (384): a troca não muda o esquema; os
+vetores antigos são refeitos em segundo plano (`knowledge/reembed.py`), guiados pela
+etiqueta do modelo em cada linha.
 
 Uma instância só, usada pela Base de Conhecimento e pela memória do usuário
 (`memory/memory_service`), que guardam vetores no pgvector. Tudo é bloqueante (CPU)
@@ -17,7 +23,7 @@ from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
-MODEL = "BAAI/bge-small-en-v1.5"
+MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DIMS = 384
 _BATCH = 256
 

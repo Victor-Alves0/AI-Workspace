@@ -195,8 +195,8 @@ def _meta_prefix(meta: dict | None) -> str:
 # --------------------------------------------------------------------------- #
 _INSERT = sql_text(
     "INSERT INTO knowledge_chunks "
-    "(id, doc_id, base_id, user_id, ordinal, text, embedding, created_at, updated_at) "
-    "VALUES (:id, :doc_id, :base_id, :user_id, :ordinal, :text, CAST(:emb AS vector), now(), now())"
+    "(id, doc_id, base_id, user_id, ordinal, text, embedding, embed_model, created_at, updated_at) "
+    "VALUES (:id, :doc_id, :base_id, :user_id, :ordinal, :text, CAST(:emb AS vector), :model, now(), now())"
 )
 
 
@@ -255,6 +255,7 @@ async def index_doc(doc_id: uuid.UUID) -> None:
                         "ordinal": i,
                         "text": chunk,
                         "emb": embeddings.to_pgvector(vec),
+                        "model": embeddings.MODEL,
                     },
                 )
             d = await db.get(KnowledgeDoc, doc_id)

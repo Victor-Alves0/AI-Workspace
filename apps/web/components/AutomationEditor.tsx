@@ -340,7 +340,7 @@ export default function AutomationEditor({
           max: Math.max(d.schedule.min ?? 1, d.schedule.max ?? 6),
           unit: d.schedule.unit ?? "hours",
         }
-      : { ...d.schedule, mode, time: d.schedule.time || "09:00", tz_offset: new Date().getTimezoneOffset() };
+      : { ...d.schedule, mode, time: d.schedule.time || "09:00", tz_offset: new Date().getTimezoneOffset(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone };
     const body = {
       title: d.title || (isMonitor ? "Novo monitor" : "Nova automação"),
       kind: d.kind,

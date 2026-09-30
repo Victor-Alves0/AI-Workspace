@@ -55,14 +55,18 @@ async def _collect(agen):
 
 # ------------------------------ prompts --------------------------------------
 
-def test_system_do_participante_e_equipe_sem_encenacao_e_proibe_inventar():
+def test_system_do_participante_segue_o_formato_pedido_e_proibe_inventar():
     s = rt.build_system("Prompt do preset", "revisar segurança", "Revisor", ["Analista"])
     assert s.startswith("Prompt do preset")
     assert "Sua função nesta equipe: revisar segurança" in s
     assert "NUNCA invente" in s and "ferramentas" in s
-    assert "não é um debate nem uma encenação" in s
+    # o formato vem do pedido (tarefa, debate, ideias); personagem só se o usuário pedir —
+    # nem "roleplay" imposto, nem debate proibido
+    assert "O FORMATO vem do pedido do usuário" in s and "debate" in s
+    assert "Só interprete um personagem se o usuário pedir" in s
     assert rt.DONE_MARK in s and rt.ASK_MARK in s
-    assert "persona" not in s.lower()
+    import re
+    assert not re.search(r"persona", s.lower())
 
 
 def test_visao_do_participante_rotula_quem_disse_o_que_e_funde_mensagens_seguidas():

@@ -367,9 +367,13 @@ async def _run_monitor(db, automation: Automation, user: User) -> dict[str, Any]
     body = summary_input
     # redação opcional pelo LLM (a instrução guia o tom); fallback = texto extraído
     if summary_input and api_key and model:
+        # idioma do PERFIL (ou o da instrução): o app não é só de quem fala português
+        lang = str((user.profile or {}).get("language") or "").strip()
+        lang_rule = (f"in {lang}" if lang
+                     else "in the same language as the Instruction (Portuguese if there is none)")
         drafted = await llm(
             "You are a monitoring assistant. Write a short, clear notification to the user "
-            "in the user's language (Portuguese), based on the detected update. Be direct.",
+            f"{lang_rule}, based on the detected update. Be direct.",
             f"Instruction: {automation.instructions or ''}\n\nDetected update:\n{summary_input}",
             300,
         )

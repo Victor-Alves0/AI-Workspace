@@ -316,10 +316,22 @@ def _trim_tool_results(
 _bg_tasks: set[asyncio.Task] = set()
 
 
+def _memory_llm(model: str, base_url: str | None, aux: str) -> tuple[str, str | None]:
+    """Modelo da extração de memória, no provedor DA CONVERSA (a chave é dela).
+    OpenRouter: o auxiliar (Config → Chats) quando for um id do OpenRouter, senão um
+    modelo barato. Ollama/provedor próprio/assinatura ChatGPT: o próprio modelo do chat."""
+    from ..providers import chatgpt_codex
+    if base_url or chatgpt_codex.is_codex_model(model):
+        return model, base_url
+    if aux and "/" in aux and not aux.startswith(("ollama/", "@", "codex/")):
+        return aux, None
+    return memory_service._LLM_MODEL, None
+
+
 def _spawn_memory_write(
     api_key: str, user_text: str, assistant_text: str, user_id: str,
     chat_id: str, agent_id: str | None, scope: str, review: bool = False,
-    *, project_id: str | None = None,
+    *, project_id: str | None = None, llm: tuple[str, str | None] | None = None,
 ) -> None:
     """Grava a memória pós-turno no escopo escolhido (global/model/chat/project), SEM
     bloquear a conclusão do turno.
@@ -343,6 +355,7 @@ def _spawn_memory_write(
                     agent_id=agent_id,
                     project_id=project_id,
                     review=review,
+                    llm=llm,
                 )
             )
         except Exception:  # noqa: BLE001 - memória é best-effort
@@ -1802,11 +1815,12 @@ REQUEST_FOLDER_TOOL: dict[str, Any] = {
     "function": {
         "name": "request_folder",
         "description": (
-            "Ask the user to let you work in a folder on their computer/server. Use it when "
-            "the user wants files created, downloaded or edited but this chat has no folder "
-            "(no file tools), or when they ask for a location outside the current folder. The "
-            "user sees an approval card; after calling it, end your reply and wait. Never "
-            "claim files were written anywhere without file tools confirming it."
+            "Ask the user for a folder on their computer/server where you may save, download, "
+            "edit or run files. Only when the user explicitly wants files ON DISK (or a place "
+            "outside the current folder). Writing code, a script or a document IN the reply "
+            "never needs a folder — just answer. The user sees an approval card; after calling "
+            "it, end your reply and wait. Never claim files were written without file tools "
+            "confirming it."
         ),
         "parameters": {
             "type": "object",
@@ -4080,6 +4094,9 @@ async def run_turn(
             retry=("media" if retried_media else "plain" if retried_plain else None),
         )
         _llm_exc: BaseException | None = None
+        # latência do PROVEDOR (pedido → 1º byte da resposta): vai à barra sob o composer
+        _llm_t0 = time.monotonic()
+        _latency_sent = False
         try:
             async for chunk in openrouter.stream_chat(
                 api_key, model, messages, tools=tools, params=params,
@@ -4093,6 +4110,9 @@ async def run_turn(
                     continue
                 got_chunk = True
                 _llm_span.mark("ttfb_ms")  # 1º pedaço do provedor
+                if not _latency_sent:
+                    _latency_sent = True
+                    yield {"type": "latency", "ms": round((time.monotonic() - _llm_t0) * 1000, 1)}
                 if chunk.get("usage"):
                     usage = chunk["usage"]
                 for choice in chunk.get("choices", []):
@@ -4500,7 +4520,8 @@ async def run_turn(
     # 5. memória pós-turno (só em chats persistentes; escopo escolhido pelo chat).
     # Dispara em BACKGROUND: não deve atrasar o `done`/conclusão visível na UI.
     if assistant_text and chat_id and mem_write and mem_write != "off":
-        _spawn_memory_write(api_key, user_text, assistant_text, user_id, chat_id, agent_id, mem_write, mem_review, project_id=mem_project)
+        _spawn_memory_write(api_key, user_text, assistant_text, user_id, chat_id, agent_id, mem_write, mem_review,
+                            project_id=mem_project, llm=_memory_llm(model, base_url, _aux))
 
     # 5b. Aprendizado Proativo (Curator): revisão em background a cada N turnos —
     # propõe skills e cura memória (opt-in; a checagem do toggle é feita na task).

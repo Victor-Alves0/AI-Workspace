@@ -70,6 +70,12 @@ def _exec(sql: str, params: Any = None) -> int:
     return pgsync.execute(pgsync.from_pyformat(sql), *tuple(params or ()))
 
 
+def _embed_model() -> str:
+    from ..knowledge.embeddings import MODEL
+
+    return MODEL  # etiqueta do vetor: o recálculo acha os de outro modelo (knowledge/reembed)
+
+
 def _vec(text: str) -> str:
     from ..knowledge.embeddings import embed_query, to_pgvector
 
@@ -388,6 +394,7 @@ def _insert(user_id: str, text: str, *, run_id: str | None, agent_id: str | None
         "hash": hashlib.md5(text.encode()).hexdigest(),
         "user_id": user_id,
         "created_at": _now(),
+        "embed_model": _embed_model(),
     }
     if run_id:
         payload["run_id"] = run_id
@@ -401,7 +408,8 @@ def _insert(user_id: str, text: str, *, run_id: str | None, agent_id: str | None
 
 
 def _update(user_id: str, memory_id: str, text: str) -> bool:
-    patch = {"data": text, "hash": hashlib.md5(text.encode()).hexdigest(), "updated_at": _now()}
+    patch = {"data": text, "hash": hashlib.md5(text.encode()).hexdigest(), "updated_at": _now(),
+             "embed_model": _embed_model()}
     return _exec(
         f"UPDATE {_TABLE} SET vector = %s::text::vector, payload = payload || %s::text::jsonb "
         f"WHERE id::text = %s AND payload->>'user_id' = %s",
@@ -445,26 +453,25 @@ Return JSON: {"memory": [{"id": "...", "text": "...", "event": "ADD|UPDATE|DELET
 Keep the language of the facts."""
 
 
-def _llm_json(api_key: str, system: str, user: str) -> dict:
-    """Uma chamada ao OpenRouter pedindo JSON. Síncrona (roda em threadpool)."""
-    import httpx
+def _llm_json(api_key: str, system: str, user: str,
+              llm: tuple[str, str | None] | None = None) -> dict:
+    """Uma chamada pedindo JSON, pelo MESMO provedor da conversa (`llm` = (modelo,
+    base_url)); sem `llm`, o modelo barato do OpenRouter. Antes era sempre OpenRouter
+    com a chave da conversa: quem usa Ollama ou a assinatura do ChatGPT tomava 401 e a
+    memória nunca era gravada. Síncrona (roda em threadpool)."""
+    import asyncio
 
-    from ..providers.openrouter import _headers
+    from ..providers import openrouter
 
-    s = get_settings()
-    resp = httpx.post(
-        f"{s.openrouter_base_url}/chat/completions",
-        headers=_headers(api_key),
-        json={
-            "model": _LLM_MODEL,
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            "response_format": {"type": "json_object"},
-            "temperature": 0,
-        },
-        timeout=_LLM_TIMEOUT,
-    )
-    resp.raise_for_status()
-    content = ((resp.json().get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+    model, base_url = llm or (_LLM_MODEL, None)
+    params: dict = {"temperature": 0}
+    if not base_url:
+        params["response_format"] = {"type": "json_object"}
+    content = asyncio.run(openrouter.complete(
+        api_key, model,
+        [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        params=params, timeout=_LLM_TIMEOUT, base_url=base_url,
+    )) or ""
     content = re.sub(r"^\s*```(?:json)?\s*|\s*```\s*$", "", content.strip())
     return json.loads(content or "{}")
 
@@ -482,6 +489,7 @@ def add(
     *,
     run_id: str | None = None,
     agent_id: str | None = None,
+    llm: tuple[str, str | None] | None = None,
 ) -> dict | None:
     """Extrai fatos da conversa e consolida com as memórias do MESMO escopo (ADD /
     UPDATE / DELETE / NONE). Bloqueante. Devolve {results: [{id, memory, event}]}."""
@@ -491,7 +499,7 @@ def add(
     try:
         hoje = datetime.now(UTC).date().isoformat()
         facts = _llm_json(api_key, _FACTS_PROMPT,
-                          f"Today is {hoje}.\n\nConversation:\n{conversa}").get("facts") or []
+                          f"Today is {hoje}.\n\nConversation:\n{conversa}", llm).get("facts") or []
         facts = [f.strip() for f in facts if isinstance(f, str) and f.strip()]
     except Exception as exc:  # noqa: BLE001
         logger.warning("extração de memória falhou: %s", exc)
@@ -528,6 +536,7 @@ def add(
             api_key, _DECIDE_PROMPT,
             "EXISTING MEMORIES:\n" + json.dumps(antigos, ensure_ascii=False)
             + "\n\nNEW FACTS:\n" + json.dumps(facts, ensure_ascii=False),
+            llm,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("consolidação de memória falhou: %s", exc)
@@ -573,6 +582,7 @@ def add_scoped(
     agent_id: str | None = None,
     project_id: str | None = None,
     review: bool = False,
+    llm: tuple[str, str | None] | None = None,
 ) -> None:
     """Grava a memória pós-turno no escopo escolhido pelo chat: global / model / chat /
     project (pasta) / "bank:<id>". `off` (ou escopo sem o id necessário) = não grava.
@@ -589,7 +599,7 @@ def add_scoped(
         return
     if scope in ("model", "project") and not aid:
         return
-    res = add(api_key, messages, user_id, run_id=run_id, agent_id=aid)
+    res = add(api_key, messages, user_id, run_id=run_id, agent_id=aid, llm=llm)
     if review:
         new = _new_ids(res)
         if new:

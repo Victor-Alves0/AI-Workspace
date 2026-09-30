@@ -4832,7 +4832,7 @@ def _signature(
     )
     dp = (
         (deep_cfg.model, deep_cfg.max_subqueries, deep_cfg.max_rounds,
-         deep_cfg.read_pages, deep_cfg.max_pages, bool(deep_cfg.api_key))
+         deep_cfg.read_pages, deep_cfg.max_pages, bool(deep_cfg.api_key), deep_cfg.base_url)
         if deep_cfg else ()
     )
     # prefs + contas liberadas entram na assinatura (o token NÃO): muda
@@ -5151,9 +5151,9 @@ def finance_config_from_secrets(
 
 
 def deep_config_from_secrets(
-    openrouter_key: str | None, deep_prefs: dict | None = None
+    openrouter_key: str | None, deep_prefs: dict | None = None, *, base_url: str | None = None,
 ) -> "deep_search.DeepSearchConfig":
-    """Config do Deep Search: chave OpenRouter (p/ os passos internos) + prefs."""
+    """Config do Deep Search: chave do provedor dos passos internos + prefs."""
     p = deep_prefs or {}
 
     def _int(k: str, d: int, lo: int, hi: int) -> int:
@@ -5165,6 +5165,7 @@ def deep_config_from_secrets(
     return deep_search.DeepSearchConfig(
         api_key=openrouter_key,
         model=str(p.get("model") or ""),
+        base_url=base_url,
         max_subqueries=_int("max_subqueries", 3, 1, 6),
         max_rounds=_int("max_rounds", 2, 1, 4),
         max_results_per_query=_int("max_results_per_query", 4, 1, 8),

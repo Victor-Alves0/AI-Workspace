@@ -75,16 +75,39 @@ def _parse_hhmm(value: str) -> tuple[int, int]:
         return 9, 0
 
 
+def _zone(schedule: dict):
+    """Fuso IANA salvo pelo editor (`tz`). Com ele, "todo dia às 9h" continua às 9h
+    depois da troca de horário de verão; o `tz_offset` fixo (minutos) andava 1h."""
+    name = str((schedule or {}).get("tz") or "").strip()
+    if not name:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(name)
+    except Exception:  # noqa: BLE001 - nome inválido/sem tzdata: cai no offset
+        return None
+
+
 def _next_at(schedule: dict, now: datetime) -> datetime:
     """Próxima ocorrência (UTC) p/ os modos com horário fixo (daily/weekly/monthly).
 
-    O horário é interpretado no fuso do usuário via `tz_offset` (getTimezoneOffset
-    do navegador, em minutos: UTC = local + offset; BRT=+180)."""
+    O horário é interpretado no fuso do usuário: pelo nome IANA (`tz`), quando há —
+    acompanha o horário de verão —, senão pelo `tz_offset` (getTimezoneOffset do
+    navegador, em minutos: UTC = local + offset; BRT=+180)."""
+    zone = _zone(schedule)
+    if zone is not None:
+        # aritmética de parede no fuso local; o offset de cada data é recalculado
+        local = _next_local(schedule, now.astimezone(zone).replace(tzinfo=None))
+        return local.replace(tzinfo=zone).astimezone(timezone.utc)
     try:
         off = int((schedule or {}).get("tz_offset") or 0)
     except (TypeError, ValueError):
         off = 0
-    local_now = now - timedelta(minutes=off)
+    return _next_local(schedule, (now - timedelta(minutes=off)).replace(tzinfo=None))         .replace(tzinfo=timezone.utc) + timedelta(minutes=off)
+
+
+def _next_local(schedule: dict, local_now: datetime) -> datetime:
+    """Próxima ocorrência em HORA LOCAL (naive), a partir da hora local de agora."""
     hh, mm = _parse_hhmm(schedule.get("time"))
     mode = schedule.get("mode")
 
@@ -99,9 +122,9 @@ def _next_at(schedule: dict, now: datetime) -> datetime:
         for i in range(8):
             cand = (local_now + timedelta(days=i)).replace(hour=hh, minute=mm, second=0, microsecond=0)
             if (cand.weekday() + 1) % 7 in days and cand > local_now:
-                return cand + timedelta(minutes=off)
+                return cand
         cand = local_now + timedelta(days=7)  # inalcançável, mas nunca falha
-        return cand + timedelta(minutes=off)
+        return cand
 
     if mode == "monthly":
         try:
@@ -113,17 +136,17 @@ def _next_at(schedule: dict, now: datetime) -> datetime:
             d = min(day, calendar.monthrange(y, m)[1])  # clampa p/ fev/meses de 30
             cand = local_now.replace(year=y, month=m, day=d, hour=hh, minute=mm, second=0, microsecond=0)
             if cand > local_now:
-                return cand + timedelta(minutes=off)
+                return cand
             m += 1
             if m > 12:
                 m, y = 1, y + 1
-        return cand + timedelta(minutes=off)
+        return cand
 
     # "daily"
     cand = local_now.replace(hour=hh, minute=mm, second=0, microsecond=0)
     if cand <= local_now:
         cand += timedelta(days=1)
-    return cand + timedelta(minutes=off)
+    return cand
 
 
 def compute_next_run(automation: Automation, now: datetime) -> datetime:
