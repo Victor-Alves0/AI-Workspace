@@ -14,6 +14,7 @@ este helper centraliza esse padrão numa chamada. Use `bg.spawn(coro())` no luga
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from typing import Any, Coroutine
 
 # referências FORTES às tasks em voo (o callback as remove ao concluir). Enquanto a task
@@ -41,7 +42,13 @@ def spawn(coro: Coroutine[Any, Any, Any], *, name: str | None = None,
     if trace is not False and (trace is not None or parent is not None):
         nome = trace if isinstance(trace, str) else f"bg:{_sem_ids(name or getattr(coro, '__qualname__', 'task'))}"
         coro = _in_trace(coro, nome)
-    task = asyncio.create_task(coro, name=name)
+    # sem o livro de efeitos do turno que disparou: o trabalho em segundo plano vive
+    # além dele e não é uma "nova tentativa" (ver tools/effects.py)
+    from .tools import effects
+
+    ctx = contextvars.copy_context()
+    ctx.run(effects.current.set, None)
+    task = asyncio.create_task(coro, name=name, context=ctx)
     _TASKS.add(task)
     task.add_done_callback(_TASKS.discard)
     return task

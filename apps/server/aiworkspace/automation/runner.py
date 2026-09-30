@@ -2,7 +2,7 @@
 
 `run_automation` é o ponto de entrada (usado pelo scheduler e pela rota de teste).
 Ele abre a própria sessão, resolve o que precisa e delega:
-  - kind="scheduled" -> `_run_scheduled`: roda um turno de modelo (reusa `run_turn`)
+  - kind="scheduled" -> `_run_scheduled`: roda um turno de modelo (reusa `run_turn_guarded`)
     e grava a resposta no chat alvo + uma notificação.
   - kind="monitor"   -> `_run_monitor`: (Fase 2) checa o watcher determinístico.
 
@@ -21,8 +21,8 @@ from typing import Any
 from sqlalchemy import select
 
 from .. import bg, tracing
-from ..chat.turn_setup import _code_mode, _load_skills, _usage_record
-from ..chat.orchestrator import TurnSession, run_turn
+from ..chat.turn_setup import _code_mode, _load_skills, _resolve_guards, _usage_record
+from ..chat.orchestrator import TurnSession, run_turn_guarded
 from ..chat import attachment_context
 from ..db import SessionLocal
 from ..models import Automation, AutomationRun, Chat, Message, ModelConfig, Notification, User, WhatsAppConnection
@@ -212,7 +212,10 @@ async def _run_scheduled(db, automation: Automation, user: User) -> dict[str, An
     assistant_usage: dict | None = None
     assistant_reasoning: dict | None = None
     assistant_tools: list | None = None
-    async for event in run_turn(
+    # os mesmos guardas de saída do chat (o modelo é o mesmo; a regra também)
+    guards = await _resolve_guards(db, user, mc)
+    async for event in run_turn_guarded(
+        guards=guards,
         api_key=api_key,
         model=model,
         history=history,

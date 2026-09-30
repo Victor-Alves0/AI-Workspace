@@ -36,7 +36,7 @@ from sift.sandbox import SubprocessSandbox
 from .. import deep_search, finance
 from ..config import get_settings
 from ..search import SearchConfig, web_search, web_search_detailed
-from . import embed_cache
+from . import effects, embed_cache
 from . import toolctx
 from .sandbox import extract_valves, run_in_subprocess
 
@@ -5098,7 +5098,8 @@ def build_user_sift(
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Tool '%s' ignorada (erro de registro): %s", t.path, exc)
         sift.build_index()
-        return sift
+        # nova tentativa do guarda de saída não repete ação já feita (tools/effects.py)
+        return effects.wrap_sift(sift)
     except Exception as exc:  # noqa: BLE001
         logger.warning("SIFT indisponível (chat seguirá sem ferramentas): %s", exc)
         return None

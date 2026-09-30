@@ -34,6 +34,7 @@ from ..chat.turn_setup import (
     _load_skills,
     _realtime_datetime,
     _resolve_brain,
+    _resolve_guards,
     _resolve_knowledge,
     _resolve_provider,
     _skill_learning,
@@ -314,8 +315,15 @@ async def run_platform_turn(
     brain = _resolve_brain(None, mc, user)
     tz = str((user.profile or {}).get("timezone") or "")
 
-    # guarded sem guardas = run_turn; ganha trace próprio quando o da request já fechou (streaming)
+    # os MESMOS guardas de saída do chat: o preset é o mesmo modelo, com a mesma regra.
+    # Ganha trace próprio quando o da request já fechou (streaming).
+    guards = await _resolve_guards(db, user, mc)
+    # Com guarda, o texto de uma tentativa pode ser REJEITADO — e um cliente de API não
+    # tem como "desver" tokens já transmitidos. Então o texto de cada tentativa fica
+    # retido e só sai quando ela é aceita (o `done`); a rejeitada é descartada.
+    retido: list[dict] = []
     async for event in run_turn_guarded(
+        guards=guards,
         api_key=rm.api_key,
         base_url=rm.base_url,
         model=rm.base_model,
@@ -342,6 +350,17 @@ async def run_platform_turn(
             vision=bool(mc and (mc.capabilities or {}).get("vision")),
         ),
     ):
+        kind = event.get("type")
+        if guards and kind in ("token", "reasoning"):
+            retido.append(event)
+            continue
+        if kind == "guard_reset":
+            retido.clear()
+            continue
+        if kind == "done":
+            for ev in retido:
+                yield ev
+            retido.clear()
         yield event
 
 

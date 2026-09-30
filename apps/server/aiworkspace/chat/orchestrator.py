@@ -43,6 +43,7 @@ from ..knowledge.links import sign_doc_url
 from ..memory import memory_service
 from ..models import GeneratedImage, Message
 from ..providers import image_gen, openrouter, reasoning_details
+from ..tools import effects as _effects
 from ..tools import sift_service, toolctx
 from . import curator
 from . import attachment_context, media_support
@@ -2523,6 +2524,10 @@ def _is_selfbound_wait(call: tuple) -> bool:
         return False
 
 
+# tools despachadas pelo orquestrador (fora da SIFT) que entram no livro de efeitos
+_LEDGER_OWN = frozenset({"delegate", "delegate_team", "generate_image", "brain", "propose_skill"})
+
+
 @dataclass
 class _ToolDispatcher:
     """Executa UMA tool_call do loop agêntico, emitindo os eventos de progresso na
@@ -2589,9 +2594,22 @@ class _ToolDispatcher:
         with tracing.span(f"tool:{inner or name}", kind="tool", tool=name, inner=inner,
                           arg_keys=sorted(args.keys())[:12],
                           args_chars=len(json.dumps(args, ensure_ascii=False, default=str))) as _tsp:
+            # nova tentativa do guarda de saída: ação já feita não roda de novo. As da
+            # SIFT são checadas no próprio execute_tool (tools/effects.py); aqui ficam
+            # as despachadas pelo orquestrador (agentes, imagem, nativas).
+            led = _effects.current.get()
+            own = led is not None and (name in _LEDGER_OWN or name in self.native_tool_names)
+            if own:
+                hit, prev = led.reuse(name, args)
+                if hit:
+                    self.result = prev
+                    _tsp.set(replayed=True)
+                    return
             try:
                 async for ev in self._run(name, args, tc):
                     yield ev
+                if own:
+                    led.record(name, args, self.result)
             except Exception as exc:  # noqa: BLE001 - falha da tool volta ao modelo
                 # Uma integração indisponível não deve abortar o turno inteiro.
                 # Devolve um tool_result de erro para o modelo poder explicar, tentar
@@ -4700,7 +4718,23 @@ async def _run_turn_guarded(
         async for ev in run_turn(**turn_kwargs):
             yield ev
         return
+    # uma tentativa rejeitada pode já ter AGIDO (enviado e-mail, criado evento): o livro
+    # de efeitos impede a próxima de repetir (tools/effects.py)
+    ledger = _effects.Ledger()
+    tok = _effects.current.set(ledger)
+    try:
+        async for ev in _guarded_attempts(guards, ledger, turn_kwargs):
+            yield ev
+    finally:
+        try:
+            _effects.current.reset(tok)
+        except ValueError:  # gerador fechado noutro contexto: nada a desfazer
+            pass
 
+
+async def _guarded_attempts(
+    guards: list[dict], ledger: "_effects.Ledger", turn_kwargs: dict[str, Any]
+) -> AsyncGenerator[dict[str, Any], None]:
     remaining = {g["id"]: max(0, int(g.get("max_retries") or 1)) for g in guards}
     base_model = turn_kwargs.get("model")
     base_key = turn_kwargs.get("api_key")
@@ -4723,6 +4757,9 @@ async def _run_turn_guarded(
             if base_extra and extra_system
             else (extra_system or base_extra)
         )
+        feitos = ledger.prompt_block()
+        if feitos:
+            combined_extra = f"{combined_extra}\n\n{feitos}".strip() if combined_extra else feitos
         # rotula o reforço do guarda no detalhamento de uso (painel "Extenso")
         combined_breakdown = (
             {**base_breakdown, "guards": len(extra_system)} if extra_system else base_breakdown
@@ -4815,6 +4852,7 @@ async def _run_turn_guarded(
                     {"detect": hit.get("detect") or "refusal", "attempt": attempt},
                     getattr(turn_kwargs.get("session"), "chat_id", None))
             yield {"type": "guard_reset"}  # o front descarta a tentativa anterior
+            ledger.next_attempt()
             continue
 
         # aceito (ou orçamento esgotado): emite o resultado final

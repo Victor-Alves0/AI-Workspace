@@ -101,18 +101,24 @@ sequenceDiagram
 | Ephemeral (no persist) | `messages_routes::ephemeral` | `run_turn_guarded` |
 | Wake (bg job done) | `chat/resume.py::resume_chat_turn` | `run_turn_guarded` |
 | Channels (WA/TG/Discord/Slack) | `integrations/*_service.py` | `run_turn_guarded` |
-| Automation / Monitor | `automation/runner.py` | `run_turn` |
-| Public API `/v1` | `api/runner.py` | `run_turn` (raw — see note) |
+| Automation / Monitor | `automation/runner.py` | `run_turn_guarded` |
+| Public API `/v1` | `api/runner.py` | `run_turn_guarded` (stream holds each attempt's text until accepted) |
 | Roundtable (one agent turn per participant) | `chat/roundtable_routes.py` → `chat/roundtable.py::run_loop` | `run_turn_guarded` via `generation.start` |
 | Playground | `playground/` | `run_turn` (raw — intentional) |
 
-> **Guards coverage:** every path that produces a normal chat reply — send, regenerate,
-> **continue**, **wake**, channels, ephemeral, roundtable participants — goes through `run_turn_guarded`, so a
-> model's output guards apply consistently. The remaining raw `run_turn` paths are
-> deliberate: Playground is a debug surface (and the roundtable moderator only picks the next
-> speaker), and the public API
-> is a passthrough. Automation is a candidate follow-up (it produces a user-facing
-> message but currently runs raw).
+> **Guards coverage:** every path that produces a reply — send, regenerate, **continue**,
+> **wake**, channels, ephemeral, roundtable participants, **automations** and the **public API** —
+> goes through `run_turn_guarded`, so a model's output guards apply the same way everywhere.
+> Only Playground (a debug surface) and the roundtable moderator (it just picks the next
+> speaker) stay raw. On the API stream, text is held per attempt and released only when the
+> guard accepts it: a client can't un-see tokens.
+>
+> **Retries never repeat actions.** A guard retry re-runs the whole turn, so each attempt's
+> tool calls are written to an effects ledger (`tools/effects.py`). On the next attempt, reads
+> and harmless repeats (file writes, turning a light on) run again. A non-repeatable action
+> (send, create, post, push) returns the earlier result instead of running, even with reworded
+> arguments. Anything else is reused only for an identical call. The retry prompt also lists
+> what was already done.
 
 **Front gates (before any model call), in order:** ownership check → model set →
 non-empty → `budget_service.enforce_or_raise` (personal $ budget, HTTP 402 when
