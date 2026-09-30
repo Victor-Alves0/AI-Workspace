@@ -213,7 +213,11 @@ def test_regras_nft_fecham_tudo_menos_o_proxy(agent):
                                       "dns": "proxy", "allow_lan": False, "allow_hosts": []})
     assert "meta skuid != 1234 accept" in rules
     assert "tcp dport 9050 accept" in rules
-    assert "udp dport 53" not in rules          # dns=proxy: sem DNS local
+    assert "dport 53 accept" not in rules       # dns=proxy: sem DNS local
+    # nem pelo resolvedor do loopback (systemd-resolved consulta fora do uid vigiado):
+    # o bloqueio do 53 vem ANTES do "lo accept"
+    linhas = [ln.strip() for ln in rules.splitlines()]
+    assert linhas.index("udp dport 53 reject") < linhas.index('oifname "lo" accept')
     assert rules.strip().splitlines()[-3].strip() == "reject"
 
 
@@ -222,3 +226,57 @@ def test_dns_system_libera_53_explicitamente(agent):
                                       "dns": "system", "allow_lan": True, "allow_hosts": []})
     assert "udp dport 53 accept" in rules
     assert "192.168.0.0/16" in rules
+
+
+def test_agente_root_com_usuario_inexistente_recusa_em_vez_de_rodar_como_root(agent, monkeypatch):
+    """Sem o usuário dedicado, `run_uid()` dá None e o comando rodaria COMO ROOT."""
+    ex = agent.Executor({**agent.default_config(), "run_user": "aiw-remote"})
+    monkeypatch.setattr(agent, "geteuid", lambda: 0)
+    monkeypatch.setattr(agent, "resolve_uid", lambda u: None)
+    motivo = ex.guard()
+    assert motivo and "não existe" in motivo
+    assert ex.run("id")["blocked"] is True
+    # nem o teste de vazamento (que pula o killswitch) roda como root no lugar dele
+    assert ex.run("id", skip_killswitch=True)["blocked"] is True
+
+
+def test_teste_de_vazamento_nao_desliga_a_trava_para_os_outros(agent, monkeypatch):
+    """Antes, o teste zerava o killswitch NA POLÍTICA durante 60s: outra requisição em
+    paralelo rodava sem a trava nesse intervalo."""
+    ex = agent.Executor({**agent.default_config(),
+                         "egress": {"mode": "force", "proxy_url": "socks5h://127.0.0.1:9050",
+                                    "dns": "proxy", "killswitch": True,
+                                    "allow_lan": False, "allow_hosts": []}})
+    visto = {}
+
+    def fake_run(cmd, timeout=0, skip_killswitch=False, **kw):
+        visto["killswitch"] = ex.policy.get("killswitch")
+        visto["skip"] = skip_killswitch
+        return {"output": "{}"}
+
+    monkeypatch.setattr(ex, "run", fake_run)
+    agent.leak_test(ex)
+    assert visto == {"killswitch": True, "skip": True}
+
+
+def test_sudo_sem_senha_impede_selar(agent, monkeypatch):
+    """Com sudo NOPASSWD, `sudo curl` sai como root — que o firewall por uid não filtra."""
+    ex = agent.Executor({**agent.default_config(),
+                         "egress": {"mode": "force", "proxy_url": "socks5h://127.0.0.1:9050",
+                                    "dns": "proxy", "killswitch": True,
+                                    "allow_lan": False, "allow_hosts": []}})
+    monkeypatch.setattr(ex, "run_uid", lambda: 1001)
+    monkeypatch.setattr(ex, "has_sudo", lambda: True)
+    monkeypatch.setattr(agent, "clear_firewall", lambda uid: None)
+    monkeypatch.setattr(agent, "apply_firewall", lambda *a: (True, "nftables"))
+    st = ex.apply_policy()
+    assert st["status"] == "degraded" and "sudo" in st["detail"]
+    assert ex.guard() and "killswitch" in ex.guard().lower()
+
+
+def test_tls_handshake_fora_do_accept_e_timeout_por_conexao(agent):
+    """Um cliente que conecta e fica mudo não pode travar o agente inteiro sem token."""
+    import inspect
+    assert agent.Handler.timeout and agent.Handler.timeout <= 120
+    assert "do_handshake_on_connect=False" in inspect.getsource(agent.serve)
+    assert "do_handshake()" in inspect.getsource(agent.Handler.setup)

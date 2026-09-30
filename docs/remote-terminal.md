@@ -54,7 +54,9 @@ pela rota normal. A recusa volta com o motivo, e a IA é instruída a repassá-l
 tentar de novo às cegas.
 
 Com **DNS pelo proxy** ligado (padrão), as portas 53/udp e 53/tcp ficam fechadas para o
-usuário dos comandos: nenhuma consulta de nome sai da máquina.
+usuário dos comandos, **inclusive no loopback**. Um resolvedor local (systemd-resolved em
+`127.0.0.53`, dnsmasq) consulta a internet por conta própria, fora do uid vigiado. Liberar o
+loopback para ele deixaria o nome vazar. Nenhuma consulta de nome sai da máquina.
 
 ## Como as regras funcionam
 
@@ -66,6 +68,8 @@ table inet aiw_egress {
   chain output {
     type filter hook output priority 0; policy accept;
     meta skuid != <uid> accept        # o resto da máquina não sente a regra
+    udp dport 53 reject               # DNS pelo proxy: nem o resolvedor local
+    tcp dport 53 reject
     oifname "lo" accept
     ip daddr <ip do proxy> tcp dport <porta> accept
     reject                            # nada mais sai
@@ -82,7 +86,15 @@ Duas consequências que valem entender antes de instalar:
   inteira (seus serviços, seu SSH), então o agente recusa e explica em vez de fazer isso.
 - **`sudo` anula o killswitch** nesse modo: `sudo` vira uid 0 e escapa da regra que casa
   pelo uid. Por isso `--grant-sudo` e `--force-egress` são incompatíveis no instalador — uma
-  proteção que não protege é pior que nenhuma.
+  proteção que não protege é pior que nenhuma. Se o sudo for dado à mão depois, o agente
+  percebe (`sudo -l`), marca a política como **degradada** e, com killswitch, recusa executar.
+- **Usuário dedicado sumiu = recusa.** Com o agente como root e o `run_user` inexistente, o
+  comando rodaria como root no lugar dele. O agente recusa e diz o motivo. A troca de
+  usuário também falha fechada: se `setgid`/`setuid` não der certo, o comando não roda.
+- O **teste de vazamento** pula o killswitch só para ele mesmo. Outra requisição, no mesmo
+  instante, continua com a trava.
+- Um cliente que conecta e **fica mudo** não trava mais o agente. O handshake TLS acontece
+  na thread da conexão, e cada conexão tem tempo-limite.
 
 ## Instalação
 

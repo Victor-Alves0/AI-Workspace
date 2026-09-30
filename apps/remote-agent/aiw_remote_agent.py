@@ -67,7 +67,7 @@ def geteuid() -> int:
     return os.geteuid() if hasattr(os, "geteuid") else -1
 
 
-AGENT_VERSION = "1.0.0"
+AGENT_VERSION = "1.0.1"
 PROTOCOL = 1
 
 DEFAULT_CONFIG_PATH = "/etc/aiw-remote-agent/config.json"
@@ -232,6 +232,13 @@ def _nft_ruleset(uid: int, policy: Dict[str, Any]) -> str:
         "  chain output {",
         "    type filter hook output priority 0; policy accept;",
         "    meta skuid != %d accept" % uid,
+    ]
+    if policy.get("dns") != "system":
+        # dns=proxy: nem o resolvedor LOCAL (systemd-resolved em 127.0.0.53, dnsmasq…)
+        # — ele consulta a internet por conta própria, fora do uid vigiado, e o nome
+        # vazaria pela rota normal apesar do "lo accept" abaixo
+        lines += ["    udp dport 53 reject", "    tcp dport 53 reject"]
+    lines += [
         "    oifname \"lo\" accept",
         "    ip daddr 127.0.0.0/8 accept",
         "    ip6 daddr ::1 accept",
@@ -310,6 +317,12 @@ def _apply_iptables(uid: int, policy: Dict[str, Any]) -> Tuple[bool, str]:
         ["iptables", "-F", chain],
         ["iptables", "-X", chain],
         ["iptables", "-N", chain],
+    ]
+    if policy.get("dns") != "system":
+        # ver _nft_ruleset: o resolvedor local consultaria a internet fora do uid
+        cmds += [["iptables", "-A", chain, "-p", "udp", "--dport", "53", "-j", "REJECT"],
+                 ["iptables", "-A", chain, "-p", "tcp", "--dport", "53", "-j", "REJECT"]]
+    cmds += [
         ["iptables", "-A", chain, "-o", "lo", "-j", "RETURN"],
         ["iptables", "-A", chain, "-d", "127.0.0.0/8", "-j", "RETURN"],
     ]
@@ -404,6 +417,29 @@ class Executor:
             return None  # sem root não há troca de usuário: roda como o próprio agente
         return resolve_uid(user)
 
+    def user_problem(self) -> Optional[str]:
+        """O agente é root e mandaram rodar como um usuário que não existe: sem esta
+        checagem, `run_uid()` devolve None e o comando rodaria COMO ROOT, calado."""
+        user = (self.cfg.get("run_user") or "").strip()
+        if geteuid() == 0 and user and user != "root" and resolve_uid(user) is None:
+            return ("o usuário dos comandos '%s' não existe nesta máquina — o agente "
+                    "recusa rodar como root no lugar dele. Crie o usuário (o instalador "
+                    "faz isso) ou ajuste run_user." % user)
+        return None
+
+    def has_sudo(self) -> bool:
+        """O usuário dos comandos tem sudo sem senha? Aí um `sudo curl` sai como root,
+        que o firewall por uid não filtra — o selo do modo force vira promessa vazia."""
+        user = (self.cfg.get("run_user") or "").strip()
+        if geteuid() != 0 or not user or not have("sudo"):
+            return False
+        try:
+            r = _run(["sudo", "-n", "-l", "-U", user], timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        out = (r.stdout or "") if r.returncode == 0 else ""
+        return "NOPASSWD" in out and "ALL" in out
+
     def apply_policy(self) -> Dict[str, Any]:
         """(Re)aplica a política atual e devolve o estado observável.
 
@@ -438,6 +474,15 @@ class Executor:
                            "rede da máquina inteira, então o agente não faz isso."),
             }
             return self.state()
+        if self.has_sudo():
+            clear_firewall(uid)
+            self.fw_state = {
+                "applied": False, "backend": "",
+                "detail": ("o usuário dos comandos tem sudo sem senha: um `sudo` sai como "
+                           "root, que o firewall por uid não filtra. Remova o sudo "
+                           "(/etc/sudoers.d/aiw-remote) para selar a saída."),
+            }
+            return self.state()
         ok, detail = apply_firewall(uid, pol)
         self.fw_state = {"applied": ok, "backend": detail if ok else "", "detail": detail}
         return self.state()
@@ -467,6 +512,9 @@ class Executor:
 
     def guard(self) -> Optional[str]:
         """Motivo para RECUSAR executar agora, ou None. É o killswitch em ação."""
+        problem = self.user_problem()
+        if problem:
+            return problem
         pol = self.policy
         mode = pol.get("mode") or "off"
         if mode == "off" or pol.get("killswitch", True) is False:
@@ -490,13 +538,14 @@ class Executor:
         def _apply():  # pragma: no cover - roda no filho
             os.setsid()  # grupo próprio: dá para matar a árvore inteira
             if uid is not None and pwd is not None:
-                try:
-                    rec = pwd.getpwuid(uid)
-                    os.setgid(rec.pw_gid)
-                    os.initgroups(rec.pw_name, rec.pw_gid)
-                except Exception:
-                    pass
+                # sem try: se trocar grupo/usuário falhar, o filho MORRE aqui (o Popen
+                # levanta) — seguir com o gid 0 do root, ou como root, é o pior desfecho
+                rec = pwd.getpwuid(uid)
+                os.setgid(rec.pw_gid)
+                os.initgroups(rec.pw_name, rec.pw_gid)
                 os.setuid(uid)
+                if os.getuid() != uid or os.geteuid() != uid:
+                    os._exit(126)
         return _apply
 
     def _env(self, extra: Optional[Dict[str, str]], uid: Optional[int]) -> Dict[str, str]:
@@ -533,8 +582,9 @@ class Executor:
         )
 
     def run(self, command: str, cwd: str = "", timeout: int = 120,
-            env: Optional[Dict[str, str]] = None, shell: str = "") -> Dict[str, Any]:
-        blocked = self.guard()
+            env: Optional[Dict[str, str]] = None, shell: str = "",
+            skip_killswitch: bool = False) -> Dict[str, Any]:
+        blocked = self.user_problem() if skip_killswitch else self.guard()
         if blocked:
             return {"error": blocked, "blocked": True, "egress": self.state()}
         timeout = max(1, min(int(timeout or 120), int(self.cfg.get("max_timeout") or 900)))
@@ -764,12 +814,9 @@ def leak_test(ex: Executor) -> Dict[str, Any]:
     cmd = "%s -c '%s'" % (sys.executable or "python3", src)
     # Ignora o killswitch de propósito: o teste existe justamente para diagnosticar por
     # que ele está mordendo. É um comando fechado, escrito aqui, sem entrada do usuário.
-    saved = ex.policy.get("killswitch", True)
-    ex.policy["killswitch"] = False
-    try:
-        r = ex.run(cmd, timeout=60)
-    finally:
-        ex.policy["killswitch"] = saved
+    # Só ESTA execução pula a trava: desligá-la na política compartilhada deixaria outra
+    # requisição, em paralelo, rodar sem ela durante o teste.
+    r = ex.run(cmd, timeout=60, skip_killswitch=True)
     if r.get("error"):
         return {"ok": False, "error": r["error"], "egress": ex.state()}
     raw = (r.get("output") or "").strip().splitlines()
@@ -812,6 +859,14 @@ def leak_test(ex: Executor) -> Dict[str, Any]:
 class Handler(BaseHTTPRequestHandler):
     server_version = "aiw-remote-agent/" + AGENT_VERSION
     protocol_version = "HTTP/1.1"
+    # conexão parada (slowloris) não segura uma thread para sempre
+    timeout = 60
+
+    def setup(self):
+        super().setup()  # aplica o timeout no socket da conexão
+        # TLS: o handshake acontece AQUI, na thread desta conexão (ver serve)
+        if isinstance(self.request, ssl.SSLSocket):
+            self.request.do_handshake()
 
     # injetados pelo serve()
     cfg: Dict[str, Any] = {}
@@ -1011,7 +1066,10 @@ def serve(cfg_path: str) -> None:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         ctx.load_cert_chain(cert, key)
-        httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True)
+        # handshake na thread da conexão (na 1ª leitura), não no accept: senão um
+        # cliente que conecta e fica mudo trava o agente inteiro, sem precisar de token
+        httpd.socket = ctx.wrap_socket(httpd.socket, server_side=True,
+                                       do_handshake_on_connect=False)
         scheme = "https"
     else:
         scheme = "http"
