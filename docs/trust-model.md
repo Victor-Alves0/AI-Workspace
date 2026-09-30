@@ -47,7 +47,16 @@ terceiros (página web, e-mail, issue, mensagem de canal, PDF, transcrição).
 2. **Exposição de rede não intencional.** Preview/porta alcançável por quem não deveria.
    - Mitigação: `PREVIEW_BIND` (padrão `127.0.0.1`) + proxy autenticado
      (`/codespace/preview/<porta>/`, com `port_owned_by`).
-3. **Vazamento acidental entre usuários.** Um recurso resolvido por id sem checar dono.
+3. **Ação sem ninguém olhando.** Uma automação lê um e-mail plantado e envia, apaga ou
+   liga coisas por conta própria. A falta de humano **nunca** vira autorização.
+   - Mitigação: uma regra única, `tools/interaction.confirm_gate`. No chat na tela, a
+     confirmação é o cartão. Num canal com lista de remetentes, a pessoa confirma na
+     conversa. Sem ninguém (automação, API, canal aberto), a IA só age nas categorias
+     que o dono liberou antes ("Pode agir sem perguntar" na automação; permissão
+     `actions` na chave de API), e o `confirm=true` do modelo não conta.
+   - Uma nova tentativa do guarda de saída não repete ação já feita
+     (`tools/effects.py`).
+4. **Vazamento acidental entre usuários.** Um recurso resolvido por id sem checar dono.
    - Isto **não** é "defesa contra usuário malicioso": é higiene. É a classe de bug mais
      fácil de introduzir sem perceber, então é coberta por teste automatizado —
      ver `tests/test_authorization_scoping.py`.

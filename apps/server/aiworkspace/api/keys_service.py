@@ -35,6 +35,10 @@ ALL_SCOPES = (
     "files:read",
     "files:write",
     "usage:read",
+    # agir sem aprovação humana (enviar e-mail, mensagens, mexer na casa…): numa chamada
+    # de API não há ninguém para confirmar, então sem esta permissão essas ações são
+    # recusadas (tools/interaction.confirm_gate). Nunca vem por padrão.
+    "actions",
 )
 DEFAULT_SCOPES = ("chat", "models:read", "usage:read")
 

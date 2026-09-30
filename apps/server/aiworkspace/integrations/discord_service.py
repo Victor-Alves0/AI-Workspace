@@ -58,6 +58,18 @@ def parse_message(event: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def approval_mode(conn) -> str:
+    """Quem aprova ações pedidas por este canal. Com lista de remetentes permitidos, quem
+    fala é gente conhecida e pode confirmar na própria conversa. Canal aberto: qualquer
+    pessoa escreve — e "sim, pode enviar" de um estranho não é aprovação do dono, então
+    ações sensíveis só com liberação prévia (interaction.confirm_gate)."""
+    f = conn.filters or {}
+    allow = [x for x in (f.get("allow") or []) if str(x).strip()]
+    if not allow:
+        return "unattended"
+    return "conversation"
+
+
 def passes_filters(conn: DiscordConnection, m: dict[str, Any]) -> tuple[bool, str]:
     f = conn.filters or {}
     if not m["is_dm"] and not f.get("guilds", True):
@@ -324,7 +336,7 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
                 knowledge=knowledge, brain=brain,
                 realtime_datetime=_realtime_datetime(mc),
                 session=TurnSession(
-                    user_id=str(user.id), background=True,
+                    user_id=str(user.id), background=True, approval=approval_mode(conn),
                     chat_id=mem_chat_id, agent_id=mem_agent_id,
                     user_profile=_user_profile_dict(user),
                     user_tz=_profile_tz(user),  # sem isso, hora UTC vira "local"

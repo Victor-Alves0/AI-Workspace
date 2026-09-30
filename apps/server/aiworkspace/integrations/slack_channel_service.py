@@ -59,6 +59,18 @@ def parse_message(event: dict[str, Any], bot_user_id: str) -> dict[str, Any] | N
     }
 
 
+def approval_mode(conn) -> str:
+    """Quem aprova ações pedidas por este canal. Com lista de remetentes permitidos, quem
+    fala é gente conhecida e pode confirmar na própria conversa. Canal aberto: qualquer
+    pessoa escreve — e "sim, pode enviar" de um estranho não é aprovação do dono, então
+    ações sensíveis só com liberação prévia (interaction.confirm_gate)."""
+    f = conn.filters or {}
+    allow = [x for x in (f.get("allow") or []) if str(x).strip()]
+    if not allow:
+        return "unattended"
+    return "conversation"
+
+
 def passes_filters(conn: SlackChannelConnection, m: dict[str, Any]) -> tuple[bool, str]:
     f = conn.filters or {}
     if not m["is_dm"] and not f.get("channels", True):
@@ -310,7 +322,7 @@ async def _run_one(connection_id: uuid.UUID, bot_user_id: str, msgs: list[dict[s
                 knowledge=knowledge, brain=brain,
                 realtime_datetime=_realtime_datetime(mc),
                 session=TurnSession(
-                    user_id=str(user.id), background=True,
+                    user_id=str(user.id), background=True, approval=approval_mode(conn),
                     chat_id=mem_chat_id, agent_id=mem_agent_id,
                     user_profile=_user_profile_dict(user),
                     user_tz=_profile_tz(user),

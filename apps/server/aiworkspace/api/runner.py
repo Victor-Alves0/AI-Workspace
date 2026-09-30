@@ -334,6 +334,8 @@ async def run_platform_turn(
         session=TurnSession(
             user_id=str(user.id), user_tz=tz, chat_id=run_id, agent_id=agent_id,
             background=True,  # sem UI para confirmar nada: guardas não interrogam
+            # sem ninguém para aprovar: ações sensíveis só com a permissão "actions" na chave
+            preauthorized=("*",) if (ctx.key is not None and keys_service.has_scope(ctx.key, "actions")) else (),
         ),
         sift=sift,
         use_tools=not tools_off,

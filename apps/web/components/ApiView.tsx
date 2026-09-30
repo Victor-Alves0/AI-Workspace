@@ -26,6 +26,7 @@ const SCOPE_LABELS: Record<string, string> = {
   "files:read": "Listar arquivos",
   "files:write": "Enviar e apagar arquivos",
   "usage:read": "Ver consumo",
+  actions: "Agir sem pedir aprovação (enviar, criar, apagar)",
 };
 
 const MEMORY_LABELS: Record<string, string> = {

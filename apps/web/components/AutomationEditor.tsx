@@ -6,7 +6,20 @@ import { api, ApiError } from "@/lib/api";
 import type { Automation, AutomationOptions, Chat, Model, ModelConfig, SystemTool, TelegramConnection, Tool, WhatsAppConnection } from "@/lib/types";
 import ModelField from "./ModelField";
 import TransferModal, { type TransferItem } from "./TransferModal";
-import { Select } from "@/components/ui";
+import { InfoDot, Select } from "@/components/ui";
+
+// mesmas chaves de tools/interaction.py::ACTION_CATEGORIES (teste de invariante no servidor)
+const ACTION_CATEGORIES = [
+  { key: "google", label: "Gmail e Agenda" },
+  { key: "messaging", label: "WhatsApp, Telegram, Discord" },
+  { key: "slack", label: "Slack" },
+  { key: "github", label: "GitHub" },
+  { key: "notion", label: "Notion" },
+  { key: "tuya", label: "Casa" },
+  { key: "codespace", label: "Codespace" },
+  { key: "remote", label: "Terminal remoto" },
+  { key: "civitai", label: "Civitai" },
+];
 
 type Draft = Pick<
   Automation,
@@ -454,6 +467,32 @@ export default function AutomationEditor({
                     })}
                   </div>
                 )}
+              </div>
+
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <p className="text-xs text-muted">Pode agir sem perguntar</p>
+                  <InfoDot text="Ninguém está olhando quando a automação roda. Ela só executa as ações marcadas aqui; as outras são recusadas e aparecem no resultado. Um e-mail ou página lidos pela automação podem trazer instruções plantadas, então marque só o que ela precisa." />
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {ACTION_CATEGORIES.map((c) => {
+                    const on = (d.options?.allowed_actions ?? []).includes(c.key);
+                    return (
+                      <button
+                        key={c.key}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => {
+                          const cur = d.options?.allowed_actions ?? [];
+                          setOpt("allowed_actions", on ? cur.filter((x) => x !== c.key) : [...cur, c.key]);
+                        }}
+                        className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${on ? "border-accent/60 bg-accent/15 text-accent-hover" : "border-border text-muted hover:text-ink"}`}
+                      >
+                        {c.label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="space-y-1.5">

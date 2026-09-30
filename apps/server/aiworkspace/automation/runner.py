@@ -141,6 +141,14 @@ async def _resolve_target_chat(
     return chat
 
 
+def _allowed_actions(automation: Automation) -> tuple[str, ...]:
+    """Categorias de ação que o dono liberou para esta automação agir sem perguntar
+    (options.allowed_actions). Sem nada marcado, ações sensíveis são recusadas."""
+    from ..tools.interaction import ACTION_CATEGORIES
+    raw = (automation.options or {}).get("allowed_actions") or []
+    return tuple(c for c in raw if isinstance(c, str) and c in ACTION_CATEGORIES)
+
+
 async def _run_scheduled(db, automation: Automation, user: User) -> dict[str, Any]:
     from ..budget_service import budget_state
     if (await budget_state(db, user)).get("blocked"):
@@ -224,8 +232,10 @@ async def _run_scheduled(db, automation: Automation, user: User) -> dict[str, An
         params=params,
         # autônomo: tools pulam revisão interativa; chat_id=None => sem mem0 em
         # jobs de fundo (mais barato/previsível)
+        # ninguém assiste: só age sozinha no que o dono liberou nesta automação
         session=TurnSession(user_id=str(user.id), user_tz=user_tz, user_tz_offset=tz_off,
-                            background=True),
+                            background=True,
+                            preauthorized=_allowed_actions(automation)),
         sift=sift,
         code_mode=code_mode,
         skills=skills,

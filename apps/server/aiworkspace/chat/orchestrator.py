@@ -1830,6 +1830,11 @@ class TurnSession:
     agent_id: str | None = None
     # execução autônoma (automação/canal): tools pulam fases interativas
     background: bool = False
+    # quem aprova ações: "" = derivado (tela se não é background; senão ninguém).
+    # Canais passam "conversation" (a pessoa responde na própria conversa).
+    approval: str = ""
+    # categorias liberadas sem aprovação quando não há ninguém ("*" = todas)
+    preauthorized: tuple[str, ...] | frozenset[str] = ()
     user_profile: dict[str, Any] | None = None
     # Codespace: projeto vinculado a este chat (habilita code.graph.query/
     # code.files.browse mirando ele). None = sem projeto — as tools avisam.
@@ -1843,6 +1848,11 @@ class TurnSession:
     # injeta o texto como mensagem de usuário prioritária — redireciona sem reiniciar.
     # None = sem steering (turno normal). Ver generation.Generation.drain_steer.
     steer_drain: Any | None = None
+
+    def approval_mode(self) -> str:
+        if self.approval in ("interactive", "conversation", "unattended"):
+            return self.approval
+        return "unattended" if self.background else "interactive"
 
 
 @dataclass
@@ -3677,6 +3687,9 @@ async def run_turn(
     toolctx.user_tz.set(user_tz or "")
     # execução autônoma (automação): tools pulam fases interativas (ex.: revisão de e-mail)
     toolctx.background.set(bool(session.background))
+    # quem aprova ações (tela / conversa do canal / ninguém) — interaction.confirm_gate
+    toolctx.approval.set(session.approval_mode())
+    toolctx.preauthorized.set(frozenset(session.preauthorized or ()))
     # perfil do usuário visível à tool user.profile.get (nome, sobre, nascimento…)
     toolctx.user_profile.set(session.user_profile or {})
     # projeto do Codespace vinculado a este chat, visível às tools code.graph/code.files

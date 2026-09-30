@@ -93,6 +93,18 @@ def _norm_br(digits: str) -> str:
     return re.sub(r"^55(\d{2})9(\d{8})$", r"55\1\2", digits)
 
 
+def approval_mode(conn) -> str:
+    """Quem aprova ações pedidas por este canal. Com lista de remetentes permitidos, quem
+    fala é gente conhecida e pode confirmar na própria conversa. Canal aberto: qualquer
+    pessoa escreve — e "sim, pode enviar" de um estranho não é aprovação do dono, então
+    ações sensíveis só com liberação prévia (interaction.confirm_gate)."""
+    f = conn.filters or {}
+    allow = [x for x in (f.get("allow") or []) if str(x).strip()]
+    if not allow or (f.get("policy") or "all") != "allow":
+        return "unattended"
+    return "conversation"
+
+
 def passes_filters(conn: WhatsAppConnection, m: dict[str, Any]) -> tuple[bool, str]:
     """Camada de filtragem ANTES do modelo. Retorna (aprovada, motivo_recusa)."""
     f = conn.filters or {}
@@ -626,7 +638,7 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
                 realtime_datetime=_realtime_datetime(mc),
                 # autônomo: sem revisão interativa de tools (background=True)
                 session=TurnSession(
-                    user_id=str(user.id), background=True,
+                    user_id=str(user.id), background=True, approval=approval_mode(conn),
                     chat_id=mem_chat_id, agent_id=mem_agent_id,
                     user_profile=_user_profile_dict(user),
                     # fuso salvo pelo turno web: sem ele o modelo via hora UTC como

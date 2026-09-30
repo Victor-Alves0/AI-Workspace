@@ -55,3 +55,14 @@ background: contextvars.ContextVar[bool] = contextvars.ContextVar("background", 
 # sistema `user.profile.get`, que devolve esses dados quando o modelo precisa
 # (ex.: "qual meu nome?", "quantos anos eu tenho?"). Dict vazio = sem dados.
 user_profile: contextvars.ContextVar[dict] = contextvars.ContextVar("user_profile", default={})
+
+# Quem está do outro lado para aprovar uma ação (ver interaction.confirm_gate):
+#  "interactive" — chat na tela (cartão Confirmar/Cancelar);
+#  "conversation" — canal (WhatsApp/Telegram/…): a IA pergunta na própria conversa;
+#  "unattended" — ninguém (automação, API, playground): só age no que o dono
+#     liberou ANTES (`preauthorized`); o resto é recusado.
+approval: contextvars.ContextVar[str] = contextvars.ContextVar("approval", default="interactive")
+# categorias de ação liberadas sem aprovação num turno "unattended" ("*" = todas)
+preauthorized: contextvars.ContextVar[frozenset] = contextvars.ContextVar(
+    "preauthorized", default=frozenset()
+)

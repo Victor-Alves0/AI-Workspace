@@ -1842,20 +1842,10 @@ def _register_builtins(
 
         def _cs_confirm_guard(confirm_on: bool, summary: str, confirm: Any) -> dict | None:
             # mesmo toggle global (Configurações → Segurança) que já protege
-            # escritas do GitHub/Google/Tuya; em background (automação/canal)
-            # não há usuário pra confirmar → executa direto, igual às demais.
+            # escritas do GitHub/Google/Tuya; canal/automação: confirm_gate.
             truthy = confirm is True or (isinstance(confirm, str) and confirm.strip().lower() in ("true", "1", "yes", "sim", "on"))
-            if confirm_on and not truthy and not toolctx.background.get():
-                from .interaction import ask_options
-                return ask_options(
-                    summary,
-                    [
-                        {"label": "Confirmar", "value": "Sim, confirmo — refaça a ação agora com confirm=true."},
-                        {"label": "Cancelar", "value": "Cancele, não execute a ação."},
-                    ],
-                    allow_custom=False,
-                )
-            return None
+            from .interaction import confirm_gate
+            return confirm_gate("codespace", summary, required=confirm_on, confirmed=truthy)
 
         _CS_STATUS_MSG = {
             "pending": "o projeto ainda não começou a clonar — aguarde alguns segundos e tente de novo",
@@ -3022,18 +3012,9 @@ def _register_builtins(
             que vira card no chat; o usuário confirma e o modelo refaz com
             confirm=true) — migrar perderia as duas coisas. Se um dia o on_risky
             aceitar devolver um payload (ask) em vez de bool, aí sim."""
-            # em automações/canais (background) não há usuário p/ confirmar → executa direto
-            if g_confirm and not _g_truthy(confirm) and not toolctx.background.get():
-                from .interaction import ask_options
-                return ask_options(
-                    summary,
-                    [
-                        {"label": "Confirmar", "value": "Sim, confirmo — refaça a ação agora com confirm=true."},
-                        {"label": "Cancelar", "value": "Cancele, não execute a ação."},
-                    ],
-                    allow_custom=False,
-                )
-            return None
+            # regra única (chat/canal/automação): tools/interaction.confirm_gate
+            from .interaction import confirm_gate
+            return confirm_gate("google", summary, required=g_confirm, confirmed=_g_truthy(confirm))
 
         def _g_n(max_results: Any) -> int:
             return min(int(max_results or g_max), 50) if str(max_results or "").strip() else g_max
@@ -3094,7 +3075,7 @@ def _register_builtins(
                 if act == "send":
                     if not (to or "").strip():
                         return {"error": "`to` is required for send"}
-                    if g_confirm and not toolctx.background.get():
+                    if g_confirm and toolctx.approval.get() == "interactive":
                         chosen, block = _g_pick_account(account)
                         if block is not None:
                             return block
@@ -3106,7 +3087,11 @@ def _register_builtins(
                             "account": str(chosen.get("id")),
                             "account_email": chosen.get("email", ""),
                         }
-                    # confirmação desligada OU automação → envia direto (abaixo)
+                    # sem tela p/ o rascunho: canal pergunta na conversa; automação só
+                    # envia se o dono liberou (confirm_gate)
+                    blocked = _g_guard(f"Enviar e-mail para {to.strip()} (assunto: {(subject or '').strip()[:80]})?", confirm)
+                    if blocked is not None:
+                        return blocked
                 elif act in writes:
                     blocked = _g_guard(f"{act} no e-mail selecionado?", confirm)
                     if blocked is not None:
@@ -3242,18 +3227,8 @@ def _register_builtins(
             return {"error": f"o dispositivo '{name}' não está liberado para este modelo."}
 
         def _t_guard(summary: str, confirm: Any) -> dict | None:
-            # background (automações/canais): sem usuário p/ confirmar → aciona direto
-            if t_confirm and not _t_truthy(confirm) and not toolctx.background.get():
-                from .interaction import ask_options
-                return ask_options(
-                    summary,
-                    [
-                        {"label": "Confirmar", "value": "Sim, confirmo — refaça a ação agora com confirm=true."},
-                        {"label": "Cancelar", "value": "Cancele, não execute a ação."},
-                    ],
-                    allow_custom=False,
-                )
-            return None
+            from .interaction import confirm_gate
+            return confirm_gate("tuya", summary, required=t_confirm, confirmed=_t_truthy(confirm))
 
         @sift.tool(
             "smartlife.tuya.devices",
@@ -3778,16 +3753,19 @@ def _register_builtins(
                             "style `query` (e.g. 'fantasy', 'photorealistic', 'anime') to get others."
                         ),
                     }
-                if act == "generate" and civitai_cfg and civitai_cfg.require_confirm and not confirmed and not toolctx.background.get():
-                    from .interaction import ask_options
-                    return ask_options(
+                if act == "generate":
+                    from .interaction import confirm_gate
+                    blocked = confirm_gate(
+                        "civitai",
                         f"Gerar {max(1, min(_int(quantity, 1), 4))} imagem(ns) no Civitai pode gastar Buzz. Confirmar geração?",
-                        [
+                        required=bool(civitai_cfg and civitai_cfg.require_confirm), confirmed=bool(confirmed),
+                        options=[
                             {"label": "Gerar", "value": "Sim, confirmo — gere agora com confirm=true."},
                             {"label": "Cancelar", "value": "Cancele, não gere a imagem."},
                         ],
-                        allow_custom=False,
                     )
+                    if blocked is not None:
+                        return blocked
                 effective_sampler = sampler.strip() or str(civitai_generation.get("sampler") or "").strip()
                 workflow = cv.submit_image(
                     civitai_token, prompt, model=effective_model,
@@ -4053,18 +4031,8 @@ def _register_builtins(
             return tok, None
 
         def _gh_guard(summary: str, confirm: Any) -> dict | None:
-            # em automações/canais (background) não há usuário p/ confirmar → executa direto
-            if gh_confirm and not _gh_truthy(confirm) and not toolctx.background.get():
-                from .interaction import ask_options
-                return ask_options(
-                    summary,
-                    [
-                        {"label": "Confirmar", "value": "Sim, confirmo — refaça a ação agora com confirm=true."},
-                        {"label": "Cancelar", "value": "Cancele, não execute a ação."},
-                    ],
-                    allow_custom=False,
-                )
-            return None
+            from .interaction import confirm_gate
+            return confirm_gate("github", summary, required=gh_confirm, confirmed=_gh_truthy(confirm))
 
         def _gh_n(limit: Any, default: int = 20) -> int:
             s = str(limit if limit is not None else "").strip()
@@ -4240,17 +4208,8 @@ def _register_builtins(
             return tok, None
 
         def _nt_guard(summary: str, confirm: Any) -> dict | None:
-            if nt_confirm and not _nt_truthy(confirm) and not toolctx.background.get():
-                from .interaction import ask_options
-                return ask_options(
-                    summary,
-                    [
-                        {"label": "Confirmar", "value": "Sim, confirmo — refaça a ação agora com confirm=true."},
-                        {"label": "Cancelar", "value": "Cancele, não execute a ação."},
-                    ],
-                    allow_custom=False,
-                )
-            return None
+            from .interaction import confirm_gate
+            return confirm_gate("notion", summary, required=nt_confirm, confirmed=_nt_truthy(confirm))
 
         def _nt_n(limit: Any, default: int = 10) -> int:
             s = str(limit if limit is not None else "").strip()
@@ -4389,17 +4348,12 @@ def _register_builtins(
             return tok, None
 
         def _sl_guard(summary: str, confirm: Any) -> dict | None:
-            if sl_confirm and not _sl_truthy(confirm) and not toolctx.background.get():
-                from .interaction import ask_options
-                return ask_options(
-                    summary,
-                    [
-                        {"label": "Enviar", "value": "Sim, confirmo — reenvie agora com confirm=true."},
-                        {"label": "Cancelar", "value": "Cancele, não envie a mensagem."},
-                    ],
-                    allow_custom=False,
-                )
-            return None
+            from .interaction import confirm_gate
+            return confirm_gate("slack", summary, required=sl_confirm, confirmed=_sl_truthy(confirm),
+                                options=[
+                                    {"label": "Enviar", "value": "Sim, confirmo — reenvie agora com confirm=true."},
+                                    {"label": "Cancelar", "value": "Cancele, não envie a mensagem."},
+                                ])
 
         def _sl_n(limit: Any, default: int = 20) -> int:
             s = str(limit if limit is not None else "").strip()
@@ -4522,18 +4476,12 @@ def _register_builtins(
             )
 
         def _msg_guard(summary: str, confirm: Any) -> dict | None:
-            # canais/automações (background): não há usuário p/ confirmar → envia direto
-            if msg_confirm and not _msg_truthy(confirm) and not toolctx.background.get():
-                from .interaction import ask_options
-                return ask_options(
-                    summary,
-                    [
-                        {"label": "Enviar", "value": "Sim, confirmo — reenvie agora com confirm=true."},
-                        {"label": "Cancelar", "value": "Cancele, não envie a mensagem."},
-                    ],
-                    allow_custom=False,
-                )
-            return None
+            from .interaction import confirm_gate
+            return confirm_gate("messaging", summary, required=msg_confirm, confirmed=_msg_truthy(confirm),
+                                options=[
+                                    {"label": "Enviar", "value": "Sim, confirmo — reenvie agora com confirm=true."},
+                                    {"label": "Cancelar", "value": "Cancele, não envie a mensagem."},
+                                ])
 
         def _msg_n(limit: Any, default: int = 20) -> int:
             s = str(limit if limit is not None else "").strip()
@@ -4679,21 +4627,15 @@ def _register_builtins(
 
             O piso é POR-MÁQUINA (`confirm_required`), não o toggle global: aqui o
             comando roda numa VPS do usuário, com a rede e os dados dela, não num
-            sandbox descartável — o padrão tem que ser perguntar. Em turno autônomo
-            (automação/canal) não há quem confirme, então executa direto, igual às
-            demais ferramentas."""
+            sandbox descartável — o padrão tem que ser perguntar. Canal pergunta na
+            conversa; automação só roda se o dono liberou (confirm_gate)."""
             need = bool(chosen.get("confirm_required")) or rt_confirm
-            if not need or _rt_truthy(confirm) or toolctx.background.get():
-                return None
-            from .interaction import ask_options
-            return ask_options(
-                summary,
-                [
-                    {"label": "Confirmar", "value": "Sim, confirmo — refaça a ação agora com confirm=true."},
-                    {"label": "Cancelar", "value": "Cancele, não execute o comando."},
-                ],
-                allow_custom=False,
-            )
+            from .interaction import confirm_gate
+            return confirm_gate("remote", summary, required=need, confirmed=_rt_truthy(confirm),
+                                options=[
+                                    {"label": "Confirmar", "value": "Sim, confirmo — refaça a ação agora com confirm=true."},
+                                    {"label": "Cancelar", "value": "Cancele, não execute o comando."},
+                                ])
 
         def _rt_call(chosen: dict, coro_factory) -> dict[str, Any]:
             """Chama o agente e ANOTA o desfecho no status da máquina.

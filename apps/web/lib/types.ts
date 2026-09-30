@@ -738,6 +738,8 @@ export interface AutomationOptions {
   chat_ttl?: number | "view_once" | null;
   /** nível de raciocínio (thinking) do turno; ausente = padrão do modelo */
   reasoning?: "off" | "low" | "medium" | "high" | null;
+  /** ações que a automação pode fazer sem aprovação (categorias do servidor) */
+  allowed_actions?: string[];
 }
 
 export interface Automation {
