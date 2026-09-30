@@ -536,6 +536,13 @@ export default function PromptBox({
     const t = setTimeout(() => setNotice(null), 3500);
     return () => clearTimeout(t);
   }, [notice]);
+  // ao PARAR de gravar, o conteúdo volta crescendo: fica cortado até a transição acabar
+  const [recClip, setRecClip] = useState(false);
+  useEffect(() => {
+    if (recording) { setRecClip(true); return; }
+    const t = setTimeout(() => setRecClip(false), 320);
+    return () => clearTimeout(t);
+  }, [recording]);
   // cronômetro da barra de gravação (só conta enquanto grava)
   const [recSecs, setRecSecs] = useState(0);
   useEffect(() => {
@@ -958,10 +965,13 @@ export default function PromptBox({
             {notice}
           </button>
         )}
-        {/* barra de gravação (estilo ChatGPT): cobre o composer enquanto grava, com
-            cancelar (descarta), a onda animada + cronômetro e concluir (transcreve). */}
-        {recording && (
-          <div className="absolute inset-0 z-40 flex items-center gap-2 rounded-3xl bg-surface px-2">
+        {/* barra de gravação (estilo ChatGPT): enquanto grava, a caixa ENCOLHE para uma
+            linha só — cancelar (descarta), a onda na largura toda + cronômetro, concluir
+            (transcreve). As duas partes trocam de altura por grid-rows (0fr ↔ 1fr). */}
+        <div inert={!recording}
+          className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${recording ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}>
+          <div className="min-h-0 overflow-hidden">
+          <div className="flex items-center gap-2">
             <button
               onClick={onCancelMic ?? onToggleMic}
               title="Cancelar"
@@ -970,7 +980,7 @@ export default function PromptBox({
               <X size={20} />
             </button>
             <div className="flex min-w-0 flex-1 items-center gap-3">
-              <MicWave stream={micStream ?? null} />
+              <MicWave stream={recording ? micStream ?? null : null} />
               <span className="shrink-0 font-mono text-sm tabular-nums text-muted">
                 {String(Math.floor(recSecs / 60)).padStart(2, "0")}:{String(recSecs % 60).padStart(2, "0")}
               </span>
@@ -983,7 +993,8 @@ export default function PromptBox({
               <Check size={20} />
             </button>
           </div>
-        )}
+          </div>
+        </div>
         {commandMenuOpen && (
           <div className="animate-pop absolute bottom-full left-3 right-3 z-50 mb-2 overflow-hidden rounded-xl border border-border bg-surface shadow-menu">
             <p className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">Comandos</p>
@@ -1098,6 +1109,11 @@ export default function PromptBox({
             </p>
           </div>
         )}
+        <div inert={recording}
+          className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${recording ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr] opacity-100"}`}>
+        {/* overflow só durante a transição: os menus da barra de ferramentas abrem PARA
+            FORA da caixa e seriam cortados se ficasse sempre escondido */}
+        <div className={`min-h-0 ${recording || recClip ? "overflow-hidden" : ""}`}>
         {refDocs.length > 0 && (
           <div className="mb-1.5 flex flex-wrap gap-1.5 px-1">
             {refDocs.map((r) => (
@@ -1454,12 +1470,15 @@ export default function PromptBox({
             )}
           </div>
         </div>
+        </div>
+        </div>
       </div>
     </div>
   );
 }
 
-const WAVE_BARS = 48;
+const WAVE_GAP_PX = 3;
+const WAVE_BAR_PX = 3;
 const WAVE_MAX_PX = 30;
 
 /** A onda da barra de gravação: cada barrinha é o volume captado num instante, rolando da
@@ -1469,9 +1488,32 @@ function MicWave({ stream }: { stream: MediaStream | null }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = ref.current;
-    if (!stream || !el) return;
+    if (!el) return;
+    // quantas barras cabem: recalcula quando a caixa muda de largura (sem React)
+    let levels: number[] = [];
+    let bars: HTMLElement[] = [];
+    const build = () => {
+      const n = Math.max(8, Math.floor((el.clientWidth + WAVE_GAP_PX) / (WAVE_BAR_PX + WAVE_GAP_PX)));
+      if (n === bars.length) return;
+      const prev = levels;
+      levels = new Array<number>(n).fill(0);
+      for (let k = 1; k <= Math.min(n, prev.length); k++) levels[n - k] = prev[prev.length - k];
+      el.replaceChildren(...Array.from({ length: n }, () => {
+        const b = document.createElement("span");
+        b.className = "shrink-0 rounded-full bg-accent transition-[height] duration-75 ease-out";
+        b.style.width = `${WAVE_BAR_PX}px`;
+        b.style.height = "3px";
+        b.style.opacity = "0.45";
+        return b;
+      }));
+      bars = Array.from(el.children) as HTMLElement[];
+    };
+    build();
+    const ro = new ResizeObserver(build);
+    ro.observe(el);
+    if (!stream) return () => ro.disconnect();
     const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctx) return;
+    if (!Ctx) return () => ro.disconnect();
     const ctx = new Ctx();
     void ctx.resume().catch(() => {});
     const src = ctx.createMediaStreamSource(stream);
@@ -1479,8 +1521,6 @@ function MicWave({ stream }: { stream: MediaStream | null }) {
     an.fftSize = 1024;
     src.connect(an);
     const buf = new Uint8Array(an.fftSize);
-    const levels = new Array<number>(WAVE_BARS).fill(0);
-    const bars = Array.from(el.children) as HTMLElement[];
     let raf = 0;
     let last = 0;
     let peak = 0;
@@ -1510,16 +1550,11 @@ function MicWave({ stream }: { stream: MediaStream | null }) {
     };
     raf = requestAnimationFrame(tick);
     return () => {
+      ro.disconnect();
       cancelAnimationFrame(raf);
       src.disconnect();
       void ctx.close().catch(() => {});
     };
   }, [stream]);
-  return (
-    <div ref={ref} className="flex h-8 flex-1 items-center justify-end gap-[3px] overflow-hidden" aria-hidden>
-      {Array.from({ length: WAVE_BARS }, (_, i) => (
-        <span key={i} className="w-[3px] shrink-0 rounded-full bg-accent transition-[height] duration-75 ease-out" style={{ height: "3px", opacity: 0.45 }} />
-      ))}
-    </div>
-  );
+  return <div ref={ref} className="flex h-8 min-w-0 flex-1 items-center justify-end gap-[3px] overflow-hidden" aria-hidden />;
 }

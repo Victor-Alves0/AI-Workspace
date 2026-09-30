@@ -13,6 +13,7 @@ import { AnchoredMenu, MenuItem, Toggle, InfoDot, Select } from "@/components/ui
 import { copyText } from "@/lib/clipboard";
 import CodespaceFileBrowser, { extLang } from "@/components/CodespaceFileBrowser";
 import CodespaceGraphView from "@/components/CodespaceGraphView";
+import { toast } from "@/components/Toaster";
 
 interface GithubAccountLite {
   id: string;
@@ -274,9 +275,7 @@ async function resolveProjectChatModel(project: CodespaceProject, userDefault: s
   return (await resolveChatModel(project.default_model)) ?? (await resolveChatModel(userDefault));
 }
 
-const NO_MODEL_MSG =
-  "Selecione um modelo primeiro: abra um chat do projeto e use “Definir como padrão do projeto”, " +
-  "ou defina um modelo padrão nas Configurações.";
+const NO_MODEL_MSG = "Escolha um modelo padrão para o projeto (ou nas Configurações).";
 
 function fmtStats(p: CodespaceProject): string {
   const s = p.stats;
@@ -311,7 +310,7 @@ function ChatRow({ chat, onOpen, onRenamed, onDeleted }: {
       const updated = await api.patch<{ title: string }>(`/chats/${chat.id}`, { title: v.trim() });
       onRenamed(updated.title);
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Falha ao renomear o chat");
+      toast(e instanceof ApiError ? e.message : "Falha ao renomear o chat");
     }
   }
 
@@ -322,7 +321,7 @@ function ChatRow({ chat, onOpen, onRenamed, onDeleted }: {
       await api.del(`/chats/${chat.id}`);
       onDeleted();
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Falha ao excluir o chat");
+      toast(e instanceof ApiError ? e.message : "Falha ao excluir o chat");
     }
   }
 
@@ -364,7 +363,7 @@ function ProjectChatsTab({ project, onOpenChat }: { project: CodespaceProject; o
     try {
       const resolved = await resolveProjectChatModel(project, user?.default_model);
       if (!resolved) {
-        alert(NO_MODEL_MSG);
+        toast(NO_MODEL_MSG);
         return;
       }
       const chat = await api.post<{ id: string }>("/chats", {
@@ -373,7 +372,7 @@ function ProjectChatsTab({ project, onOpenChat }: { project: CodespaceProject; o
       });
       onOpenChat(chat.id);
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Falha ao criar o chat");
+      toast(e instanceof ApiError ? e.message : "Falha ao criar o chat");
     } finally {
       setCreating(false);
     }
@@ -588,7 +587,7 @@ function ProjectMemoryTab({ bankId }: { bankId: string }) {
       setDraft("");
       load();
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Falha ao adicionar");
+      toast(e instanceof ApiError ? e.message : "Falha ao adicionar");
     } finally {
       setAdding(false);
     }
@@ -796,13 +795,13 @@ function ProjectDetail({
       if (chats.length > 0) { onOpenChat(chats[0].id, prefill); return; }
       const me = await api.get<User>("/auth/me");
       const resolved = await resolveProjectChatModel(project, me.default_model);
-      if (!resolved) { alert(NO_MODEL_MSG); return; }
+      if (!resolved) { toast(NO_MODEL_MSG); return; }
       const chat = await api.post<{ id: string }>("/chats", {
         title: project.name, model: resolved.model, model_config_id: resolved.model_config_id,
         project_id: project.id,
       });
       onOpenChat(chat.id, prefill);
-    }).catch(() => alert("Falha ao abrir o chat para referenciar o arquivo"));
+    }).catch(() => toast("Falha ao abrir o chat para referenciar o arquivo"));
   }
 
   function openInExplorer(path: string) {
@@ -962,7 +961,7 @@ function ProjectTasksTab({ project }: { project: CodespaceProject }) {
         openPr ? { open_pr: true } : { push: hasGithub });
       if (openPr && r.pr?.html_url) window.open(r.pr.html_url, "_blank");
       await load(); setOpenId(null);
-    } catch (e) { alert(e instanceof ApiError ? e.message : "Falha ao mesclar"); }
+    } catch (e) { toast(e instanceof ApiError ? e.message : "Falha ao mesclar"); }
     finally { setBusy(null); }
   }
 

@@ -6,6 +6,7 @@ import { api, API_URL, ApiError } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { openExternal } from "@/lib/desktop";
 import { useConfirm } from "./ConfirmDialog";
+import { toast } from "@/components/Toaster";
 
 interface Account {
   id: string;
@@ -120,7 +121,7 @@ export default function GitHubPanel({ onBack }: { onBack: () => void }) {
                     onClick={async () => {
                       if (!(await confirm({ title: "Remover esta conta?", body: <>Os modelos deixarão de acessar <span className="font-medium text-ink">{a.login}</span>.</>, confirmLabel: "Remover", danger: true }))) return;
                       try { await api.del(`/integrations/github/accounts/${a.id}`); await load(); }
-                      catch (e) { alert(e instanceof ApiError ? e.message : "Falha ao remover"); }
+                      catch (e) { toast(e instanceof ApiError ? e.message : "Falha ao remover"); }
                     }}
                     title="Remover conta"
                     className="shrink-0 rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-red-400"
@@ -340,7 +341,7 @@ function OAuthAppConfig({ st, reload }: { st: GithubStatus; reload: () => Promis
       setTimeout(() => setSaved(false), 1500);
       await reload();
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Falha ao salvar");
+      toast(e instanceof ApiError ? e.message : "Falha ao salvar");
     } finally {
       setSaving(false);
     }

@@ -44,6 +44,7 @@ import { useDrawerSwipe } from "./useDrawerSwipe";
 import { SoundAutoplayContext } from "@/components/SoundChip";
 import { AgentChatContext } from "@/components/SubagentCard";
 import type { QueueItem } from "@/components/QueueTray";
+import { toast } from "@/components/Toaster";
 
 // fila de mensagens por chat (bandeja do composer), guardada no navegador
 const QUEUE_KEY = "aiw_msg_queue";
@@ -1026,7 +1027,7 @@ export default function ChatPage() {
       return;
     }
     // SEM chat: só um RASCUNHO — nada é criado até o 1º envio/rodar
-    if (!curModel) { alert("Selecione um modelo primeiro."); return; }
+    if (!curModel) { toast("Escolha um modelo."); return; }
     setDraftRt({
       participants: [{ id: rid(), model: curModel, model_config_id: curCustomId, name: modelLabel || "Modelo 1", color: RT_COLORS[0] }],
       config: { turn_policy: "round_robin", max_rounds: 6 },
@@ -1037,7 +1038,7 @@ export default function ChatPage() {
   async function ensureRoundtableChat(): Promise<Chat | null> {
     if (active) return active;
     if (!draftRt) return null;
-    if (!curModel) { alert("Selecione um modelo primeiro."); return null; }
+    if (!curModel) { toast("Escolha um modelo."); return null; }
     // mesa iniciada no modo TEMPORÁRIO → chat view_once (apagado ao sair), a
     // versão "não salva" possível p/ a mesa (que exige um chat persistido).
     const viewOnce = temporary;
@@ -1688,7 +1689,7 @@ export default function ChatPage() {
     if ((!text && attachments.length === 0) || sending) return;
     const model = active ? active.model : curModel;
     if (!model) {
-      alert("Selecione um modelo primeiro.");
+      toast("Escolha um modelo.");
       return;
     }
     if (!override) setInput("");
@@ -1907,7 +1908,7 @@ export default function ChatPage() {
       await selectChat(clone.id);
       setForkSend({ chatId: clone.id, text: item.text });
     } catch (e) {
-      alert(e instanceof Error ? e.message : "Não foi possível fazer o fork.");
+      toast(e instanceof Error ? e.message : "Falha no fork.");
     }
   }
   // o envio no fork espera o chat novo estar ativo e livre (selectChat é assíncrono)
@@ -2002,7 +2003,7 @@ export default function ChatPage() {
       refreshChats();
     } catch (e) {
       setMessages(prev); // reverte em caso de falha
-      alert(e instanceof ApiError ? e.message : "Falha ao excluir a mensagem");
+      toast(e instanceof ApiError ? e.message : "Falha ao excluir a mensagem");
     }
   }, [active, confirm, messages, refreshChats]);
 
@@ -2116,7 +2117,7 @@ export default function ChatPage() {
           const ext = recordingFilename(blob).split(".").pop() || "webm";
           await addFilesRef.current([new File([blob], `Gravação ${hora}.${ext}`, { type: blob.type || "audio/webm" })]);
         } catch (e) {
-          alert("Falha na gravação: " + (e as Error).message);
+          toast("Gravação falhou: " + (e as Error).message);
         }
         return;
       }
@@ -2134,11 +2135,11 @@ export default function ChatPage() {
             if (local) {
               setInput((v) => (v ? v + " " : "") + local);
             } else {
-              alert("Falha na transcrição: " + (e as Error).message);
+              toast((e as Error).message || "Transcrição falhou.");
             }
           }
         } catch (e) {
-          alert("Falha na gravação: " + (e as Error).message);
+          toast("Gravação falhou: " + (e as Error).message);
         }
       }
     } else {
@@ -2147,7 +2148,7 @@ export default function ChatPage() {
       const voiceConfig = selectedModel?.filter_config?.voice as { stt_enabled?: boolean } | undefined;
       const ouveAudio = !!(selectedModel?.capabilities as Record<string, unknown> | undefined)?.audio;
       if (voiceConfig?.stt_enabled === false && !ouveAudio) {
-        alert("A escuta (STT) está desativada nas configurações deste modelo.");
+        toast("Escuta desligada neste modelo.");
         return;
       }
       try {
@@ -2157,7 +2158,7 @@ export default function ChatPage() {
         setMicStream(recorderRef.current.stream);
         setRecording(true);
       } catch {
-        alert("Não foi possível acessar o microfone.");
+        toast("Sem acesso ao microfone.");
       }
     }
   }
@@ -2247,7 +2248,7 @@ export default function ChatPage() {
         blob = await utter.done;
         voiceRef.current.utter = null;
       } catch {
-        alert("Não foi possível acessar o microfone.");
+        toast("Sem acesso ao microfone.");
         break;
       }
       setVoiceLevel(0);
@@ -2282,20 +2283,20 @@ export default function ChatPage() {
     if (voiceRef.current.active) { stopVoiceMode(); return; }
     const mcId = curCustom?.id ?? active?.model_config_id ?? null;
     if (!mcId) {
-      alert('O modo voz precisa de um modelo com "Assistente de voz" ligado (Configurações do modelo → Voz).');
+      toast("Modo voz desligado neste modelo.");
       return;
     }
     const selectedModel = curCustom ?? customModels.find((model) => model.id === mcId);
     const voiceConfig = selectedModel?.filter_config?.voice as { stt_enabled?: boolean } | undefined;
     if (voiceConfig?.stt_enabled === false) {
-      alert("A escuta (STT) está desativada nas configurações deste modelo.");
+      toast("Escuta desligada neste modelo.");
       return;
     }
     let session: VoiceSession;
     try {
       session = await api.post<VoiceSession>("/voice/session", { model_config_id: mcId });
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Não foi possível iniciar o modo voz.");
+      toast(e instanceof ApiError ? e.message : "Falha ao iniciar o modo voz.");
       return;
     }
     voiceRef.current = { active: true, utter: null, session };
@@ -2483,7 +2484,7 @@ export default function ChatPage() {
       refreshChats();
       notify("Contexto compactado", "A conversa foi resumida para liberar espaço.");
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Falha ao compactar");
+      toast(e instanceof ApiError ? e.message : "Falha ao compactar");
     } finally {
       setCompacting(false);
     }

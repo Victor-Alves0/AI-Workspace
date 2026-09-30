@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import type { ImaginaiSpell, ImaginaiSpells } from "../types";
 import { ImaginaiFeatureStatus, ImaginaiToolbar } from "../shared";
 import { Select } from "@/components/ui";
+import { useConfirm } from "@/components/ConfirmDialog";
 
 export function spellComponents(value: unknown): string {
   if (Array.isArray(value)) return value.map((item) => String(item)).filter(Boolean).join(", ");
@@ -19,6 +20,7 @@ function levelLabel(level: number): string {
 
 export function ImaginaiSpellsPanel({ campaignId }: { campaignId: string }) {
   const [data, setData] = useState<ImaginaiSpells | null>(null);
+  const confirm = useConfirm();
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [editing, setEditing] = useState<ImaginaiSpell | "new" | null>(null);
   const [query, setQuery] = useState("");
@@ -66,7 +68,7 @@ export function ImaginaiSpellsPanel({ campaignId }: { campaignId: string }) {
         <button type="button" onClick={() => setSelectedKey(null)} className="imaginai-small-button -ml-1.5"><ChevronLeft size={14} /> Grimório</button>
         <div className="flex gap-0.5">
           <button type="button" onClick={() => setEditing(selected)} title="Editar magia" aria-label="Editar magia" className="flex h-7 w-7 items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-ink"><Pencil size={13} /></button>
-          <button type="button" onClick={() => { if (window.confirm(`Remover ${selected.name} da ficha?`)) void saveAll(data.spells.filter((item) => item.key !== selected.key)).then(() => setSelectedKey(null)); }} title="Remover magia" aria-label="Remover magia" className="flex h-7 w-7 items-center justify-center rounded-lg text-muted transition-colors hover:bg-rose-500/10 hover:text-rose-300"><Trash2 size={13} /></button>
+          <button type="button" onClick={async () => { if (await confirm({ title: `Remover ${selected.name} da ficha?`, confirmLabel: "Remover", danger: true })) void saveAll(data.spells.filter((item) => item.key !== selected.key)).then(() => setSelectedKey(null)); }} title="Remover magia" aria-label="Remover magia" className="flex h-7 w-7 items-center justify-center rounded-lg text-muted transition-colors hover:bg-rose-500/10 hover:text-rose-300"><Trash2 size={13} /></button>
         </div>
       </div>
       <div className="mt-2 flex items-start justify-between gap-2"><div className="min-w-0"><p className="text-[10px] uppercase tracking-wider text-violet-300">{levelLabel(selected.level)}{selected.school ? ` · ${selected.school}` : ""}</p><h3 className="mt-0.5 text-sm font-semibold text-ink">{selected.name}</h3></div><span className={`shrink-0 rounded-full px-2 py-1 text-[9px] ${selected.prepared ? "bg-emerald-400/10 text-emerald-300" : "bg-amber-400/10 text-amber-300"}`}>{selected.prepared ? "Preparada" : "Não preparada"}</span></div>

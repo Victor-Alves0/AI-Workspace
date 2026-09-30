@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Radar, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
+import { useConfirm } from "./ConfirmDialog";
 import type { InvestigationGraphMeta } from "@/lib/types";
 import InvestigationGraphView from "./InvestigationGraphView";
 
@@ -16,6 +17,7 @@ const KIND_LABEL: Record<string, string> = {
 export default function InvestigationPanel() {
   const [graphs, setGraphs] = useState<InvestigationGraphMeta[] | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   const load = useCallback(() => {
     api.get<{ graphs: InvestigationGraphMeta[] }>("/investigation/graphs")
@@ -32,7 +34,7 @@ export default function InvestigationPanel() {
   }, [graphs, selected]);
 
   async function remove(id: string) {
-    if (!confirm("Apagar este grafo? Não dá para desfazer.")) return;
+    if (!(await confirm({ title: "Apagar este grafo?", body: "Não dá para desfazer.", confirmLabel: "Apagar", danger: true }))) return;
     await api.del(`/investigation/graphs/${id}`).catch(() => {});
     if (selected === id) setSelected(null);
     load();

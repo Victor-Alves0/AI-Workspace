@@ -375,7 +375,7 @@ async def stt(
         if out is not None:
             return out
         if provider == "local":
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "O servidor de voz local não oferece transcrição")
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, "A Voz Local não transcreve.")
     if provider not in {"auto", "api", "local"}:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Provedor de transcrição inválido")
     # …depois o provedor global (exige a chave)
@@ -383,14 +383,13 @@ async def stt(
     if not key:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "Nenhum servidor de transcrição disponível: a conexão de Voz Local não faz "
-            "STT e não há chave do provedor de voz configurada.",
+            "Sem transcrição configurada. Adicione uma em Conexões → Voz.",
         )
     out = await _try_transcribe(
         s.voice_base_url, key, requested_model or s.stt_model, fname, audio, mime
     )
     if out is None:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Provedor de voz global inacessível")
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "Provedor de voz fora do ar.")
     return out
 
 
@@ -586,7 +585,7 @@ async def voice_session(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Modelo não encontrado")
     listen = (mc.filter_config or {}).get("listen") or {}
     if not listen.get("enabled"):
-        raise HTTPException(status.HTTP_409_CONFLICT, "O assistente de voz não está ligado neste modelo")
+        raise HTTPException(status.HTTP_409_CONFLICT, "Modo voz desligado neste modelo.")
 
     mode = "new" if listen.get("chat_mode") == "new" else "fixed"
     chat = None

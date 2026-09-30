@@ -7,6 +7,7 @@ import { streamCompare } from "@/lib/sse";
 import type { Model, ModelConfig } from "@/lib/types";
 import ModelField from "./ModelField";
 import Markdown from "./Markdown";
+import { toast } from "@/components/Toaster";
 
 function splitModel(v: string): { model: string; model_config_id: string | null } {
   return v.startsWith("custom:") ? { model: "", model_config_id: v.slice(7) } : { model: v, model_config_id: null };
@@ -96,7 +97,7 @@ export default function CompareView() {
         name: `Comparação: ${prompt.slice(0, 40)}`,
         cases: [{ prompt, ...(system ? { system } : {}) }],
       });
-      alert(`Salvo como benchmark. Abra em Benchmarks para rodar.\nID: ${id}`);
+      toast("Salvo em Benchmarks.", "success");
     } catch {
       setErr("Falha ao salvar como benchmark");
     }

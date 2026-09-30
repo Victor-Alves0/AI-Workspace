@@ -9,6 +9,7 @@ import ModelField from "./ModelField";
 import ContextWindowSelect from "./ContextWindowSelect";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { Select } from "@/components/ui";
+import { toast } from "@/components/Toaster";
 
 const inputCls = "mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent placeholder:text-muted";
 
@@ -85,7 +86,7 @@ export default function TelegramPanel({ onBack }: { onBack: () => void }) {
     try {
       const r = await api.post<{ ok: boolean; chat_id?: string }>(`/integrations/telegram/connections/${c.id}/test`, {});
       setErr(r.ok ? null : "Falha no teste");
-      if (r.ok) alert(`Mensagem de teste enviada para ${r.chat_id}.`);
+      if (r.ok) toast("Mensagem de teste enviada.", "success");
     } catch (e) { setErr(e instanceof ApiError ? e.message : "Falha ao testar"); }
   }
 

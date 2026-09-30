@@ -304,3 +304,16 @@ def test_o_tailwind_mantem_hover_apenas_onde_ha_mouse():
     todos os `touch-reveal` continuam certos e o bug volta silenciosamente."""
     config = (_WEB / "tailwind.config.ts").read_text(encoding="utf-8")
     assert "hoverOnlyWhenSupported: true" in config
+
+
+def test_front_nao_usa_dialogos_do_navegador():
+    """alert/confirm/prompt do navegador travam a página, fogem do visual do app e não
+    funcionam bem no app desktop. Avisos: `toast()` (components/Toaster); perguntas:
+    `useConfirm`/`usePrompt` (components/ConfirmDialog)."""
+    padrao = re.compile(r"(?<![\w.])(?:window\.)?alert\(|window\.(?:confirm|prompt)\(")
+    achados: list[str] = []
+    for path in [*_tsx(), *(_WEB / "lib").rglob("*.ts"), *(_WEB / "app").rglob("*.ts")]:
+        for n, linha in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if padrao.search(linha) and not linha.lstrip().startswith(("//", "*", "/*")):
+                achados.append(f"{path.relative_to(_REPO)}:{n}")
+    assert not achados, f"use toast()/useConfirm no lugar do diálogo do navegador: {achados}"

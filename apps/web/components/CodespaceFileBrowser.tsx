@@ -9,6 +9,7 @@ import { api, ApiError } from "@/lib/api";
 import type { CodespaceFileEntry } from "@/lib/types";
 import { usePrompt } from "@/components/ConfirmDialog";
 import { AnchoredMenu, MenuItem } from "@/components/ui";
+import { toast } from "@/components/Toaster";
 
 /** remove o prefixo "N\t" (número de linha) que /files/content devolve */
 export function stripLineNumbers(content: string): string {
@@ -115,7 +116,7 @@ function EntryRow({
       await api.patch(`/codespace/projects/${projectId}/files/move`, { path: entry.path, dest_path: dest });
       onChanged();
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Falha ao renomear");
+      toast(e instanceof ApiError ? e.message : "Falha ao renomear");
     }
   }
 
@@ -295,7 +296,7 @@ export default function CodespaceFileBrowser({
       refresh();
       if (selected === srcPath) setSelected(dest);
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Falha ao mover");
+      toast(e instanceof ApiError ? e.message : "Falha ao mover");
     }
   }
 

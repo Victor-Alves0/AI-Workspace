@@ -5,6 +5,7 @@ import { AudioLines, Check, ChevronLeft, Loader2, TriangleAlert, Trash2, Wifi } 
 import { api, ApiError } from "@/lib/api";
 import { useConfirm } from "./ConfirmDialog";
 import { Select } from "@/components/ui";
+import { toast } from "@/components/Toaster";
 
 interface Voice { id: string; name: string }
 interface ElevenLabsStatus {
@@ -68,7 +69,7 @@ export default function ElevenLabsPanel({ onBack, onChanged }: { onBack: () => v
   async function disconnect() {
     if (!(await confirm({ title: "Desconectar a ElevenLabs?", body: "A voz premium e a ferramenta de áudio deixarão de funcionar.", confirmLabel: "Desconectar", danger: true }))) return;
     try { await api.del("/integrations/elevenlabs"); await load(); onChanged?.(); }
-    catch (e) { alert(e instanceof ApiError ? e.message : "Falha ao desconectar"); }
+    catch (e) { toast(e instanceof ApiError ? e.message : "Falha ao desconectar"); }
   }
 
   return (

@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { Toaster } from "./Toaster";
 
 export interface ConfirmOptions {
   title: string;
@@ -65,6 +66,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
     <ConfirmCtx.Provider value={confirm}>
       <PromptCtx.Provider value={promptFn}>
         {children}
+        <Toaster />
         {state && (
           <ConfirmModal
             {...state}

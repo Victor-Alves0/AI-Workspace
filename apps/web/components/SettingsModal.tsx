@@ -96,6 +96,7 @@ import {
   type DesktopPatch,
   type DesktopSettings,
 } from "@/lib/desktop";
+import { toast } from "@/components/Toaster";
 
 type Cat = "general" | "status" | "interface" | "connections" | "integrations" | "miniapps" | "shortcuts" | "security" | "data" | "account" | "desktop" | "about";
 
@@ -2076,11 +2077,11 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
         } else {
           body = { items: Array.isArray(parsed) ? parsed : (parsed.items ?? [parsed]) };
         }
-      } catch { alert("Arquivo inválido."); return; }
+      } catch { toast("Arquivo inválido."); return; }
       await api.post("/chats/bulk/import", body);
-      alert("Chats importados. Recarregue para vê-los.");
+      toast("Chats importados. Recarregue a página.", "success");
     } catch (e) {
-      alert(e instanceof ApiError ? e.message : "Falha ao importar.");
+      toast(e instanceof ApiError ? e.message : "Falha ao importar.");
     } finally {
       setBusy(false);
     }
@@ -2089,7 +2090,7 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
   async function archiveAll() {
     if (!(await confirm({ title: "Arquivar TODOS os chats?", confirmLabel: "Arquivar" }))) return;
     await api.post("/chats/bulk/archive-all");
-    alert("Todos os chats foram arquivados. Recarregue a página.");
+    toast("Chats arquivados. Recarregue a página.", "success");
   }
   async function deleteAll() {
     const ok = await confirm({
@@ -2100,7 +2101,7 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
     });
     if (!ok) return;
     await api.post("/chats/bulk/delete-all");
-    alert("Todos os chats foram excluídos. Recarregue a página.");
+    toast("Chats excluídos. Recarregue a página.", "success");
   }
 
   return (
@@ -2183,7 +2184,7 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
       </Row>
 
       <Heading>Arquivos</Heading>
-      <Row label="Gerenciar arquivos"><LinkBtn onClick={() => alert("Em breve")}>Gerenciar</LinkBtn></Row>
+      <Row label="Gerenciar arquivos"><LinkBtn onClick={() => toast("Em breve.", "info")}>Gerenciar</LinkBtn></Row>
     </div>
   );
 }

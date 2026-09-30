@@ -10,6 +10,7 @@ import { messageAgent } from "@/lib/sse";
 import { startRecording, transcribe } from "@/lib/voice";
 import { describeStep } from "@/lib/activity";
 import Markdown from "./Markdown";
+import { toast } from "@/components/Toaster";
 
 /** Conversa direta com o agente pelo painel dele (depois que ele terminou). */
 export type AgentFollowup = { role: "user" | "assistant"; content: string; timeline?: SubagentTimelineItem[] };
@@ -380,7 +381,7 @@ function AgentComposer({ name, running, busy, onSend }: {
         const t = await transcribe(await rec.stop());
         if (t) setText((v) => (v ? `${v} ${t}` : t));
       } catch (e) {
-        alert("Falha ao transcrever: " + (e as Error).message);
+        toast((e as Error).message || "Transcrição falhou.");
       } finally {
         setTranscribing(false);
         ta.current?.focus();
@@ -390,7 +391,7 @@ function AgentComposer({ name, running, busy, onSend }: {
     try {
       setRec(await startRecording());
     } catch (e) {
-      alert("Não consegui usar o microfone: " + (e as Error).message);
+      toast("Sem acesso ao microfone.");
     }
   }
   const btn = "flex h-8 w-8 items-center justify-center rounded-full transition-colors";
