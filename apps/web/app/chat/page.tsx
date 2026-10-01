@@ -215,7 +215,7 @@ export default function ChatPage() {
   // `draftMiniApp` segura a escolha até o chat ser criado no primeiro envio.
   const [draftMiniApp, setDraftMiniApp] = useState<MiniAppId | null>(null);
   const activeMiniApp: MiniAppId | null = active
-    ? (active.mini_app === "imaginai" ? "imaginai" : null)
+    ? (active.mini_app === "imaginai" ? "imaginai" : active.mini_app === "cyberlab" ? "cyberlab" : null)
     : draftMiniApp;
   // num chat Imaginai, o botão do Mini App só mostra/oculta os painéis laterais
   const [imaginaiDocksHidden, setImaginaiDocksHidden] = useState(false);
@@ -1623,21 +1623,24 @@ export default function ChatPage() {
       setImaginaiDocksHidden((hidden) => !hidden);
       return;
     }
-    if (app !== "imaginai") return;
-    // o que já estava digitado vira a ideia da campanha; sem nada, a IA pergunta
+    if (app !== "imaginai" && app !== "cyberlab") return;
+    // o que já estava digitado vira a ideia inicial; sem nada, a IA pergunta
     const ideia = input.trim();
     goHome();
     setInput("");
-    setDraftMiniApp("imaginai");
+    setDraftMiniApp(app);
     setImaginaiDocksHidden(false);
-    setPendingKickoff(ideia || tr("Começar uma nova campanha"));
+    const padrao = app === "cyberlab"
+      ? tr("Começar uma avaliação de segurança")
+      : tr("Começar uma nova campanha");
+    setPendingKickoff(ideia || padrao);
   }
 
   // Dispara o 1º turno da campanha nova quando o rascunho já está limpo: aqui o `send`
   // é o desta renderização (sem estado velho do chat anterior) e cria o chat já como
   // Imaginai. A IA responde cumprimentando e abrindo a sessão zero.
   useEffect(() => {
-    if (!pendingKickoff || active || sending || draftMiniApp !== "imaginai") return;
+    if (!pendingKickoff || active || sending || draftMiniApp == null) return;
     const texto = pendingKickoff;
     setPendingKickoff(null);
     void send(texto);
@@ -1767,7 +1770,7 @@ export default function ChatPage() {
         let chat = active;
         if (!chat) {
           chat = await api.post<Chat>("/chats", {
-            title: turnMiniApp === "imaginai" ? tr("Nova campanha") : tr("Novo Chat"),
+            title: turnMiniApp === "imaginai" ? tr("Nova campanha") : turnMiniApp === "cyberlab" ? tr("Novo caso") : tr("Novo Chat"),
             model,
             system_prompt: initialSystemPrompt,
             params: initialParams,

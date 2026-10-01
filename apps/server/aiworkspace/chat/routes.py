@@ -177,6 +177,12 @@ async def create_chat(
 
         await imaginai_service.create_campaign(db, user.id, CampaignCreate(chat_id=chat.id))
         await db.refresh(chat)
+    elif body.mini_app == "cyberlab":
+        # o caso nasce com o chat — o 1º turno já encontra o caso e a tool prontos
+        from ..cyberlab import service as cyberlab_service
+
+        await cyberlab_service.create_case(db, user.id, chat.id)
+        await db.refresh(chat)
     return chat
 
 

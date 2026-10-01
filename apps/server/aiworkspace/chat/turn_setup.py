@@ -1996,3 +1996,35 @@ async def _imaginai_turn_kwargs(
 
     tools = await prepare_turn_tools(db, user.id, chat.id, turn_key)
     return {"native_tools": tools} if tools is not None else {}
+
+
+@traced("setup:cyberlab")
+async def _cyberlab_turn_kwargs(
+    db: AsyncSession,
+    user: User,
+    chat: Chat,
+    *,
+    mini_app: str | None,
+) -> dict[str, Any]:
+    """Ativa o caso CyberLab só num turno marcado como tal (mesmo gate do Imaginai:
+    é estado do chat, não instrução global)."""
+    if mini_app != "cyberlab":
+        return {}
+    from ..cyberlab.turns import prepare_turn_tools
+
+    tools = await prepare_turn_tools(user.id, chat.id)
+    return {"native_tools": tools} if tools is not None else {}
+
+
+async def _miniapp_turn_kwargs(
+    db: AsyncSession,
+    user: User,
+    chat: Chat,
+    turn_key: str,
+    *,
+    mini_app: str | None,
+) -> dict[str, Any]:
+    """Despacha os kwargs de turno do Mini App ativo (um por chat)."""
+    if mini_app == "cyberlab":
+        return await _cyberlab_turn_kwargs(db, user, chat, mini_app=mini_app)
+    return await _imaginai_turn_kwargs(db, user, chat, turn_key, mini_app=mini_app)

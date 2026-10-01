@@ -17,6 +17,7 @@ import {
   Mic,
   MessagesSquare,
   Minimize2,
+  Crosshair,
   Plus,
   Search,
   Send,
@@ -276,6 +277,12 @@ const MINI_APPS = [
     name: tr("Imaginai"),
     description: tr("RPG interativo com IA"),
     icon: Dices,
+  },
+  {
+    id: "cyberlab",
+    name: tr("CyberLab"),
+    description: tr("Avaliação de segurança guiada (a IA conduz você)"),
+    icon: Crosshair,
   },
 ] as const;
 export type MiniAppId = (typeof MINI_APPS)[number]["id"];

@@ -19,7 +19,7 @@ class ChatCreate(BaseModel):
     # Codespace: projeto vinculado (habilita code.graph.query/code.files.browse)
     project_id: uuid.UUID | None = None
     # Mini App que o chat É desde o nascimento ("imaginai" = nova campanha)
-    mini_app: str | None = Field(default=None, pattern=r"^(imaginai)$")
+    mini_app: str | None = Field(default=None, pattern=r"^(imaginai|cyberlab)$")
     # pasta de trabalho: "home" = principal, "off" = sem pasta, ou id de projeto.
     # Chat novo nasce SEM pasta: a IA pede uma (request_folder) quando precisar.
     workspace: str | None = Field(default="off", max_length=64)
@@ -155,7 +155,7 @@ class SendMessageIn(BaseModel):
     steer: bool = False
     # Mini App ativo neste envio. Permite ao servidor materializar o mundo antes
     # do primeiro turno, eliminando a corrida entre o clique e o POST da mensagem.
-    mini_app: Literal["imaginai"] | None = None
+    mini_app: Literal["imaginai", "cyberlab"] | None = None
 
 
 class FolderCreate(BaseModel):

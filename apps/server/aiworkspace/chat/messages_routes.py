@@ -37,7 +37,7 @@ from .turn_setup import (
     _final_message_fields,
     _get_model_config,
     _get_owned_chat,
-    _imaginai_turn_kwargs,
+    _miniapp_turn_kwargs,
     _load_skills,
     _media_opts,
     _workspace_active,
@@ -228,6 +228,11 @@ async def send_message(
             user.id,
             CampaignCreate(chat_id=chat.id),
         )
+    elif body.mini_app == "cyberlab":
+        from ..cyberlab import service as cyberlab_service
+
+        # idempotente, igual ao Imaginai: garante o caso antes do 1º turno
+        await cyberlab_service.create_case(db, user.id, chat.id)
 
     # ENVIO DURANTE GERAÇÃO ATIVA: não abre uma 2ª geração (corrida de duas respostas no
     # mesmo chat). Persiste a mensagem (visível) e a ENFILEIRA na geração em curso —
@@ -447,7 +452,7 @@ async def send_message(
         params=params,
         base_url=base_url,
         **(await _artifacts_kwargs(db, chat_id, user, arts_on, model_config)),
-        **(await _imaginai_turn_kwargs(
+        **(await _miniapp_turn_kwargs(
             db, user, chat, str(user_msg.id), mini_app=body.mini_app
         )),
         session=TurnSession(
@@ -675,7 +680,7 @@ async def regenerate_message(
         params=params,
         base_url=base_url,
         **(await _artifacts_kwargs(db, chat_id, user, arts_on, model_config)),
-        **(await _imaginai_turn_kwargs(
+        **(await _miniapp_turn_kwargs(
             db,
             user,
             chat,

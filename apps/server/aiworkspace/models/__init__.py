@@ -40,6 +40,7 @@ from .trace import ObsTrace, ObsSpan
 from .remote_host import RemoteHost
 from .subagent_job import SubagentJob
 from .sync_peer import SyncPeer
+from .cyberlab import CyberLabCase
 from .imaginai import (
     ImaginaiActionAttempt,
     ImaginaiCampaign,
@@ -113,6 +114,7 @@ __all__ = [
     "RemoteHost",
     "SubagentJob",
     "SyncPeer",
+    "CyberLabCase",
     "ImaginaiCampaign",
     "ImaginaiEntity",
     "ImaginaiEvent",
