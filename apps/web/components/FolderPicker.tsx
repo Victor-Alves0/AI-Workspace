@@ -57,9 +57,10 @@ export default function FolderPicker({ value, onChange, lockedName, menuUp }: {
       <button type="button" onClick={() => { setOpen((o) => !o); if (!open) void load(); }}
         title={off ? tr("Sem pasta: a IA não cria nem edita arquivos") : tr("Pasta de trabalho: {0}", { "0": atual?.path ?? "" })}
         aria-label={tr("Pasta de trabalho")}
-        className={`flex h-8 max-w-[170px] items-center gap-1.5 rounded-full px-2 text-xs transition-colors hover:bg-hover ${off ? "text-muted" : "text-ink-soft"}`}>
+        className={`flex h-8 max-w-[170px] shrink-0 items-center gap-1.5 rounded-full px-2 text-xs transition-colors hover:bg-hover ${off ? "text-muted" : "text-ink-soft"}`}>
         {off ? <FolderX size={15} className="shrink-0" /> : <Folder size={15} className="shrink-0" />}
-        <span className="truncate">{rotulo}</span>
+        {/* celular: só o ícone (o nome apertava a caixa de mensagem) */}
+        <span className="truncate max-md:hidden">{rotulo}</span>
       </button>
       {open && (
         <div className={`animate-pop absolute left-0 z-50 w-80 max-w-[calc(100vw-1rem)] overflow-hidden rounded-xl border border-border bg-surface shadow-menu ${menuUp ? "bottom-full mb-2" : "top-full mt-2"}`}>

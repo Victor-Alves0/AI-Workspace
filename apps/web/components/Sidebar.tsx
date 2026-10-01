@@ -50,16 +50,17 @@ function groupByDate(chats: Chat[]): { label: string; chats: Chat[] }[] {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const yesterday = new Date(today.getTime() - 86400000);
   const pinned: Chat[] = [];
-  const groups: Record<string, Chat[]> = { Hoje: [], Ontem: [], Anteriores: [] };
+  const groups: Record<string, Chat[]> = { [tr("Hoje")]: [], [tr("Ontem")]: [], [tr("Anteriores")]: [] };
+  const [gToday, gYesterday, gOlder] = Object.keys(groups);
   for (const c of chats) {
     if (c.pinned) {
       pinned.push(c);
       continue;
     }
     const d = new Date(c.updated_at);
-    if (d >= today) groups["Hoje"].push(c);
-    else if (d >= yesterday) groups["Ontem"].push(c);
-    else groups["Anteriores"].push(c);
+    if (d >= today) groups[gToday].push(c);
+    else if (d >= yesterday) groups[gYesterday].push(c);
+    else groups[gOlder].push(c);
   }
   const out: { label: string; chats: Chat[] }[] = [];
   if (pinned.length) out.push({ label: tr("Fixados"), chats: pinned });
@@ -156,6 +157,7 @@ export default function Sidebar({
   onOpenSettings,
   onShowArchived,
   onOpenWorkspace,
+  onOpenModels,
   onOpenAutomations,
   onOpenCodespace,
   onOpenPlayground,
@@ -176,13 +178,15 @@ export default function Sidebar({
   onSearch: () => void;
   onOpenConversations: () => void;
   chatActions: ChatActions;
-  onCreateFolder: () => void;
+  /** cria e devolve o id da pasta nova (a barra abre a seção e já entra em renomear) */
+  onCreateFolder: () => Promise<string | undefined>;
   onRenameFolder: (id: string, name: string) => void;
   onDeleteFolder: (id: string) => void;
   onMoveChat: (chatId: string, folderId: string | null) => void;
   onOpenSettings: () => void;
   onShowArchived: () => void;
   onOpenWorkspace: () => void;
+  onOpenModels: () => void;
   onOpenAutomations: () => void;
   onOpenCodespace: () => void;
   onOpenPlayground: () => void;
@@ -219,6 +223,20 @@ export default function Sidebar({
       }
     }
   }, []);
+
+  // pasta recém-criada: abre a seção (senão o usuário não vê que foi criada) e já
+  // entra em renomear
+  const [freshFolder, setFreshFolder] = useState<string | null>(null);
+  const newFolder = async () => {
+    setSections((s) => {
+      if (s.folders) return s;
+      const next = { ...s, folders: true };
+      localStorage.setItem("sidebarSections", JSON.stringify(next));
+      return next;
+    });
+    const id = await onCreateFolder().catch(() => undefined);
+    if (id) setFreshFolder(id);
+  };
 
   const toggle = (k: keyof typeof sections) =>
     setSections((s) => {
@@ -351,7 +369,7 @@ export default function Sidebar({
               icon={<LayoutGrid size={16} />}
               onToggle={() => toggle("models")}
               action={
-                <button onClick={onOpenWorkspace} title={tr("Gerenciar")} className="text-muted transition-colors hover:text-ink-soft">
+                <button onClick={onOpenModels} title={tr("Gerenciar")} className="text-muted transition-colors hover:text-ink-soft">
                   <Wrench size={14} />
                 </button>
               }
@@ -385,7 +403,7 @@ export default function Sidebar({
               icon={<FolderIcon size={16} />}
               onToggle={() => toggle("folders")}
               action={
-                <button onClick={onCreateFolder} title={tr("Nova pasta")} className="text-muted transition-colors hover:text-ink-soft">
+                <button onClick={newFolder} title={tr("Nova pasta")} className="text-muted transition-colors hover:text-ink-soft">
                   <FolderPlus size={14} />
                 </button>
               }
@@ -405,6 +423,7 @@ export default function Sidebar({
                     onRename={onRenameFolder}
                     onDelete={onDeleteFolder}
                     onMoveChat={onMoveChat}
+                    startRenaming={f.id === freshFolder}
                   />
                 ))}
               </div>
@@ -490,6 +509,7 @@ function FolderRow({
   onRename,
   onDelete,
   onMoveChat,
+  startRenaming = false,
 }: {
   folder: Folder;
   chats: Chat[];
@@ -502,10 +522,11 @@ function FolderRow({
   onRename: (id: string, name: string) => void;
   onDelete: (id: string) => void;
   onMoveChat: (chatId: string, folderId: string | null) => void;
+  startRenaming?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [over, setOver] = useState(false);
-  const [renaming, setRenaming] = useState(false);
+  const [renaming, setRenaming] = useState(startRenaming);
   const [name, setName] = useState(folder.name);
 
   return (
@@ -535,6 +556,7 @@ function FolderRow({
           {renaming ? (
             <input
               autoFocus
+              onFocus={(e) => e.currentTarget.select()}
               value={name}
               onClick={(e) => e.stopPropagation()}
               onChange={(e) => setName(e.target.value)}
@@ -579,7 +601,7 @@ function FolderRow({
           {chats.map((c) => (
             <ChatItem key={c.id} chat={c} active={c.id === activeId} actions={actions} />
           ))}
-          {chats.length === 0 && subfolders.length === 0 && <p className="px-2 py-1 text-xs text-muted">vazia</p>}
+          {chats.length === 0 && subfolders.length === 0 && <p className="px-2 py-1 text-xs text-muted">{tr("vazia")}</p>}
         </div>
       )}
     </div>

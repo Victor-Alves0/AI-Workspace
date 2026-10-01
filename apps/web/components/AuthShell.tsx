@@ -21,12 +21,11 @@ export default function AuthShell({
     // a tela INTEIRA é o login (sem moldura/cartão em volta): arte à esquerda, formulário à direita
     <div className="h-full overflow-y-auto bg-[#0b0b0d]">
       <div className="animate-fade-up relative grid min-h-full w-full overflow-hidden bg-[#0b0b0d] md:grid-cols-[1fr_1.05fr]">
-        {/* celular: a mesma arte vira o FUNDO da tela, com blur e um véu escuro opaco
-            por cima para o formulário continuar legível (no desktop ela fica na coluna) */}
+        {/* celular: a mesma arte viva vira o FUNDO da tela, com um véu escuro por cima
+            para o formulário continuar legível (no desktop ela fica na coluna) */}
         <div aria-hidden className="pointer-events-none absolute inset-0 md:hidden">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/login-hero.webp" alt="" className="h-full w-full scale-105 object-cover blur-[2px]" />
-          <div className="absolute inset-0 bg-gradient-to-b from-[#0b0b0d]/20 via-[#0b0b0d]/45 to-[#0b0b0d]/80" />
+          <RisingLines className="absolute inset-0 h-full w-full" />
+          <div className="absolute inset-0 bg-gradient-to-b from-[#0b0b0d]/10 via-[#0b0b0d]/45 to-[#0b0b0d]/80" />
         </div>
         <div className="relative hidden md:block">
           {/* a arte viva: as linhas sobem em loop até o ápice (a mesma da tela de início) */}

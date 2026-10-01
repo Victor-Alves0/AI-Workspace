@@ -1292,8 +1292,8 @@ export default function PromptBox({
           style={{ maxHeight: MAX_HEIGHT }}
           />
         </div>
-        <div className="composer-toolbar flex items-center justify-between px-1 pt-1">
-          <div className="flex items-center gap-1">
+        <div className="composer-toolbar flex items-center justify-between gap-1 px-1 pt-1 max-md:px-0">
+          <div className="flex min-w-0 items-center gap-1 max-md:gap-0">
             <div className="relative" ref={plusRef}>
               <button
                 onMouseDown={(e) => e.stopPropagation()}
@@ -1419,7 +1419,7 @@ export default function PromptBox({
             {folder}
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-1.5 max-md:gap-0.5">
             {context && onCompact && context.limit > 0 && (
               <ContextMeter
                 pct={context.tokens / context.limit}

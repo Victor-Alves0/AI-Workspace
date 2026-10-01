@@ -45,7 +45,7 @@ import { SoundAutoplayContext } from "@/components/SoundChip";
 import { AgentChatContext } from "@/components/SubagentCard";
 import type { QueueItem } from "@/components/QueueTray";
 import { toast } from "@/components/Toaster";
-import { dateLocale, syncLocaleWithProfile, tr } from "@/lib/i18n";
+import { dateLocale, syncLocaleWithProfile, tr, trTools } from "@/lib/i18n";
 
 // fila de mensagens por chat (bandeja do composer), guardada no navegador
 const QUEUE_KEY = "aiw_msg_queue";
@@ -635,7 +635,7 @@ export default function ChatPage() {
         applyDefaultModel(u, customs);
         refreshExtModels();
         api.get<Tool[]>("/tools").then(setTools).catch(() => {});
-        api.get<SystemTool[]>("/tools/system").then(setSystemTools).catch(() => {});
+        api.get<SystemTool[]>("/tools/system").then((ts) => setSystemTools(trTools(ts))).catch(() => {});
         api.get<Prompt[]>("/prompts")
           .then((ps) => setPrompts([...ps, LEARN_BUILTIN]))
           .catch(() => setPrompts([LEARN_BUILTIN]));
@@ -1379,15 +1379,21 @@ export default function ChatPage() {
     if (!vv) return;
     const root = document.documentElement;
     const update = () => {
+      // o iOS ainda ROLA a página para cima ao focar o campo (mesmo com overflow
+      // hidden); somado ao --kb, a barra do topo sumia e sobrava um vão acima do
+      // teclado. A página fica presa no topo e só o --kb sobe o composer.
+      if (window.scrollY !== 0 || vv.offsetTop !== 0) window.scrollTo(0, 0);
       const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
       root.style.setProperty("--kb", `${Math.round(kb)}px`);
     };
     update();
     vv.addEventListener("resize", update);
     vv.addEventListener("scroll", update);
+    window.addEventListener("scroll", update);
     return () => {
       vv.removeEventListener("resize", update);
       vv.removeEventListener("scroll", update);
+      window.removeEventListener("scroll", update);
       root.style.removeProperty("--kb");
     };
   }, []);
@@ -1573,8 +1579,9 @@ export default function ChatPage() {
   };
 
   const createFolder = async () => {
-    await api.post("/folders", { name: tr("Nova pasta") });
+    const f = await api.post<{ id: string }>("/folders", { name: tr("Nova pasta") });
     await refreshFolders();
+    return f?.id;
   };
   const renameFolder = async (id: string, name: string) => {
     await api.patch(`/folders/${id}`, { name });
@@ -2676,6 +2683,7 @@ export default function ChatPage() {
           onOpenSettings={() => { setShowSettings(true); setMobileNav(false); }}
           onShowArchived={() => { setShowArchived(true); setMobileNav(false); }}
           onOpenWorkspace={() => openWorkspace(null)}
+          onOpenModels={() => openWorkspace("Modelos")}
           onOpenAutomations={() => openWorkspace("Automacoes")}
           onOpenCodespace={() => openWorkspace("Codespace")}
           onOpenPlayground={() => openWorkspace("Playground")}

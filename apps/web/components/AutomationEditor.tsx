@@ -7,7 +7,7 @@ import type { Automation, AutomationOptions, Chat, Model, ModelConfig, SystemToo
 import ModelField from "./ModelField";
 import TransferModal, { type TransferItem } from "./TransferModal";
 import { InfoDot, Select } from "@/components/ui";
-import { tr } from "@/lib/i18n";
+import { tr, trTools } from "@/lib/i18n";
 
 // mesmas chaves de tools/interaction.py::ACTION_CATEGORIES (teste de invariante no servidor)
 const ACTION_CATEGORIES = [
@@ -282,7 +282,7 @@ export default function AutomationEditor({
     api.get<{ connections: WhatsAppConnection[] }>("/integrations/whatsapp").then((r) => setWaConns(r.connections ?? [])).catch(() => {});
     api.get<TelegramConnection[]>("/integrations/telegram/connections").then(setTgConns).catch(() => {});
     api.get<Tool[]>("/tools").then(setTools).catch(() => {});
-    api.get<SystemTool[]>("/tools/system").then(setSystemTools).catch(() => {});
+    api.get<SystemTool[]>("/tools/system").then((ts) => setSystemTools(trTools(ts))).catch(() => {});
   }, []);
 
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((p) => ({ ...p, [k]: v }));

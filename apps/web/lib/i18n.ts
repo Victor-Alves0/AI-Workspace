@@ -107,6 +107,17 @@ function compilar(d: Record<string, string>): Modelo[] {
 }
 
 /** Traduz uma mensagem vinda do servidor; sem tradução, devolve como veio. */
+/** Ferramentas do sistema vêm do servidor com nome/descrição em PT (BUILTIN_TOOLS). */
+export function trTools<T extends { name: string; description: string; integration?: string }>(rows: T[]): T[] {
+  if (current === "pt") return rows;
+  return rows.map((t) => ({
+    ...t,
+    name: trServer(t.name),
+    description: trServer(t.description),
+    ...(t.integration ? { integration: trServer(t.integration) } : {}),
+  }));
+}
+
 export function trServer(msg: string): string {
   if (current === "pt" || !msg) return msg;
   const d = DICTS[current];

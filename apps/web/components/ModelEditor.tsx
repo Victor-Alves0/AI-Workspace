@@ -11,7 +11,7 @@ import { toolCategoryIcon, toolCategoryTitle } from "./toolCategory";
 import ModelField from "./ModelField";
 import { AnchoredMenu, finePointer, Toggle, Select } from "./ui";
 import { WebSearchPanel, FinancePanel, TextExtractionPanel, DeepSearchPanel, GooglePanel, TuyaToolPanel, GithubToolPanel, MessagingToolPanel, RemoteTerminalToolPanel } from "./toolPanels";
-import { tr } from "@/lib/i18n";
+import { tr, trTools } from "@/lib/i18n";
 
 // ferramentas internas com painel de config (engrenagem em "Ferramentas Ativas")
 const TOOL_CFG: Record<string, { key: string; Panel: (p: any) => React.JSX.Element; needsStatus: boolean }> = {
@@ -1043,7 +1043,7 @@ export default function ModelEditor({
       api.get<Model[]>("/integrations/subscriptions/chatgpt/models").catch(() => [] as Model[]),
     ]).then(([ext, local, subs]) => setBaseModels([...ext, ...local, ...subs])).catch(() => {});
     api.get<Tool[]>("/tools").then(setTools).catch(() => {});
-    api.get<SystemTool[]>("/tools/system").then(setSystemTools).catch(() => {});
+    api.get<SystemTool[]>("/tools/system").then((ts) => setSystemTools(trTools(ts))).catch(() => {});
     api.get<Skill[]>("/skills").then(setSkills).catch(() => {});
     reloadSecrets();
   }, []);

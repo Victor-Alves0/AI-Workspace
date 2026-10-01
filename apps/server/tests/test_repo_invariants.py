@@ -413,3 +413,17 @@ def test_erros_do_servidor_tem_traducao_em_ingles():
     en = _json.loads((_WEB / "locales" / "en.json").read_text(encoding="utf-8"))
     faltando = [f"{onde}: {k[:70]!r}" for k, onde in _mensagens_do_servidor().items() if k not in en]
     assert not faltando, "erros do servidor sem tradução:\n" + "\n".join(faltando[:40])
+
+
+def test_ferramentas_do_sistema_tem_traducao_em_ingles():
+    """Nome/descrição das ferramentas embutidas (BUILTIN_TOOLS) e o nome da
+    integração aparecem na UI; o front traduz com `trTools` pelo en.json."""
+    import json as _json
+
+    from aiworkspace.tools import sift_service
+
+    en = _json.loads((_WEB / "locales" / "en.json").read_text(encoding="utf-8"))
+    textos = [t[k] for t in sift_service.BUILTIN_TOOLS for k in ("name", "description")]
+    textos += list(sift_service._INTEGRATION_PREFIXES.values())
+    faltando = [t[:70] for t in textos if t not in en]
+    assert not faltando, "ferramentas do sistema sem tradução:\n" + "\n".join(faltando)
