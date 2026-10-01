@@ -1299,6 +1299,8 @@ def _register_builtins(
                         "This is usually temporary — the engines may be rate-limiting this "
                         "server's IP. Retry once with simpler or different keywords, or open a "
                         "specific authoritative URL with web.page.read; do not give up on the task."
+                        + (" For CVEs/vulnerabilities, security.cve.search (official NVD database) "
+                           "is never blocked." if re.search(r"\bcve\b|vulnerab|exploit", query, re.I) else "")
                     )}
                 # enxuga: trecho curto, sem campos redundantes → poucos tokens
                 trimmed = [
@@ -1418,20 +1420,34 @@ def _register_builtins(
         @sift.tool(
             "security.cve.search",
             description=(
-                "Look up vulnerabilities in the official NVD CVE API. Search by an exact CVE ID "
-                "or keywords; returns description, published date, CVSS and reference URLs. "
-                "Use this to establish whether a CVE exists before making a security claim."
+                "Look up vulnerabilities in the official NVD CVE database (prefer this over web "
+                "search for anything CVE-related — it never gets blocked). Search by an exact CVE "
+                "ID, or by PRODUCT keywords (e.g. 'InfluxDB', 'MiniUPnPd' — keep it to product/"
+                "vendor names; generic words like 'vulnerability' or years narrow it to nothing). "
+                "Newest CVEs first. Each result has description, CVSS, CWE, `affected` version "
+                "ranges (check them against the version you care about) and `known_exploited` "
+                "when it is in CISA's KEV catalog (exploited in the wild). Filters: severity, "
+                "known_exploited, cpe. Use it to establish whether a CVE exists before making a "
+                "security claim."
             ),
             params={
-                "query": "string:o::CVE ID (e.g. CVE-2024-3094) or keyword search",
+                "query": "string:o::CVE ID (e.g. CVE-2024-3094) or product/vendor keywords",
                 "limit": "number:o:10:max results (1-20)",
+                "severity": "string:o::only this CVSS v3 severity: LOW | MEDIUM | HIGH | CRITICAL",
+                "known_exploited": "boolean:o::only CVEs in CISA's Known Exploited Vulnerabilities catalog",
+                "cpe": "string:o::CPE 2.3 match string to filter by exact product/version, e.g. cpe:2.3:a:influxdata:influxdb:2.7.5",
             },
-            returns=["source", "total_results", "results", "error"],
-            examples=["look up CVE-2024-3094", "find CVEs for xz utils"],
+            returns=["source", "total_results", "results", "query_used", "note", "error",
+                     "id", "description", "published", "cvss", "cwe", "affected",
+                     "known_exploited", "references", "url"],
+            examples=["look up CVE-2024-3094", "find CVEs for xz utils",
+                      "critical InfluxDB CVEs exploited in the wild"],
         )
-        def _cve_search(query: str = "", limit: Any = 10) -> dict[str, Any]:
+        def _cve_search(query: str = "", limit: Any = 10, severity: str = "",
+                        known_exploited: Any = None, cpe: str = "") -> dict[str, Any]:
             from .security_search import nvd_cve_search
-            return nvd_cve_search(query, limit)
+            ke = known_exploited is True or str(known_exploited).strip().lower() in ("true", "1", "yes", "sim")
+            return nvd_cve_search(query, limit, severity=severity, known_exploited=ke, cpe=cpe)
 
     if want("web.browser.use"):
         @sift.tool(

@@ -19,6 +19,7 @@ def _response(status: int, payload: dict | None = None, text: str = ""):
 def setup_function():
     search._result_cache.clear()
     search._exploit_index = None
+    search._NVD_MIN_INTERVAL = 0.0  # o respiro do limite público do NVD não vale p/ teste
 
 
 def test_public_github_search_shapes_repository_results_and_caches(monkeypatch):
@@ -107,9 +108,83 @@ def test_security_tools_are_listed_and_registered_in_sift(monkeypatch):
     sift = Sift()
     sift_service._register_builtins(sift, sift_service.SearchConfig(), wanted)
     sift.build_index()
-    monkeypatch.setattr(search, "nvd_cve_search", lambda query, limit: {"results": [{"id": query}], "limit": limit})
+    monkeypatch.setattr(search, "nvd_cve_search", lambda query, limit, **kw: {"results": [{"id": query}], "limit": limit})
     raw = sift.dispatch("execute_tool", {"path": "security.cve.search", "params": {"query": "CVE-2024-1", "limit": 3}})
     out = json.loads(raw) if isinstance(raw, str) else raw
     # A SIFT filtra a resposta pelos campos declarados em `returns`; o importante
     # aqui é provar que o path foi registrado e chegou ao handler certo.
     assert out == {"results": [{"id": "CVE-2024-1"}]}
+
+
+# ------------------------------- NVD (01/10) --------------------------------------
+def _cve(cid, published, **extra):
+    return {"cve": {"id": cid, "published": published, "descriptions": [{"lang": "en", "value": cid}],
+                    **extra}}
+
+
+def test_nvd_varias_palavras_sem_resultado_tenta_so_o_produto(monkeypatch):
+    """O NVD exige TODAS as palavras na descrição: "InfluxDB information disclosure
+    vulnerability 2.7.5 2024" dava 0 — "InfluxDB" sozinho acha."""
+    pedidos = []
+
+    def fake_get(url, *, params, headers, timeout):
+        pedidos.append(params.get("keywordSearch"))
+        if params["keywordSearch"] == "InfluxDB":
+            return _response(200, {"totalResults": 1, "vulnerabilities": [_cve("CVE-2022-36640", "2022-09-02")]})
+        return _response(200, {"totalResults": 0, "vulnerabilities": []})
+
+    monkeypatch.setattr(search.httpx, "get", fake_get)
+    out = search.nvd_cve_search("InfluxDB information disclosure vulnerability 2.7.5 2024", 5)
+    assert pedidos == ["InfluxDB information disclosure vulnerability 2.7.5 2024", "InfluxDB 2.7.5", "InfluxDB"]
+    assert out["query_used"] == "InfluxDB" and out["results"][0]["id"] == "CVE-2022-36640"
+    assert "note" in out
+
+
+def test_nvd_mostra_os_mais_recentes_primeiro(monkeypatch):
+    """A API devolve do mais antigo ao mais novo: "Hikvision" trazia só CVEs de 2014."""
+    pedidos = []
+
+    def fake_get(url, *, params, headers, timeout):
+        pedidos.append(params.get("startIndex"))
+        if params.get("startIndex") is None:
+            return _response(200, {"totalResults": 48, "vulnerabilities": [_cve("CVE-2013-4977", "2014-01-01")]})
+        return _response(200, {"totalResults": 48, "vulnerabilities": [
+            _cve("CVE-2026-1", "2026-07-22"), _cve("CVE-2026-2", "2026-09-10")]})
+
+    monkeypatch.setattr(search.httpx, "get", fake_get)
+    out = search.nvd_cve_search("Hikvision", 2)
+    assert pedidos == [None, 46]
+    assert [r["id"] for r in out["results"]] == ["CVE-2026-2", "CVE-2026-1"]
+
+
+def test_nvd_traz_versoes_afetadas_cwe_e_kev_e_repassa_filtros(monkeypatch):
+    vistos = {}
+
+    def fake_get(url, *, params, headers, timeout):
+        vistos.update(params)
+        return _response(200, {"totalResults": 1, "vulnerabilities": [_cve(
+            "CVE-2021-36260", "2021-09-22",
+            weaknesses=[{"description": [{"lang": "en", "value": "CWE-78"}]}],
+            configurations=[{"nodes": [{"cpeMatch": [
+                {"vulnerable": True, "criteria": r"cpe:2.3:o:hikvision:ds-2cd2026g2-iu\/sl_firmware:*:*:*:*:*:*:*:*",
+                 "versionEndExcluding": "5.5.800"},
+                {"vulnerable": False, "criteria": "cpe:2.3:h:hikvision:camera:-:*:*:*:*:*:*:*"},
+            ]}]}],
+            cisaExploitAdd="2022-01-10", cisaActionDue="2022-01-24",
+            cisaRequiredAction="Apply updates per vendor instructions.",
+        )]})
+
+    monkeypatch.setattr(search.httpx, "get", fake_get)
+    out = search.nvd_cve_search("Hikvision", 5, severity="critical", known_exploited=True)
+    r = out["results"][0]
+    assert vistos["cvssV3Severity"] == "CRITICAL" and "hasKev" in vistos
+    assert r["cwe"] == ["CWE-78"]
+    assert r["affected"] == ["hikvision ds-2cd2026g2-iu/sl_firmware < 5.5.800"]
+    assert r["known_exploited"]["added"] == "2022-01-10"
+
+
+def test_nvd_sem_kev_nao_inventa_o_campo(monkeypatch):
+    monkeypatch.setattr(search.httpx, "get", lambda url, **k: _response(
+        200, {"totalResults": 1, "vulnerabilities": [_cve("CVE-2024-1", "2024-01-01")]}))
+    r = search.nvd_cve_search("CVE-2024-1", 1)["results"][0]
+    assert "known_exploited" not in r

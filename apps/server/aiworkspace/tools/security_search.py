@@ -179,53 +179,212 @@ def _english_description(cve: dict[str, Any]) -> str:
     return ""
 
 
-def nvd_cve_search(query: Any, limit: Any = 10) -> dict[str, Any]:
-    """Consulta a API 2.0 oficial do NVD por CVE ou palavra-chave."""
-    try:
-        q = _clean_query(query, min_length=2)
-    except ValueError as exc:
-        return {"error": str(exc)}
+# palavras que dizem O TIPO de falha, não o produto. A busca por palavra-chave do NVD
+# exige TODAS as palavras na descrição: "InfluxDB information disclosure vulnerability
+# 2.7.5 2024" voltava vazio; "InfluxDB" sozinho acha. Ficam de fora na 2ª tentativa.
+_NVD_GENERIC = frozenset("""
+vulnerability vulnerabilities vuln vulns cve cves exploit exploits exploitation poc security
+issue issues bug bugs flaw flaws advisory advisories attack attacks remote local unauthenticated
+authenticated authentication bypass rce code execution command injection sql sqli xss csrf ssrf
+xxe lfi rfi traversal path directory disclosure information leak overflow buffer heap stack
+denial service dos privilege escalation arbitrary file upload read write download default
+credentials password hardcoded weak no without missing improper
+""".split())
+_NVD_MIN_INTERVAL = 6.5   # sem chave: 5 consultas / 30 s (limite público do NVD)
+_nvd_last_call = [0.0]
+_nvd_lock = threading.Lock()
+
+
+def _nvd_get(params: dict[str, Any]) -> httpx.Response:
+    """GET na API do NVD respeitando o limite público (sem chave: 5 por 30 s). Estourar
+    rende 403 por um tempo — esperar alguns segundos sai mais barato que errar."""
+    with _nvd_lock:
+        espera = _NVD_MIN_INTERVAL - (time.monotonic() - _nvd_last_call[0])
+        if espera > 0:
+            time.sleep(espera)
+        try:
+            return httpx.get(_NVD_API, params=params, headers={"User-Agent": _UA}, timeout=25)
+        finally:
+            _nvd_last_call[0] = time.monotonic()
+
+
+def _core_terms(q: str) -> str:
+    """Produto + versão, sem as palavras genéricas, anos e IDs soltos."""
+    out = []
+    for w in q.split():
+        lw = w.lower().strip(",.;:()[]\"'")
+        if not lw or lw in _NVD_GENERIC or re.fullmatch(r"(19|20)\d\d", lw):
+            continue
+        out.append(w.strip(",.;:()[]\"'"))
+    return " ".join(out)
+
+
+def _affected(cve: dict[str, Any], limit: int = 6) -> list[str]:
+    """Faixas de versão afetadas (das configurações CPE), ex.: "influxdata influxdb < 1.7.6"."""
+    out: list[str] = []
+    for conf in cve.get("configurations") or []:
+        for node in (conf or {}).get("nodes") or []:
+            for m in (node or {}).get("cpeMatch") or []:
+                if not isinstance(m, dict) or not m.get("vulnerable"):
+                    continue
+                parts = str(m.get("criteria") or "").split(":")
+                if len(parts) < 6:
+                    continue
+                # o CPE escapa caracteres especiais com barra ("iu\/sl" = "iu/sl")
+                vendor, product, version = (x.replace("\\", "") for x in parts[3:6])
+                faixa = []
+                if m.get("versionStartIncluding"):
+                    faixa.append(f">= {m['versionStartIncluding']}")
+                if m.get("versionStartExcluding"):
+                    faixa.append(f"> {m['versionStartExcluding']}")
+                if m.get("versionEndIncluding"):
+                    faixa.append(f"<= {m['versionEndIncluding']}")
+                if m.get("versionEndExcluding"):
+                    faixa.append(f"< {m['versionEndExcluding']}")
+                if not faixa and version not in ("*", "-", ""):
+                    faixa.append(version)
+                item = f"{vendor} {product} {' '.join(faixa) or '(all versions)'}".strip()
+                if item not in out:
+                    out.append(item)
+                if len(out) >= limit:
+                    return out
+    return out
+
+
+def _cwes(cve: dict[str, Any]) -> list[str]:
+    out: list[str] = []
+    for w in cve.get("weaknesses") or []:
+        for d in (w or {}).get("description") or []:
+            v = str((d or {}).get("value") or "")
+            if v.startswith("CWE-") and v not in out:
+                out.append(v)
+    return out[:3]
+
+
+def _nvd_result(cve: dict[str, Any]) -> dict[str, Any]:
+    cve_id = str(cve.get("id") or "")
+    refs = cve.get("references") if isinstance(cve.get("references"), list) else []
+    item: dict[str, Any] = {
+        "id": cve_id,
+        "description": _english_description(cve),
+        "published": cve.get("published") or "",
+        "last_modified": cve.get("lastModified") or "",
+        "cvss": _cvss(cve),
+        "cwe": _cwes(cve),
+        "affected": _affected(cve),
+        "references": [str(ref.get("url")) for ref in refs if isinstance(ref, dict) and ref.get("url")][:5],
+        "url": f"https://nvd.nist.gov/vuln/detail/{cve_id}" if cve_id else "",
+    }
+    # está no catálogo KEV da CISA = explorada de verdade, não só teórica
+    if cve.get("cisaExploitAdd"):
+        item["known_exploited"] = {
+            "added": cve.get("cisaExploitAdd"),
+            "action_due": cve.get("cisaActionDue") or "",
+            "required_action": str(cve.get("cisaRequiredAction") or "")[:300],
+        }
+    return item
+
+
+def nvd_cve_search(query: Any = "", limit: Any = 10, *, severity: str = "",
+                   known_exploited: bool = False, cpe: str = "") -> dict[str, Any]:
+    """Consulta a API 2.0 oficial do NVD por CVE, palavra-chave ou CPE.
+
+    - Mais RECENTES primeiro (a API devolve do mais antigo ao mais novo — "Hikvision"
+      trazia só CVEs de 2014);
+    - busca vazia com várias palavras tenta de novo só com produto/versão;
+    - cada CVE traz as faixas de versão afetadas, a CWE e se está no KEV da CISA."""
+    q = " ".join(str(query or "").split()).strip()[:256]
+    cpe = (cpe or "").strip()
+    if len(q) < 2 and not cpe.startswith("cpe:2.3:"):
+        return {"error": "informe um CVE, palavras-chave (produto/versão) ou um CPE"}
     n = _limit(limit)
-    key = f"nvd:{q.lower()}:{n}"
+    sev = (severity or "").strip().upper()
+    if sev not in ("", "LOW", "MEDIUM", "HIGH", "CRITICAL"):
+        sev = ""
+    key = f"nvd:{q.lower()}:{n}:{sev}:{bool(known_exploited)}:{cpe.lower()}"
     if cached := _cache_get(key):
         return cached
-    params: dict[str, Any] = {"resultsPerPage": n}
-    if re.fullmatch(r"CVE-\d{4}-\d{4,}", q, flags=re.IGNORECASE):
-        params["cveId"] = q.upper()
+
+    base: dict[str, Any] = {}
+    if sev:
+        base["cvssV3Severity"] = sev
+    if known_exploited:
+        base["hasKev"] = ""
+    if cpe.startswith("cpe:2.3:"):
+        base["virtualMatchString"] = cpe
+
+    exato = re.fullmatch(r"CVE-\d{4}-\d{4,}", q, flags=re.IGNORECASE)
+    tentativas: list[str] = []
+    if exato:
+        tentativas = [q.upper()]
+    elif q:
+        tentativas = [q]
+        core = _core_terms(q)
+        if core and core.lower() != q.lower():
+            tentativas.append(core)
+        # último recurso: só a 1ª palavra que sobrou (normalmente o produto)
+        if core and len(core.split()) > 1:
+            tentativas.append(core.split()[0])
     else:
-        params["keywordSearch"] = q
-    try:
-        response = httpx.get(_NVD_API, params=params, headers={"User-Agent": _UA}, timeout=20)
-    except httpx.HTTPError as exc:
-        return {"error": f"não foi possível consultar o NVD: {exc}"}
-    if response.status_code != 200:
-        return _http_error("NVD", response)
-    try:
-        payload = response.json()
-    except ValueError:
-        return {"error": "NVD devolveu uma resposta inválida."}
+        tentativas = [""]
+
+    usado, total, payload = "", 0, {}
+    for t in tentativas:
+        params = dict(base)
+        if exato:
+            params["cveId"] = t
+        elif t:
+            params["keywordSearch"] = t
+        params["resultsPerPage"] = n
+        try:
+            response = _nvd_get(params)
+        except httpx.HTTPError as exc:
+            return {"error": f"não foi possível consultar o NVD: {exc}"}
+        if response.status_code != 200:
+            return _http_error("NVD", response)
+        try:
+            payload = response.json()
+        except ValueError:
+            return {"error": "NVD devolveu uma resposta inválida."}
+        total = int(payload.get("totalResults") or 0) if isinstance(payload, dict) else 0
+        usado = t
+        if total:
+            break
+
+    # a API ordena do mais antigo ao mais novo: com mais resultados que o pedido, busca
+    # a ÚLTIMA página (os mais novos) em vez de mostrar só os de dez anos atrás
+    if total > n and not exato:
+        params = dict(base)
+        if usado:
+            params["keywordSearch"] = usado
+        params.update({"resultsPerPage": n, "startIndex": max(0, total - n)})
+        try:
+            response = _nvd_get(params)
+            if response.status_code == 200:
+                payload = response.json()
+        except (httpx.HTTPError, ValueError):
+            pass  # fica com a 1ª página (mais antigos) — melhor que nada
+
     vulnerabilities = payload.get("vulnerabilities") if isinstance(payload, dict) else []
     if not isinstance(vulnerabilities, list):
         vulnerabilities = []
-    results: list[dict[str, Any]] = []
-    for wrapper in vulnerabilities[:n]:
-        cve = wrapper.get("cve") if isinstance(wrapper, dict) and isinstance(wrapper.get("cve"), dict) else {}
-        cve_id = str(cve.get("id") or "")
-        refs = cve.get("references") if isinstance(cve.get("references"), list) else []
-        results.append({
-            "id": cve_id,
-            "description": _english_description(cve),
-            "published": cve.get("published") or "",
-            "last_modified": cve.get("lastModified") or "",
-            "cvss": _cvss(cve),
-            "references": [str(ref.get("url")) for ref in refs if isinstance(ref, dict) and ref.get("url")][:5],
-            "url": f"https://nvd.nist.gov/vuln/detail/{cve_id}" if cve_id else "",
-        })
-    return _cache_put(key, {
+    results = [
+        _nvd_result(w["cve"]) for w in vulnerabilities
+        if isinstance(w, dict) and isinstance(w.get("cve"), dict)
+    ]
+    results.sort(key=lambda r: r.get("published") or "", reverse=True)
+    out: dict[str, Any] = {
         "source": "NVD CVE API 2.0",
-        "total_results": payload.get("totalResults", 0) if isinstance(payload, dict) else 0,
-        "results": results,
-    })
+        "total_results": total,
+        "results": results[:n],
+    }
+    if usado and usado != q:
+        out["query_used"] = usado
+        out["note"] = (f"no CVE matched every word of '{q}'; searched '{usado}' instead. "
+                       "Check each CVE's `affected` versions against the version you care about.")
+    elif total > n:
+        out["note"] = f"showing the {n} most recent of {total}; narrow with severity, known_exploited or cpe."
+    return _cache_put(key, out)
 
 
 def _load_exploit_index() -> tuple[list[dict[str, str]] | None, str | None, bool]:
