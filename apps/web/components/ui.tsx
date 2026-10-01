@@ -289,6 +289,14 @@ export function InfoDot({ text }: { text: string }) {
   const [pinned, setPinned] = useState(false);
   const ref = useRef<HTMLSpanElement>(null);
   const open = hover || pinned;
+  // perto da borda direita (fim de uma linha de ajuste, menu à direita) o balão abre
+  // para a esquerda — senão o modal em volta corta o texto
+  const [toLeft, setToLeft] = useState(false);
+  useEffect(() => {
+    if (!open || !ref.current) return;
+    const x = ref.current.getBoundingClientRect().left;
+    setToLeft(x + 248 > window.innerWidth - 8 || x > window.innerWidth * 0.6);
+  }, [open]);
   useEffect(() => {
     if (!pinned) return;
     const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setPinned(false); };
@@ -314,7 +322,7 @@ export function InfoDot({ text }: { text: string }) {
       {open && (
         <span
           role="tooltip"
-          className="absolute left-0 top-6 z-50 w-60 max-w-[min(80vw,15rem)] rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs font-normal leading-snug text-ink-soft shadow-lg"
+          className={`absolute ${toLeft ? "right-0" : "left-0"} top-6 z-50 w-60 max-w-[min(80vw,15rem)] rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs font-normal leading-snug text-ink-soft shadow-lg`}
         >
           {text}
         </span>

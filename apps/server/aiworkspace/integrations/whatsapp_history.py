@@ -54,10 +54,17 @@ async def record(instance: str, rows: list[dict[str, Any]],
     """Grava mensagens (repetidas são ignoradas) e atualiza as conversas.
     `names`: jid → (nome, é_grupo) conhecido da conversa. Devolve quantas entraram.
     Nunca levanta: histórico é auxiliar, não pode derrubar a entrega da mensagem."""
+    cid = await connection_id(instance)
+    if cid is None:
+        return 0
+    return await record_for(cid, rows, names, label=instance)
+
+
+async def record_for(cid: uuid.UUID, rows: list[dict[str, Any]],
+                     names: dict[str, tuple[str, bool]] | None = None, label: str = "") -> int:
+    """`record` pela id da conexão — a API oficial não tem instância, mas o que chega
+    por ela também precisa ficar legível para a IA do chat."""
     try:
-        cid = await connection_id(instance)
-        if cid is None:
-            return 0
         msgs = [
             {
                 "id": uuid.uuid4(), "connection_id": cid, "jid": r["jid"], "msg_id": r["msg_id"],
@@ -101,7 +108,7 @@ async def record(instance: str, rows: list[dict[str, Any]],
             await db.commit()
         return entraram
     except Exception as exc:  # noqa: BLE001
-        logger.warning("whatsapp: histórico não gravado (%s): %s", instance, exc)
+        logger.warning("whatsapp: histórico não gravado (%s): %s", label or cid, exc)
         return 0
 
 
@@ -110,6 +117,10 @@ async def chats(instance: str, limit: int = 50) -> list[dict[str, Any]]:
     cid = await connection_id(instance)
     if cid is None:
         return []
+    return await chats_for(cid, limit)
+
+
+async def chats_for(cid: uuid.UUID, limit: int = 50) -> list[dict[str, Any]]:
     async with SessionLocal() as db:
         rows = list(await db.scalars(
             select(WhatsAppChat).where(WhatsAppChat.connection_id == cid)
@@ -134,6 +145,10 @@ async def messages(instance: str, jid: str, limit: int = 20) -> list[dict[str, A
     cid = await connection_id(instance)
     if cid is None:
         return []
+    return await messages_for(cid, jid, limit)
+
+
+async def messages_for(cid: uuid.UUID, jid: str, limit: int = 20) -> list[dict[str, Any]]:
     async with SessionLocal() as db:
         rows = list(await db.scalars(
             select(WhatsAppMessage).where(WhatsAppMessage.connection_id == cid, WhatsAppMessage.jid == jid)

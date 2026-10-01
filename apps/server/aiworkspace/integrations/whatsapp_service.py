@@ -33,7 +33,7 @@ from ..models import (
     WhatsAppThread,
 )
 from ..usage_service import usage_event_from_record
-from . import channel_folders, channel_media, inbound_batch, wa_format
+from . import channel_folders, channel_media, inbound_batch, wa_format, whatsapp_history
 from . import whatsapp_qr as evolution
 from . import whatsapp_official as official
 
@@ -264,7 +264,10 @@ def _contact_note(conn: WhatsAppConnection, m: dict[str, Any]) -> str:
 
 
 def _memory_setup(conn: WhatsAppConnection, chat: Chat, mc: ModelConfig | None, model: str):
-    """Política de memória da conexão → (chat_id, agent_id, MemoryOpts):
+    """Política de memória da conexão → (chat_id, agent_id, MemoryOpts).
+
+    `memory_config` (o mesmo formato da memória do modelo) manda quando existe;
+    senão vale a escolha antiga:
     - "local": memórias isoladas por conversa do WhatsApp (escopo chat);
     - "global": lê e alimenta a memória compartilhada do modelo (junto com os
       outros canais)."""
@@ -274,6 +277,18 @@ def _memory_setup(conn: WhatsAppConnection, chat: Chat, mc: ModelConfig | None, 
     agent_id = _mem_agent_id(mc, model)
     # bancos acoplados ao modelo: compartilhados também nas conversas do WhatsApp
     banks = [str(b) for b in ((mc.capabilities or {}).get("memory") or {}).get("banks", [])] if mc else []
+    cfg = conn.memory_config
+    if isinstance(cfg, dict):
+        if cfg.get("enabled") is False:
+            return str(chat.id), agent_id, MemoryOpts(
+                read={"global": False, "model": False, "chat": False}, write="off")
+        read = cfg.get("read") or {}
+        own_banks = [str(b) for b in (cfg.get("banks") or [])]
+        return str(chat.id), agent_id, MemoryOpts(
+            read={k: read.get(k, k == "chat") is not False for k in ("global", "model", "chat")},
+            write=str(cfg.get("write") or "chat"),
+            banks=list(dict.fromkeys(banks + own_banks)),
+        )
     if conn.memory == "global":
         mem = MemoryOpts(read={"global": True, "model": True, "chat": True}, write="model", banks=banks)
     else:
@@ -281,9 +296,18 @@ def _memory_setup(conn: WhatsAppConnection, chat: Chat, mc: ModelConfig | None, 
     return str(chat.id), agent_id, mem
 
 
+async def record_official(conn: WhatsAppConnection, rows: list[dict[str, Any]]) -> None:
+    """A API oficial não guarda histórico consultável: o que entra e sai por ela vai
+    para o mesmo histórico do motor embutido (a IA do chat lê dali)."""
+    if conn.provider == "official" and rows:
+        await whatsapp_history.record_for(conn.id, rows, label=conn.label or conn.phone)
+
+
 async def _send_reply(conn: WhatsAppConnection, jid: str, text: str) -> None:
     if conn.provider == "official":
         await official.send_text(conn.phone_number_id, conn.access_token, jid, text)
+        await record_official(conn, [{"jid": jid, "msg_id": f"out-{uuid.uuid4().hex}",
+                                      "from_me": True, "text": text, "ts": int(time.time())}])
     else:
         await evolution.send_text(conn.instance, jid, text)
 
@@ -565,10 +589,18 @@ async def _run_one(connection_id: uuid.UUID, msgs: list[dict[str, Any]]) -> None
                 except Exception as exc:  # noqa: BLE001 - áudio indisponível não trava o turno
                     logger.warning("whatsapp: falha ao baixar áudio (%s): %s", conn.id, exc)
 
-        # histórico = o próprio chat da conversa (limitado)
+        # conversa longa: resume o começo antes do turno (como a auto-compactação
+        # dos chats). As mensagens resumidas saem do contexto; o resumo entra.
+        if conn.compaction:
+            from ..chat.compaction_service import maybe_autocompact
+            await maybe_autocompact(db, user, chat, mc)
+
+        # histórico = o próprio chat da conversa (limitado); o que já foi compactado
+        # (aqui ou pelo /compact no app) fica de fora — o resumo representa
         rows = list(await db.scalars(
             select(Message)
-            .where(Message.chat_id == chat.id, Message.role.in_(("user", "assistant")))
+            .where(Message.chat_id == chat.id, Message.role.in_(("user", "assistant")),
+                   Message.compacted.is_(False))
             .order_by(Message.created_at.desc())
             .limit(channel_media.history_limit(conn))
         ))
@@ -733,6 +765,17 @@ async def handle_incoming(connection_id: uuid.UUID, messages: list[dict[str, Any
     async with SessionLocal() as db:
         conn = await db.get(WhatsAppConnection, connection_id)
         if conn is None or not conn.enabled:
+            return
+        # o que chega pela API oficial entra no histórico consultável (a IA do chat
+        # vê "o que chegou" mesmo quando ninguém responde sozinho)
+        await record_official(conn, [
+            {"jid": m["jid"], "msg_id": m.get("msg_id") or "", "from_me": False,
+             "sender": m["jid"], "sender_name": m.get("sender_name") or "",
+             "text": m.get("text") or "", "ts": m.get("ts") or 0}
+            for m in messages if not _too_old(m)
+        ])
+        if conn.auto_reply is False:
+            # número "só para a IA do chat": ninguém responde sozinho
             return
         approved = []
         for m in messages:

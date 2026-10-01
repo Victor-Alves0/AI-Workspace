@@ -4467,7 +4467,8 @@ def _register_builtins(
             plat = _MSG_PLAT_PT.get(a.get("platform", ""), a.get("platform", ""))
             return f"{a.get('label') or plat} ({plat})"
 
-        def _msg_pick(account: str = "", platform: str = "") -> tuple[dict | None, dict | None]:
+        def _msg_pick(account: str = "", platform: str = "",
+                      fan_out: bool = False) -> tuple[dict | None, dict | None]:
             pool = msg_accounts
             plat = (platform or "").strip().lower()
             if plat:
@@ -4490,6 +4491,10 @@ def _register_builtins(
                 return chosen, None
             if len(pool) == 1:
                 return pool[0], None
+            if fan_out:
+                # leitura sem conta dita: olha em TODAS as liberadas (o resultado diz
+                # de qual conta veio); só enviar exige escolher
+                return {"_all": pool}, None
             from .interaction import ask_options
             return None, ask_options(
                 "Por qual conexão devo agir?",
@@ -4519,46 +4524,98 @@ def _register_builtins(
             description=(
                 "Act on the user's OWN chat connections (WhatsApp/Telegram/Discord) — send, read "
                 "and list on their behalf ('reply to X for me', 'tell the group about the meeting', "
-                "'what did X say about Y?'). `action`: 'list_chats' (find conversations; optional "
-                "`query` to filter by name/number), 'read_messages' (`chat` = a conversation id from "
-                "list_chats, or a phone number for WhatsApp; recent history), 'send_message' (`chat` + "
-                "`text`). Pick the connection with `platform` (whatsapp|telegram|discord) and/or "
-                "`account` when the user has more than one. IMPORTANT per-platform limits: WhatsApp "
+                "'what did X say about Y?', 'did I get new WhatsApp messages?'). `action`: "
+                "'new_messages' (conversations with messages RECEIVED recently — `since_hours`, "
+                "default 24; `unanswered_only` for the ones nobody replied yet), 'list_chats' (find "
+                "conversations; optional `query` to filter by name/number), 'read_messages' (`chat` = "
+                "a conversation id from list_chats, or a phone number for WhatsApp; recent history), "
+                "'send_message' (`chat` + `text`). Pick the connection with `platform` "
+                "(whatsapp|telegram|discord) and/or `account`. Reading without `account` looks in ALL "
+                "the user's connections (each result says its `account`); sending to an unspecified "
+                "connection asks the user which. IMPORTANT per-platform limits: WhatsApp "
                 "acts AS the user (full read/send to anyone). Telegram/Discord act as a BOT — they only "
                 "reach conversations the bot is already in, and Telegram CANNOT read history. Prefer "
                 "calling list_chats first to get the exact `chat` id. Sending asks the user to confirm "
                 "unless confirm=true."
             ),
             params={
-                "action": "string:n::list_chats | read_messages | send_message",
+                "action": "string:n::new_messages | list_chats | read_messages | send_message",
                 "platform": "string:o::which network: whatsapp | telegram | discord (omit if the user has only one)",
                 "account": "string:o::which connection (its label) when several on the same network",
                 "chat": "string:o::the conversation: an id from list_chats, or a phone number (with country code) for WhatsApp",
                 "text": "string:o::send_message: the message to send",
                 "query": "string:o::list_chats: filter conversations by name or number",
-                "limit": "number:o::list_chats/read_messages: max items (1-100)",
+                "limit": "number:o::list_chats/read_messages/new_messages: max items (1-100)",
+                "since_hours": "number:o::new_messages: how far back to look (default 24)",
+                "unanswered_only": "boolean:o::new_messages: only conversations nobody replied yet",
                 "confirm": "boolean:o::set true only after the user confirmed sending",
             },
-            returns=["chats", "messages", "id", "name", "is_group", "is_dm", "from", "text",
-                     "from_me", "ts", "ok", "to", "platform", "action", "error",
+            returns=["chats", "messages", "conversations", "id", "name", "is_group", "is_dm", "from",
+                     "text", "from_me", "ts", "ok", "to", "platform", "account", "chat", "unanswered",
+                     "last_ts", "notes", "action", "error",
                      "kind", "question", "options", "allow_custom", "custom_label"],
             risk=True,
-            examples=["reply to Ana on WhatsApp for me", "what did the group say about the trip?",
+            examples=["did I get new WhatsApp messages?", "reply to Ana on WhatsApp for me",
+                      "what did the group say about the trip?",
                       "tell the family group there's a meeting at 8pm", "list my WhatsApp chats",
                       "read my last messages with João"],
         )
         def _messaging(action: str = "", platform: str = "", account: str = "", chat: str = "",
                        text: str = "", query: str = "", limit: Any = None,
-                       confirm: Any = None) -> dict[str, Any]:
+                       confirm: Any = None, since_hours: Any = None,
+                       unanswered_only: Any = None) -> dict[str, Any]:
             act = (action or "").strip().lower()
-            caps = {"list_chats": "msg_list", "read_messages": "msg_read", "send_message": "msg_send"}
+            if act in ("inbox", "unread", "new"):
+                act = "new_messages"
+            caps = {"new_messages": "msg_read", "list_chats": "msg_list",
+                    "read_messages": "msg_read", "send_message": "msg_send"}
             if act not in caps:
-                return {"error": f"unknown action '{action}' (use list_chats/read_messages/send_message)"}
+                return {"error": f"unknown action '{action}' (use new_messages/list_chats/read_messages/send_message)"}
             if not _msg_on(caps[act]):
                 return {"error": f"a operação '{act}' está desativada nas configurações desta ferramenta."}
-            chosen, block = _msg_pick(account, platform)
+            pool_plat = platform
+            if act == "new_messages" and not (platform or account):
+                pool_plat = "whatsapp"  # só o WhatsApp guarda o que chega
+            chosen, block = _msg_pick(account, pool_plat, fan_out=act != "send_message")
             if block is not None:
                 return block
+            from ..integrations import messaging_service as ms
+
+            def _one(a: dict) -> tuple[str, list]:
+                p, c = a["platform"], str(a["id"])
+                if act == "new_messages":
+                    try:
+                        hrs = float(str(since_hours)) if since_hours not in (None, "") else 24.0
+                    except (TypeError, ValueError):
+                        hrs = 24.0
+                    return "conversations", asyncio.run(ms.new_messages(
+                        p, c, hrs, _msg_truthy(unanswered_only), _msg_n(limit, 20)))
+                if act == "list_chats":
+                    return "chats", asyncio.run(ms.list_chats(p, c, query, _msg_n(limit, 30)))
+                return "messages", asyncio.run(ms.read_messages(p, c, chat, _msg_n(limit, 20)))
+
+            if "_all" in chosen:
+                if act == "read_messages" and not (chat or "").strip():
+                    return {"error": "`chat` é obrigatório para read_messages"}
+                key = {"new_messages": "conversations", "list_chats": "chats"}.get(act, "messages")
+                merged, notes = [], []
+                for a in chosen["_all"]:
+                    try:
+                        key, rows = _one(a)
+                    except ms.MessagingError as exc:
+                        notes.append(f"{_msg_label(a)}: {exc}")
+                        continue
+                    except Exception as exc:  # noqa: BLE001 - uma conta fora do ar não cala as outras
+                        notes.append(f"{_msg_label(a)}: {exc}")
+                        continue
+                    merged += [{**r, "account": a.get("label") or a["platform"], "platform": a["platform"]}
+                               for r in rows]
+                if act == "new_messages":
+                    merged.sort(key=lambda r: r.get("last_ts") or 0, reverse=True)
+                out: dict[str, Any] = {key: merged}
+                if notes:
+                    out["notes"] = notes
+                return out
             plat = chosen["platform"]
             cid = str(chosen["id"])
             plat_pt = _MSG_PLAT_PT.get(plat, plat)
@@ -4571,14 +4628,10 @@ def _register_builtins(
                 blocked = _msg_guard(f"Enviar no {plat_pt} para {who}: “{text.strip()[:140]}”?", confirm)
                 if blocked is not None:
                     return blocked
-            from ..integrations import messaging_service as ms
             try:
-                if act == "list_chats":
-                    rows = asyncio.run(ms.list_chats(plat, cid, query, _msg_n(limit, 30)))
-                    return {"chats": rows, "platform": plat}
-                if act == "read_messages":
-                    rows = asyncio.run(ms.read_messages(plat, cid, chat, _msg_n(limit, 20)))
-                    return {"messages": rows, "platform": plat}
+                if act != "send_message":
+                    key, rows = _one(chosen)
+                    return {key: rows, "platform": plat, "account": chosen.get("label") or plat}
                 return asyncio.run(ms.send_message(plat, cid, chat, text))
             except ms.MessagingError as exc:
                 return {"error": str(exc)}

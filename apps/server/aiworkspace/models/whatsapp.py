@@ -55,6 +55,14 @@ class WhatsAppConnection(Base):
     # memória das conversas: "local" (isolada por conversa) | "global" (alimenta a
     # memória compartilhada do modelo, junto com os outros canais)
     memory: Mapped[str] = mapped_column(String(8), default="local")
+    # memória no formato do modelo: {enabled, write, read:{global,model,chat}, banks}.
+    # None = segue `memory` acima (conexões antigas)
+    memory_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # False = ninguém responde sozinho; o número só fica disponível para a IA do chat
+    # (ferramenta de mensagens: ver o que chegou, ler, enviar)
+    auto_reply: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    # resume as conversas longas antes do turno (como a auto-compactação dos chats)
+    compaction: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # prompt adicional DESTE número, concatenado ao system prompt do modelo
     # (ex.: "responda curto, sem markdown, informal")
     system_prompt: Mapped[str] = mapped_column(Text, default="")

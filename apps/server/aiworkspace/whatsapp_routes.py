@@ -46,6 +46,8 @@ class ConnectionIn(BaseModel):
     provider: str = Field(default="evolution", pattern=r"^(evolution|official)$")
     model_config_id: uuid.UUID | None = None
     model: str = Field(default="", max_length=255)
+    # sem modelo = não responde sozinho (só a IA do chat usa o número)
+    auto_reply: bool = True
     # Cloud API (provider "official")
     phone: str = Field(default="", max_length=32)
     phone_number_id: str = Field(default="", max_length=64)
@@ -77,6 +79,12 @@ class ConnectionUpdate(BaseModel):
     debounce_seconds: int | None = Field(default=None, ge=0, le=60)
     # quantas mensagens anteriores a IA enxerga (0 = Tudo, até o teto de segurança)
     context_window: int | None = Field(default=None, ge=0, le=500)
+    # False = não responde sozinho (o número só fica disponível p/ a IA do chat)
+    auto_reply: bool | None = None
+    # auto-compactação das conversas longas
+    compaction: bool | None = None
+    # memória no formato do modelo; null = volta ao padrão da conexão
+    memory_config: dict[str, Any] | None = None
 
 
 _LIMIT_KEYS = ("total", "per_hour", "per_day", "per_month")
@@ -124,6 +132,24 @@ def _clean_contacts(raw: list[dict[str, Any]]) -> list[dict[str, str]]:
     return out
 
 
+_MEM_WRITES = ("global", "model", "chat", "off")
+
+
+def _clean_memory(raw: dict[str, Any] | None) -> dict[str, Any] | None:
+    if raw is None:
+        return None
+    write = str(raw.get("write") or "chat")
+    if write not in _MEM_WRITES and not write.startswith("bank:"):
+        write = "chat"
+    read = raw.get("read") or {}
+    return {
+        "enabled": raw.get("enabled", True) is not False,
+        "write": write[:64],
+        "read": {k: read.get(k, k == "chat") is not False for k in ("global", "model", "chat")},
+        "banks": [str(b)[:64] for b in (raw.get("banks") or [])][:50],
+    }
+
+
 def _serialize(conn: WhatsAppConnection, threads: int = 0) -> dict[str, Any]:
     return {
         "id": str(conn.id),
@@ -134,6 +160,9 @@ def _serialize(conn: WhatsAppConnection, threads: int = 0) -> dict[str, Any]:
         "model": conn.model,
         "filters": {**_DEFAULT_FILTERS, **(conn.filters or {})},
         "memory": conn.memory,
+        "memory_config": conn.memory_config,
+        "auto_reply": conn.auto_reply is not False,
+        "compaction": bool(conn.compaction),
         "system_prompt": conn.system_prompt or "",
         "limits": conn.limits or {},
         "contacts": conn.contacts or [],
@@ -201,6 +230,7 @@ async def create_connection(
         model=body.model.strip(),
         filters=dict(_DEFAULT_FILTERS),
         webhook_token=webhook_token,
+        auto_reply=body.auto_reply and bool(body.model_config_id or body.model.strip()),
     )
 
     if body.provider == "evolution":
@@ -261,6 +291,11 @@ async def update_connection(
         data["contacts"] = _clean_contacts(data["contacts"] or [])
     if "humanize" in data:
         data["humanize"] = _clean_humanize(data["humanize"] or {})
+    if "memory_config" in data:
+        data["memory_config"] = _clean_memory(data["memory_config"])
+    for flag in ("auto_reply", "compaction"):
+        if flag in data and data[flag] is None:
+            data.pop(flag)
     for field, value in data.items():
         setattr(conn, field, value)
     await db.commit()

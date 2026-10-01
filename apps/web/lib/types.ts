@@ -700,6 +700,13 @@ export interface DiscordConnection {
   threads: number;
 }
 
+export interface WhatsAppMemory {
+  enabled?: boolean;
+  write?: string;
+  read?: { global?: boolean; model?: boolean; chat?: boolean };
+  banks?: string[];
+}
+
 export interface WhatsAppConnection {
   id: string;
   label: string;
@@ -709,6 +716,12 @@ export interface WhatsAppConnection {
   model: string;
   filters: WhatsAppFilters;
   memory: "local" | "global";
+  /** memória no formato do modelo; null = segue `memory` */
+  memory_config: WhatsAppMemory | null;
+  /** false = ninguém responde sozinho (o número fica só para a IA do chat) */
+  auto_reply: boolean;
+  /** resume o começo das conversas longas antes do turno */
+  compaction: boolean;
   /** prompt adicional deste número, concatenado ao system prompt do modelo */
   system_prompt: string;
   /** limites de mensagens por contato (0/ausente = sem limite) */
