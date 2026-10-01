@@ -1279,8 +1279,15 @@ def _register_builtins(
                 results, errors = asyncio.run(web_search_detailed(query, cfg))
                 if not results and errors:
                     # vazio POR FALHA ≠ vazio de verdade: o modelo precisa saber que a
-                    # busca não funcionou, senão conclui que "não existe nada sobre isso"
-                    return {"results": [], "error": "search unavailable — " + "; ".join(errors)}
+                    # busca não funcionou, senão conclui que "não existe nada sobre isso".
+                    # A mensagem é acionável de propósito — sem isso o modelo DESISTIA da
+                    # busca ("pula"); o certo é tentar de novo ou ler uma URL direta.
+                    return {"results": [], "error": (
+                        "no usable web results right now (" + "; ".join(errors) + "). "
+                        "This is usually temporary — the engines may be rate-limiting this "
+                        "server's IP. Retry once with simpler or different keywords, or open a "
+                        "specific authoritative URL with web.page.read; do not give up on the task."
+                    )}
                 # enxuga: trecho curto, sem campos redundantes → poucos tokens
                 trimmed = [
                     {

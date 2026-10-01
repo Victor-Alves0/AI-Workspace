@@ -87,7 +87,9 @@ async def test_todos_os_motores_falhando_explica_o_motivo(ddgs):
     results, errors = await web_search_detailed("q", SearchConfig())
 
     assert results == []
-    assert errors and "metasearch" in errors[0] and "No results found" in errors[0]
+    # o apelido "searxng"/"metasearch" não aparece: p/ quem lê é só "web"
+    assert errors and "web" in errors[0] and "No results found" in errors[0]
+    assert "searxng" not in errors[0] and "metasearch" not in errors[0]
 
 
 async def test_vazio_de_verdade_nao_inventa_erro(ddgs):

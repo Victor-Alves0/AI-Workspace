@@ -97,6 +97,13 @@ _PROVIDERS = {
 }
 
 
+def _display(provider: str) -> str:
+    """Nome do motor em logs/erros/mensagens ao modelo. O SearXNG saiu há tempo e virou
+    só um apelido da metabusca embutida; ver "searxng"/"metasearch" num erro faz parecer
+    que um container morreu. Para quem lê, tudo isso é só "web"."""
+    return "web" if provider in ("metasearch", "searxng") else provider
+
+
 def _blocked(url: str, domains: tuple[str, ...]) -> bool:
     if not domains or not url:
         return False
@@ -337,16 +344,16 @@ async def _resilient(provider: str, query: str, cfg: SearchConfig) -> list[Searc
                     found = _relevant(query, brutos)
                     _sp.set(results=len(found), dropped=len(brutos) - len(found))
             except Exception as exc:  # noqa: BLE001
-                erros.append(f"{prov}: {(str(exc).strip() or type(exc).__name__)[:200]}")
+                erros.append(f"{_display(prov)}: {(str(exc).strip() or type(exc).__name__)[:200]}")
                 continue
             if found:
                 return found
             if brutos:
                 logger.info("busca: %s devolveu %d resultado(s) sem relação com %r — descartados",
-                            prov, len(brutos), q[:120])
-                erros.append(f"{prov}: resultados sem relação com a busca")
+                            _display(prov), len(brutos), q[:120])
+                erros.append(f"{_display(prov)}: resultados sem relação com a busca")
             else:
-                erros.append(f"{prov}: sem resultados")
+                erros.append(f"{_display(prov)}: sem resultados")
     # nada encontrado e nenhum outro provider para tentar: não é falha (era assim antes)
     if not _fallbacks(provider, cfg) and erros and all(e.endswith(": sem resultados") for e in erros):
         return []
@@ -371,10 +378,10 @@ async def _one(
             _qs.set(results=len(found))
         return found, None
     except asyncio.TimeoutError:
-        return [], f"{provider}: a busca demorou demais (muitas buscas na fila); tente de novo"
+        return [], f"{_display(provider)}: a busca demorou demais (muitas buscas na fila); tente de novo"
     except Exception as exc:  # noqa: BLE001 - um provider falho não derruba a busca
         motivo = str(exc).strip() or type(exc).__name__
-        return [], f"{provider}: {motivo[:300]}"
+        return [], f"{_display(provider)}: {motivo[:300]}"
 
 
 async def web_search(query: str, cfg: SearchConfig) -> list[SearchResult]:
