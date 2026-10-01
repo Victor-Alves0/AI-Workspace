@@ -21,6 +21,7 @@ Tradução:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -33,6 +34,45 @@ logger = logging.getLogger(__name__)
 MODEL_PREFIX = "codex/"
 API_KEY_PREFIX = "codex:"
 BASE_URL = "https://chatgpt.com/backend-api/codex/responses"
+
+
+def _model_retired(status: int, body: str) -> bool:
+    """O backend recusou o MODELO (aposentado/não liberado p/ conta ChatGPT)."""
+    b = body.lower()
+    return status == 400 and "model" in b and "not supported" in b
+
+
+@contextlib.asynccontextmanager
+async def _open_stream(client: httpx.AsyncClient, headers: dict, payload: dict, user_id: str):
+    """Abre o stream da Responses. Modelo aposentado (chat ou preset que ainda aponta
+    p/ o "gpt-5") não derruba a conversa: troca uma vez pelo modelo atual da conta.
+    O erro chega antes de qualquer texto, então repetir não duplica nada."""
+    from ..integrations import chatgpt_service
+
+    for tentativa in range(2):
+        resp = await client.send(client.build_request("POST", BASE_URL, headers=headers, json=payload),
+                                 stream=True)
+        if resp.status_code < 400:
+            try:
+                yield resp
+            finally:
+                await resp.aclose()
+            return
+        body = (await resp.aread()).decode("utf-8", "replace")[:300]
+        await resp.aclose()
+        if resp.status_code in (401, 403):
+            raise RuntimeError(
+                "ChatGPT recusou o acesso — reconecte em Conexões → Assinaturas. "
+                f"(HTTP {resp.status_code}: {body})"
+            )
+        if tentativa == 0 and _model_retired(resp.status_code, body):
+            novo = await chatgpt_service.replacement_model(user_id, payload["model"])
+            if novo:
+                logger.info("codex: modelo %s recusado pela conta — usando %s", payload["model"], novo)
+                payload = {**payload, "model": novo}
+                continue
+        raise RuntimeError(f"Codex HTTP {resp.status_code}: {body}")
+    raise RuntimeError("Codex: sem resposta")
 
 
 def is_codex_model(model: str | None) -> bool:
@@ -215,15 +255,7 @@ async def stream_chat(
     terminal = False
     timeout = httpx.Timeout(connect=15.0, write=30.0, read=300.0, pool=15.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
-        async with client.stream("POST", BASE_URL, headers=headers, json=payload) as resp:
-            if resp.status_code >= 400:
-                body = (await resp.aread()).decode("utf-8", "replace")[:300]
-                if resp.status_code in (401, 403):
-                    raise RuntimeError(
-                        "ChatGPT recusou o acesso — reconecte em Conexões → Assinaturas. "
-                        f"(HTTP {resp.status_code}: {body})"
-                    )
-                raise RuntimeError(f"Codex HTTP {resp.status_code}: {body}")
+        async with _open_stream(client, headers, payload, user_id) as resp:
             async for line in resp.aiter_lines():
                 if not line or not line.startswith("data:"):
                     continue

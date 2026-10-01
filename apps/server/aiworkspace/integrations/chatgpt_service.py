@@ -26,6 +26,7 @@ import base64
 import hashlib
 import json
 import logging
+import re
 import secrets
 import time
 from typing import Any
@@ -53,9 +54,12 @@ SCOPE = "openid profile email offline_access"
 # claim do JWT com os dados da conta ChatGPT
 _JWT_CLAIM = "https://api.openai.com/auth"
 
-# Modelos servidos pelo backend do Codex (ids SEM o prefixo do app). O usuário
-# pode acrescentar variantes a que tiver direito no painel (ex.: um "-fast").
-DEFAULT_MODELS = ["gpt-5", "gpt-5-codex"]
+# Reserva quando a lista ao vivo (/models) não responde e nunca respondeu. A lista
+# de verdade vem do ChatGPT; esta envelhece (o "gpt-5" saiu em 2026 e a conta passou
+# a recusá-lo com HTTP 400).
+DEFAULT_MODELS = ["gpt-5.5"]
+# modelos que o backend do Codex já recusa em conta ChatGPT
+RETIRED_MODELS = frozenset({"gpt-5", "gpt-5-codex"})
 MODEL_PREFIX = "codex/"
 
 
@@ -371,6 +375,32 @@ _MODELS_URL = "https://chatgpt.com/backend-api/codex/models"
 _MODELS_TTL = 3600
 _models_cache: dict[str, tuple[float, list[str]]] = {}
 
+# O /models FILTRA pela versão do cliente (`minimal_client_version` de cada modelo).
+# Com uma versão velha fixa (era "0.99.0") a lista vinha vazia e o app caía na
+# reserva com modelos aposentados. Usa a versão ATUAL do Codex CLI (npm), a mesma
+# que um usuário do Codex tem — nem velha (lista vazia) nem inventada.
+_CODEX_VERSION_FALLBACK = "0.159.3"
+_CODEX_VERSION_URL = "https://registry.npmjs.org/@openai/codex/latest"
+_VERSION_TTL = 24 * 3600
+_version_cache: list = []  # [(quando, versão)]
+
+
+async def client_version() -> str:
+    agora = time.time()
+    if _version_cache and agora - _version_cache[0][0] < _VERSION_TTL:
+        return _version_cache[0][1]
+    ver = _CODEX_VERSION_FALLBACK
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(_CODEX_VERSION_URL)
+        v = str((r.json() or {}).get("version") or "") if r.status_code == 200 else ""
+        if re.fullmatch(r"\d+\.\d+\.\d+", v):
+            ver = v
+    except Exception as exc:  # noqa: BLE001 - versão é best-effort
+        logger.info("versão do Codex CLI indisponível (usando %s): %s", ver, exc)
+    _version_cache[:] = [(agora, ver)]
+    return ver
+
 
 def _parse_models(data: Any) -> list[str]:
     """Slugs listáveis da resposta do /models do Codex (o mesmo que o Codex CLI lê).
@@ -402,17 +432,30 @@ async def available_models(user_id: str) -> list[str]:
         if account_id:
             headers["chatgpt-account-id"] = account_id
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.get(_MODELS_URL, params={"client_version": "0.99.0"}, headers=headers)
+            r = await client.get(_MODELS_URL, params={"client_version": await client_version()},
+                                 headers=headers)
         if r.status_code == 200:
             slugs = _parse_models(r.json())
             if slugs:
                 _models_cache[uid] = (time.time(), slugs)
+                await _save_live_models(uid, slugs)
                 return slugs
     except Exception as exc:  # noqa: BLE001 - lista de modelos é best-effort
         logger.info("lista de modelos do ChatGPT indisponível: %s", exc)
-    row = await _load_row(uid)
-    salvos = (row or {}).get("models") if isinstance(row, dict) else None
-    return list(salvos or DEFAULT_MODELS)
+    # reserva: a última lista boa que o ChatGPT deu; senão a salva (sem aposentados)
+    row = await _load_row(uid) or {}
+    vivos = [m for m in (row.get("models_live") or []) if isinstance(m, str)]
+    salvos = [m for m in (row.get("models") or []) if isinstance(m, str) and m not in RETIRED_MODELS]
+    return list(vivos or salvos or DEFAULT_MODELS)
+
+
+async def replacement_model(user_id: str, retired: str) -> str | None:
+    """Modelo atual para quem pediu um que a conta não aceita mais (o 1º da lista do
+    ChatGPT, que vem na ordem de prioridade dele). None se não houver outro."""
+    for m in await available_models(user_id):
+        if m != retired:
+            return m
+    return None
 
 
 async def is_connected(db: AsyncSession, user_id: str) -> bool:
@@ -452,6 +495,27 @@ async def _load_row(user_id: str) -> dict[str, Any] | None:
             return raw if isinstance(raw, dict) else None
     finally:
         await eng.dispose()
+
+
+async def _save_live_models(user_id: str, models: list[str]) -> None:
+    """Guarda a última lista boa do /models (reserva p/ quando ele não responder)."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from ..config import get_settings
+    try:
+        eng = create_async_engine(get_settings().database_url, poolclass=NullPool)
+        try:
+            Session = async_sessionmaker(eng, expire_on_commit=False)
+            async with Session() as db:
+                raw = await get_setting(db, _key(user_id))
+                if isinstance(raw, dict) and raw.get("models_live") != models:
+                    raw["models_live"] = list(models)
+                    await set_setting(db, _key(user_id), raw)
+        finally:
+            await eng.dispose()
+    except Exception as exc:  # noqa: BLE001 - reserva é best-effort
+        logger.info("lista de modelos do ChatGPT não foi guardada: %s", exc)
 
 
 async def _save_tokens(user_id: str, access: str, refresh: str, expires: int) -> None:

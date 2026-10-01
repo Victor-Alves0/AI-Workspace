@@ -233,10 +233,16 @@ def test_is_codex_model_prefix_rule():
 
 
 class _FakeResponse:
-    status_code = 200
-
-    def __init__(self, events):
+    def __init__(self, events, status_code=200, body=b""):
         self.events = events
+        self.status_code = status_code
+        self.body = body
+
+    async def aread(self):
+        return self.body
+
+    async def aclose(self):
+        pass
 
     async def __aenter__(self):
         return self
@@ -252,6 +258,9 @@ class _FakeResponse:
 
 class _FakeClient:
     events: ClassVar[list[dict]] = []
+    # respostas de erro ANTES do stream bom (ex.: o 400 do modelo aposentado)
+    errors: ClassVar[list[tuple[int, bytes]]] = []
+    sent: ClassVar[list[dict]] = []
 
     def __init__(self, *args, **kwargs):
         pass
@@ -262,7 +271,14 @@ class _FakeClient:
     async def __aexit__(self, *args):
         return False
 
-    def stream(self, *args, **kwargs):
+    def build_request(self, method, url, headers=None, json=None):
+        return {"method": method, "url": url, "json": json}
+
+    async def send(self, request, stream=False):
+        _FakeClient.sent.append(request["json"])
+        if _FakeClient.errors:
+            status, body = _FakeClient.errors.pop(0)
+            return _FakeResponse([], status, body)
         return _FakeResponse(self.events)
 
 
@@ -278,7 +294,45 @@ def fake_codex_stream(monkeypatch):
     monkeypatch.setattr(cs, "get_instructions", instructions)
     monkeypatch.setattr(cx.httpx, "AsyncClient", _FakeClient)
     _FakeClient.events = []
+    _FakeClient.errors = []
+    _FakeClient.sent = []
     return _FakeClient
+
+
+_RECUSADO = (400, b'{"detail":"The \'gpt-5\' model is not supported when using Codex with a ChatGPT account."}')
+_OK_EVENTS = [
+    {"type": "response.output_text.delta", "delta": "oi"},
+    {"type": "response.completed", "response": {"usage": {"input_tokens": 1, "output_tokens": 1,
+                                                          "total_tokens": 2}}},
+]
+
+
+@pytest.mark.asyncio
+async def test_modelo_aposentado_troca_pelo_atual_da_conta(fake_codex_stream, monkeypatch):
+    """O caso real (01/10): chat/preset em codex/gpt-5 → HTTP 400. Não derruba: usa o
+    modelo atual da conta e a conversa segue."""
+    async def atual(user_id, retired):
+        assert retired == "gpt-5"
+        return "gpt-5.5"
+
+    monkeypatch.setattr(cs, "replacement_model", atual)
+    fake_codex_stream.errors = [_RECUSADO]
+    fake_codex_stream.events = _OK_EVENTS
+    chunks = [c async for c in cx.stream_chat("codex:u1", "codex/gpt-5", [{"role": "user", "content": "oi"}])]
+    assert [p["model"] for p in fake_codex_stream.sent] == ["gpt-5", "gpt-5.5"]
+    assert any((c["choices"][0]["delta"].get("content") == "oi") for c in chunks if c.get("choices"))
+
+
+@pytest.mark.asyncio
+async def test_outro_erro_400_nao_troca_de_modelo(fake_codex_stream, monkeypatch):
+    async def nunca(*a):
+        raise AssertionError("não devia trocar")
+
+    monkeypatch.setattr(cs, "replacement_model", nunca)
+    fake_codex_stream.errors = [(400, b'{"detail":"Invalid input"}')]
+    with pytest.raises(RuntimeError, match="Codex HTTP 400"):
+        [c async for c in cx.stream_chat("codex:u1", "codex/gpt-5.5", [{"role": "user", "content": "oi"}])]
+    assert len(fake_codex_stream.sent) == 1
 
 
 @pytest.mark.asyncio
