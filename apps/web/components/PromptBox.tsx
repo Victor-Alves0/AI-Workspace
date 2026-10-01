@@ -56,6 +56,7 @@ import { CODESPACE_DND_MIME, CODESPACE_SNIPPET_MIME } from "./CodespaceFileBrows
 import { toolCategoryIcon, toolCategoryTitle } from "./toolCategory";
 import TextAttachmentModal from "./TextAttachmentModal";
 import QueueTray, { type QueueItem } from "./QueueTray";
+import { dateLocale, tr } from "@/lib/i18n";
 
 // docs binários com extração server-side (integração "Extração de Texto")
 const DOC_RE = /\.(pdf|docx|xlsx|xlsm|pptx|csv)$/i;
@@ -121,13 +122,16 @@ function ContextMeter({
       {open && (
         <div ref={pop.ref} style={pop.style} className="animate-pop absolute bottom-11 left-1/2 z-50 min-w-[230px] -translate-x-1/2 rounded-xl border border-border bg-surface p-1.5 shadow-menu">
           <p className="px-2.5 pb-1 pt-1 text-[11px] text-muted">
-            Contexto: <span className="font-medium text-ink-soft">{fmt(tokens)}{limit ? ` / ${fmt(limit)}` : ""}</span> tokens
+            
+            {tr("Contexto:")} <span className="font-medium text-ink-soft">{fmt(tokens)}{limit ? ` / ${fmt(limit)}` : ""}</span> tokens
           </p>
           <MenuItem icon={<Minimize2 size={15} />} onClick={() => { setOpen(false); onCompact(); }}>
-            Compactar agora
+            
+            {tr("Compactar agora")}
           </MenuItem>
           <MenuItem icon={<History size={15} />} onClick={() => { setOpen(false); onHistory(); }}>
-            Histórico de compactações
+            
+            {tr("Histórico de compactações")}
           </MenuItem>
         </div>
       )}
@@ -137,11 +141,11 @@ function ContextMeter({
 
 export type ReasoningEffort = "off" | "low" | "medium" | "high" | "xhigh";
 const REASONING_LABELS: Record<ReasoningEffort, string> = {
-  off: "Desligado",
-  low: "Baixo",
-  medium: "Médio",
-  high: "Alto",
-  xhigh: "Máximo",
+  off: tr("Desligado"),
+  low: tr("Baixo"),
+  medium: tr("Médio"),
+  high: tr("Alto"),
+  xhigh: tr("Máximo"),
 };
 
 // Escada completa de raciocínio, oferecida em TODO modelo: o OpenRouter não expõe
@@ -172,7 +176,7 @@ function ThinkingSelect({
   const [open, setOpen] = useState(false);
   const ref = useClickOutside<HTMLDivElement>(() => setOpen(false));
   const active = value !== "off";
-  const label = REASONING_LABELS[value] ?? "Desligado";
+  const label = REASONING_LABELS[value] ?? tr("Desligado");
   const opts: ReasoningEffort[] = ["off", ...reasoningLevelsFor(modelId)];
   const pop = useCenteredPopover<HTMLDivElement>(open);
   return (
@@ -180,7 +184,7 @@ function ThinkingSelect({
       <button
         onMouseDown={(e) => e.stopPropagation()}
         onClick={() => setOpen((v) => !v)}
-        title="Nível de raciocínio"
+        title={tr("Nível de raciocínio")}
         className={`flex items-center gap-1 rounded-full px-2 py-1.5 text-xs transition-colors ${
           active ? "bg-accent/15 text-accent-hover" : "text-ink-soft hover:bg-hover hover:text-ink"
         }`}
@@ -191,7 +195,8 @@ function ThinkingSelect({
       {open && (
         <div ref={pop.ref} style={pop.style} className="animate-pop absolute bottom-11 left-1/2 z-50 min-w-[160px] -translate-x-1/2 rounded-xl border border-border bg-surface p-1.5 shadow-menu">
           <p className="px-2.5 pb-1 pt-1 text-[11px] font-medium uppercase tracking-wider text-muted">
-            Raciocínio
+            
+            {tr("Raciocínio")}
           </p>
           {opts.map((k) => (
             <MenuItem
@@ -222,7 +227,7 @@ function ToolsMenu({ tools }: { tools: { name: string; description?: string; cat
       <button
         onMouseDown={(e) => e.stopPropagation()}
         onClick={() => setOpen((v) => !v)}
-        title="Ferramentas do modelo"
+        title={tr("Ferramentas do modelo")}
         className="flex items-center gap-1 rounded-full px-2 py-1.5 text-ink-soft transition-colors hover:bg-hover hover:text-ink"
       >
         <Wrench size={16} />
@@ -234,14 +239,14 @@ function ToolsMenu({ tools }: { tools: { name: string; description?: string; cat
             <div className="flex items-center gap-2 border-b border-border px-3 py-2">
               <Search size={14} className="text-muted" />
               <input
-                autoFocus={finePointer()} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar ferramentas…"
+                autoFocus={finePointer()} value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr("Buscar ferramentas…")}
                 className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
               />
             </div>
             <div className="max-h-64 overflow-y-auto py-1">
               {filtered.length === 0 ? (
                 <p className="px-3 py-5 text-center text-xs text-muted">
-                  {tools.length === 0 ? "Nenhuma ferramenta ativa neste modelo." : "Nada encontrado."}
+                  {tools.length === 0 ? tr("Nenhuma ferramenta ativa neste modelo.") : tr("Nada encontrado.")}
                 </p>
               ) : (
                 filtered.map((t, i) => (
@@ -268,8 +273,8 @@ function ToolsMenu({ tools }: { tools: { name: string; description?: string; cat
 const MINI_APPS = [
   {
     id: "imaginai",
-    name: "Imaginai",
-    description: "RPG interativo com IA",
+    name: tr("Imaginai"),
+    description: tr("RPG interativo com IA"),
     icon: Dices,
   },
 ] as const;
@@ -305,8 +310,8 @@ function MiniAppsMenu({
         type="button"
         onMouseDown={(event) => event.stopPropagation()}
         onClick={() => { setQuery(""); setOpen((value) => !value); }}
-        title="Mini Apps"
-        aria-label="Mini Apps"
+        title={tr("Mini Apps")}
+        aria-label={tr("Mini Apps")}
         aria-expanded={open}
         aria-haspopup="dialog"
         className={`rounded-full p-2 transition-colors ${
@@ -320,7 +325,7 @@ function MiniAppsMenu({
           ref={pop.ref}
           style={pop.style}
           role="dialog"
-          aria-label="Mini Apps"
+          aria-label={tr("Mini Apps")}
           className={`animate-pop absolute left-1/2 z-50 -translate-x-1/2 w-[min(12rem,calc(100vw-1.25rem))] overflow-hidden rounded-xl border border-border bg-surface shadow-menu ${menuPosition}`}
         >
           <div className="flex items-center gap-1.5 border-b border-border px-2.5 py-2">
@@ -329,13 +334,13 @@ function MiniAppsMenu({
               autoFocus={finePointer()}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Buscar…"
+              placeholder={tr("Buscar…")}
               className="w-full min-w-0 bg-transparent text-xs text-ink outline-none placeholder:text-muted"
             />
             <button
               type="button"
               onClick={() => setOpen(false)}
-              aria-label="Fechar Mini Apps"
+              aria-label={tr("Fechar Mini Apps")}
               className="-mr-2 flex min-h-11 min-w-11 items-center justify-center rounded-md text-muted transition-colors hover:bg-hover hover:text-ink sm:mr-0 sm:min-h-7 sm:min-w-7"
             >
               <X size={14} />
@@ -343,7 +348,7 @@ function MiniAppsMenu({
           </div>
           <div className="max-h-[12rem] overflow-y-auto p-2">
             {matches.length ? (
-              <div className="grid grid-cols-3 gap-1.5" aria-label="Catálogo de Mini Apps">
+              <div className="grid grid-cols-3 gap-1.5" aria-label={tr("Catálogo de Mini Apps")}>
                 {matches.map((app) => {
                   const Icon = app.icon;
                   const selected = activeApp === app.id;
@@ -355,9 +360,9 @@ function MiniAppsMenu({
                           onActiveAppChange?.(selected ? null : app.id);
                           setOpen(false);
                         }}
-                        aria-label={selected ? `${app.name}: mostrar ou ocultar os painéis` : `${app.name}: começar uma nova campanha`}
+                        aria-label={selected ? tr("{name}: mostrar ou ocultar os painéis", { name: app.name }) : tr("{name}: começar uma nova campanha", { name: app.name })}
                         aria-pressed={selected}
-                        title={selected ? `${app.name} — mostrar ou ocultar os painéis` : `${app.name} — começar uma nova campanha`}
+                        title={selected ? tr("{name} — mostrar ou ocultar os painéis", { name: app.name }) : tr("{name} — começar uma nova campanha", { name: app.name })}
                         className={`flex aspect-square w-full items-center justify-center rounded-lg border transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/80 ${
                           selected
                             ? "border-violet-400/80 bg-violet-500/30 text-violet-100 shadow-[0_0_0_1px_rgb(139_92_246_/_0.22)]"
@@ -378,7 +383,7 @@ function MiniAppsMenu({
                 ))}
               </div>
             ) : (
-              <p className="py-6 text-center text-xs text-muted">Nenhum Mini App encontrado.</p>
+              <p className="py-6 text-center text-xs text-muted">{tr("Nenhum Mini App encontrado.")}</p>
             )}
           </div>
         </div>
@@ -437,7 +442,7 @@ export default function PromptBox({
   folder,
   activeMiniApp = null,
   onActiveMiniAppChange,
-  placeholder = "Como posso ajudar você hoje?",
+  placeholder = tr("Como posso ajudar você hoje?"),
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -566,18 +571,18 @@ export default function PromptBox({
     const aceitos: { file: File; type: Attachment["type"] }[] = [];
     let livres = MAX_ATTACHMENTS - attachments.length;
     for (const f of files) {
-      if (livres <= 0) { setAttachErr(`Máximo de ${MAX_ATTACHMENTS} anexos por mensagem.`); break; }
+      if (livres <= 0) { setAttachErr(tr("Máximo de {MAX_ATTACHMENTS} anexos por mensagem.", { MAX_ATTACHMENTS: MAX_ATTACHMENTS })); break; }
       if (f.type.startsWith("image/")) {
-        if (!canVision) { setAttachErr("Este modelo não tem Visão nem Roteador de Visão."); continue; }
+        if (!canVision) { setAttachErr(tr("Este modelo não tem Visão nem Roteador de Visão.")); continue; }
         aceitos.push({ file: f, type: "image" });
       } else if (isAudioFile(f)) {
-        if (!canAudio) { setAttachErr("Este modelo não ouve áudio: ative Áudio nas Capacidades ou o Roteador de Áudio."); continue; }
+        if (!canAudio) { setAttachErr(tr("Este modelo não ouve áudio: ative Áudio nas Capacidades ou o Roteador de Áudio.")); continue; }
         // modelo que ouve áudio de forma nativa: formatos incomuns viram WAV antes de subir
         aceitos.push({ file: capabilities["audio"] ? await toModelAudio(f) : f, type: "audio" });
       } else if (canFiles && (DOC_RE.test(f.name) || f.type.startsWith("text/") || TEXT_RE.test(f.name))) {
         aceitos.push({ file: f, type: "file" });
       } else {
-        setAttachErr(canFiles ? `Tipo não suportado: ${f.name} (imagens, PDF/Word/Excel/PPT/CSV ou texto).` : "Este modelo não aceita arquivos: ative Arquivos nas Capacidades.");
+        setAttachErr(canFiles ? tr("Tipo não suportado: {name} (imagens, PDF/Word/Excel/PPT/CSV ou texto).", { name: f.name }) : tr("Este modelo não aceita arquivos: ative Arquivos nas Capacidades."));
         continue;
       }
       livres -= 1;
@@ -606,7 +611,7 @@ export default function PromptBox({
           : a);
       } catch (err) {
         atuais = atuais.filter((a) => a.upload_id !== marca);
-        setAttachErr(err instanceof Error ? err.message : `Falha ao enviar ${file.name}`);
+        setAttachErr(err instanceof Error ? err.message : tr("Falha ao enviar {name}", { name: file.name }));
       }
       onAttachmentsChange?.(atuais);
     }
@@ -627,7 +632,7 @@ export default function PromptBox({
     const texto = e.clipboardData?.getData("text/plain") ?? "";
     if (!imgs.length && canFiles && texto.length > PASTE_AS_FILE_CHARS) {
       e.preventDefault();
-      const nome = `Texto colado ${new Date().toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}.txt`;
+      const nome = tr("Texto colado {0}.txt", { "0": new Date().toLocaleString(dateLocale(), { dateStyle: "short", timeStyle: "short" }) });
       await addFiles([new File([texto], nome, { type: "text/plain" })]);
     }
   }
@@ -950,9 +955,9 @@ export default function PromptBox({
       >
         {dragOver && (
           <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-3xl bg-accent/5 text-sm font-medium text-accent-hover">
-            {dropKind === "snippet" ? "Solte para anexar o trecho"
-              : dropKind === "file" ? "Solte para anexar o arquivo"
-              : "Solte para anexar"}
+            {dropKind === "snippet" ? tr("Solte para anexar o trecho")
+              : dropKind === "file" ? tr("Solte para anexar o arquivo")
+              : tr("Solte para anexar")}
           </div>
         )}
         {notice && (
@@ -974,7 +979,7 @@ export default function PromptBox({
           <div className="flex items-center gap-2">
             <button
               onClick={onCancelMic ?? onToggleMic}
-              title="Cancelar"
+              title={tr("Cancelar")}
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-hover hover:text-ink"
             >
               <X size={20} />
@@ -997,7 +1002,7 @@ export default function PromptBox({
         </div>
         {commandMenuOpen && (
           <div className="animate-pop absolute bottom-full left-3 right-3 z-50 mb-2 overflow-hidden rounded-xl border border-border bg-surface shadow-menu">
-            <p className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">Comandos</p>
+            <p className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">{tr("Comandos")}</p>
             <div className="max-h-60 overflow-y-auto py-1">
               {commandMatches.map((c, i) => (
                 <button
@@ -1013,13 +1018,14 @@ export default function PromptBox({
               ))}
             </div>
             <p className="border-t border-border px-3 py-1.5 text-[10px] text-muted">
-              ↑↓ navegar · Enter/Tab usar · Esc ignorar
+              
+              {tr("↑↓ navegar · Enter/Tab usar · Esc ignorar")}
             </p>
           </div>
         )}
         {promptMenuOpen && !commandMenuOpen && (
           <div className="animate-pop absolute bottom-full left-3 right-3 z-50 mb-2 overflow-hidden rounded-xl border border-border bg-surface shadow-menu">
-            <p className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">Prompts</p>
+            <p className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">{tr("Prompts")}</p>
             <div className="max-h-60 overflow-y-auto py-1">
               {promptMatches.map((p, i) => (
                 <button
@@ -1035,13 +1041,14 @@ export default function PromptBox({
               ))}
             </div>
             <p className="border-t border-border px-3 py-1.5 text-[10px] text-muted">
-              ↑↓ navegar · Enter/Tab usar · Esc ignorar
+              
+              {tr("↑↓ navegar · Enter/Tab usar · Esc ignorar")}
             </p>
           </div>
         )}
         {skillMenuOpen && (
           <div className="animate-pop absolute bottom-full left-3 right-3 z-50 mb-2 overflow-hidden rounded-xl border border-border bg-surface shadow-menu">
-            <p className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">Skills</p>
+            <p className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">{tr("Skills")}</p>
             <div className="max-h-60 overflow-y-auto py-1">
               {skillMatches.map((s, i) => (
                 <button
@@ -1060,13 +1067,14 @@ export default function PromptBox({
               ))}
             </div>
             <p className="border-t border-border px-3 py-1.5 text-[10px] text-muted">
-              ↑↓ navegar · Enter/Tab anexar · Esc ignorar
+              
+              {tr("↑↓ navegar · Enter/Tab anexar · Esc ignorar")}
             </p>
           </div>
         )}
         {agentMenuOpen && (
           <div className="animate-pop absolute bottom-full left-3 right-3 z-50 mb-2 overflow-hidden rounded-xl border border-border bg-surface shadow-menu">
-            <p className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">Agentes</p>
+            <p className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">{tr("Agentes")}</p>
             <div className="max-h-60 overflow-y-auto py-1">
               {agentMatches.map((a, i) => (
                 <button
@@ -1081,13 +1089,14 @@ export default function PromptBox({
               ))}
             </div>
             <p className="border-t border-border px-3 py-1.5 text-[10px] text-muted">
-              Roteia esta mensagem para o agente · ↑↓ · Enter/Tab · Esc
+              
+              {tr("Roteia esta mensagem para o agente · ↑↓ · Enter/Tab · Esc")}
             </p>
           </div>
         )}
         {refMenuOpen && (
           <div className="animate-pop absolute bottom-full left-3 right-3 z-50 mb-2 overflow-hidden rounded-xl border border-border bg-surface shadow-menu">
-            <p className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">Base de Conhecimento</p>
+            <p className="px-3 pt-2 text-[11px] font-medium uppercase tracking-wider text-muted">{tr("Base de Conhecimento")}</p>
             <div className="max-h-60 overflow-y-auto py-1">
               {refMatches.map((e, i) => (
                 <button
@@ -1105,7 +1114,8 @@ export default function PromptBox({
               ))}
             </div>
             <p className="border-t border-border px-3 py-1.5 text-[10px] text-muted">
-              Anexa o arquivo a esta mensagem · ↑↓ · Enter/Tab · Esc
+              
+              {tr("Anexa o arquivo a esta mensagem · ↑↓ · Enter/Tab · Esc")}
             </p>
           </div>
         )}
@@ -1133,7 +1143,7 @@ export default function PromptBox({
           <div className="mb-1.5 flex flex-wrap gap-1.5 px-1">
             {refChats.map((c) => (
               <span key={c.id} className="flex items-center gap-1 rounded-full bg-accent/15 px-2.5 py-0.5 text-xs text-accent-hover" title={c.title}>
-                <MessagesSquare size={11} /> <span className="max-w-[160px] truncate">{c.title || "Sem título"}</span>
+                <MessagesSquare size={11} /> <span className="max-w-[160px] truncate">{c.title || tr("Sem título")}</span>
                 <button
                   onClick={() => onRefChatsChange?.(refChats.filter((x) => x.id !== c.id))}
                   className="text-accent-hover/70 transition-colors hover:text-accent-hover"
@@ -1191,7 +1201,7 @@ export default function PromptBox({
                       ) : (
                         <span className="min-w-0 truncate">{a.name}</span>
                       )}
-                      <button onClick={() => removeAttachment(i)} title="Remover" className="shrink-0 text-muted transition-colors hover:text-red-300">
+                      <button onClick={() => removeAttachment(i)} title={tr("Remover")} className="shrink-0 text-muted transition-colors hover:text-red-300">
                         <X size={14} />
                       </button>
                     </span>
@@ -1288,7 +1298,7 @@ export default function PromptBox({
               <button
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={() => setPlusOpen((v) => !v)}
-                title="Anexar"
+                title={tr("Anexar")}
                 className="rounded-full p-2 text-ink-soft transition-colors hover:bg-hover hover:text-ink"
               >
                 <Plus size={18} />
@@ -1302,27 +1312,29 @@ export default function PromptBox({
                       onClick={() => {
                         if (canAttach) { openFilePicker(false); return; }
                         setPlusOpen(false);
-                        setAttachErr("Este modelo não aceita anexos: ative Visão ou Arquivos nas Capacidades.");
+                        setAttachErr(tr("Este modelo não aceita anexos: ative Visão ou Arquivos nas Capacidades."));
                       }}
                     >
-                      Carregar arquivos
+                      
+                      {tr("Carregar arquivos")}
                     </MenuItem>
                     <MenuItem
                       icon={<Camera size={16} />}
                       onClick={() => {
                         if (canVision) { openFilePicker(true); return; }
                         setPlusOpen(false);
-                        setAttachErr("Este modelo não vê imagens: ative Visão ou o Roteador de Visão.");
+                        setAttachErr(tr("Este modelo não vê imagens: ative Visão ou o Roteador de Visão."));
                       }}
                     >
-                      Enviar captura
+                      
+                      {tr("Enviar captura")}
                     </MenuItem>
                     <MenuItem
                       icon={<Database size={16} />}
                       onClick={() => {
                         setPlusOpen(false);
                         if (!refEntries.length) {
-                          setNotice("Sem base de conhecimento acoplada");
+                          setNotice(tr("Sem base de conhecimento acoplada"));
                           return;
                         }
                         // insere "#" no fim p/ abrir o menu de referências (garante que
@@ -1336,13 +1348,15 @@ export default function PromptBox({
                         });
                       }}
                     >
-                      Anexar base de conhecimento
+                      
+                      {tr("Anexar base de conhecimento")}
                     </MenuItem>
                     <MenuItem
                       icon={<MessagesSquare size={16} />}
                       onClick={() => { setPlusOpen(false); setChatQuery(""); setChatPickOpen(true); }}
                     >
-                      Chats de referência
+                      
+                      {tr("Chats de referência")}
                     </MenuItem>
                 </div>
               )}
@@ -1359,7 +1373,7 @@ export default function PromptBox({
                       autoFocus={finePointer()}
                       value={chatQuery}
                       onChange={(e) => setChatQuery(e.target.value)}
-                      placeholder="Buscar chat…"
+                      placeholder={tr("Buscar chat…")}
                       className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
                     />
                     <button onClick={() => setChatPickOpen(false)} className="text-muted transition-colors hover:text-ink">
@@ -1383,18 +1397,19 @@ export default function PromptBox({
                           <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${on ? "border-accent bg-accent text-white" : "border-border"}`}>
                             {on && <Check size={11} />}
                           </span>
-                          <span className="truncate">{c.title || "Sem título"}</span>
+                          <span className="truncate">{c.title || tr("Sem título")}</span>
                         </button>
                       );
                     })}
                     {chatRows.length === 0 && (
                       <p className="px-3 py-5 text-center text-sm text-muted">
-                        {chats.length === 0 ? "Nenhum outro chat." : "Nada encontrado."}
+                        {chats.length === 0 ? tr("Nenhum outro chat.") : tr("Nada encontrado.")}
                       </p>
                     )}
                   </div>
                   <p className="border-t border-border px-3 py-1.5 text-[10px] text-muted">
-                    Anexa a conversa como contexto desta mensagem · máx. 5
+                    
+                    {tr("Anexa a conversa como contexto desta mensagem · máx. 5")}
                   </p>
                 </div>
               )}
@@ -1420,7 +1435,7 @@ export default function PromptBox({
             )}
             <button
               onClick={onToggleMic}
-              title="Ditar"
+              title={tr("Ditar")}
               className={`rounded-full p-2 transition-colors ${
                 recording ? "animate-pulse bg-red-500/20 text-red-300" : "text-ink-soft hover:bg-hover hover:text-ink"
               }`}
@@ -1432,7 +1447,7 @@ export default function PromptBox({
                 {onQueue && value.trim() && (
                   <button
                     onClick={() => onQueue(false)}
-                    title="Enfileirar (segure Alt p/ steer: injeta no turno atual)"
+                    title={tr("Enfileirar (segure Alt p/ steer: injeta no turno atual)")}
                     className="rounded-full bg-surface2 p-2 text-ink-soft transition-colors hover:bg-hover hover:text-ink"
                   >
                     <Send size={16} />
@@ -1440,7 +1455,7 @@ export default function PromptBox({
                 )}
                 <button
                   onClick={onStop}
-                  title="Parar geração"
+                  title={tr("Parar geração")}
                   className="rounded-full bg-accent p-2 text-ink transition-colors hover:bg-accent-hover"
                 >
                   <Square size={16} fill="currentColor" />
@@ -1450,7 +1465,7 @@ export default function PromptBox({
               <button
                 onClick={onSend}
                 disabled={sending || subindo}
-                title={subindo ? "Enviando anexos…" : "Enviar"}
+                title={subindo ? tr("Enviando anexos…") : tr("Enviar")}
                 className="rounded-full bg-accent p-2 text-ink transition-colors hover:bg-accent-hover disabled:opacity-50"
               >
                 <Send size={16} />
@@ -1458,13 +1473,13 @@ export default function PromptBox({
             ) : onVoiceMode ? (
               <button
                 onClick={onVoiceMode}
-                title="Modo voz (assistente)"
+                title={tr("Modo voz (assistente)")}
                 className="rounded-full bg-accent p-2 text-ink transition-colors hover:bg-accent-hover"
               >
                 <AudioLines size={16} />
               </button>
             ) : (
-              <button disabled title="Enviar" className="rounded-full bg-accent p-2 text-ink opacity-50">
+              <button disabled title={tr("Enviar")} className="rounded-full bg-accent p-2 text-ink opacity-50">
                 <Send size={16} />
               </button>
             )}

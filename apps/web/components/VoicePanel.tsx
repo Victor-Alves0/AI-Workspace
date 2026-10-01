@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AudioLines, Check, ChevronLeft, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
+import { tr } from "@/lib/i18n";
 
 interface VoiceConfig {
   configured: boolean;
@@ -40,7 +41,7 @@ export default function VoicePanel({ onBack, onChanged }: { onBack: () => void; 
   return (
     <div className="pt-1">
       <button onClick={onBack} className="mb-3 flex items-center gap-1 text-sm text-muted transition-colors hover:text-ink">
-        <ChevronLeft size={16} /> Voltar
+        <ChevronLeft size={16} />  {tr("Voltar")}
       </button>
 
       <div className="flex items-center gap-2.5">
@@ -48,8 +49,8 @@ export default function VoicePanel({ onBack, onChanged }: { onBack: () => void; 
           <AudioLines size={18} />
         </span>
         <div>
-          <p className="text-sm font-semibold text-ink">Voz</p>
-          <p className="text-xs text-muted">Controlar voz de IA</p>
+          <p className="text-sm font-semibold text-ink">{tr("Voz")}</p>
+          <p className="text-xs text-muted">{tr("Controlar voz de IA")}</p>
         </div>
       </div>
 
@@ -85,7 +86,7 @@ function VoiceBody({ st, reload, onChanged }: { st: VoiceConfig; reload: () => P
       const fresh = await api.get<VoiceConfig>("/voice/config");
       setTest({ ok: true, count: fresh.voices.length });
     } catch (e) {
-      setTest({ ok: false, error: e instanceof ApiError ? e.message : "Falha ao salvar" });
+      setTest({ ok: false, error: e instanceof ApiError ? e.message : tr("Falha ao salvar") });
     } finally {
       setBusy(null);
     }
@@ -99,7 +100,7 @@ function VoiceBody({ st, reload, onChanged }: { st: VoiceConfig; reload: () => P
       });
       setTest(r);
     } catch (e) {
-      setTest({ ok: false, error: e instanceof ApiError ? e.message : "Falha na conexão" });
+      setTest({ ok: false, error: e instanceof ApiError ? e.message : tr("Falha na conexão") });
     } finally {
       setBusy(null);
     }
@@ -108,7 +109,7 @@ function VoiceBody({ st, reload, onChanged }: { st: VoiceConfig; reload: () => P
   return (
     <div className="space-y-4 pt-4">
       <div className="space-y-1.5">
-        <label className="text-sm text-ink-soft">Endereço do servidor de voz (OpenAI-compatível)</label>
+        <label className="text-sm text-ink-soft">{tr("Endereço do servidor de voz (OpenAI-compatível)")}</label>
         <input
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
@@ -116,15 +117,16 @@ function VoiceBody({ st, reload, onChanged }: { st: VoiceConfig; reload: () => P
           className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
         />
         <p className="text-xs text-muted">
-          O endereço é acessado pelo <b>servidor</b> (não pelo navegador) e deve terminar em{" "}
-          <span className="font-mono">/v1</span>. Servidor no seu PC (host):{" "}
-          <span className="font-mono">http://host.docker.internal:&lt;porta&gt;/v1</span> ou o IP da LAN.
+          
+          {tr("O endereço é acessado pelo")} <b>servidor</b>  {tr("(não pelo navegador) e deve terminar em")}{" "}
+          <span className="font-mono">/v1</span>{tr(". Servidor no seu PC (host):")}{" "}
+          <span className="font-mono">http://host.docker.internal:&lt;porta&gt;/v1</span>  {tr("ou o IP da LAN.")}
         </p>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <label className="text-sm text-ink-soft">Modelo TTS</label>
+          <label className="text-sm text-ink-soft">{tr("Modelo TTS")}</label>
           <input
             value={ttsModel}
             onChange={(e) => setTtsModel(e.target.value)}
@@ -145,42 +147,42 @@ function VoiceBody({ st, reload, onChanged }: { st: VoiceConfig; reload: () => P
 
       <div className="flex items-center justify-between rounded-xl border border-border bg-surface px-3 py-2.5">
         <div>
-          <p className="text-sm text-ink">Ativado</p>
-          <p className="text-xs text-muted">Quando ligado, o TTS usa este servidor no lugar do provedor global.</p>
+          <p className="text-sm text-ink">{tr("Ativado")}</p>
+          <p className="text-xs text-muted">{tr("Quando ligado, o TTS usa este servidor no lugar do provedor global.")}</p>
         </div>
         <Toggle on={enabled} onClick={() => setEnabled((v) => !v)} />
       </div>
 
       <div className="flex items-center gap-2">
         <button onClick={runTest} disabled={!!busy} className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-surface2 disabled:opacity-50">
-          {busy === "test" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Testar conexão
+          {busy === "test" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}  {tr("Testar conexão")}
         </button>
         <button onClick={save} disabled={!!busy} className="rounded-full bg-accent px-5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50">
-          {busy === "save" ? "Salvando…" : saved ? "Salvo ✓" : "Salvar"}
+          {busy === "save" ? tr("Salvando…") : saved ? "Salvo ✓" : tr("Salvar")}
         </button>
       </div>
 
       {test && (
         test.ok ? (
           <p className="flex items-center gap-1.5 text-sm text-green-400">
-            <Check size={15} /> Conectado — {test.count ?? 0} voz(es) disponível(is).
+            <Check size={15} /> Conectado — {test.count ?? 0}  {tr("voz(es) disponível(is).")}
           </p>
         ) : (
           <p className="flex items-start gap-1.5 text-sm text-red-400">
-            <TriangleAlert size={15} className="mt-0.5 shrink-0" /> {test.error || "Não foi possível conectar."}
+            <TriangleAlert size={15} className="mt-0.5 shrink-0" /> {test.error || tr("Não foi possível conectar.")}
           </p>
         )
       )}
 
       {st.voices.length > 0 && (
         <div>
-          <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">Vozes disponíveis ({st.voices.length})</p>
+          <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">{tr("Vozes disponíveis (")}{st.voices.length})</p>
           <div className="flex flex-wrap gap-1.5">
             {st.voices.slice(0, 60).map((v) => (
               <span key={v} className="rounded-full border border-border bg-surface px-2.5 py-0.5 font-mono text-xs text-ink-soft">{v}</span>
             ))}
           </div>
-          <p className="mt-2 text-xs text-muted">Escolha a voz por modelo em Espaço → Modelos.</p>
+          <p className="mt-2 text-xs text-muted">{tr("Escolha a voz por modelo em Espaço → Modelos.")}</p>
         </div>
       )}
     </div>

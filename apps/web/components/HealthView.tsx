@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Activity, HeartPulse, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
+import { dateLocale, tr } from "@/lib/i18n";
 
 type Sev = "info" | "warn" | "degraded" | "error";
 
@@ -36,14 +37,14 @@ const SEV_COLOR: Record<Sev, string> = {
   info: "#64748b", warn: "#f59e0b", degraded: "#f97316", error: "#ef4444",
 };
 const SEV_LABEL: Record<Sev, string> = {
-  info: "info", warn: "atenção", degraded: "degradado", error: "erro",
+  info: "info", warn: tr("atenção"), degraded: tr("degradado"), error: tr("erro"),
 };
 const CAP_LABEL: Record<string, string> = {
-  memory: "Memória", synthesis: "Síntese final", tool_watchdog: "Watchdog de tools",
-  codegraph: "Grafo de código", output_guard: "Guarda de Saída", guard_judge: "Guarda-juiz",
-  compaction: "Compactação", database: "Banco", embedder: "Embedder", browser: "Navegador",
-  steering: "Steering (intervenção)", anti_spin: "Anti-spin", queue: "Fila de mensagens",
-  ledger: "Ledger de tarefa",
+  memory: tr("Memória"), synthesis: tr("Síntese final"), tool_watchdog: tr("Watchdog de tools"),
+  codegraph: tr("Grafo de código"), output_guard: tr("Guarda de Saída"), guard_judge: "Guarda-juiz",
+  compaction: tr("Compactação"), database: tr("Banco"), embedder: tr("Embedder"), browser: tr("Navegador"),
+  steering: tr("Steering (intervenção)"), anti_spin: "Anti-spin", queue: tr("Fila de mensagens"),
+  ledger: tr("Ledger de tarefa"),
 };
 
 const CARD = "rounded-xl border border-border bg-surface p-4";
@@ -51,7 +52,7 @@ const CHIP = "rounded-full px-2.5 py-0.5 text-[11px] font-medium";
 
 function fmtTime(iso: string | null | undefined): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  return new Date(iso).toLocaleString(dateLocale(), { dateStyle: "short", timeStyle: "short" });
 }
 
 export default function HealthView() {
@@ -81,12 +82,12 @@ export default function HealthView() {
         <div className="flex items-center gap-2">
           <HeartPulse size={18} className={healthy ? "text-emerald-500" : "text-orange-500"} />
           <span className="text-sm font-medium text-ink">
-            {data ? (healthy ? "Tudo saudável" : "Há capacidades degradadas") : "Carregando…"}
+            {data ? (healthy ? tr("Tudo saudável") : tr("Há capacidades degradadas")) : tr("Carregando…")}
           </span>
         </div>
         <button onClick={load} disabled={loading}
           className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-muted transition-colors hover:bg-hover hover:text-ink disabled:opacity-50">
-          <RefreshCw size={13} className={loading ? "animate-spin" : ""} /> Recarregar
+          <RefreshCw size={13} className={loading ? "animate-spin" : ""} />  {tr("Recarregar")}
         </button>
       </div>
 
@@ -95,7 +96,7 @@ export default function HealthView() {
       {/* infra (self-check): banco, pgvector */}
       {data && (
         <div className={CARD}>
-          <p className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-muted">Infraestrutura</p>
+          <p className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-muted">{tr("Infraestrutura")}</p>
           <div className="flex flex-wrap gap-2">
             {Object.entries(data.components).map(([name, c]) => (
               <span key={name} className={`${CHIP} flex items-center gap-1.5`}
@@ -113,12 +114,14 @@ export default function HealthView() {
       {data && (
         <div className={CARD}>
           <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
-            Capacidades · últimas {data.health?.hours ?? 24}h
+            
+            {tr("Capacidades · últimas")} {data.health?.hours ?? 24}h
           </p>
           {caps.length === 0 ? (
             <div className="flex items-center gap-2 py-3 text-sm text-muted">
               <Activity size={15} className="text-emerald-500" />
-              Nenhuma degradação registrada — todas as capacidades operando normalmente.
+              
+              {tr("Nenhuma degradação registrada — todas as capacidades operando normalmente.")}
             </div>
           ) : (
             <ul className="divide-y divide-border">
@@ -158,10 +161,11 @@ export default function HealthView() {
       {prims && (
         <div className={CARD}>
           <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
-            Primitivos · últimos {prims.days} dias
+            
+            {tr("Primitivos · últimos")} {prims.days} dias
           </p>
           {prims.primitives.length === 0 ? (
-            <p className="py-2 text-sm text-muted">Nenhum primitivo acionado no período.</p>
+            <p className="py-2 text-sm text-muted">{tr("Nenhum primitivo acionado no período.")}</p>
           ) : (
             <ul className="divide-y divide-border">
               {prims.primitives.map((p) => (

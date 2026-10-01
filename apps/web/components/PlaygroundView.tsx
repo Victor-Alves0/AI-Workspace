@@ -6,13 +6,14 @@ import { ArrowLeft, BarChart3, ChevronLeft, Columns2, FlaskConical, Wrench } fro
 import BenchmarkView from "./BenchmarkView";
 import CompareView from "./CompareView";
 import ToolDebugView from "./ToolDebugView";
+import { tr } from "@/lib/i18n";
 
 type Section = "benchmarks" | "compare" | "tools";
 
 const CARDS: { key: Section; name: string; desc: string; icon: ReactNode }[] = [
-  { key: "benchmarks", name: "Benchmarks", desc: "Casos de teste contra 1+ modelos, com nota, custo e histórico", icon: <BarChart3 size={22} /> },
-  { key: "compare", name: "Comparações", desc: "Mesmo prompt em vários modelos, lado a lado", icon: <Columns2 size={22} /> },
-  { key: "tools", name: "Debug de Tools", desc: "Testar e inspecionar chamadas de ferramentas", icon: <Wrench size={22} /> },
+  { key: "benchmarks", name: tr("Benchmarks"), desc: tr("Casos de teste contra 1+ modelos, com nota, custo e histórico"), icon: <BarChart3 size={22} /> },
+  { key: "compare", name: tr("Comparações"), desc: tr("Mesmo prompt em vários modelos, lado a lado"), icon: <Columns2 size={22} /> },
+  { key: "tools", name: tr("Debug de Tools"), desc: tr("Testar e inspecionar chamadas de ferramentas"), icon: <Wrench size={22} /> },
 ];
 
 function PlayCard({ icon, name, desc, onClick }: { icon: ReactNode; name: string; desc: string; onClick: () => void }) {
@@ -38,7 +39,7 @@ export function PlaygroundShell({ title, onBack, children }: { title: string; on
     <div className="px-4 py-5 md:px-8 md:py-6">
       <nav className="mb-4 flex items-center gap-1.5 text-sm">
         <button onClick={onBack} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-muted transition-colors hover:bg-hover hover:text-ink">
-          <ArrowLeft size={16} /> Playground
+          <ArrowLeft size={16} />  {tr("Playground")}
         </button>
         <span className="text-muted">/</span>
         <span className="font-medium text-ink">{title}</span>
@@ -57,14 +58,14 @@ export default function PlaygroundView({ onClose }: { onClose: () => void }) {
         <div className="mx-auto max-w-5xl px-4 py-6 md:px-8 md:py-8">
           <div className="mb-6 flex items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
-              <button onClick={onClose} title="Espaço de Trabalho" aria-label="Voltar ao Espaço de Trabalho" className="flex h-8 w-8 flex-none items-center justify-center rounded-xl border border-transparent bg-surface text-ink-soft transition-colors hover:border-border hover:bg-surface2 hover:text-ink">
+              <button onClick={onClose} title={tr("Espaço de Trabalho")} aria-label={tr("Voltar ao Espaço de Trabalho")} className="flex h-8 w-8 flex-none items-center justify-center rounded-xl border border-transparent bg-surface text-ink-soft transition-colors hover:border-border hover:bg-surface2 hover:text-ink">
                 <ChevronLeft size={18} />
               </button>
               <div className="min-w-0">
                 <h1 className="flex items-center gap-2 text-2xl font-bold text-ink">
-                  <FlaskConical size={22} className="text-accent-hover" /> Playground
+                  <FlaskConical size={22} className="text-accent-hover" />  {tr("Playground")}
                 </h1>
-                <p className="mt-1 text-sm text-muted">Experimente, meça e depure seus modelos e ferramentas.</p>
+                <p className="mt-1 text-sm text-muted">{tr("Experimente, meça e depure seus modelos e ferramentas.")}</p>
               </div>
             </div>
           </div>
@@ -77,17 +78,17 @@ export default function PlaygroundView({ onClose }: { onClose: () => void }) {
       )}
 
       {section === "benchmarks" && (
-        <PlaygroundShell title="Benchmarks" onBack={() => setSection(null)}>
+        <PlaygroundShell title={tr("Benchmarks")} onBack={() => setSection(null)}>
           <BenchmarkView />
         </PlaygroundShell>
       )}
       {section === "compare" && (
-        <PlaygroundShell title="Comparações" onBack={() => setSection(null)}>
+        <PlaygroundShell title={tr("Comparações")} onBack={() => setSection(null)}>
           <CompareView />
         </PlaygroundShell>
       )}
       {section === "tools" && (
-        <PlaygroundShell title="Debug de Tools" onBack={() => setSection(null)}>
+        <PlaygroundShell title={tr("Debug de Tools")} onBack={() => setSection(null)}>
           <ToolDebugView />
         </PlaygroundShell>
       )}

@@ -1,3 +1,4 @@
+import { tr } from "@/lib/i18n";
 /**
  * Comandos do compositor: começam com "//" (o "/" sozinho é a biblioteca de prompts).
  * Valem em QUALQUER chat — não só no Imaginai.
@@ -15,9 +16,9 @@ export type ChatCommand = {
 };
 
 export const CHAT_COMMANDS: ChatCommand[] = [
-  { name: "roll", aliases: ["r"], usage: "//roll 1d20+2 furtividade", description: "Rola dados (1d20+2, 2d6+3, 4d6kh3, 2d20kh1)" },
-  { name: "compact", aliases: [], usage: "//compact", description: "Compacta o contexto da conversa" },
-  { name: "help", aliases: ["?"], usage: "//help", description: "Lista os comandos" },
+  { name: "roll", aliases: ["r"], usage: "//roll 1d20+2 furtividade", description: tr("Rola dados (1d20+2, 2d6+3, 4d6kh3, 2d20kh1)") },
+  { name: "compact", aliases: [], usage: "//compact", description: tr("Compacta o contexto da conversa") },
+  { name: "help", aliases: ["?"], usage: "//help", description: tr("Lista os comandos") },
 ];
 
 export type ParsedCommand = { command: ChatCommand; args: string };

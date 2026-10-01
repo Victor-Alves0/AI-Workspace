@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { useClickOutside } from "./ui";
+import { tr } from "@/lib/i18n";
 
 export interface TransferItem {
   key: string;
@@ -105,7 +106,7 @@ function TransferPane({
                   >
                     <span className="flex items-center gap-1.5">
                       {it.system && (
-                        <span title={it.iconTitle ?? "AI Workspace"} className="shrink-0 text-muted">
+                        <span title={it.iconTitle ?? tr("AI Workspace")} className="shrink-0 text-muted">
                           {it.icon ?? <Wrench size={12} />}
                         </span>
                       )}
@@ -118,8 +119,8 @@ function TransferPane({
                     <button
                       onClick={() => onTogglePin!(it.key)}
                       title={pinned
-                        ? "Fixada: sempre visível ao modelo, sem round-trip de busca. Clique p/ desafixar."
-                        : (pinHint || "Fixar: vira ferramenta de 1ª classe (o modelo chama direto, sem busca).")}
+                        ? tr("Fixada: sempre visível ao modelo, sem round-trip de busca. Clique p/ desafixar.")
+                        : (pinHint || tr("Fixar: vira ferramenta de 1ª classe (o modelo chama direto, sem busca)."))}
                       className={`mr-1 shrink-0 rounded-md p-1 transition-colors ${
                         pinned ? "text-accent-hover" : "text-muted hover:text-ink"
                       }`}
@@ -130,7 +131,7 @@ function TransferPane({
                   {showConfig && (
                     <button
                       onClick={() => onConfig!(it.key)}
-                      title="Configurar capacidade"
+                      title={tr("Configurar capacidade")}
                       className="mr-1 shrink-0 rounded-md p-1 text-muted transition-colors hover:text-ink"
                     >
                       <Settings size={13} />
@@ -143,7 +144,7 @@ function TransferPane({
         ))}
         {list.length === 0 && (
           <p className="px-2.5 py-6 text-center text-xs text-muted">
-            {hasQuery ? "Nada encontrado." : side === "left" ? "Tudo selecionado." : "Nada selecionado."}
+            {hasQuery ? tr("Nada encontrado.") : side === "left" ? tr("Tudo selecionado.") : tr("Nada selecionado.")}
           </p>
         )}
       </div>
@@ -163,7 +164,7 @@ export default function TransferModal({
   selected,
   onChange,
   onClose,
-  availableLabel = "Disponíveis",
+  availableLabel = tr("Disponíveis"),
   selectedLabel = "Selecionadas",
   searchPlaceholder = "Buscar…",
   pinnedKeys,
@@ -272,28 +273,28 @@ export default function TransferModal({
           <div className="flex shrink-0 flex-row items-center justify-center gap-2 md:flex-col">
             <button
               onClick={() => moveToSelected(available.map((i) => i.key))}
-              title="Adicionar todos"
+              title={tr("Adicionar todos")}
               className="rounded-lg border border-border p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink"
             >
               <ChevronsRight size={16} className="rotate-90 md:rotate-0" />
             </button>
             <button
               onClick={() => moveToSelected([...markLeft])}
-              title="Adicionar selecionados"
+              title={tr("Adicionar selecionados")}
               className="rounded-lg border border-border bg-surface2 p-1.5 text-ink transition-colors hover:bg-accent hover:text-white"
             >
               <ChevronRight size={16} className="rotate-90 md:rotate-0" />
             </button>
             <button
               onClick={() => moveToAvailable([...markRight])}
-              title="Remover selecionados"
+              title={tr("Remover selecionados")}
               className="rounded-lg border border-border bg-surface2 p-1.5 text-ink transition-colors hover:bg-accent hover:text-white"
             >
               <ChevronLeft size={16} className="rotate-90 md:rotate-0" />
             </button>
             <button
               onClick={() => moveToAvailable(chosen.map((i) => i.key))}
-              title="Remover todos"
+              title={tr("Remover todos")}
               className="rounded-lg border border-border p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink"
             >
               <ChevronsLeft size={16} className="rotate-90 md:rotate-0" />
@@ -317,13 +318,14 @@ export default function TransferModal({
         </div>
 
         <div className="flex items-center justify-between border-t border-border px-5 py-3 text-xs text-muted">
-          <span className="hidden md:inline">Clique para marcar • clique duplo para mover • use as setas</span>
-          <span className="md:hidden">Toque para marcar • use as setas</span>
+          <span className="hidden md:inline">{tr("Clique para marcar • clique duplo para mover • use as setas")}</span>
+          <span className="md:hidden">{tr("Toque para marcar • use as setas")}</span>
           <button
             onClick={onClose}
             className="rounded-full bg-accent px-5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
           >
-            Concluído
+            
+            {tr("Concluído")}
           </button>
         </div>
       </div>

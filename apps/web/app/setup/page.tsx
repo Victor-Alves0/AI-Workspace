@@ -6,6 +6,7 @@ import { ArrowLeft, Check, KeyRound, Lock, Mail, User as UserIcon, Users } from 
 import AuthShell, { AuthButton, AuthField } from "@/components/AuthShell";
 import { api, ApiError } from "@/lib/api";
 import type { User } from "@/lib/types";
+import { tr } from "@/lib/i18n";
 
 const PASSOS = 3;
 
@@ -33,7 +34,7 @@ export default function SetupPage() {
 
   function continuarConta(e: React.FormEvent) {
     e.preventDefault();
-    if (senha !== confirma) { setErro("As senhas não conferem."); return; }
+    if (senha !== confirma) { setErro(tr("As senhas não conferem.")); return; }
     setErro(null);
     setPasso(2);
   }
@@ -46,7 +47,7 @@ export default function SetupPage() {
       try { sessionStorage.setItem("aiw:from-setup", "1"); } catch { /* opcional */ }
       router.replace("/chat");
     } catch (err) {
-      const msg = err instanceof ApiError ? err.message : "Falha inesperada";
+      const msg = err instanceof ApiError ? err.message : tr("Falha inesperada");
       if (err instanceof ApiError && err.status === 409) { router.replace("/login"); return; }
       setErro(msg);
       setPasso(1);  // e-mail/senha recusados voltam à etapa deles
@@ -60,7 +61,7 @@ export default function SetupPage() {
   const voltar = (
     <button type="button" onClick={() => { setErro(null); setPasso(passo - 1); }}
       className="flex items-center gap-1.5 text-xs text-muted transition-colors hover:text-ink">
-      <ArrowLeft size={14} /> Voltar
+      <ArrowLeft size={14} />  {tr("Voltar")}
     </button>
   );
 
@@ -69,38 +70,38 @@ export default function SetupPage() {
       {passo === 0 && (
         <div className="space-y-7">
           <div className="space-y-2">
-            <h1 className="text-xl font-semibold tracking-tight text-ink">Bem-vindo ao AI Workspace</h1>
-            <p className="text-sm text-muted">Vamos criar a sua conta de administrador.</p>
+            <h1 className="text-xl font-semibold tracking-tight text-ink">{tr("Bem-vindo ao AI Workspace")}</h1>
+            <p className="text-sm text-muted">{tr("Vamos criar a sua conta de administrador.")}</p>
           </div>
-          <AuthButton type="button" onClick={() => setPasso(1)} autoFocus>Começar</AuthButton>
+          <AuthButton type="button" onClick={() => setPasso(1)} autoFocus>{tr("Começar")}</AuthButton>
         </div>
       )}
 
       {passo === 1 && (
         <form onSubmit={continuarConta} className="space-y-7">
-          <h1 className="text-xl font-semibold tracking-tight text-ink">Sua conta</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-ink">{tr("Sua conta")}</h1>
           <div className="space-y-6">
             <AuthField icon={<UserIcon size={16} />} required autoFocus autoComplete="name" maxLength={80}
-              placeholder="Nome" value={nome} onChange={(e) => setNome(e.target.value)} />
+              placeholder={tr("Nome")} value={nome} onChange={(e) => setNome(e.target.value)} />
             <AuthField icon={<Mail size={16} />} type="email" required autoComplete="email"
               placeholder="E-mail" value={email} onChange={(e) => setEmail(e.target.value)} />
             <AuthField icon={<KeyRound size={16} />} type="password" required minLength={8} autoComplete="new-password"
-              placeholder="Senha (mín. 8 caracteres)" value={senha} onChange={(e) => setSenha(e.target.value)} />
+              placeholder={tr("Senha (mín. 8 caracteres)")} value={senha} onChange={(e) => setSenha(e.target.value)} />
             <AuthField icon={<KeyRound size={16} />} type="password" required minLength={8} autoComplete="new-password"
-              placeholder="Confirmar senha" value={confirma} onChange={(e) => setConfirma(e.target.value)} />
+              placeholder={tr("Confirmar senha")} value={confirma} onChange={(e) => setConfirma(e.target.value)} />
           </div>
           {erro && <p className="text-sm text-red-400">{erro}</p>}
-          <AuthButton type="submit">Continuar</AuthButton>
+          <AuthButton type="submit">{tr("Continuar")}</AuthButton>
         </form>
       )}
 
       {passo === 2 && (
         <div className="space-y-7">
-          <h1 className="text-xl font-semibold tracking-tight text-ink">Quem pode entrar?</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-ink">{tr("Quem pode entrar?")}</h1>
           <div className="space-y-2.5">
             {[
-              { v: false, icon: <Lock size={16} />, titulo: "Só eu", sub: "Ninguém mais se cadastra. Dá para abrir o cadastro depois, em Administração." },
-              { v: true, icon: <Users size={16} />, titulo: "Outras pessoas também", sub: "Qualquer um pode se cadastrar; você aprova cada conta." },
+              { v: false, icon: <Lock size={16} />, titulo: tr("Só eu"), sub: tr("Ninguém mais se cadastra. Dá para abrir o cadastro depois, em Administração.") },
+              { v: true, icon: <Users size={16} />, titulo: tr("Outras pessoas também"), sub: tr("Qualquer um pode se cadastrar; você aprova cada conta.") },
             ].map((o) => (
               <button key={String(o.v)} type="button" onClick={() => setAberto(o.v)}
                 className={`flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${aberto === o.v ? "border-accent/60 bg-accent/10" : "border-border hover:bg-hover"}`}>
@@ -115,7 +116,7 @@ export default function SetupPage() {
           </div>
           {erro && <p className="text-sm text-red-400">{erro}</p>}
           <AuthButton type="button" onClick={concluir} disabled={enviando}>
-            {enviando ? "…" : "Concluir"}
+            {enviando ? "…" : tr("Concluir")}
           </AuthButton>
         </div>
       )}

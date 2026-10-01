@@ -17,6 +17,7 @@ import TextAttachmentModal from "./TextAttachmentModal";
 import DiceRollCard, { parseDiceRoll } from "./DiceRollCard";
 import { BackgroundNote, isBackgroundNote, SubagentStep, TeamStep } from "./SubagentCard";
 import { isTextAttachment } from "./PromptBox";
+import { dateLocale, tr } from "@/lib/i18n";
 
 // artefatos visuais que uma ferramenta pode emitir (resultado compacto → o front
 // desenha). O modelo pode chamar via `execute_tool` (resultado no topo) ou via
@@ -190,7 +191,7 @@ function SourcesBar({ sources }: { sources: Source[] }) {
   const shown = all ? sources : sources.slice(0, 6);
   return (
     <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-      <span className="mr-0.5 text-[11px] font-medium uppercase tracking-wider text-muted">Fontes</span>
+      <span className="mr-0.5 text-[11px] font-medium uppercase tracking-wider text-muted">{tr("Fontes")}</span>
       {shown.map((s, i) => {
         const isDoc = s.url.includes("/knowledge/docs/");
         return (
@@ -320,7 +321,7 @@ function EmailComposer({ draft }: { draft: EmailDraft }) {
       try { localStorage.setItem(sentKey, "1"); } catch { /* ignore */ }
       setStatus("sent");
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao enviar");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao enviar"));
       setStatus("error");
     }
   }
@@ -329,9 +330,9 @@ function EmailComposer({ draft }: { draft: EmailDraft }) {
     return (
       <div className="my-2 max-w-xl rounded-xl border border-border bg-surface px-4 py-3">
         <p className="flex items-center gap-2 text-sm text-green-400">
-          <Check size={16} /> E-mail enviado{draft.account_email ? ` de ${draft.account_email}` : ""}.
+          <Check size={16} />  {tr("E-mail enviado")}{draft.account_email ? ` de ${draft.account_email}` : ""}.
         </p>
-        <p className="mt-1 truncate text-xs text-muted">Para {to} · {subject || "(sem assunto)"}</p>
+        <p className="mt-1 truncate text-xs text-muted">{tr("Para")} {to} · {subject || tr("(sem assunto)")}</p>
       </div>
     );
   }
@@ -345,32 +346,32 @@ function EmailComposer({ draft }: { draft: EmailDraft }) {
       </div>
       <div className="divide-y divide-border">
         <label className="flex items-center gap-2 px-4 py-2 text-sm">
-          <span className="w-16 shrink-0 text-muted">Para</span>
+          <span className="w-16 shrink-0 text-muted">{tr("Para")}</span>
           <input value={to} onChange={(e) => setTo(e.target.value)} placeholder="destinatario@exemplo.com" className="flex-1 bg-transparent text-ink outline-none placeholder:text-muted" />
-          {!showCc && <button onClick={() => setShowCc(true)} className="shrink-0 text-xs text-muted transition-colors hover:text-ink">Cc</button>}
+          {!showCc && <button onClick={() => setShowCc(true)} className="shrink-0 text-xs text-muted transition-colors hover:text-ink">{tr("Cc")}</button>}
         </label>
         {showCc && (
           <label className="flex items-center gap-2 px-4 py-2 text-sm">
-            <span className="w-16 shrink-0 text-muted">Cc</span>
+            <span className="w-16 shrink-0 text-muted">{tr("Cc")}</span>
             <input value={cc} onChange={(e) => setCc(e.target.value)} placeholder="opcional" className="flex-1 bg-transparent text-ink outline-none placeholder:text-muted" />
           </label>
         )}
         <label className="flex items-center gap-2 px-4 py-2 text-sm">
-          <span className="w-16 shrink-0 text-muted">Assunto</span>
-          <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="(sem assunto)" className="flex-1 bg-transparent font-medium text-ink outline-none placeholder:font-normal placeholder:text-muted" />
+          <span className="w-16 shrink-0 text-muted">{tr("Assunto")}</span>
+          <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder={tr("(sem assunto)")} className="flex-1 bg-transparent font-medium text-ink outline-none placeholder:font-normal placeholder:text-muted" />
         </label>
         {/* barra de formatação */}
         <div className="flex flex-wrap items-center gap-0.5 px-3 py-1.5">
-          <FmtBtn title="Negrito" icon={<Bold size={15} />} cmd="bold" run={exec} />
-          <FmtBtn title="Itálico" icon={<Italic size={15} />} cmd="italic" run={exec} />
-          <FmtBtn title="Sublinhado" icon={<Underline size={15} />} cmd="underline" run={exec} />
-          <FmtBtn title="Tachado" icon={<Strikethrough size={15} />} cmd="strikeThrough" run={exec} />
+          <FmtBtn title={tr("Negrito")} icon={<Bold size={15} />} cmd="bold" run={exec} />
+          <FmtBtn title={tr("Itálico")} icon={<Italic size={15} />} cmd="italic" run={exec} />
+          <FmtBtn title={tr("Sublinhado")} icon={<Underline size={15} />} cmd="underline" run={exec} />
+          <FmtBtn title={tr("Tachado")} icon={<Strikethrough size={15} />} cmd="strikeThrough" run={exec} />
           <span className="mx-1 h-4 w-px bg-border" />
-          <FmtBtn title="Título 1" icon={<Heading1 size={15} />} cmd="formatBlock" arg="H1" run={exec} />
-          <FmtBtn title="Título 2" icon={<Heading2 size={15} />} cmd="formatBlock" arg="H2" run={exec} />
+          <FmtBtn title={tr("Título 1")} icon={<Heading1 size={15} />} cmd="formatBlock" arg="H1" run={exec} />
+          <FmtBtn title={tr("Título 2")} icon={<Heading2 size={15} />} cmd="formatBlock" arg="H2" run={exec} />
           <span className="mx-1 h-4 w-px bg-border" />
-          <FmtBtn title="Lista com marcadores" icon={<List size={15} />} cmd="insertUnorderedList" run={exec} />
-          <FmtBtn title="Lista numerada" icon={<ListOrdered size={15} />} cmd="insertOrderedList" run={exec} />
+          <FmtBtn title={tr("Lista com marcadores")} icon={<List size={15} />} cmd="insertUnorderedList" run={exec} />
+          <FmtBtn title={tr("Lista numerada")} icon={<ListOrdered size={15} />} cmd="insertOrderedList" run={exec} />
         </div>
         <div
           ref={bodyRef}
@@ -388,7 +389,7 @@ function EmailComposer({ draft }: { draft: EmailDraft }) {
           disabled={!to.trim() || status === "sending"}
           className="ml-auto flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
         >
-          <Send size={14} /> {status === "sending" ? "Enviando…" : "Enviar"}
+          <Send size={14} /> {status === "sending" ? tr("Enviando…") : tr("Enviar")}
         </button>
       </div>
     </div>
@@ -434,8 +435,8 @@ function SkillProposalCard({ proposal }: { proposal: SkillProposal }) {
     } catch (e) {
       setErr(
         e instanceof ApiError && e.status === 409
-          ? "Já existe uma skill com este identificador — troque o slug."
-          : e instanceof ApiError ? e.message : "Falha ao salvar a skill",
+          ? tr("Já existe uma skill com este identificador — troque o slug.")
+          : e instanceof ApiError ? e.message : tr("Falha ao salvar a skill"),
       );
       setStatus("idle");
     }
@@ -451,7 +452,7 @@ function SkillProposalCard({ proposal }: { proposal: SkillProposal }) {
       <div className="my-2 max-w-xl rounded-xl border border-border bg-surface px-4 py-3">
         <p className={`flex items-center gap-2 text-sm ${status === "saved" ? "text-green-400" : "text-muted"}`}>
           {status === "saved" ? <Check size={16} /> : <Ban size={16} />}
-          {status === "saved" ? "Skill aprovada" : "Proposta descartada"}
+          {status === "saved" ? tr("Skill aprovada") : tr("Proposta descartada")}
           <span className="truncate text-muted">· {name || proposal.name}</span>
         </p>
       </div>
@@ -462,30 +463,30 @@ function SkillProposalCard({ proposal }: { proposal: SkillProposal }) {
     <div className="my-2 max-w-xl overflow-hidden rounded-xl border border-border bg-surface">
       <div className="flex items-center gap-2 border-b border-border px-4 py-2">
         <BookmarkPlus size={15} className="text-accent-hover" />
-        <span className="text-sm font-medium text-ink">Proposta de skill</span>
+        <span className="text-sm font-medium text-ink">{tr("Proposta de skill")}</span>
         <span className="ml-auto text-xs text-muted">revise e aprove</span>
       </div>
       <div className="divide-y divide-border">
         <label className="flex items-center gap-2 px-4 py-2 text-sm">
-          <span className="w-24 shrink-0 text-muted">Nome</span>
+          <span className="w-24 shrink-0 text-muted">{tr("Nome")}</span>
           <input value={name} onChange={(e) => setName(e.target.value)} className="flex-1 bg-transparent font-medium text-ink outline-none" />
         </label>
         <label className="flex items-center gap-2 px-4 py-2 text-sm">
-          <span className="w-24 shrink-0 text-muted">Identificador</span>
+          <span className="w-24 shrink-0 text-muted">{tr("Identificador")}</span>
           <span className="text-muted">$</span>
           <input value={slug} onChange={(e) => setSlug(e.target.value)} className="flex-1 bg-transparent font-mono text-xs text-ink outline-none" />
         </label>
         <label className="flex items-start gap-2 px-4 py-2 text-sm">
-          <span className="w-24 shrink-0 pt-0.5 text-muted">Quando usar</span>
+          <span className="w-24 shrink-0 pt-0.5 text-muted">{tr("Quando usar")}</span>
           <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className="flex-1 resize-none bg-transparent text-ink outline-none" />
         </label>
         <label className="flex items-center gap-2 px-4 py-2 text-sm">
-          <span className="w-24 shrink-0 text-muted">Tags</span>
-          <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="separadas por vírgula" className="flex-1 bg-transparent text-ink outline-none placeholder:text-muted" />
+          <span className="w-24 shrink-0 text-muted">{tr("Tags")}</span>
+          <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder={tr("separadas por vírgula")} className="flex-1 bg-transparent text-ink outline-none placeholder:text-muted" />
         </label>
         <div className="px-4 py-2">
           <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1 text-xs text-muted transition-colors hover:text-ink">
-            {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Como fazer ({content.length} chars)
+            {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}  {tr("Como fazer (")}{content.length} chars)
           </button>
           {open && (
             <textarea
@@ -499,7 +500,7 @@ function SkillProposalCard({ proposal }: { proposal: SkillProposal }) {
         {files.length > 0 && (
           <div className="px-4 py-2">
             <p className="mb-1 text-xs text-muted">
-              {files.length} arquivo{files.length > 1 ? "s" : ""} de referência (incluídos ao aprovar):
+              {files.length} arquivo{files.length > 1 ? "s" : ""}  {tr("de referência (incluídos ao aprovar):")}
             </p>
             <div className="flex flex-wrap gap-1.5">
               {files.map((f, i) => (
@@ -514,14 +515,15 @@ function SkillProposalCard({ proposal }: { proposal: SkillProposal }) {
       <div className="flex items-center gap-3 border-t border-border px-4 py-2">
         {err && <span className="truncate text-xs text-red-400">{err}</span>}
         <button onClick={dismiss} className="ml-auto rounded-full px-3 py-1.5 text-sm text-muted transition-colors hover:text-ink">
-          Descartar
+          
+          {tr("Descartar")}
         </button>
         <button
           onClick={approve}
           disabled={!name.trim() || !content.trim() || status === "saving"}
           className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
         >
-          <Check size={14} /> {status === "saving" ? "Salvando…" : "Aprovar skill"}
+          <Check size={14} /> {status === "saving" ? tr("Salvando…") : tr("Aprovar skill")}
         </button>
       </div>
     </div>
@@ -562,8 +564,8 @@ function PromptProposalCard({ proposal }: { proposal: PromptProposal }) {
     } catch (e) {
       setErr(
         e instanceof ApiError && e.status === 409
-          ? "Já existe um prompt com este comando — troque o /comando."
-          : e instanceof ApiError ? e.message : "Falha ao salvar o prompt",
+          ? tr("Já existe um prompt com este comando — troque o /comando.")
+          : e instanceof ApiError ? e.message : tr("Falha ao salvar o prompt"),
       );
       setStatus("idle");
     }
@@ -579,7 +581,7 @@ function PromptProposalCard({ proposal }: { proposal: PromptProposal }) {
       <div className="my-2 max-w-xl rounded-xl border border-border bg-surface px-4 py-3">
         <p className={`flex items-center gap-2 text-sm ${status === "saved" ? "text-green-400" : "text-muted"}`}>
           {status === "saved" ? <Check size={16} /> : <Ban size={16} />}
-          {status === "saved" ? "Prompt aprovado" : "Proposta descartada"}
+          {status === "saved" ? tr("Prompt aprovado") : tr("Proposta descartada")}
           <span className="truncate text-muted">· /{command || proposal.command}</span>
         </p>
       </div>
@@ -590,25 +592,25 @@ function PromptProposalCard({ proposal }: { proposal: PromptProposal }) {
     <div className="my-2 max-w-xl overflow-hidden rounded-xl border border-border bg-surface">
       <div className="flex items-center gap-2 border-b border-border px-4 py-2">
         <MessageSquarePlus size={15} className="text-accent-hover" />
-        <span className="text-sm font-medium text-ink">Proposta de prompt</span>
+        <span className="text-sm font-medium text-ink">{tr("Proposta de prompt")}</span>
         <span className="ml-auto text-xs text-muted">revise e aprove</span>
       </div>
       <div className="divide-y divide-border">
         <label className="flex items-center gap-2 px-4 py-2 text-sm">
-          <span className="w-24 shrink-0 text-muted">Título</span>
+          <span className="w-24 shrink-0 text-muted">{tr("Título")}</span>
           <input value={title} onChange={(e) => setTitle(e.target.value)} className="flex-1 bg-transparent font-medium text-ink outline-none" />
         </label>
         <label className="flex items-center gap-2 px-4 py-2 text-sm">
-          <span className="w-24 shrink-0 text-muted">Comando</span>
+          <span className="w-24 shrink-0 text-muted">{tr("Comando")}</span>
           <span className="text-muted">/</span>
           <input value={command} onChange={(e) => setCommand(e.target.value)} className="flex-1 bg-transparent font-mono text-xs text-ink outline-none" />
         </label>
         {proposal.source_url && (
-          <p className="truncate px-4 py-2 text-xs text-muted">Origem: {proposal.source_url}</p>
+          <p className="truncate px-4 py-2 text-xs text-muted">{tr("Origem:")} {proposal.source_url}</p>
         )}
         <div className="px-4 py-2">
           <button onClick={() => setOpen((v) => !v)} className="flex items-center gap-1 text-xs text-muted transition-colors hover:text-ink">
-            {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Conteúdo ({content.length} chars)
+            {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}  {tr("Conteúdo (")}{content.length} chars)
           </button>
           {open && (
             <textarea
@@ -623,14 +625,15 @@ function PromptProposalCard({ proposal }: { proposal: PromptProposal }) {
       <div className="flex items-center gap-3 border-t border-border px-4 py-2">
         {err && <span className="truncate text-xs text-red-400">{err}</span>}
         <button onClick={dismiss} className="ml-auto rounded-full px-3 py-1.5 text-sm text-muted transition-colors hover:text-ink">
-          Descartar
+          
+          {tr("Descartar")}
         </button>
         <button
           onClick={approve}
           disabled={!command.trim() || !content.trim() || status === "saving"}
           className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
         >
-          <Check size={14} /> {status === "saving" ? "Salvando…" : "Aprovar prompt"}
+          <Check size={14} /> {status === "saving" ? tr("Salvando…") : tr("Aprovar prompt")}
         </button>
       </div>
     </div>
@@ -645,11 +648,12 @@ function BrainNoteCard({ note }: { note: BrainNoteEvent }) {
       <div className="flex items-center gap-2 border-b border-border px-4 py-2">
         <Brain size={15} className="text-accent-hover" />
         <span className="text-sm font-medium text-ink">
-          {note.action === "updated" ? "Nota atualizada no cérebro" : "Nota criada no cérebro"}
+          {note.action === "updated" ? tr("Nota atualizada no cérebro") : tr("Nota criada no cérebro")}
         </span>
         {href && (
           <a href={href} target="_blank" rel="noreferrer noopener" className="ml-auto text-xs text-muted transition-colors hover:text-ink">
-            Abrir
+            
+            {tr("Abrir")}
           </a>
         )}
       </div>
@@ -752,7 +756,7 @@ function ImageCard({ url, prompt }: { url: string; prompt?: string }) {
             type="button"
             onClick={() => setOpen(true)}
             className="block w-full cursor-zoom-in text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
-            aria-label="Ampliar imagem"
+            aria-label={tr("Ampliar imagem")}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={src} alt={prompt || "imagem gerada"} loading="lazy" className="block h-auto w-full" />
@@ -762,8 +766,8 @@ function ImageCard({ url, prompt }: { url: string; prompt?: string }) {
               href={downloadSrc}
               download
               onClick={(event) => event.stopPropagation()}
-              title="Baixar imagem"
-              aria-label="Baixar imagem"
+              title={tr("Baixar imagem")}
+              aria-label={tr("Baixar imagem")}
               className="rounded-lg border border-white/10 bg-black/60 p-2 text-white shadow-lg backdrop-blur-sm transition-colors hover:bg-black/85"
             >
               <Download size={16} />
@@ -776,8 +780,8 @@ function ImageCard({ url, prompt }: { url: string; prompt?: string }) {
             <button
               type="button"
               onClick={copyPrompt}
-              title={copied ? "Prompt copiado" : "Copiar prompt"}
-              aria-label={copied ? "Prompt copiado" : "Copiar prompt"}
+              title={copied ? tr("Prompt copiado") : tr("Copiar prompt")}
+              aria-label={copied ? tr("Prompt copiado") : tr("Copiar prompt")}
               className={`shrink-0 rounded-md p-1.5 transition-colors hover:bg-hover ${copied ? "text-green-400" : "text-muted hover:text-ink"}`}
             >
               {copied ? <Check size={15} /> : <Copy size={15} />}
@@ -790,7 +794,7 @@ function ImageCard({ url, prompt }: { url: string; prompt?: string }) {
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Imagem ampliada"
+          aria-label={tr("Imagem ampliada")}
           onMouseDown={close}
           className="fixed inset-0 z-[100] flex items-center justify-center overflow-hidden bg-black/85 p-4 backdrop-blur-sm"
         >
@@ -812,8 +816,8 @@ function ImageCard({ url, prompt }: { url: string; prompt?: string }) {
             <a
               href={downloadSrc}
               download
-              title="Baixar imagem"
-              aria-label="Baixar imagem"
+              title={tr("Baixar imagem")}
+              aria-label={tr("Baixar imagem")}
               className="rounded-lg border border-white/10 bg-black/60 p-2 text-white backdrop-blur-sm transition-colors hover:bg-black/85"
             >
               <Download size={18} />
@@ -821,8 +825,8 @@ function ImageCard({ url, prompt }: { url: string; prompt?: string }) {
             <button
               type="button"
               onClick={close}
-              title="Fechar"
-              aria-label="Fechar imagem ampliada"
+              title={tr("Fechar")}
+              aria-label={tr("Fechar imagem ampliada")}
               className="rounded-lg border border-white/10 bg-black/60 p-2 text-white backdrop-blur-sm transition-colors hover:bg-black/85"
             >
               <X size={18} />
@@ -837,8 +841,8 @@ function ImageCard({ url, prompt }: { url: string; prompt?: string }) {
               <button
                 type="button"
                 onClick={copyPrompt}
-                title={copied ? "Prompt copiado" : "Copiar prompt"}
-                aria-label={copied ? "Prompt copiado" : "Copiar prompt"}
+                title={copied ? tr("Prompt copiado") : tr("Copiar prompt")}
+                aria-label={copied ? tr("Prompt copiado") : tr("Copiar prompt")}
                 className={`rounded-md p-1.5 transition-colors hover:bg-white/10 ${copied ? "text-green-400" : "text-white/70 hover:text-white"}`}
               >
                 {copied ? <Check size={16} /> : <Copy size={16} />}
@@ -883,7 +887,8 @@ function ArtifactChip({
       <span className="min-w-0">
         <span className="block truncate text-sm font-medium text-ink">{meta?.title || identifier}</span>
         <span className="block text-[11px] text-muted">
-          Artefato{meta ? ` · ${meta.kind}${meta.version > 1 ? ` · v${meta.version}` : ""}` : ""} — clique para abrir
+          
+          {tr("Artefato")}{meta ? ` · ${meta.kind}${meta.version > 1 ? ` · v${meta.version}` : ""}` : ""}  {tr("— clique para abrir")}
         </span>
       </span>
     </button>
@@ -1014,8 +1019,8 @@ export function ToolEventsPanel({
   const nGuards = events.filter((e) => e.kind === "guard").length;
   const parts: string[] = [];
   if (nCalls > 0) parts.push(`${nCalls} ferramenta${nCalls === 1 ? "" : "s"}`);
-  if (nGuards > 0) parts.push(`${nGuards} guarda${nGuards === 1 ? "" : "s"} de saída`);
-  const label = running ? "Usando ferramentas…" : parts.length ? parts.join(" · ") : "Ferramentas";
+  if (nGuards > 0) parts.push(tr("{nGuards} guarda{1} de saída", { nGuards: nGuards, "1": nGuards === 1 ? "" : "s" }));
+  const label = running ? tr("Usando ferramentas…") : parts.length ? parts.join(" · ") : "Ferramentas";
   return (
     <div className="mb-2 mt-1.5">
       <button
@@ -1051,17 +1056,17 @@ function MemoriesUsedPanel({ items }: { items: { id: string; text: string; scope
   };
   return (
     <div ref={ref} className="animate-pop mt-1.5 w-full max-w-full space-y-1.5 rounded-xl border border-border bg-surface p-2 shadow-menu">
-      <p className="px-1 pb-0.5 text-[11px] font-medium uppercase tracking-wider text-muted">Memórias usadas nesta resposta</p>
+      <p className="px-1 pb-0.5 text-[11px] font-medium uppercase tracking-wider text-muted">{tr("Memórias usadas nesta resposta")}</p>
       {items.map((m) => (
         <div key={m.id} className="group/mem flex items-start gap-2 rounded-lg border border-border/70 bg-bg px-2.5 py-1.5 text-xs">
           <Brain size={12} className="mt-0.5 shrink-0 text-accent-hover" />
           <span className={`min-w-0 flex-1 ${gone[m.id] ? "text-muted line-through decoration-muted/50" : "text-ink-soft"}`}>{m.text}</span>
           {gone[m.id] ? (
-            <span className="shrink-0 text-[10px] uppercase text-muted">{gone[m.id] === "deleted" ? "excluída" : "desativada"}</span>
+            <span className="shrink-0 text-[10px] uppercase text-muted">{gone[m.id] === "deleted" ? tr("excluída") : "desativada"}</span>
           ) : (
             <div className="flex shrink-0 items-center gap-1 touch-reveal opacity-0 transition-opacity group-hover/mem:opacity-100">
-              <button onClick={() => act(m.id, "disabled")} title="Desativar" className="rounded p-1 text-muted hover:text-ink"><Ban size={12} /></button>
-              <button onClick={() => act(m.id, "deleted")} title="Excluir" className="rounded p-1 text-muted hover:text-red-400"><Trash2 size={12} /></button>
+              <button onClick={() => act(m.id, "disabled")} title={tr("Desativar")} className="rounded p-1 text-muted hover:text-ink"><Ban size={12} /></button>
+              <button onClick={() => act(m.id, "deleted")} title={tr("Excluir")} className="rounded p-1 text-muted hover:text-red-400"><Trash2 size={12} /></button>
             </div>
           )}
         </div>
@@ -1071,10 +1076,10 @@ function MemoriesUsedPanel({ items }: { items: { id: string; text: string; scope
 }
 
 const GUARD_DETECT_LABEL: Record<string, string> = {
-  refusal: "recusa detectada",
-  empty: "resposta vazia/curta",
+  refusal: tr("recusa detectada"),
+  empty: tr("resposta vazia/curta"),
   regex: "padrão (regex) casou",
-  judge: "juiz LLM acionou",
+  judge: tr("juiz LLM acionou"),
 };
 
 /** Acionamento de um Guarda de saída: escudo + fluxo do que aconteceu
@@ -1092,7 +1097,7 @@ function GuardEventRow({ event }: { event: ToolEvent }) {
         className="flex w-full items-center gap-2 px-2.5 py-1.5 text-amber-300/90 transition-colors hover:text-amber-200"
       >
         <ShieldAlert size={12} className="shrink-0" />
-        <span className="truncate">guarda de saída · {event.name}</span>
+        <span className="truncate">{tr("guarda de saída ·")} {event.name}</span>
         <span className="ml-auto shrink-0 text-[10px] uppercase tracking-wide text-amber-300/60">
           tentativa {d.attempt ?? "?"}
         </span>
@@ -1101,25 +1106,25 @@ function GuardEventRow({ event }: { event: ToolEvent }) {
       {open && (
         <div className="space-y-1.5 border-t border-amber-500/20 px-2.5 py-2 leading-5 text-ink-soft">
           <p>
-            <span className="text-muted">Detecção:</span> {GUARD_DETECT_LABEL[d.detect ?? ""] ?? d.detect}
+            <span className="text-muted">{tr("Detecção:")}</span> {GUARD_DETECT_LABEL[d.detect ?? ""] ?? d.detect}
             {d.model && <> · <span className="text-muted">modelo:</span> <span className="font-mono text-[11px]">{d.model}</span></>}
           </p>
           {d.rejected_preview && (
             <div>
-              <p className="text-muted">Resposta rejeitada:</p>
+              <p className="text-muted">{tr("Resposta rejeitada:")}</p>
               <p className="mt-0.5 rounded-md bg-bg px-2 py-1.5 italic text-muted">“{d.rejected_preview}”</p>
             </div>
           )}
           <p>
-            <span className="text-muted">Reação:</span>{" "}
+            <span className="text-muted">{tr("Reação:")}</span>{" "}
             {d.action === "fallback_model" ? (
-              <>trocou para o modelo <span className="font-mono text-[11px] text-ink">{d.fallback_model}</span> e refez</>
+              <>{tr("trocou para o modelo")} <span className="font-mono text-[11px] text-ink">{d.fallback_model}</span> e refez</>
             ) : (
-              <>reforçou as instruções e refez</>
+              <>{tr("reforçou as instruções e refez")}</>
             )}
           </p>
           {d.injected && (
-            <p className="text-muted">Instrução injetada: <span className="italic text-ink-soft">“{d.injected}”</span></p>
+            <p className="text-muted">{tr("Instrução injetada:")} <span className="italic text-ink-soft">“{d.injected}”</span></p>
           )}
         </div>
       )}
@@ -1150,10 +1155,10 @@ function ToolEventRow({ event, running = false }: { event: ToolEvent; running?: 
     return ({
       context: "Mundo · contexto",
       roleplay: "Mundo · personagem",
-      resolve: "Mundo · validar ação",
+      resolve: tr("Mundo · validar ação"),
       roll: "Mundo · rolagem",
-      adjudicate: "Mundo · consequência",
-    } as Record<string, string>)[operation] ?? "Mundo · ação";
+      adjudicate: tr("Mundo · consequência"),
+    } as Record<string, string>)[operation] ?? tr("Mundo · ação");
   })();
   return (
     <div className={`overflow-hidden rounded-lg border bg-bg text-xs ${running ? "border-accent/40" : "border-border/70"}`}>
@@ -1171,10 +1176,10 @@ function ToolEventRow({ event, running = false }: { event: ToolEvent; running?: 
         <span className="font-mono">{running ? "executando" : isCall ? "chamada" : "resultado"} · {toolLabel}</span>
         {!!event.tokens && (
           <span
-            title={`Este bloco ocupou ~${event.tokens.toLocaleString("pt-BR")} tokens do contexto (${(event.chars ?? 0).toLocaleString("pt-BR")} caracteres)`}
+            title={tr("Este bloco ocupou ~{0} tokens do contexto ({1} caracteres)", { "0": event.tokens.toLocaleString(dateLocale()), "1": (event.chars ?? 0).toLocaleString(dateLocale()) })}
             className="ml-auto shrink-0 font-mono text-[11px] text-muted"
           >
-            {event.tokens.toLocaleString("pt-BR")} tokens
+            {event.tokens.toLocaleString(dateLocale())} tokens
           </span>
         )}
         <ChevronRight size={12} className={`shrink-0 transition-transform duration-150 ${event.tokens ? "" : "ml-auto"} ${open ? "rotate-90" : ""}`} />
@@ -1256,10 +1261,10 @@ export function ReasoningBlock({
   useEffect(() => { if (openRequested) setTab("think"); }, [openRequested]);
   const toggle = (t: "think" | "agents") => setTab((cur) => (cur === t ? null : t));
   const thinkLabel = live
-    ? "Pensando…"
+    ? tr("Pensando…")
     : seconds && seconds > 0
-      ? `Pensou por ${fmtThinkTime(seconds)}`
-      : "Pensou";
+      ? tr("Pensou por {0}", { "0": fmtThinkTime(seconds) })
+      : tr("Pensou");
   const agentsLabel = `${agents.length} agente${agents.length === 1 ? "" : "s"}`;
   const tabCls = (on: boolean) =>
     `flex h-7 items-center gap-1 rounded-full px-2 text-xs transition-colors ${
@@ -1287,7 +1292,7 @@ export function ReasoningBlock({
         </div>
       )}
       {tab === "think" && hasThought && (
-        <ol className="ml-1.5 mt-3 space-y-4 border-l border-border pb-2 pl-5 text-sm leading-6 text-muted" aria-label="Etapas da resposta">
+        <ol className="ml-1.5 mt-3 space-y-4 border-l border-border pb-2 pl-5 text-sm leading-6 text-muted" aria-label={tr("Etapas da resposta")}>
           {timeline.map((step, index) => (
             <li key={step.kind === "agent" ? `a:${step.call?.id ?? step.result?.id ?? index}` : index} className="relative min-w-0 [overflow-wrap:anywhere]">
               <span aria-hidden className={`absolute -left-[25px] ${step.kind === "user" ? "top-[14px]" : "top-2"} h-2 w-2 rounded-full ${step.kind === "tool" ? "bg-emerald-400" : step.kind === "agent" || step.kind === "user" ? "bg-accent" : "bg-muted"}`} />
@@ -1299,7 +1304,7 @@ export function ReasoningBlock({
                 <div className="flex flex-col items-end gap-0.5">
                   <div className="max-w-[92%] whitespace-pre-wrap rounded-2xl bg-accent/15 px-3 py-1.5 text-ink">{step.text}</div>
                   {step.pending && (
-                    <span className="flex items-center gap-1 text-[11px] text-muted"><Clock size={10} /> entra no próximo passo</span>
+                    <span className="flex items-center gap-1 text-[11px] text-muted"><Clock size={10} />  {tr("entra no próximo passo")}</span>
                   )}
                 </div>
               ) : step.kind === "reasoning" ? (
@@ -1382,7 +1387,7 @@ function BreakdownRow({
       >
         <ChevronRight size={12} className={`shrink-0 transition-transform duration-150 ${open ? "rotate-90" : ""} ${!shown.length ? "opacity-0" : ""}`} />
         <span className="flex-1">{label}</span>
-        <span className="font-medium text-ink">{total.toLocaleString("pt-BR")}</span>
+        <span className="font-medium text-ink">{total.toLocaleString(dateLocale())}</span>
         <span className="text-muted">tokens</span>
       </button>
       {open && shown.length > 0 && (
@@ -1390,7 +1395,7 @@ function BreakdownRow({
           {shown.map((p) => (
             <div key={p.label} className={`flex items-center justify-between gap-4 ${p.sub ? "pl-3" : ""} ${p.value === 0 ? "opacity-50" : ""}`}>
               <span className="truncate">{p.label}</span>
-              <span className="shrink-0 font-mono text-ink-soft">{p.value.toLocaleString("pt-BR")}</span>
+              <span className="shrink-0 font-mono text-ink-soft">{p.value.toLocaleString(dateLocale())}</span>
             </div>
           ))}
         </div>
@@ -1421,11 +1426,11 @@ function UsagePanel({ u }: { u: NonNullable<Message["usage"]> }) {
 
   // detalhe do "extra" por origem (só no modo Extenso, aninhado sob a linha)
   const EXTRA_LABELS: Record<string, string> = {
-    artifacts: "Artefatos (instruções + conteúdo)",
+    artifacts: tr("Artefatos (instruções + conteúdo)"),
     channel: "Canal (WhatsApp/Telegram)",
-    guards: "Guardas de saída (reforços acionados)",
-    agent_notes: "Conversas diretas com os agentes",
-    sound_effects: "Efeitos sonoros (instruções)",
+    guards: tr("Guardas de saída (reforços acionados)"),
+    agent_notes: tr("Conversas diretas com os agentes"),
+    sound_effects: tr("Efeitos sonoros (instruções)"),
   };
   const perExtra = Object.entries(u.extra_breakdown ?? {}).sort((a, b) => b[1] - a[1]);
   // Extenso: PROVENIÊNCIA do prompt do sistema e do bloco de ferramentas — responde
@@ -1435,31 +1440,31 @@ function UsagePanel({ u }: { u: NonNullable<Message["usage"]> }) {
   // ferramentas REALMENTE executadas (inclui as de dentro do run_code)
   const perCalled = Object.entries(u.called_tools_breakdown ?? {}).sort((a, b) => b[1] - a[1]);
   const inputParts = [
-    { label: "Usuário (mensagem atual)", value: inb?.user ?? 0 },
-    { label: "Contexto (histórico do chat)", value: inb?.context ?? 0 },
-    { label: "Prompt do sistema", value: inb?.system ?? 0 },
+    { label: tr("Usuário (mensagem atual)"), value: inb?.user ?? 0 },
+    { label: tr("Contexto (histórico do chat)"), value: inb?.context ?? 0 },
+    { label: tr("Prompt do sistema"), value: inb?.system ?? 0 },
     ...(full && sysb ? [
-      { label: "Prompt do modelo (editor do modelo)", value: sysb.model_prompt ?? 0, sub: true },
-      { label: "Data e hora (injetada a cada turno)", value: sysb.datetime ?? 0, sub: true },
+      { label: tr("Prompt do modelo (editor do modelo)"), value: sysb.model_prompt ?? 0, sub: true },
+      { label: tr("Data e hora (injetada a cada turno)"), value: sysb.datetime ?? 0, sub: true },
     ] : []),
-    { label: "Instruções extras (artefatos/canal/guardas)", value: inb?.extra ?? 0 },
+    { label: tr("Instruções extras (artefatos/canal/guardas)"), value: inb?.extra ?? 0 },
     ...(full ? perExtra.map(([k, v]) => ({ label: EXTRA_LABELS[k] ?? k, value: v, sub: true })) : []),
-    { label: "Memória", value: inb?.memory ?? 0 },
-    { label: "Ferramentas (instruções + schemas)", value: inb?.tools ?? 0 },
+    { label: tr("Memória"), value: inb?.memory ?? 0 },
+    { label: tr("Ferramentas (instruções + schemas)"), value: inb?.tools ?? 0 },
     ...(full && tpb ? [
-      { label: "Instruções da SIFT + catálogo", value: tpb.instructions ?? 0, sub: true },
-      { label: "Schemas das ferramentas", value: tpb.schemas ?? 0, sub: true },
-      { label: "Cérebro (notas)", value: tpb.brain ?? 0, sub: true },
+      { label: tr("Instruções da SIFT + catálogo"), value: tpb.instructions ?? 0, sub: true },
+      { label: tr("Schemas das ferramentas"), value: tpb.schemas ?? 0, sub: true },
+      { label: tr("Cérebro (notas)"), value: tpb.brain ?? 0, sub: true },
     ] : []),
-    { label: "Skills", value: inb?.skills ?? 0 },
-    { label: "Resultados de ferramentas", value: inb?.tool_results ?? 0 },
+    { label: tr("Skills"), value: inb?.skills ?? 0 },
+    { label: tr("Resultados de ferramentas"), value: inb?.tool_results ?? 0 },
     // Extenso: o gasto de cada ferramenta, aninhado sob "Resultados"
     ...(full ? perTool.map(([tool, v]) => ({ label: tool, value: v, sub: true })) : []),
     { label: "Arquivos e anexos", value: inb?.file ?? 0 },
   ];
   const outputParts = [
-    { label: "Resposta", value: outb?.output ?? Math.max(0, u.completion_tokens - (u.reasoning_tokens ?? 0)) },
-    { label: "Raciocínio (thinking)", value: outb?.thinking ?? u.reasoning_tokens ?? 0 },
+    { label: tr("Resposta"), value: outb?.output ?? Math.max(0, u.completion_tokens - (u.reasoning_tokens ?? 0)) },
+    { label: tr("Raciocínio (thinking)"), value: outb?.thinking ?? u.reasoning_tokens ?? 0 },
   ];
   const cached = u.cached_tokens ?? 0;
   const showCached = full || cached > 0;
@@ -1468,31 +1473,34 @@ function UsagePanel({ u }: { u: NonNullable<Message["usage"]> }) {
     <div ref={ref} className="animate-pop mt-1.5 w-80 max-w-full rounded-xl border border-border bg-surface px-3.5 py-2.5 text-xs text-muted shadow-menu">
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="min-w-0 truncate text-ink-soft">
-          Origem: <span className="text-ink">{u.model_name}</span>{" "}
+          
+          {tr("Origem:")} <span className="text-ink">{u.model_name}</span>{" "}
           <span className="font-mono text-[11px]">({u.model})</span>
         </p>
         {/* Compacto = só o que gastou · Extenso = todas as fontes + por ferramenta */}
         <div className="flex shrink-0 overflow-hidden rounded-md border border-border text-[10px]">
           <button onClick={() => setMode(false)} className={`px-2 py-0.5 transition-colors ${!full ? "bg-surface2 font-medium text-ink" : "text-muted hover:text-ink"}`}>
-            Compacto
+            
+            {tr("Compacto")}
           </button>
           <button onClick={() => setMode(true)} className={`border-l border-border px-2 py-0.5 transition-colors ${full ? "bg-surface2 font-medium text-ink" : "text-muted hover:text-ink"}`}>
-            Extenso
+            
+            {tr("Extenso")}
           </button>
         </div>
       </div>
 
       <div className="space-y-0.5">
-        <BreakdownRow label="Entrada" total={u.prompt_tokens} parts={inputParts} showZero={full} startOpen={full} />
-        <BreakdownRow label="Saída" total={u.completion_tokens} parts={outputParts} showZero={full} />
+        <BreakdownRow label={tr("Entrada")} total={u.prompt_tokens} parts={inputParts} showZero={full} startOpen={full} />
+        <BreakdownRow label={tr("Saída")} total={u.completion_tokens} parts={outputParts} showZero={full} />
         {showCached && (
           <BreakdownRow
-            label="Cacheado"
+            label={tr("Cacheado")}
             total={cached}
             showZero={full}
             parts={[
-              { label: "Entrada em cache (leitura)", value: cached },
-              { label: "Não cacheado", value: Math.max(0, u.prompt_tokens - cached) },
+              { label: tr("Entrada em cache (leitura)"), value: cached },
+              { label: tr("Não cacheado"), value: Math.max(0, u.prompt_tokens - cached) },
             ]}
           />
         )}
@@ -1501,8 +1509,8 @@ function UsagePanel({ u }: { u: NonNullable<Message["usage"]> }) {
             produziu — é o mesmo gasto visto por outro ângulo, não um custo a mais. */}
         {full && perCalled.length > 0 && (
           <BreakdownRow
-            label="Ferramentas executadas"
-            hint="O que cada ferramenta produziu neste turno — inclusive as chamadas por dentro do run_code (Modo Código). Não é um custo adicional: é o detalhe do que voltou como entrada."
+            label={tr("Ferramentas executadas")}
+            hint={tr("O que cada ferramenta produziu neste turno — inclusive as chamadas por dentro do run_code (Modo Código). Não é um custo adicional: é o detalhe do que voltou como entrada.")}
             total={perCalled.reduce((s, [, v]) => s + v, 0)}
             parts={perCalled.map(([p, v]) => ({ label: p, value: v }))}
             showZero
@@ -1512,8 +1520,8 @@ function UsagePanel({ u }: { u: NonNullable<Message["usage"]> }) {
       </div>
 
       <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
-        <span>Total <span className="font-medium text-ink">{u.total_tokens.toLocaleString("pt-BR")}</span></span>
-        <span>Custo <span className="text-ink">{fmtCost(u.cost)}</span></span>
+        <span>{tr("Total")} <span className="font-medium text-ink">{u.total_tokens.toLocaleString(dateLocale())}</span></span>
+        <span>{tr("Custo")} <span className="text-ink">{fmtCost(u.cost)}</span></span>
       </div>
     </div>
   );
@@ -1631,14 +1639,15 @@ function MessageItem({
           onClick={() => { setEditing(false); setDraft(message.content); }}
           className="rounded-full px-3 py-1.5 text-xs text-muted transition-colors hover:text-ink"
         >
-          Cancelar
+          
+          {tr("Cancelar")}
         </button>
         <button
           onClick={saveEdit}
           disabled={saving}
           className="rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-accent-hover disabled:opacity-60"
         >
-          {saving ? "…" : "Salvar"}
+          {saving ? "…" : tr("Salvar")}
         </button>
       </div>
     </div>
@@ -1725,14 +1734,14 @@ function MessageItem({
               <div data-touch="long-press" className={`mt-1 flex items-center justify-end gap-1.5 pr-1 transition-opacity duration-150 ${touchActions ? "opacity-100" : "touch-reveal opacity-0 group-hover:opacity-100"}`}>
                 <span className="text-[11px] text-muted">{fmtTime(message.created_at)}</span>
                 <button
-                  title="Copiar"
+                  title={tr("Copiar")}
                   onClick={copy}
                   className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-ink max-md:p-2 max-md:[&_svg]:size-[19px]"
                 >
                   {copied ? <Check size={13} className="text-green-400" /> : <Copy size={13} />}
                 </button>
                 <button
-                  title="Tentar novamente — a IA responde de novo a partir desta mensagem"
+                  title={tr("Tentar novamente — a IA responde de novo a partir desta mensagem")}
                   onClick={() => onRegenerate(message.id)}
                   disabled={busy}
                   className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-ink disabled:cursor-not-allowed disabled:opacity-40 max-md:p-2 max-md:[&_svg]:size-[19px]"
@@ -1740,14 +1749,14 @@ function MessageItem({
                   <RotateCcw size={13} />
                 </button>
                 <button
-                  title="Editar"
+                  title={tr("Editar")}
                   onClick={() => { setDraft(message.content); setEditing(true); }}
                   className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-ink max-md:p-2 max-md:[&_svg]:size-[19px]"
                 >
                   <Pencil size={13} />
                 </button>
                 <button
-                  title="Excluir"
+                  title={tr("Excluir")}
                   onClick={() => onDelete(message.id)}
                   className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-red-300 max-md:p-2 max-md:[&_svg]:size-[19px]"
                 >
@@ -1776,10 +1785,10 @@ function MessageItem({
             {guardEvents.length > 0 && (
               <button
                 onClick={() => setShowTools(true)}
-                title="Um Guarda de saída agiu nesta resposta — clique para ver o fluxo"
+                title={tr("Um Guarda de saída agiu nesta resposta — clique para ver o fluxo")}
                 className="flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-400 transition-colors hover:bg-amber-500/25"
               >
-                <ShieldAlert size={12} /> Guarda{guardEvents.length > 1 ? ` ×${guardEvents.length}` : ""}
+                <ShieldAlert size={12} />  {tr("Guarda")}{guardEvents.length > 1 ? ` ×${guardEvents.length}` : ""}
               </button>
             )}
             <span data-touch="decorative" className="text-[11px] font-normal text-muted opacity-0 transition-opacity duration-150 group-hover:opacity-100">
@@ -1797,44 +1806,44 @@ function MessageItem({
         {!editing && (
           <>
             <div className={`mt-1.5 flex flex-wrap items-center gap-0.5 max-md:gap-1 transition-opacity duration-150 ${speaking ? "opacity-100" : "touch-reveal opacity-0 group-hover:opacity-100"}`}>
-              <IconButton title="Editar" onClick={() => { setDraft(message.content); setEditing(true); }} disabled={busy}>
+              <IconButton title={tr("Editar")} onClick={() => { setDraft(message.content); setEditing(true); }} disabled={busy}>
                 <Pencil size={15} />
               </IconButton>
-              <IconButton title="Copiar" onClick={copy}>
+              <IconButton title={tr("Copiar")} onClick={copy}>
                 {copied ? <Check size={15} className="text-green-400" /> : <Copy size={15} />}
               </IconButton>
               {onSpeak && (
-                <IconButton title={speaking ? "Parar leitura" : "Ler em voz alta"} onClick={() => onSpeak(message)} active={speaking}>
+                <IconButton title={speaking ? tr("Parar leitura") : tr("Ler em voz alta")} onClick={() => onSpeak(message)} active={speaking}>
                   {speaking ? <Square size={14} fill="currentColor" /> : <Volume2 size={15} />}
                 </IconButton>
               )}
               <IconButton title="Custo / tokens" onClick={() => setShowCost((v) => !v)}>
                 <Info size={15} className={showCost ? "text-accent-hover" : ""} />
               </IconButton>
-              <IconButton title="Continuar" onClick={() => onContinue(message.id)} disabled={busy}>
+              <IconButton title={tr("Continuar")} onClick={() => onContinue(message.id)} disabled={busy}>
                 <Play size={15} />
               </IconButton>
-              <IconButton title="Tentar novamente" onClick={() => onRegenerate(message.id)} disabled={busy}>
+              <IconButton title={tr("Tentar novamente")} onClick={() => onRegenerate(message.id)} disabled={busy}>
                 <RotateCcw size={15} />
               </IconButton>
               {usedMemories.length > 0 && (
-                <IconButton title="Memórias usadas" onClick={() => setShowMem((v) => !v)}>
+                <IconButton title={tr("Memórias usadas")} onClick={() => setShowMem((v) => !v)}>
                   <Brain size={15} className={showMem ? "text-accent-hover" : ""} />
                 </IconButton>
               )}
               {onRemember && message.content.trim() && (
                 <div className="relative">
-                  <IconButton title="Lembrar disto" onClick={() => { setRemOpen((v) => !v); setRemSaved(false); }}>
+                  <IconButton title={tr("Lembrar disto")} onClick={() => { setRemOpen((v) => !v); setRemSaved(false); }}>
                     <BookmarkPlus size={15} className={remOpen ? "text-accent-hover" : ""} />
                   </IconButton>
                   {remOpen && (
                     <div className="absolute bottom-full left-0 z-20 mb-1 w-44 overflow-hidden rounded-xl border border-border bg-surface py-1 text-sm shadow-menu">
                       {remSaved ? (
-                        <p className="px-3 py-1.5 text-xs text-green-400">Salvo na memória ✓</p>
+                        <p className="px-3 py-1.5 text-xs text-green-400">{tr("Salvo na memória ✓")}</p>
                       ) : (
                         <>
-                          <p className="px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-muted">Lembrar em</p>
-                          {([["global", "Global"], ["model", "Este modelo"], ["chat", "Este chat"]] as const).map(([sc, label]) => (
+                          <p className="px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-muted">{tr("Lembrar em")}</p>
+                          {([["global", tr("Global")], ["model", tr("Este modelo")], ["chat", tr("Este chat")]] as const).map(([sc, label]) => (
                             <button
                               key={sc}
                               onClick={async () => { await onRemember(message.content, sc); setRemSaved(true); setTimeout(() => setRemOpen(false), 900); }}
@@ -1849,7 +1858,7 @@ function MessageItem({
                   )}
                 </div>
               )}
-              <IconButton title="Excluir" onClick={() => onDelete(message.id)} disabled={busy}>
+              <IconButton title={tr("Excluir")} onClick={() => onDelete(message.id)} disabled={busy}>
                 <Trash2 size={15} className="hover:text-red-300" />
               </IconButton>
             </div>
@@ -1861,7 +1870,8 @@ function MessageItem({
                 <UsagePanel u={u} />
               ) : (
                 <div className="animate-pop mt-1.5 w-fit rounded-xl border border-border bg-surface px-3.5 py-2.5 text-xs text-muted shadow-menu">
-                  Sem dados de uso para esta mensagem.
+                  
+                  {tr("Sem dados de uso para esta mensagem.")}
                 </div>
               ))}
           </>

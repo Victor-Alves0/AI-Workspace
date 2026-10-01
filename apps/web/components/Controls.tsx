@@ -5,19 +5,20 @@ import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, SlidersHorizontal, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { BrainConfig, KnowledgeBase, KnowledgeConfig, MemoryConfig } from "@/lib/types";
+import { tr } from "@/lib/i18n";
 
 const MEM_WRITE: { value: string; label: string; project?: boolean }[] = [
-  { value: "global", label: "Global" },
-  { value: "model", label: "Do modelo" },
-  { value: "project", label: "Do projeto (pasta)", project: true },
-  { value: "chat", label: "Só este chat" },
-  { value: "off", label: "Não salvar" },
+  { value: "global", label: tr("Global") },
+  { value: "model", label: tr("Do modelo") },
+  { value: "project", label: tr("Do projeto (pasta)"), project: true },
+  { value: "chat", label: tr("Só este chat") },
+  { value: "off", label: tr("Não salvar") },
 ];
 const MEM_READ: { key: "global" | "model" | "chat" | "project"; label: string; project?: boolean }[] = [
-  { key: "global", label: "Global" },
-  { key: "model", label: "Modelo" },
-  { key: "project", label: "Projeto", project: true },
-  { key: "chat", label: "Chat" },
+  { key: "global", label: tr("Global") },
+  { key: "model", label: tr("Modelo") },
+  { key: "project", label: tr("Projeto"), project: true },
+  { key: "chat", label: tr("Chat") },
 ];
 const MEM_DEFAULT: Required<MemoryConfig> = {
   enabled: true, write: "global",
@@ -36,24 +37,24 @@ type ParamSpec =
   | { key: string; label: string; kind: "text" };
 
 const PARAMS: ParamSpec[] = [
-  { key: "temperature", label: "Temperatura", kind: "slider", min: 0, max: 2, step: 0.05, def: 1 },
+  { key: "temperature", label: tr("Temperatura"), kind: "slider", min: 0, max: 2, step: 0.05, def: 1 },
   { key: "top_p", label: "top_p", kind: "slider", min: 0, max: 1, step: 0.05, def: 1 },
   { key: "top_k", label: "top_k", kind: "slider", min: 0, max: 100, step: 1, def: 40 },
   { key: "min_p", label: "min_p", kind: "slider", min: 0, max: 1, step: 0.01, def: 0 },
-  { key: "frequency_penalty", label: "Penalidade de frequência", kind: "slider", min: -2, max: 2, step: 0.1, def: 0 },
-  { key: "presence_penalty", label: "Penalidade de presença", kind: "slider", min: -2, max: 2, step: 0.1, def: 0 },
-  { key: "reasoning_effort", label: "Esforço de raciocínio", kind: "select", options: [
-    { value: "low", label: "Baixo" },
-    { value: "medium", label: "Médio" }, { value: "high", label: "Alto" }, { value: "xhigh", label: "Máximo" },
+  { key: "frequency_penalty", label: tr("Penalidade de frequência"), kind: "slider", min: -2, max: 2, step: 0.1, def: 0 },
+  { key: "presence_penalty", label: tr("Penalidade de presença"), kind: "slider", min: -2, max: 2, step: 0.1, def: 0 },
+  { key: "reasoning_effort", label: tr("Esforço de raciocínio"), kind: "select", options: [
+    { value: "low", label: tr("Baixo") },
+    { value: "medium", label: tr("Médio") }, { value: "high", label: tr("Alto") }, { value: "xhigh", label: tr("Máximo") },
   ] },
   { key: "max_tokens", label: "max_tokens", kind: "text" },
-  { key: "seed", label: "Seed", kind: "text" },
-  { key: "stop", label: "Sequência de parada", kind: "text" },
+  { key: "seed", label: tr("Seed"), kind: "text" },
+  { key: "stop", label: tr("Sequência de parada"), kind: "text" },
   { key: "logit_bias", label: "logit_bias", kind: "text" },
-  { key: "stream", label: "Stream da resposta", kind: "bool" },
-  { key: "function_calling", label: "Chamada de função", kind: "bool" },
-  { key: "reasoning_tags", label: "Tags de raciocínio", kind: "bool" },
-  { key: "stream_delta_size", label: "Tamanho do bloco delta", kind: "text" },
+  { key: "stream", label: tr("Stream da resposta"), kind: "bool" },
+  { key: "function_calling", label: tr("Chamada de função"), kind: "bool" },
+  { key: "reasoning_tags", label: tr("Tags de raciocínio"), kind: "bool" },
+  { key: "stream_delta_size", label: tr("Tamanho do bloco delta"), kind: "text" },
   { key: "repeat_penalty", label: "repeat_penalty", kind: "slider", min: 0, max: 2, step: 0.05, def: 1 },
   { key: "repeat_last_n", label: "repeat_last_n", kind: "text" },
   { key: "mirostat", label: "mirostat", kind: "text" },
@@ -94,7 +95,7 @@ function Section({
 
 // "Padrão" (não enviado ao modelo) = valor ausente. Cada tipo de linha materializa
 // um valor tipado ao ser mexido; o "×"/opção Padrão volta a não enviar.
-const PADRAO_HINT = "\"Padrão\" usa o valor do próprio modelo — o parâmetro não é enviado.";
+const PADRAO_HINT = tr("\"Padrão\" usa o valor do próprio modelo — o parâmetro não é enviado.");
 
 function ParamControl({
   spec,
@@ -123,13 +124,14 @@ function ParamControl({
                 onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
                 className="w-16 rounded-md border border-border bg-surface px-1.5 py-0.5 text-right text-xs text-ink outline-none focus:border-accent"
               />
-              <button onClick={() => onChange(undefined)} title="Voltar ao Padrão" className="text-muted hover:text-ink">
+              <button onClick={() => onChange(undefined)} title={tr("Voltar ao Padrão")} className="text-muted hover:text-ink">
                 <X size={13} />
               </button>
             </div>
           ) : (
             <button onClick={() => onChange(spec.def)} title={PADRAO_HINT} className="text-xs text-muted hover:text-ink">
-              Padrão
+              
+              {tr("Padrão")}
             </button>
           )}
         </div>
@@ -151,7 +153,7 @@ function ParamControl({
   if (spec.kind === "select" || spec.kind === "bool") {
     const options =
       spec.kind === "bool"
-        ? [{ value: "true", label: "Ligado" }, { value: "false", label: "Desligado" }]
+        ? [{ value: "true", label: tr("Ligado") }, { value: "false", label: tr("Desligado") }]
         : spec.options;
     const cur = has ? String(value) : "";
     return (
@@ -168,7 +170,7 @@ function ParamControl({
           title={PADRAO_HINT}
           className="rounded-md border border-border bg-surface px-2 py-1 text-xs text-ink outline-none focus:border-accent"
         >
-          <option value="">Padrão (do modelo)</option>
+          <option value="">{tr("Padrão (do modelo)")}</option>
           {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </Select>
       </div>
@@ -211,7 +213,7 @@ function ParamTextRow({
           title={has ? undefined : PADRAO_HINT}
           className={has ? "text-sm text-ink" : "text-sm text-muted hover:text-ink"}
         >
-          {has ? String(value) : "Padrão"}
+          {has ? String(value) : tr("Padrão")}
         </button>
       )}
     </div>
@@ -301,7 +303,7 @@ export default function Controls({
     <aside className="pt-safe pb-safe flex w-80 shrink-0 flex-col border-l border-transparent bg-sidebar transition-colors hover:border-border md:w-full">
       <div className="flex items-center justify-between px-4 py-3">
         <span className="flex items-center gap-2 text-sm font-semibold text-ink">
-          <SlidersHorizontal size={16} className="text-muted" /> Controles
+          <SlidersHorizontal size={16} className="text-muted" />  {tr("Controles")}
         </span>
         <button onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink">
           <X size={16} />
@@ -309,25 +311,25 @@ export default function Controls({
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        <Section title="Prompt do Sistema" open={open.system} onToggle={() => setOpen({ ...open, system: !open.system })}>
+        <Section title={tr("Prompt do Sistema")} open={open.system} onToggle={() => setOpen({ ...open, system: !open.system })}>
           <textarea
             rows={4}
             value={systemPrompt}
             onChange={(e) => setSystemPrompt(e.target.value)}
-            placeholder="Digite o prompt do sistema"
+            placeholder={tr("Digite o prompt do sistema")}
             className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
           />
         </Section>
 
         {onMemoryChange && (
-          <Section title="Memória" open={open.memory} onToggle={() => setOpen({ ...open, memory: !open.memory })}>
+          <Section title={tr("Memória")} open={open.memory} onToggle={() => setOpen({ ...open, memory: !open.memory })}>
             <div className="mb-3 flex items-center justify-between">
               <div className="min-w-0">
-                <p className="text-sm text-ink">Memória neste chat</p>
+                <p className="text-sm text-ink">{tr("Memória neste chat")}</p>
               </div>
               <div className="flex items-center gap-2">
                 {!inheriting && (
-                  <button onClick={() => onMemoryChange(null)} className="text-xs text-muted hover:text-ink">Redefinir</button>
+                  <button onClick={() => onMemoryChange(null)} className="text-xs text-muted hover:text-ink">{tr("Redefinir")}</button>
                 )}
                 <MemToggle on={memEnabled} onClick={() => onMemoryChange({ ...mem, enabled: !memEnabled })} />
               </div>
@@ -335,7 +337,7 @@ export default function Controls({
             {memEnabled && (
               <div className="space-y-3 border-t border-border pt-3">
                 <div>
-                  <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">Salvar novas memórias em</p>
+                  <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">{tr("Salvar novas memórias em")}</p>
                   <Select
                     value={mem.write}
                     onChange={(e) => patchMem({ write: e.target.value as MemoryConfig["write"] })}
@@ -345,7 +347,7 @@ export default function Controls({
                   </Select>
                 </div>
                 <div>
-                  <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">Ler memórias de (união)</p>
+                  <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">{tr("Ler memórias de (união)")}</p>
                   <div className="flex flex-wrap gap-1.5">
                     {MEM_READ.filter((r) => !r.project || hasProject).map((r) => {
                       const on = mem.read[r.key] !== false;
@@ -367,15 +369,15 @@ export default function Controls({
         )}
 
         {onKnowledgeChange && (
-          <Section title="Conhecimento" open={open.knowledge} onToggle={() => setOpen({ ...open, knowledge: !open.knowledge })}>
+          <Section title={tr("Conhecimento")} open={open.knowledge} onToggle={() => setOpen({ ...open, knowledge: !open.knowledge })}>
             {kbBases.length === 0 ? (
-              <p className="text-xs text-muted">Nenhuma base criada. Suba documentos em <span className="text-ink-soft">Espaço → Conhecimento</span>.</p>
+              <p className="text-xs text-muted">{tr("Nenhuma base criada. Suba documentos em")} <span className="text-ink-soft">{tr("Espaço → Conhecimento")}</span>.</p>
             ) : (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <span />
                   {kbBasesSel.length > 0 && (
-                    <button onClick={() => onKnowledgeChange(null)} className="text-xs text-muted hover:text-ink">Limpar</button>
+                    <button onClick={() => onKnowledgeChange(null)} className="text-xs text-muted hover:text-ink">{tr("Limpar")}</button>
                   )}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -394,14 +396,14 @@ export default function Controls({
                 </div>
                 {kbBasesSel.length > 0 && (
                   <div>
-                    <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">Modo</p>
+                    <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">{tr("Modo")}</p>
                     <Select
                       value={kb.mode || "auto"}
                       onChange={(e) => patchKb({ mode: e.target.value as "auto" | "tool" })}
                       className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent"
                     >
-                      <option value="auto">Automático (injeta + cita)</option>
-                      <option value="tool">Ferramenta (a IA busca)</option>
+                      <option value="auto">{tr("Automático (injeta + cita)")}</option>
+                      <option value="tool">{tr("Ferramenta (a IA busca)")}</option>
                     </Select>
                   </div>
                 )}
@@ -411,15 +413,15 @@ export default function Controls({
         )}
 
         {onBrainChange && (
-          <Section title="Cérebro" open={open.brain} onToggle={() => setOpen({ ...open, brain: !open.brain })}>
+          <Section title={tr("Cérebro")} open={open.brain} onToggle={() => setOpen({ ...open, brain: !open.brain })}>
             {brains.length === 0 ? (
               null
             ) : (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs text-muted">Cérebros usados só neste chat (além dos do modelo).</p>
+                  <p className="text-xs text-muted">{tr("Cérebros usados só neste chat (além dos do modelo).")}</p>
                   {brSel.length > 0 && (
-                    <button onClick={() => onBrainChange(null)} className="text-xs text-muted hover:text-ink">Limpar</button>
+                    <button onClick={() => onBrainChange(null)} className="text-xs text-muted hover:text-ink">{tr("Limpar")}</button>
                   )}
                 </div>
                 <div className="flex flex-wrap gap-1.5">
@@ -438,7 +440,7 @@ export default function Controls({
                 </div>
                 {brSel.length > 0 && (
                   <div className="flex items-center justify-between">
-                    <p className="text-sm text-ink">Escrita pela IA</p>
+                    <p className="text-sm text-ink">{tr("Escrita pela IA")}</p>
                     <MemToggle on={br.write !== false} onClick={() => patchBrain({ write: br.write === false })} />
                   </div>
                 )}
@@ -447,7 +449,7 @@ export default function Controls({
           </Section>
         )}
 
-        <Section title="Parâmetros Avançados" open={open.advanced} onToggle={() => setOpen({ ...open, advanced: !open.advanced })}>
+        <Section title={tr("Parâmetros Avançados")} open={open.advanced} onToggle={() => setOpen({ ...open, advanced: !open.advanced })}>
           <div className="divide-y divide-border/40">
             {PARAMS.map((p) => (
               <ParamControl key={p.key} spec={p} value={params[p.key]} onChange={(v) => setParam(p.key, v)} />
@@ -461,7 +463,8 @@ export default function Controls({
           onClick={() => onSave(systemPrompt || null, params)}
           className="w-full rounded-xl bg-accent py-2 text-sm font-medium text-ink transition-colors hover:bg-accent-hover"
         >
-          Salvar controles
+          
+          {tr("Salvar controles")}
         </button>
       </div>
     </aside>

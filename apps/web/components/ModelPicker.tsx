@@ -18,6 +18,7 @@ import {
 import type { Model, ModelConfig } from "@/lib/types";
 import { copyText } from "@/lib/clipboard";
 import { AnchoredMenu, MenuItem, dismissKeyboard, finePointer, useClickOutside } from "./ui";
+import { tr } from "@/lib/i18n";
 
 interface Row {
   key: string; // "ext:<id>" | "custom:<id>"
@@ -140,7 +141,7 @@ export default function ModelPicker({
             // eslint-disable-next-line @next/next/no-img-element
             <img src={avatar} alt="" className="h-6 w-6 shrink-0 rounded-full object-cover" />
           )}
-          <span title={label || "Selecionar modelo"} className="max-w-[140px] truncate sm:max-w-[240px]">{label || "Selecionar modelo"}</span>
+          <span title={label || tr("Selecionar modelo")} className="max-w-[140px] truncate sm:max-w-[240px]">{label || tr("Selecionar modelo")}</span>
           <ChevronDown size={18} className="shrink-0 text-muted" />
         </button>
       )}
@@ -155,12 +156,12 @@ export default function ModelPicker({
               autoFocus={finePointer()}
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Pesquisar um modelo"
+              placeholder={tr("Pesquisar um modelo")}
               className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted max-md:text-[16px]"
             />
             <button
               onClick={() => setOpen(false)}
-              title="Fechar"
+              title={tr("Fechar")}
               className="shrink-0 rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink"
             >
               <X size={18} />
@@ -169,14 +170,14 @@ export default function ModelPicker({
           <div className="flex items-center gap-1 border-b border-border px-2 py-1.5 text-sm max-md:py-2 max-md:text-[15px]">
             <button
               onClick={() => setTab("favorites")}
-              title="Favoritos"
+              title={tr("Favoritos")}
               className={`flex items-center rounded-lg px-2 py-1 transition-colors ${
                 tab === "favorites" ? "bg-surface2 text-accent-hover" : "text-muted hover:text-ink-soft"
               }`}
             >
               <Star size={15} className={tab === "favorites" ? "fill-accent-hover" : ""} />
             </button>
-            {([["all", "Tudo"], ["providers", "Providers"], ["custom", "Custom"], ["local", "Local"]] as const).map(([key, lbl]) => (
+            {([["all", tr("Tudo")], ["providers", tr("Providers")], ["custom", tr("Custom")], ["local", "Local"]] as const).map(([key, lbl]) => (
               <button
                 key={key}
                 onClick={() => setTab(key)}
@@ -242,18 +243,19 @@ export default function ModelPicker({
                       icon={<Star size={15} className={favSet.has(r.key) ? "fill-accent-hover text-accent-hover" : ""} />}
                       onClick={() => { onToggleFavorite?.(r.key); setItemMenu(null); }}
                     >
-                      {favSet.has(r.key) ? "Remover dos Favoritos" : "Adicionar aos Favoritos"}
+                      {favSet.has(r.key) ? tr("Remover dos Favoritos") : tr("Adicionar aos Favoritos")}
                     </MenuItem>
                     <MenuItem
                       icon={pinSet.has(r.key) ? <PinOff size={15} /> : <Pin size={15} />}
                       onClick={() => { onTogglePin?.(r.key); setItemMenu(null); }}
                     >
-                      {pinSet.has(r.key) ? "Desafixar da barra lateral" : "Fixar na barra lateral"}
+                      {pinSet.has(r.key) ? tr("Desafixar da barra lateral") : tr("Fixar na barra lateral")}
                     </MenuItem>
                     {r.custom && (
                       <>
                         <MenuItem icon={<Pencil size={15} />} onClick={() => { onEditModel?.(r.custom!); setItemMenu(null); setOpen(false); }}>
-                          Editar
+                          
+                          {tr("Editar")}
                         </MenuItem>
                         <MenuItem
                           icon={<Copy size={15} />}
@@ -262,7 +264,8 @@ export default function ModelPicker({
                             setItemMenu(null);
                           }}
                         >
-                          Copiar Link
+                          
+                          {tr("Copiar Link")}
                         </MenuItem>
                       </>
                     )}
@@ -272,7 +275,7 @@ export default function ModelPicker({
             ))}
             {rows.length === 0 && (
               <p className="px-3 py-6 text-center text-sm text-muted">
-                {tab === "local" ? "Nenhum modelo local. Configure o Ollama em Configurações → Conexões." : "Nenhum modelo."}
+                {tab === "local" ? tr("Nenhum modelo local. Configure o Ollama em Configurações → Conexões.") : tr("Nenhum modelo.")}
               </p>
             )}
           </div>

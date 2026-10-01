@@ -5,6 +5,7 @@ import { ChevronDown, Pause, Pencil, Play, Plus, Search, StepForward, Trash2, X 
 import type { Model, ModelConfig, RoundtableConfig, RoundtableParticipant } from "@/lib/types";
 import { useClickOutside, Select } from "./ui";
 import ModelPicker from "./ModelPicker";
+import { tr } from "@/lib/i18n";
 
 // paleta de cores dos participantes (atribuída por ordem de entrada)
 export const RT_COLORS = ["#f59e0b", "#3b82f6", "#10b981", "#ef4444", "#a855f7", "#ec4899", "#14b8a6", "#f97316"];
@@ -43,7 +44,7 @@ function AddModel({
         <div className="absolute left-0 top-9 z-50 w-72 overflow-hidden rounded-xl border border-border bg-surface shadow-menu animate-pop">
           <div className="flex items-center gap-2 border-b border-border px-3 py-2">
             <Search size={14} className="text-muted" />
-            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar modelo…" className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted" />
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr("Buscar modelo…")} className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted" />
           </div>
           <div className="max-h-64 overflow-y-auto p-1">
             {rows.map((r) => (
@@ -62,7 +63,7 @@ function AddModel({
                 {r.mcid && <span className="ml-auto shrink-0 text-[10px] text-muted">custom</span>}
               </button>
             ))}
-            {rows.length === 0 && <p className="px-3 py-5 text-center text-sm text-muted">Nenhum modelo.</p>}
+            {rows.length === 0 && <p className="px-3 py-5 text-center text-sm text-muted">{tr("Nenhum modelo.")}</p>}
           </div>
         </div>
       )}
@@ -108,7 +109,7 @@ export default function Roundtable({
     <div className="mx-auto w-full max-w-3xl space-y-2 px-1 py-1">
       {/* participantes */}
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Mesa</span>
+        <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-muted">{tr("Mesa")}</span>
         {participants.map((p) => (
           <span
             key={p.id}
@@ -118,8 +119,8 @@ export default function Roundtable({
             <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: p.color || "#888" }} />
             <span className="max-w-[120px] truncate text-ink">{p.name}</span>
             {p.persona && <Pencil size={10} className="text-muted" />}
-            <button onClick={() => setEditing(editing === p.id ? null : p.id)} title="Editar" className="text-muted transition-colors hover:text-ink"><ChevronDown size={12} /></button>
-            <button onClick={() => onRemove(p.id)} title="Remover da mesa" className="text-muted transition-colors hover:text-red-300"><X size={12} /></button>
+            <button onClick={() => setEditing(editing === p.id ? null : p.id)} title={tr("Editar")} className="text-muted transition-colors hover:text-ink"><ChevronDown size={12} /></button>
+            <button onClick={() => onRemove(p.id)} title={tr("Remover da mesa")} className="text-muted transition-colors hover:text-red-300"><X size={12} /></button>
           </span>
         ))}
         <AddModel models={models} custom={custom} onAdd={onAdd} />
@@ -132,7 +133,7 @@ export default function Roundtable({
             <input
               value={editP.name}
               onChange={(e) => onUpdate(editP.id, { name: e.target.value })}
-              placeholder="Nome"
+              placeholder={tr("Nome")}
               className="min-w-0 flex-1 rounded-lg border border-border bg-surface2 px-2 py-1 text-sm text-ink outline-none focus:border-accent"
             />
             <div className="flex items-center gap-1">
@@ -144,35 +145,35 @@ export default function Roundtable({
           <textarea
             value={editP.persona || ""}
             onChange={(e) => onUpdate(editP.id, { persona: e.target.value })}
-            placeholder="Função na equipe (ex.: 'revisa segurança e testes'). Opcional."
+            placeholder={tr("Função na equipe (ex.: 'revisa segurança e testes'). Opcional.")}
             rows={2}
             className="w-full resize-y rounded-lg border border-border bg-surface2 px-2.5 py-1.5 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
           />
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-muted">{editP.model}</span>
-            <button onClick={() => { onRemove(editP.id); setEditing(null); }} className="flex items-center gap-1 text-xs text-muted transition-colors hover:text-red-300"><Trash2 size={12} /> Remover</button>
+            <button onClick={() => { onRemove(editP.id); setEditing(null); }} className="flex items-center gap-1 text-xs text-muted transition-colors hover:text-red-300"><Trash2 size={12} />  {tr("Remover")}</button>
           </div>
         </div>
       )}
 
       {/* controles */}
       <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2">
-        <Select value={policy} onChange={(e) => onConfigChange({ turn_policy: e.target.value as RoundtableConfig["turn_policy"] })} className={selCls} title="Quem fala em seguida">
+        <Select value={policy} onChange={(e) => onConfigChange({ turn_policy: e.target.value as RoundtableConfig["turn_policy"] })} className={selCls} title={tr("Quem fala em seguida")}>
           <option value="round_robin">Round-robin</option>
-          <option value="manual">Manual</option>
+          <option value="manual">{tr("Manual")}</option>
           <option value="moderator">Moderador (LLM)</option>
         </Select>
 
         {policy === "manual" && (
-          <Select value={config.next ?? ""} onChange={(e) => onConfigChange({ next: e.target.value || null })} className={selCls} title="Próximo a falar">
-            <option value="">Próximo: automático</option>
-            {participants.map((p) => <option key={p.id} value={p.id}>Próximo: {p.name}</option>)}
+          <Select value={config.next ?? ""} onChange={(e) => onConfigChange({ next: e.target.value || null })} className={selCls} title={tr("Próximo a falar")}>
+            <option value="">{tr("Próximo: automático")}</option>
+            {participants.map((p) => <option key={p.id} value={p.id}>{tr("Próximo:")} {p.name}</option>)}
           </Select>
         )}
         {policy === "moderator" && (
           <ModelPicker
             variant="chip"
-            title="Modelo moderador"
+            title={tr("Modelo moderador")}
             label={modLabel ? `Moderador: ${modLabel}` : "Moderador: escolha…"}
             avatar={modCustom?.avatar_url ?? null}
             models={models}
@@ -189,7 +190,8 @@ export default function Roundtable({
         )}
 
         <label className="flex items-center gap-1 text-xs text-muted">
-          máx.
+          
+          {tr("máx.")}
           <input
             type="number" min={1} max={20} value={config.max_rounds ?? 6}
             onChange={(e) => onConfigChange({ max_rounds: Math.max(1, Math.min(20, Number(e.target.value) || 6)) })}
@@ -201,15 +203,15 @@ export default function Roundtable({
         <div className="ml-auto flex items-center gap-1.5">
           {running ? (
             <button onClick={onPause} className="flex items-center gap-1.5 rounded-full bg-surface2 px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-hover">
-              <Pause size={13} /> Pausar
+              <Pause size={13} />  {tr("Pausar")}
             </button>
           ) : (
             <>
-              <button onClick={onStep} disabled={participants.length < 1} className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-50" title="Um turno">
-                <StepForward size={13} /> Passo
+              <button onClick={onStep} disabled={participants.length < 1} className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-50" title={tr("Um turno")}>
+                <StepForward size={13} />  {tr("Passo")}
               </button>
               <button onClick={onRun} disabled={participants.length < 1} className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50" title="Rodar a conversa">
-                <Play size={13} /> Rodar
+                <Play size={13} />  {tr("Rodar")}
               </button>
             </>
           )}

@@ -6,6 +6,7 @@ import { LayoutGrid, Loader2, MapPin, Maximize2, Minus, Plus, X } from "lucide-r
 import { api } from "@/lib/api";
 import type { ImaginaiMap } from "../types";
 import { EntityImage, ImaginaiFeatureStatus, ImaginaiToolbar } from "../shared";
+import { tr } from "@/lib/i18n";
 
 type Node = ImaginaiMap["locations"][number] & { px: number; py: number };
 type XY = { x: number; y: number };
@@ -89,7 +90,7 @@ export function ImaginaiMapPanel({ campaignId }: { campaignId: string }) {
     setOffsets({});
     api.get<ImaginaiMap>(`/mini-apps/imaginai/campaigns/${campaignId}/map`)
       .then((value) => { if (!cancelled) setData(value); })
-      .catch((loadError: unknown) => { if (!cancelled) setError(loadError instanceof Error ? loadError.message : "Não foi possível abrir o mapa"); })
+      .catch((loadError: unknown) => { if (!cancelled) setError(loadError instanceof Error ? loadError.message : tr("Não foi possível abrir o mapa")); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [campaignId]);
@@ -208,7 +209,7 @@ export function ImaginaiMapPanel({ campaignId }: { campaignId: string }) {
   };
 
   if (loading) return <ImaginaiFeatureStatus><Loader2 size={17} className="animate-spin" /></ImaginaiFeatureStatus>;
-  if (error || !data) return <ImaginaiFeatureStatus error>{error ?? "Mapa indisponível"}</ImaginaiFeatureStatus>;
+  if (error || !data) return <ImaginaiFeatureStatus error>{error ?? tr("Mapa indisponível")}</ImaginaiFeatureStatus>;
 
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const open = openId ? byId.get(openId) ?? null : null;
@@ -220,16 +221,16 @@ export function ImaginaiMapPanel({ campaignId }: { campaignId: string }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <form onSubmit={(event) => { event.preventDefault(); focusFirstMatch(); }}>
-        <ImaginaiToolbar value={query} onChange={setQuery} placeholder="Buscar local" />
+        <ImaginaiToolbar value={query} onChange={setQuery} placeholder={tr("Buscar local")} />
       </form>
       <div className="relative mt-2 min-h-0 flex-1 overflow-hidden rounded-xl bg-[radial-gradient(circle,rgb(var(--c-border))_1px,transparent_1px)] [background-size:20px_20px]">
-        {nodes.length === 0 ? <ImaginaiFeatureStatus>Nenhum local descoberto.</ImaginaiFeatureStatus> : (
+        {nodes.length === 0 ? <ImaginaiFeatureStatus>{tr("Nenhum local descoberto.")}</ImaginaiFeatureStatus> : (
           <div
             ref={viewportRef}
             onPointerDown={onPointerDownBg}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
-            aria-label="Mapa dos locais descobertos"
+            aria-label={tr("Mapa dos locais descobertos")}
             className="absolute inset-0 cursor-grab touch-none select-none active:cursor-grabbing"
           >
             <div className="absolute left-0 top-0 origin-top-left" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
@@ -269,10 +270,10 @@ export function ImaginaiMapPanel({ campaignId }: { campaignId: string }) {
           </div>
         )}
         <div className="absolute bottom-2 right-2 flex flex-col gap-0.5 rounded-xl border border-border bg-surface/90 p-0.5">
-          <button type="button" onClick={() => zoom(1)} title="Aproximar" aria-label="Aproximar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Plus size={14} /></button>
-          <button type="button" onClick={() => zoom(-1)} title="Afastar" aria-label="Afastar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Minus size={14} /></button>
-          <button type="button" onClick={() => fit()} title="Ajustar à tela" aria-label="Ajustar à tela" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Maximize2 size={14} /></button>
-          <button type="button" onClick={() => void resetLayout()} title="Voltar ao layout automático" aria-label="Voltar ao layout automático" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><LayoutGrid size={14} /></button>
+          <button type="button" onClick={() => zoom(1)} title={tr("Aproximar")} aria-label={tr("Aproximar")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Plus size={14} /></button>
+          <button type="button" onClick={() => zoom(-1)} title={tr("Afastar")} aria-label={tr("Afastar")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Minus size={14} /></button>
+          <button type="button" onClick={() => fit()} title={tr("Ajustar à tela")} aria-label={tr("Ajustar à tela")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Maximize2 size={14} /></button>
+          <button type="button" onClick={() => void resetLayout()} title={tr("Voltar ao layout automático")} aria-label={tr("Voltar ao layout automático")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><LayoutGrid size={14} /></button>
         </div>
       </div>
       {open ? <LocationDialog node={open} paths={neighbours(open.id)} onGo={(id) => setOpenId(id)} onClose={() => setOpenId(null)} /> : null}
@@ -292,16 +293,16 @@ function LocationDialog({ node, paths, onGo, onClose }: { node: Node; paths: Nod
       <div role="dialog" aria-modal="true" aria-labelledby="imaginai-location-title" onMouseDown={(event) => event.stopPropagation()} className="w-full max-w-md rounded-2xl border border-border bg-surface p-4 shadow-menu animate-pop">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            {node.current ? <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-300">Você está aqui</p> : null}
+            {node.current ? <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-300">{tr("Você está aqui")}</p> : null}
             <h2 id="imaginai-location-title" className="mt-0.5 text-base font-semibold text-ink">{node.name}</h2>
           </div>
-          <button type="button" onClick={onClose} aria-label="Fechar" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-ink"><X size={16} /></button>
+          <button type="button" onClick={onClose} aria-label={tr("Fechar")} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-ink"><X size={16} /></button>
         </div>
         {node.image_url ? <EntityImage url={node.image_url} alt={node.name} className="mt-3 aspect-video w-full" /> : null}
-        <p className="mt-3 max-h-[40vh] overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-ink-soft">{node.description || "Sem descrição registrada."}</p>
+        <p className="mt-3 max-h-[40vh] overflow-y-auto whitespace-pre-wrap text-sm leading-6 text-ink-soft">{node.description || tr("Sem descrição registrada.")}</p>
         {paths.length ? (
           <div className="mt-4">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">Caminhos</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">{tr("Caminhos")}</p>
             <div className="imaginai-chips mt-1.5 flex-wrap">
               {paths.map((path) => <button key={path.id} type="button" onClick={() => onGo(path.id)} className="imaginai-chip"><MapPin size={11} className="mr-1" />{path.name}</button>)}
             </div>

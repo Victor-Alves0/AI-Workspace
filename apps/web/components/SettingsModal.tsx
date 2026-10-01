@@ -97,105 +97,106 @@ import {
   type DesktopSettings,
 } from "@/lib/desktop";
 import { toast } from "@/components/Toaster";
+import { getLocale, localeOf, setLocale, tr } from "@/lib/i18n";
 
 type Cat = "general" | "status" | "interface" | "connections" | "integrations" | "miniapps" | "shortcuts" | "security" | "data" | "account" | "desktop" | "about";
 
 // "desktop" só aparece quando a UI roda dentro do app instalado (ver isDesktop()).
 const CATS: { key: Cat; label: string; icon: React.ReactNode }[] = [
-  { key: "general", label: "Geral", icon: <Settings size={16} /> },
-  { key: "status", label: "Status", icon: <Activity size={16} /> },
-  { key: "interface", label: "Interface", icon: <PanelsTopLeft size={16} /> },
-  { key: "connections", label: "Conexões", icon: <Cable size={16} /> },
-  { key: "integrations", label: "Integrações", icon: <Blocks size={16} /> },
-  { key: "miniapps", label: "Miniapps", icon: <LayoutGrid size={16} /> },
-  { key: "shortcuts", label: "Atalhos", icon: <Keyboard size={16} /> },
-  { key: "security", label: "Segurança", icon: <ShieldCheck size={16} /> },
-  { key: "data", label: "Controle de Dados", icon: <Database size={16} /> },
-  { key: "account", label: "Conta", icon: <CircleUserRound size={16} /> },
-  { key: "desktop", label: "Aplicativo", icon: <AppWindow size={16} /> },
-  { key: "about", label: "Sobre", icon: <Info size={16} /> },
+  { key: "general", label: tr("Geral"), icon: <Settings size={16} /> },
+  { key: "status", label: tr("Status"), icon: <Activity size={16} /> },
+  { key: "interface", label: tr("Interface"), icon: <PanelsTopLeft size={16} /> },
+  { key: "connections", label: tr("Conexões"), icon: <Cable size={16} /> },
+  { key: "integrations", label: tr("Integrações"), icon: <Blocks size={16} /> },
+  { key: "miniapps", label: tr("Miniapps"), icon: <LayoutGrid size={16} /> },
+  { key: "shortcuts", label: tr("Atalhos"), icon: <Keyboard size={16} /> },
+  { key: "security", label: tr("Segurança"), icon: <ShieldCheck size={16} /> },
+  { key: "data", label: tr("Controle de Dados"), icon: <Database size={16} /> },
+  { key: "account", label: tr("Conta"), icon: <CircleUserRound size={16} /> },
+  { key: "desktop", label: tr("Aplicativo"), icon: <AppWindow size={16} /> },
+  { key: "about", label: tr("Sobre"), icon: <Info size={16} /> },
 ];
 
 // Índice de TODAS as configurações, p/ a busca encontrar um item por nome em
 // qualquer categoria (ex.: "Prompt" → "Prompt do Sistema" em Geral). `view`
 // aponta o card interno a abrir em Conexões/Integrações (senão cai na grade).
 const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
-  { label: "Tema", cat: "general" },
-  { label: "Idioma", cat: "general" },
-  { label: "Barra Lateral", cat: "interface", view: "sidebar" },
-  { label: "Gerar título de novos chats", cat: "interface", view: "sidebar" },
-  { label: "Mostrar Modelos", cat: "interface", view: "sidebar" },
-  { label: "Mostrar Automações", cat: "interface", view: "sidebar" },
-  { label: "Mostrar Codespace", cat: "interface", view: "sidebar" },
-  { label: "Mostrar Espaço de Trabalho", cat: "interface", view: "sidebar" },
-  { label: "Mostrar Analítica", cat: "interface", view: "sidebar" },
-  { label: "Mostrar Playground", cat: "interface", view: "sidebar" },
-  { label: "Mostrar Chats Arquivados", cat: "interface", view: "sidebar" },
-  { label: "Chat (aparência)", cat: "interface", view: "chat" },
-  { label: "Mostrar ferramentas do modelo", cat: "interface", view: "chat" },
-  { label: "Mostrar compartilhar conversa", cat: "interface", view: "chat" },
-  { label: "Mostrar imagem do modelo no chat", cat: "interface", view: "chat" },
-  { label: "Foto do modelo no seletor", cat: "interface", view: "chat" },
-  { label: "Artefatos", cat: "interface", view: "chat" },
-  { label: "Notificações", cat: "general" },
-  { label: "Animações", cat: "general" },
-  { label: "Fuso horário", cat: "general" },
-  { label: "Imaginai", cat: "miniapps" },
-  { label: "Formato de hora", cat: "account" },
-  { label: "Formato de data", cat: "account" },
-  { label: "Controle de gasto", cat: "account" },
-  { label: "Atalhos de teclado", cat: "shortcuts" },
-  { label: "Atalhos", cat: "shortcuts" },
-  { label: "Segurança", cat: "security" },
-  { label: "Pedir confirmação antes de ações sensíveis", cat: "security" },
-  { label: "Verificação em duas etapas (2FA)", cat: "security" },
-  { label: "Autenticação de dois fatores", cat: "security" },
-  { label: "Logs de segurança", cat: "security" },
-  { label: "Auditoria", cat: "security" },
-  { label: "Status do sistema", cat: "status" },
-  { label: "Rodar em segundo plano", cat: "desktop" },
-  { label: "Iniciar com o Windows", cat: "desktop" },
-  { label: "Bandeja", cat: "desktop" },
-  { label: "Orçamento mensal", cat: "account" },
-  { label: "Nome", cat: "account" },
-  { label: "Sobre você", cat: "account" },
-  { label: "Gênero", cat: "account" },
-  { label: "Data de nascimento", cat: "account" },
-  { label: "Alterar Senha", cat: "account" },
+  { label: tr("Tema"), cat: "general" },
+  { label: tr("Idioma"), cat: "general" },
+  { label: tr("Barra Lateral"), cat: "interface", view: "sidebar" },
+  { label: tr("Gerar título de novos chats"), cat: "interface", view: "sidebar" },
+  { label: tr("Mostrar Modelos"), cat: "interface", view: "sidebar" },
+  { label: tr("Mostrar Automações"), cat: "interface", view: "sidebar" },
+  { label: tr("Mostrar Codespace"), cat: "interface", view: "sidebar" },
+  { label: tr("Mostrar Espaço de Trabalho"), cat: "interface", view: "sidebar" },
+  { label: tr("Mostrar Analítica"), cat: "interface", view: "sidebar" },
+  { label: tr("Mostrar Playground"), cat: "interface", view: "sidebar" },
+  { label: tr("Mostrar Chats Arquivados"), cat: "interface", view: "sidebar" },
+  { label: tr("Chat (aparência)"), cat: "interface", view: "chat" },
+  { label: tr("Mostrar ferramentas do modelo"), cat: "interface", view: "chat" },
+  { label: tr("Mostrar compartilhar conversa"), cat: "interface", view: "chat" },
+  { label: tr("Mostrar imagem do modelo no chat"), cat: "interface", view: "chat" },
+  { label: tr("Foto do modelo no seletor"), cat: "interface", view: "chat" },
+  { label: tr("Artefatos"), cat: "interface", view: "chat" },
+  { label: tr("Notificações"), cat: "general" },
+  { label: tr("Animações"), cat: "general" },
+  { label: tr("Fuso horário"), cat: "general" },
+  { label: tr("Imaginai"), cat: "miniapps" },
+  { label: tr("Formato de hora"), cat: "account" },
+  { label: tr("Formato de data"), cat: "account" },
+  { label: tr("Controle de gasto"), cat: "account" },
+  { label: tr("Atalhos de teclado"), cat: "shortcuts" },
+  { label: tr("Atalhos"), cat: "shortcuts" },
+  { label: tr("Segurança"), cat: "security" },
+  { label: tr("Pedir confirmação antes de ações sensíveis"), cat: "security" },
+  { label: tr("Verificação em duas etapas (2FA)"), cat: "security" },
+  { label: tr("Autenticação de dois fatores"), cat: "security" },
+  { label: tr("Logs de segurança"), cat: "security" },
+  { label: tr("Auditoria"), cat: "security" },
+  { label: tr("Status do sistema"), cat: "status" },
+  { label: tr("Rodar em segundo plano"), cat: "desktop" },
+  { label: tr("Iniciar com o Windows"), cat: "desktop" },
+  { label: tr("Bandeja"), cat: "desktop" },
+  { label: tr("Orçamento mensal"), cat: "account" },
+  { label: tr("Nome"), cat: "account" },
+  { label: tr("Sobre você"), cat: "account" },
+  { label: tr("Gênero"), cat: "account" },
+  { label: tr("Data de nascimento"), cat: "account" },
+  { label: tr("Alterar Senha"), cat: "account" },
   { label: "APIs", cat: "connections", view: "apis" },
-  { label: "Voz", cat: "connections", view: "voice" },
-  { label: "Servidor de voz", cat: "connections", view: "voice" },
-  { label: "Assistente de voz", cat: "connections", view: "assistant-voice" },
-  { label: "Wake word", cat: "connections", view: "assistant-voice" },
-  { label: "AccessKey Picovoice", cat: "connections", view: "assistant-voice" },
-  { label: "Vosk", cat: "connections", view: "assistant-voice" },
-  { label: "Testar escuta", cat: "connections", view: "assistant-voice" },
+  { label: tr("Voz"), cat: "connections", view: "voice" },
+  { label: tr("Servidor de voz"), cat: "connections", view: "voice" },
+  { label: tr("Assistente de voz"), cat: "connections", view: "assistant-voice" },
+  { label: tr("Wake word"), cat: "connections", view: "assistant-voice" },
+  { label: tr("AccessKey Picovoice"), cat: "connections", view: "assistant-voice" },
+  { label: tr("Vosk"), cat: "connections", view: "assistant-voice" },
+  { label: tr("Testar escuta"), cat: "connections", view: "assistant-voice" },
   // a chave do OpenRouter mora em Provedores (junto com os demais provedores de LLM)
-  { label: "Chave do OpenRouter", cat: "connections", view: "apis/providers" },
-  { label: "Chave Tavily", cat: "connections", view: "apis/search" },
-  { label: "Chave Brave Search", cat: "connections", view: "apis/search" },
-  { label: "Chave Finnhub", cat: "connections", view: "apis/finance" },
-  { label: "Chave Alpha Vantage", cat: "connections", view: "apis/finance" },
-  { label: "Civitai", cat: "integrations", view: "civitai" },
-  { label: "API token Civitai", cat: "integrations", view: "civitai" },
-  { label: "Chave do provedor de voz", cat: "connections", view: "apis/voice" },
-  { label: "Provedores", cat: "connections", view: "apis/providers" },
+  { label: tr("Chave do OpenRouter"), cat: "connections", view: "apis/providers" },
+  { label: tr("Chave Tavily"), cat: "connections", view: "apis/search" },
+  { label: tr("Chave Brave Search"), cat: "connections", view: "apis/search" },
+  { label: tr("Chave Finnhub"), cat: "connections", view: "apis/finance" },
+  { label: tr("Chave Alpha Vantage"), cat: "connections", view: "apis/finance" },
+  { label: tr("Civitai"), cat: "integrations", view: "civitai" },
+  { label: tr("API token Civitai"), cat: "integrations", view: "civitai" },
+  { label: tr("Chave do provedor de voz"), cat: "connections", view: "apis/voice" },
+  { label: tr("Provedores"), cat: "connections", view: "apis/providers" },
   { label: "LiteLLM", cat: "connections", view: "apis/providers" },
-  { label: "Web", cat: "connections", view: "web" },
-  { label: "Metabusca", cat: "connections", view: "web" },
-  { label: "Pesquisa na web (mecanismo padrão)", cat: "connections", view: "web" },
+  { label: tr("Web"), cat: "connections", view: "web" },
+  { label: tr("Metabusca"), cat: "connections", view: "web" },
+  { label: tr("Pesquisa na web (mecanismo padrão)"), cat: "connections", view: "web" },
   { label: "Navegador (Browser)", cat: "connections", view: "web" },
-  { label: "Testar conexão (web / navegador)", cat: "connections", view: "web" },
-  { label: "Importar Chats", cat: "data" },
-  { label: "Exportar Chats", cat: "data" },
-  { label: "Chats Arquivados", cat: "data" },
-  { label: "Chats compartilhados", cat: "data" },
-  { label: "Arquivar Todos os Chats", cat: "data" },
-  { label: "Excluir Todos os Chats", cat: "data" },
-  { label: "Gerenciar arquivos", cat: "data" },
-  { label: "Memória da IA", cat: "data" },
-  { label: "Aprendizado proativo", cat: "data" },
-  { label: "Sobre", cat: "about" },
+  { label: tr("Testar conexão (web / navegador)"), cat: "connections", view: "web" },
+  { label: tr("Importar Chats"), cat: "data" },
+  { label: tr("Exportar Chats"), cat: "data" },
+  { label: tr("Chats Arquivados"), cat: "data" },
+  { label: tr("Chats compartilhados"), cat: "data" },
+  { label: tr("Arquivar Todos os Chats"), cat: "data" },
+  { label: tr("Excluir Todos os Chats"), cat: "data" },
+  { label: tr("Gerenciar arquivos"), cat: "data" },
+  { label: tr("Memória da IA"), cat: "data" },
+  { label: tr("Aprendizado proativo"), cat: "data" },
+  { label: tr("Sobre"), cat: "about" },
 ];
 
 const catLabel = (c: Cat) => CATS.find((x) => x.key === c)?.label ?? c;
@@ -255,7 +256,7 @@ function InfoDot({ text }: { text: string }) {
 
 // rótulos dos escopos de memória (Controle de Dados → engrenagem da Memória)
 const MEM_WRITE_LABEL: Record<string, string> = {
-  global: "Global", model: "Do modelo", chat: "Do chat", off: "Não salvar",
+  global: tr("Global"), model: "Do modelo", chat: tr("Do chat"), off: tr("Não salvar"),
 };
 
 function Row({ label, sub, info, children }: { label: string; sub?: string; info?: string; children?: React.ReactNode }) {
@@ -351,7 +352,7 @@ function DetailView({ title, onBack, children }: { title: string; onBack: () => 
       <div className="mb-3 flex items-center justify-between gap-4 border-b border-border pb-2">
         <h3 className="text-sm font-semibold text-ink">{title}</h3>
         <button onClick={onBack} className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-sm text-muted transition-colors hover:bg-hover hover:text-ink">
-          <ChevronLeft size={16} /> Voltar
+          <ChevronLeft size={16} />  {tr("Voltar")}
         </button>
       </div>
       {children}
@@ -403,7 +404,7 @@ function SecretField({ label, name, configured, hint, onSaved }: {
           className="flex-1 rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
         />
         <button onClick={save} disabled={!value.trim()} className="rounded-lg bg-accent px-3 py-2 text-sm text-ink disabled:opacity-50">
-          {saved ? "✓" : "Salvar"}
+          {saved ? "✓" : tr("Salvar")}
         </button>
       </div>
       {hint && <p className="text-xs text-muted">{hint}</p>}
@@ -469,7 +470,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
       setTimeout(() => setSavedFlash(false), 1500);
       onSaved?.(); // avisa o app p/ atualizar nome/foto na barra lateral
     } catch (e) {
-      setSaveErr(e instanceof ApiError ? e.message : "Falha ao salvar");
+      setSaveErr(e instanceof ApiError ? e.message : tr("Falha ao salvar"));
     }
   }
 
@@ -499,7 +500,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
       >
         {/* topo */}
         <div className="flex items-center justify-between px-6 py-4">
-          <h2 className="text-xl font-semibold text-ink">Configurações</h2>
+          <h2 className="text-xl font-semibold text-ink">{tr("Configurações")}</h2>
           <button onClick={close} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink">
             <X size={18} />
           </button>
@@ -513,11 +514,11 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Pesquisar"
+                placeholder={tr("Pesquisar")}
                 className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
               />
               {q && (
-                <button onClick={() => setQ("")} title="Limpar" className="shrink-0 rounded p-0.5 text-muted transition-colors hover:text-ink">
+                <button onClick={() => setQ("")} title={tr("Limpar")} className="shrink-0 rounded p-0.5 text-muted transition-colors hover:text-ink">
                   <X size={14} />
                 </button>
               )}
@@ -542,7 +543,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                   onClick={() => { close(); router.push("/admin"); }}
                   className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted hover:bg-hover hover:text-ink"
                 >
-                  <UserCog size={16} /> Administrador
+                  <UserCog size={16} />  {tr("Administrador")}
                 </button>
               </div>
             )}
@@ -605,13 +606,13 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
               ) : connView === "voice" ? (
                 <VoicePanel onBack={() => setConnView(null)} onChanged={onConnectionsChanged} />
               ) : connView === "assistant-voice" ? (
-                <DetailView title="Assistente" onBack={() => setConnView(null)}>
+                <DetailView title={tr("Assistente")} onBack={() => setConnView(null)}>
                   <AssistantVoicePanel />
                 </DetailView>
               ) : connView === "subscriptions" ? (
                 <SubscriptionsPanel onBack={() => setConnView(null)} />
               ) : connView === "web" ? (
-                <DetailView title="Web" onBack={() => setConnView(null)}>
+                <DetailView title={tr("Web")} onBack={() => setConnView(null)}>
                   <WebSearchPanel
                     scope="user"
                     value={profile.web_search ?? {}}
@@ -622,15 +623,15 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                 </DetailView>
               ) : (
                 <div>
-                  <Heading>Conexões</Heading>
+                  <Heading>{tr("Conexões")}</Heading>
                   <CardGrid
                     cards={[
-                      { key: "apis", icon: <KeyRound size={22} />, name: "APIs", desc: "Provedores e chaves de APIs" },
-                      { key: "subscriptions", icon: <Crown size={22} />, name: "Assinaturas", desc: "Suas assinaturas" },
-                      { key: "web", icon: <Globe size={22} />, name: "Web", desc: "Acesso a internet" },
-                      { key: "ollama", icon: <SiOllama size={22} />, name: "Ollama", desc: "Utilize modelos locais" },
-                      { key: "voice", icon: <AudioLines size={22} />, name: "Voz", desc: "Controlar voz de IA" },
-                      { key: "assistant-voice", icon: <Bot size={22} />, name: "Assistente", desc: "Usabilidade de agentes" },
+                      { key: "apis", icon: <KeyRound size={22} />, name: "APIs", desc: tr("Provedores e chaves de APIs") },
+                      { key: "subscriptions", icon: <Crown size={22} />, name: tr("Assinaturas"), desc: tr("Suas assinaturas") },
+                      { key: "web", icon: <Globe size={22} />, name: tr("Web"), desc: "Acesso a internet" },
+                      { key: "ollama", icon: <SiOllama size={22} />, name: tr("Ollama"), desc: tr("Utilize modelos locais") },
+                      { key: "voice", icon: <AudioLines size={22} />, name: tr("Voz"), desc: tr("Controlar voz de IA") },
+                      { key: "assistant-voice", icon: <Bot size={22} />, name: tr("Assistente"), desc: tr("Usabilidade de agentes") },
                     ]}
                     onOpen={setConnView}
                   />
@@ -670,7 +671,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                 <RemoteTerminalPanel onBack={() => setIntegView(null)} />
               ) : (
                 <div>
-                  <Heading>Integrações</Heading>
+                  <Heading>{tr("Integrações")}</Heading>
                   <div className="grid grid-cols-2 gap-3 pt-1 sm:grid-cols-3">
                     <button
                       onClick={() => setIntegView("google")}
@@ -679,8 +680,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
                         <SiGoogle size={22} />
                       </span>
-                      <span className="text-sm font-medium text-ink">Google Workspace</span>
-                      <span className="text-xs leading-4 text-muted">Ecosistema Google</span>
+                      <span className="text-sm font-medium text-ink">{tr("Google Workspace")}</span>
+                      <span className="text-xs leading-4 text-muted">{tr("Ecosistema Google")}</span>
                     </button>
                     <button
                       onClick={() => setIntegView("tuya")}
@@ -689,8 +690,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
                         <Home size={22} />
                       </span>
-                      <span className="text-sm font-medium text-ink">Tuya Smart Home</span>
-                      <span className="text-xs leading-4 text-muted">Casa Inteligente</span>
+                      <span className="text-sm font-medium text-ink">{tr("Tuya Smart Home")}</span>
+                      <span className="text-xs leading-4 text-muted">{tr("Casa Inteligente")}</span>
                     </button>
                     <button
                       onClick={() => setIntegView("whatsapp")}
@@ -700,7 +701,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                         <SiWhatsapp size={22} />
                       </span>
                       <span className="text-sm font-medium text-ink">WhatsApp</span>
-                      <span className="text-xs leading-4 text-muted">Contato Pessoal</span>
+                      <span className="text-xs leading-4 text-muted">{tr("Contato Pessoal")}</span>
                     </button>
                     <button
                       onClick={() => setIntegView("telegram")}
@@ -709,8 +710,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
                         <SiTelegram size={22} />
                       </span>
-                      <span className="text-sm font-medium text-ink">Telegram</span>
-                      <span className="text-xs leading-4 text-muted">Bot conversacional</span>
+                      <span className="text-sm font-medium text-ink">{tr("Telegram")}</span>
+                      <span className="text-xs leading-4 text-muted">{tr("Bot conversacional")}</span>
                     </button>
                     <button
                       onClick={() => setIntegView("discord")}
@@ -719,8 +720,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
                         <SiDiscord size={22} />
                       </span>
-                      <span className="text-sm font-medium text-ink">Discord</span>
-                      <span className="text-xs leading-4 text-muted">Bot conversacional</span>
+                      <span className="text-sm font-medium text-ink">{tr("Discord")}</span>
+                      <span className="text-xs leading-4 text-muted">{tr("Bot conversacional")}</span>
                     </button>
                     <button
                       onClick={() => setIntegView("github")}
@@ -739,8 +740,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
                         <Clapperboard size={22} />
                       </span>
-                      <span className="text-sm font-medium text-ink">Higgsfield</span>
-                      <span className="text-xs leading-4 text-muted">Geração de imagem e vídeo</span>
+                      <span className="text-sm font-medium text-ink">{tr("Higgsfield")}</span>
+                      <span className="text-xs leading-4 text-muted">{tr("Geração de imagem e vídeo")}</span>
                     </button>
                     <button
                       onClick={() => setIntegView("civitai")}
@@ -749,8 +750,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
                         <Sparkles size={22} />
                       </span>
-                      <span className="text-sm font-medium text-ink">Civitai</span>
-                      <span className="text-xs leading-4 text-muted">Modelos e geração de imagens</span>
+                      <span className="text-sm font-medium text-ink">{tr("Civitai")}</span>
+                      <span className="text-xs leading-4 text-muted">{tr("Modelos e geração de imagens")}</span>
                     </button>
                     <button
                       onClick={() => setIntegView("notion")}
@@ -759,8 +760,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
                         <SiNotion size={22} />
                       </span>
-                      <span className="text-sm font-medium text-ink">Notion</span>
-                      <span className="text-xs leading-4 text-muted">Páginas e bases de dados</span>
+                      <span className="text-sm font-medium text-ink">{tr("Notion")}</span>
+                      <span className="text-xs leading-4 text-muted">{tr("Páginas e bases de dados")}</span>
                     </button>
                     <button
                       onClick={() => setIntegView("slack")}
@@ -769,7 +770,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
                         <Blocks size={22} />
                       </span>
-                      <span className="text-sm font-medium text-ink">Slack</span>
+                      <span className="text-sm font-medium text-ink">{tr("Slack")}</span>
                       <span className="text-xs leading-4 text-muted">Canais e mensagens</span>
                     </button>
                     <button
@@ -780,7 +781,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                         <Mic size={22} />
                       </span>
                       <span className="text-sm font-medium text-ink">ElevenLabs</span>
-                      <span className="text-xs leading-4 text-muted">Voz e geração de audio</span>
+                      <span className="text-xs leading-4 text-muted">{tr("Voz e geração de audio")}</span>
                     </button>
                     <button
                       onClick={() => setIntegView("vercel")}
@@ -789,7 +790,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
                         <SiVercel size={22} />
                       </span>
-                      <span className="text-sm font-medium text-ink">Vercel</span>
+                      <span className="text-sm font-medium text-ink">{tr("Vercel")}</span>
                       <span className="text-xs leading-4 text-muted">Projetos e deployments</span>
                     </button>
                     <button
@@ -799,8 +800,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
                         <SiSpotify size={22} />
                       </span>
-                      <span className="text-sm font-medium text-ink">Spotify</span>
-                      <span className="text-xs leading-4 text-muted">Música: buscar e tocar</span>
+                      <span className="text-sm font-medium text-ink">{tr("Spotify")}</span>
+                      <span className="text-xs leading-4 text-muted">{tr("Música: buscar e tocar")}</span>
                     </button>
                     <button
                       onClick={() => setIntegView("remote")}
@@ -809,17 +810,17 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                       <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-accent-hover transition-transform duration-150 group-hover:scale-105">
                         <TerminalSquare size={22} />
                       </span>
-                      <span className="text-sm font-medium text-ink">Remote Terminal</span>
-                      <span className="text-xs leading-4 text-muted">Terminal nas suas máquinas</span>
+                      <span className="text-sm font-medium text-ink">{tr("Remote Terminal")}</span>
+                      <span className="text-xs leading-4 text-muted">{tr("Terminal nas suas máquinas")}</span>
                     </button>
                     {[
-                      { name: "Google Drive", icon: <SiGoogledrive size={22} /> },
-                      { name: "Trello", icon: <SiTrello size={22} /> },
+                      { name: tr("Google Drive"), icon: <SiGoogledrive size={22} /> },
+                      { name: tr("Trello"), icon: <SiTrello size={22} /> },
                     ].map((it) => (
                       <div key={it.name} className="flex flex-col items-center gap-2.5 rounded-2xl border border-border bg-surface px-4 py-7 text-center opacity-60">
                         <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-surface2 text-muted">{it.icon}</span>
                         <span className="text-sm font-medium text-ink">{it.name}</span>
-                        <span className="text-[10px] text-muted">Em breve</span>
+                        <span className="text-[10px] text-muted">{tr("Em breve")}</span>
                       </div>
                     ))}
                   </div>
@@ -838,7 +839,8 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
               {saveErr && <span className="text-xs text-red-400">{saveErr}</span>}
               {savedFlash && <span className="text-xs text-green-400">Salvo ✓</span>}
               <button onClick={saveProfile} className="rounded-full bg-accent px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover">
-                Salvar
+                
+                {tr("Salvar")}
               </button>
             </div>
           </div>
@@ -855,9 +857,9 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
 function SearchResults({ results, onPick }: { results: { label: string; cat: Cat; view?: string }[]; onPick: (c: Cat, view?: string) => void }) {
   return (
     <div className="pt-1">
-      <Heading>Resultados da busca</Heading>
+      <Heading>{tr("Resultados da busca")}</Heading>
       {results.length === 0 ? (
-        <p className="text-sm text-muted">Nenhuma configuração encontrada.</p>
+        <p className="text-sm text-muted">{tr("Nenhuma configuração encontrada.")}</p>
       ) : (
         <div className="space-y-1.5">
           {results.map((s) => (
@@ -895,11 +897,11 @@ function InterfaceTab({
   if (view === "chat") return <ChatSettings profile={profile} set={set} onBack={() => setView(null)} />;
   return (
     <div>
-      <Heading>Interface</Heading>
+      <Heading>{tr("Interface")}</Heading>
       <CardGrid
         cards={[
-          { key: "sidebar", icon: <PanelsTopLeft size={22} />, name: "Barra Lateral", desc: "Aparência e navegação" },
-          { key: "chat", icon: <MessageSquareText size={22} />, name: "Chat", desc: "Layout e opcionais" },
+          { key: "sidebar", icon: <PanelsTopLeft size={22} />, name: tr("Barra Lateral"), desc: tr("Aparência e navegação") },
+          { key: "chat", icon: <MessageSquareText size={22} />, name: tr("Chat"), desc: "Layout e opcionais" },
         ]}
         onOpen={setView}
       />
@@ -917,41 +919,41 @@ function ChatSettings({ profile, set, onBack }: { profile: Record<string, any>; 
   const chatModelImg = iface.chat_model_image !== false; // avatar ao lado do nome na mensagem
   const sfxAutoplay = iface.sfx_autoplay === true;       // padrão: som só no clique
   return (
-    <DetailView title="Chat" onBack={onBack}>
+    <DetailView title={tr("Chat")} onBack={onBack}>
       <div className="space-y-2.5">
         <ToggleCard
-          label="Tocar efeitos sonoros automaticamente"
-          info="Os sons que a IA coloca na narração tocam sozinhos enquanto ela escreve. Desligado, eles viram botões para tocar"
+          label={tr("Tocar efeitos sonoros automaticamente")}
+          info={tr("Os sons que a IA coloca na narração tocam sozinhos enquanto ela escreve. Desligado, eles viram botões para tocar")}
           on={sfxAutoplay}
           onToggle={() => setIface("sfx_autoplay", !sfxAutoplay)}
         />
         <ToggleCard
-          label="Mostrar ferramentas do modelo"
-          info="A chave inglesa com a lista de ferramentas equipadas, no topo do chat"
+          label={tr("Mostrar ferramentas do modelo")}
+          info={tr("A chave inglesa com a lista de ferramentas equipadas, no topo do chat")}
           on={chatTools}
           onToggle={() => setIface("chat_tools", !chatTools)}
         />
         <ToggleCard
-          label="Mostrar compartilhar conversa"
-          info="O botão de compartilhar (gera um link público), no canto superior direito"
+          label={tr("Mostrar compartilhar conversa")}
+          info={tr("O botão de compartilhar (gera um link público), no canto superior direito")}
           on={chatShare}
           onToggle={() => setIface("chat_share", !chatShare)}
         />
         <ToggleCard
-          label="Mostrar imagem do modelo no chat"
-          info="O avatar do modelo ao lado do nome dele, dentro de cada resposta"
+          label={tr("Mostrar imagem do modelo no chat")}
+          info={tr("O avatar do modelo ao lado do nome dele, dentro de cada resposta")}
           on={chatModelImg}
           onToggle={() => setIface("chat_model_image", !chatModelImg)}
         />
         <ToggleCard
-          label="Foto do modelo no seletor"
-          info="Mostra o avatar do modelo ao lado do nome, no topo do chat"
+          label={tr("Foto do modelo no seletor")}
+          info={tr("Mostra o avatar do modelo ao lado do nome, no topo do chat")}
           on={modelAvatar}
           onToggle={() => setIface("model_avatar", !modelAvatar)}
         />
         <ToggleCard
-          label="Artefatos"
-          info="Conteúdos extensos (código, documentos, HTML…) abrem numa janela dedicada ao lado do chat, com edição e versões"
+          label={tr("Artefatos")}
+          info={tr("Conteúdos extensos (código, documentos, HTML…) abrem numa janela dedicada ao lado do chat, com edição e versões")}
           on={artifacts}
           onToggle={() => setIface("artifacts", !artifacts)}
         />
@@ -970,15 +972,15 @@ function SidebarSettings({ profile, set, onBack }: { profile: Record<string, any
   useEffect(() => { api.get<Model[]>("/settings/models").then(setModels).catch(() => {}); }, []);
   const autoTitle = !!iface.auto_title;
   return (
-    <DetailView title="Barra Lateral" onBack={onBack}>
-      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted/70">Chats</p>
+    <DetailView title={tr("Barra Lateral")} onBack={onBack}>
+      <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted/70">{tr("Chats")}</p>
       <div className="rounded-xl border border-border bg-surface px-4 py-3">
         <div className="flex items-center justify-between gap-3">
-          <span className="text-sm text-ink">Gerar título de novos chats</span>
+          <span className="text-sm text-ink">{tr("Gerar título de novos chats")}</span>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setCfgOpen((v) => !v)}
-              title="Configurar"
+              title={tr("Configurar")}
               className={`rounded-lg p-1.5 transition-colors ${cfgOpen ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
             >
               <Settings size={16} />
@@ -990,32 +992,32 @@ function SidebarSettings({ profile, set, onBack }: { profile: Record<string, any
           <div className="mt-3 space-y-4 border-t border-border pt-3">
             {(iface.title_model || iface.title_prompt) && (
               <div className="flex justify-end">
-                <LinkBtn onClick={() => set("interface", { ...iface, title_model: "", title_prompt: "" })}>Redefinir para o padrão</LinkBtn>
+                <LinkBtn onClick={() => set("interface", { ...iface, title_model: "", title_prompt: "" })}>{tr("Redefinir para o padrão")}</LinkBtn>
               </div>
             )}
             <div className="text-sm">
-              <span className="text-ink-soft">Modelo</span>
+              <span className="text-ink-soft">{tr("Modelo")}</span>
               <div className="mt-1">
                 <ModelField
                   models={models}
                   value={iface.title_model ?? ""}
                   onChange={(v) => setIface("title_model", v)}
-                  placeholder="Modelo do chat (padrão)"
+                  placeholder={tr("Modelo do chat (padrão)")}
                 />
               </div>
-              <span className="mt-1 block text-xs text-muted">Use um modelo barato. Vazio = modelo do chat.</span>
+              <span className="mt-1 block text-xs text-muted">{tr("Use um modelo barato. Vazio = modelo do chat.")}</span>
             </div>
             <label className="block text-sm">
-              <span className="text-ink-soft">System prompt</span>
+              <span className="text-ink-soft">{tr("System prompt")}</span>
               <textarea
                 value={iface.title_prompt ?? ""}
                 onChange={(e) => setIface("title_prompt", e.target.value)}
                 rows={4}
                 maxLength={2000}
-                placeholder="Vazio = usa o prompt padrão."
+                placeholder={tr("Vazio = usa o prompt padrão.")}
                 className="mt-1 w-full resize-y rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent"
               />
-              <span className="mt-1 block text-xs text-muted">O título é limitado a {MAX_CHAT_TITLE} caracteres (já informado à IA). Vazio = padrão.</span>
+              <span className="mt-1 block text-xs text-muted">{tr("O título é limitado a")} {MAX_CHAT_TITLE}  {tr("caracteres (já informado à IA). Vazio = padrão.")}</span>
             </label>
           </div>
         )}
@@ -1025,13 +1027,14 @@ function SidebarSettings({ profile, set, onBack }: { profile: Record<string, any
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <span className="flex items-center gap-1.5 text-sm text-ink">
-              Resumo de contexto (compactação)
-              <InfoDot text="Tarefa auxiliar — dá pra usar um modelo mais barato." />
+              
+              {tr("Resumo de contexto (compactação)")}
+              <InfoDot text={tr("Tarefa auxiliar — dá pra usar um modelo mais barato.")} />
             </span>
           </div>
           <button
             onClick={() => setCompactCfgOpen((v) => !v)}
-            title="Configurar"
+            title={tr("Configurar")}
             className={`shrink-0 rounded-lg p-1.5 transition-colors ${compactCfgOpen ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
           >
             <Settings size={16} />
@@ -1041,42 +1044,42 @@ function SidebarSettings({ profile, set, onBack }: { profile: Record<string, any
           <div className="mt-3 space-y-2 border-t border-border pt-3">
             {iface.compact_model && (
               <div className="flex justify-end">
-                <LinkBtn onClick={() => setIface("compact_model", "")}>Redefinir para o padrão</LinkBtn>
+                <LinkBtn onClick={() => setIface("compact_model", "")}>{tr("Redefinir para o padrão")}</LinkBtn>
               </div>
             )}
             <div className="text-sm">
-              <span className="text-ink-soft">Modelo</span>
+              <span className="text-ink-soft">{tr("Modelo")}</span>
               <div className="mt-1">
                 <ModelField
                   models={models}
                   value={iface.compact_model ?? ""}
                   onChange={(v) => setIface("compact_model", v)}
-                  placeholder="Modelo do chat (padrão)"
+                  placeholder={tr("Modelo do chat (padrão)")}
                 />
               </div>
-              <span className="mt-1 block text-xs text-muted">Vazio = modelo do chat.</span>
+              <span className="mt-1 block text-xs text-muted">{tr("Vazio = modelo do chat.")}</span>
             </div>
           </div>
         )}
       </div>
 
       <div className="mt-6 flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted/70">Itens visíveis</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted/70">{tr("Itens visíveis")}</p>
         <button
           onClick={() => setOrganizeOpen(true)}
           className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink"
         >
-          <GripVertical size={13} /> Organizar
+          <GripVertical size={13} />  {tr("Organizar")}
         </button>
       </div>
       {organizeOpen && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" onClick={() => setOrganizeOpen(false)}>
           <div className="animate-pop flex max-h-[85vh] w-full max-w-md flex-col overflow-hidden rounded-2xl border border-border bg-bg shadow-menu" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-border px-5 py-3">
-              <p className="text-sm font-semibold text-ink">Organizar barra lateral</p>
+              <p className="text-sm font-semibold text-ink">{tr("Organizar barra lateral")}</p>
               <div className="flex items-center gap-1">
-                <button onClick={() => setIface("sidebar_order", SIDEBAR_ITEMS.map((i) => i.key))} className="rounded-lg px-2 py-1 text-xs text-muted transition-colors hover:bg-hover hover:text-ink">Ordem padrão</button>
-                <button onClick={() => setOrganizeOpen(false)} title="Fechar" className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={18} /></button>
+                <button onClick={() => setIface("sidebar_order", SIDEBAR_ITEMS.map((i) => i.key))} className="rounded-lg px-2 py-1 text-xs text-muted transition-colors hover:bg-hover hover:text-ink">{tr("Ordem padrão")}</button>
+                <button onClick={() => setOrganizeOpen(false)} title={tr("Fechar")} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={18} /></button>
               </div>
             </div>
             <div className="overflow-y-auto px-5 py-4">
@@ -1086,7 +1089,7 @@ function SidebarSettings({ profile, set, onBack }: { profile: Record<string, any
         </div>
       )}
 
-      <p className="mb-2 mt-6 text-xs font-semibold uppercase tracking-wider text-muted/70">No menu do usuário</p>
+      <p className="mb-2 mt-6 text-xs font-semibold uppercase tracking-wider text-muted/70">{tr("No menu do usuário")}</p>
       <div className="space-y-2.5">
         {USERMENU_ITEMS.map((it) => {
           const on = iface[it.key] !== false; // padrão: visível
@@ -1103,22 +1106,22 @@ function SidebarSettings({ profile, set, onBack }: { profile: Record<string, any
 // profile.interface (padrão visível); a ordem em profile.interface.sidebar_order.
 // Lidos pela Sidebar. "Biblioteca" é o rótulo da seção; "Chats" é a lista.
 const SIDEBAR_ITEMS: { key: string; label: string }[] = [
-  { key: "sb_new_chat", label: "Novo Chat" },
-  { key: "sb_conversations", label: "Conversas" },
-  { key: "sb_automations", label: "Automações" },
-  { key: "sb_codespace", label: "Codespace" },
-  { key: "sb_workspace", label: "Espaço de Trabalho" },
-  { key: "sb_library", label: "Biblioteca (rótulo)" },
-  { key: "sb_models", label: "Modelos" },
-  { key: "sb_folders", label: "Pastas" },
-  { key: "sb_chats", label: "Chats" },
+  { key: "sb_new_chat", label: tr("Novo Chat") },
+  { key: "sb_conversations", label: tr("Conversas") },
+  { key: "sb_automations", label: tr("Automações") },
+  { key: "sb_codespace", label: tr("Codespace") },
+  { key: "sb_workspace", label: tr("Espaço de Trabalho") },
+  { key: "sb_library", label: tr("Biblioteca (rótulo)") },
+  { key: "sb_models", label: tr("Modelos") },
+  { key: "sb_folders", label: tr("Pastas") },
+  { key: "sb_chats", label: tr("Chats") },
 ];
 export const SIDEBAR_ORDER_DEFAULT = SIDEBAR_ITEMS.map((i) => i.key);
 // itens do MENU DO USUÁRIO (rodapé) que podem ser ocultados
 const USERMENU_ITEMS: { key: string; label: string }[] = [
-  { key: "sb_analytics", label: "Analítica" },
-  { key: "sb_playground", label: "Playground" },
-  { key: "sb_archived", label: "Chats Arquivados" },
+  { key: "sb_analytics", label: tr("Analítica") },
+  { key: "sb_playground", label: tr("Playground") },
+  { key: "sb_archived", label: tr("Chats Arquivados") },
 ];
 
 /* lista reordenável (drag & drop nativo) com olho de mostrar/ocultar por item */
@@ -1157,7 +1160,7 @@ function SidebarItemsEditor({ iface, setIface }: { iface: Record<string, any>; s
             <span className="flex-1 truncate text-sm text-ink">{labelOf(k)}</span>
             <button
               onClick={() => setIface(k, !on)}
-              title={on ? "Ocultar" : "Mostrar"}
+              title={on ? tr("Ocultar") : tr("Mostrar")}
               className={`rounded-lg p-1.5 transition-colors ${on ? "text-ink-soft hover:bg-hover hover:text-ink" : "text-muted hover:bg-hover hover:text-ink"}`}
             >
               {on ? <Eye size={16} /> : <EyeOff size={16} />}
@@ -1192,18 +1195,18 @@ function DesktopTab() {
   if (!s) {
     return (
       <div>
-        <Heading>Aplicativo</Heading>
-        <p className="py-2 text-sm text-muted">Carregando as preferências do aplicativo…</p>
+        <Heading>{tr("Aplicativo")}</Heading>
+        <p className="py-2 text-sm text-muted">{tr("Carregando as preferências do aplicativo…")}</p>
       </div>
     );
   }
 
   return (
     <div>
-      <Heading>Aplicativo</Heading>
+      <Heading>{tr("Aplicativo")}</Heading>
       <Row
-        label="Rodar em segundo plano"
-        info="Fechar a janela esconde o app na bandeja do Windows em vez de encerrá-lo. Para sair de verdade, use o menu do ícone na bandeja."
+        label={tr("Rodar em segundo plano")}
+        info={tr("Fechar a janela esconde o app na bandeja do Windows em vez de encerrá-lo. Para sair de verdade, use o menu do ícone na bandeja.")}
       >
         <Toggle
           on={s.minimize_to_tray}
@@ -1211,8 +1214,8 @@ function DesktopTab() {
         />
       </Row>
       <Row
-        label="Iniciar com o Windows"
-        info="Abre o AI Workspace automaticamente quando você liga o computador."
+        label={tr("Iniciar com o Windows")}
+        info={tr("Abre o AI Workspace automaticamente quando você liga o computador.")}
       >
         <Toggle
           on={s.autostart}
@@ -1221,8 +1224,8 @@ function DesktopTab() {
       </Row>
       {s.autostart && (
         <Row
-          label="Abrir minimizado na bandeja"
-          info="Ao iniciar com o Windows, sobe direto para a bandeja sem abrir a janela — não rouba o foco de quem acabou de ligar o PC."
+          label={tr("Abrir minimizado na bandeja")}
+          info={tr("Ao iniciar com o Windows, sobe direto para a bandeja sem abrir a janela — não rouba o foco de quem acabou de ligar o PC.")}
         >
           <Toggle
             on={s.start_minimized}
@@ -1231,8 +1234,8 @@ function DesktopTab() {
         </Row>
       )}
       <Row
-        label="Atalho global do modo voz"
-        info="Combinação de teclas que ativa o modo voz de qualquer lugar do PC, mesmo com o app em segundo plano. Formato do Tauri (ex.: CommandOrControl+Shift+Space). Vazio = desligado."
+        label={tr("Atalho global do modo voz")}
+        info={tr("Combinação de teclas que ativa o modo voz de qualquer lugar do PC, mesmo com o app em segundo plano. Formato do Tauri (ex.: CommandOrControl+Shift+Space). Vazio = desligado.")}
       >
         <input
           defaultValue={s.voice_hotkey ?? ""}
@@ -1251,13 +1254,14 @@ function AboutTab() {
   const repoUrl = info?.repo_url || "#"; // placeholder até o repositório ser configurado
   return (
     <div>
-      <Heading>Sobre</Heading>
-      <p className="text-base font-semibold text-ink">AI Workspace</p>
+      <Heading>{tr("Sobre")}</Heading>
+      <p className="text-base font-semibold text-ink">{tr("AI Workspace")}</p>
       <p className="mt-1 text-sm text-ink-soft">
-        Versão: {info?.version ?? "—"}
+        
+        {tr("Versão:")} {info?.version ?? "—"}
         {info?.update_available && info.latest_version && (
           <span className="ml-2 rounded-full bg-accent/15 px-2 py-0.5 text-xs font-medium text-accent-hover">
-            {info.latest_version} disponível
+            {info.latest_version}  {tr("disponível")}
           </span>
         )}
       </p>
@@ -1268,16 +1272,18 @@ function AboutTab() {
       {info?.update_available && info.release_url && (
         <DesktopUpdateNotice releaseUrl={info.release_url} version={info.latest_version} />
       )}
-      <p className="mt-5 text-xs text-muted">Copyright (c) 2026 AI Workspace. All rights reserved.</p>
+      <p className="mt-5 text-xs text-muted">{tr("Copyright (c) 2026 AI Workspace. All rights reserved.")}</p>
       {/* openExternal, e não <a target="_blank">: no webview do Tauri o link de nova
           janela não faz nada (docs/desktop-updates.md). */}
       <p className="mt-1 text-xs text-muted">
         <button onClick={() => openExternal(`${window.location.origin}/privacy`)} className="text-accent-hover transition-colors hover:underline">
-          Política de Privacidade
+          
+          {tr("Política de Privacidade")}
         </button>
         {" · "}
         <button onClick={() => openExternal(`${window.location.origin}/terms`)} className="text-accent-hover transition-colors hover:underline">
-          Termos de Serviço
+          
+          {tr("Termos de Serviço")}
         </button>
       </p>
       <a
@@ -1286,9 +1292,10 @@ function AboutTab() {
         rel="noreferrer"
         className="mt-1 inline-block text-xs text-accent-hover transition-colors hover:underline"
       >
-        Github Repo
+        
+        {tr("Github Repo")}
       </a>
-      <p className="mt-1 text-xs text-muted">Criado por Victor Alves</p>
+      <p className="mt-1 text-xs text-muted">{tr("Criado por Victor Alves")}</p>
     </div>
   );
 }
@@ -1297,35 +1304,41 @@ function AboutTab() {
 function GeneralTab({ profile, set }: { profile: Record<string, any>; set: (k: string, v: any) => void }) {
   return (
     <div>
-      <Heading>Configurações da WebUI</Heading>
-      <Row label="Tema">
+      <Heading>{tr("Configurações da WebUI")}</Heading>
+      <Row label={tr("Tema")}>
         <Select
           value={profile.theme ?? "system"}
           onChange={(e) => set("theme", e.target.value)}
           className="rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none"
         >
-          <option value="system">Sistema</option>
-          <option value="dark">Escuro</option>
-          <option value="light">Claro</option>
+          <option value="system">{tr("Sistema")}</option>
+          <option value="dark">{tr("Escuro")}</option>
+          <option value="light">{tr("Claro")}</option>
         </Select>
       </Row>
-      <Row label="Idioma">
+      <Row label={tr("Idioma")}>
         <Select
-          value={profile.language ?? "pt-BR"}
-          onChange={(e) => set("language", e.target.value)}
+          value={getLocale() === "pt" ? "pt-BR" : "en"}
+          onChange={async (e) => {
+            // grava já (a troca recarrega a página) e vale para a IA e outros aparelhos
+            const language = e.target.value;
+            set("language", language);
+            try { await api.put("/settings/profile", { language }); } catch { /* fica só neste aparelho */ }
+            setLocale(localeOf(language) ?? "pt");
+          }}
           className="rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none"
         >
-          <option value="pt-BR">Portuguese (Brazil)</option>
+          <option value="pt-BR">Português (Brasil)</option>
           <option value="en">English</option>
         </Select>
       </Row>
-      <Row label="Notificações">
+      <Row label={tr("Notificações")}>
         <Toggle on={!!profile.notifications} onClick={() => set("notifications", !profile.notifications)} />
       </Row>
-      <Row label="Animações" info="Transições e efeitos da interface">
+      <Row label={tr("Animações")} info={tr("Transições e efeitos da interface")}>
         <Toggle on={profile.animations !== false} onClick={() => set("animations", profile.animations === false)} />
       </Row>
-      <Row label="Fuso horário">
+      <Row label={tr("Fuso horário")}>
         <TimezoneSelect
           value={profile.tz_manual ? (profile.timezone ?? "") : ""}
           onChange={(tz) => {
@@ -1372,7 +1385,7 @@ function TimezoneSelect({ value, onChange }: { value: string; onChange: (tz: str
         onClick={() => { setOpen((v) => !v); setQ(""); }}
         className="flex max-w-[220px] items-center gap-1.5 rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none hover:bg-hover"
       >
-        <span className="truncate">{value || `Automático (${detected})`}</span>
+        <span className="truncate">{value || tr("Automático ({detected})", { detected: detected })}</span>
         <ChevronDown size={15} className="shrink-0 text-muted" />
       </button>
 
@@ -1384,7 +1397,7 @@ function TimezoneSelect({ value, onChange }: { value: string; onChange: (tz: str
               autoFocus
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Pesquisar fuso"
+              placeholder={tr("Pesquisar fuso")}
               className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
             />
           </div>
@@ -1394,7 +1407,7 @@ function TimezoneSelect({ value, onChange }: { value: string; onChange: (tz: str
               onClick={() => { onChange(""); setOpen(false); }}
               className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-sm text-ink hover:bg-hover"
             >
-              <span className="truncate">Automático ({detected})</span>
+              <span className="truncate">{tr("Automático (")}{detected})</span>
               {!value && <Check size={15} className="shrink-0 text-accent" />}
             </button>
             {filtered.map((z) => (
@@ -1409,7 +1422,7 @@ function TimezoneSelect({ value, onChange }: { value: string; onChange: (tz: str
               </button>
             ))}
             {filtered.length === 0 && (
-              <p className="px-3 py-6 text-center text-sm text-muted">Nenhum fuso.</p>
+              <p className="px-3 py-6 text-center text-sm text-muted">{tr("Nenhum fuso.")}</p>
             )}
           </div>
         </div>
@@ -1428,10 +1441,10 @@ function SecurityTab({ profile, set }: { profile: Record<string, any>; set: (k: 
   const confirmOn = !!sec.confirm_actions;
   return (
     <div>
-      <Heading>Segurança</Heading>
+      <Heading>{tr("Segurança")}</Heading>
       <Row
-        label="Pedir confirmação antes de ações sensíveis"
-        info="A IA pede sua aprovação antes de enviar/arquivar e-mails, criar ou alterar eventos na agenda e acionar dispositivos da casa. Desligado (padrão), ela executa direto. Vale para todos os seus modelos. Automações e canais (WhatsApp/Telegram) sempre executam direto, pois rodam sem você presente para confirmar."
+        label={tr("Pedir confirmação antes de ações sensíveis")}
+        info={tr("A IA pede sua aprovação antes de enviar/arquivar e-mails, criar ou alterar eventos na agenda e acionar dispositivos da casa. Desligado (padrão), ela executa direto. Vale para todos os seus modelos. Automações e canais (WhatsApp/Telegram) sempre executam direto, pois rodam sem você presente para confirmar.")}
       >
         <Toggle on={confirmOn} onClick={() => set("security", { ...sec, confirm_actions: !confirmOn })} />
       </Row>
@@ -1458,63 +1471,63 @@ function TwoFactorSection() {
   async function startSetup() {
     setMsg(null); setBusy(true);
     try { setSetup(await api.post<{ secret: string; qr: string }>("/security/2fa/setup")); }
-    catch (e) { setMsg(e instanceof ApiError ? e.message : "Falha ao iniciar"); }
+    catch (e) { setMsg(e instanceof ApiError ? e.message : tr("Falha ao iniciar")); }
     finally { setBusy(false); }
   }
   async function confirm() {
     setMsg(null); setBusy(true);
     try {
       await api.post("/security/2fa/enable", { code: code.trim() });
-      setSetup(null); setCode(""); setMsg("2FA ativado ✓"); reload();
-    } catch (e) { setMsg(e instanceof ApiError ? e.message : "Código inválido"); }
+      setSetup(null); setCode(""); setMsg(tr("2FA ativado ✓")); reload();
+    } catch (e) { setMsg(e instanceof ApiError ? e.message : tr("Código inválido")); }
     finally { setBusy(false); }
   }
   async function disable() {
     setMsg(null); setBusy(true);
     try {
       await api.post("/security/2fa/disable", { password: pw });
-      setDisabling(false); setPw(""); setMsg("2FA desativado"); reload();
-    } catch (e) { setMsg(e instanceof ApiError ? e.message : "Senha incorreta"); }
+      setDisabling(false); setPw(""); setMsg(tr("2FA desativado")); reload();
+    } catch (e) { setMsg(e instanceof ApiError ? e.message : tr("Senha incorreta")); }
     finally { setBusy(false); }
   }
 
   return (
     <>
-      <Heading info="Um código do app autenticador (Google Authenticator, Authy…) além da senha, no login.">Verificação em duas etapas (2FA)</Heading>
+      <Heading info={tr("Um código do app autenticador (Google Authenticator, Authy…) além da senha, no login.")}>{tr("Verificação em duas etapas (2FA)")}</Heading>
       {enabled === null ? (
-        <p className="text-sm text-muted">Carregando…</p>
+        <p className="text-sm text-muted">{tr("Carregando…")}</p>
       ) : enabled ? (
         <div className="rounded-xl border border-border bg-surface px-4 py-3">
           <div className="flex items-center justify-between gap-3">
-            <span className="flex items-center gap-2 text-sm text-ink"><Check size={15} className="text-green-400" /> 2FA está ativo</span>
-            {!disabling && <button onClick={() => setDisabling(true)} className="text-sm text-red-400 hover:text-red-300">Desativar</button>}
+            <span className="flex items-center gap-2 text-sm text-ink"><Check size={15} className="text-green-400" />  {tr("2FA está ativo")}</span>
+            {!disabling && <button onClick={() => setDisabling(true)} className="text-sm text-red-400 hover:text-red-300">{tr("Desativar")}</button>}
           </div>
           {disabling && (
             <div className="mt-3 space-y-2 border-t border-border pt-3">
-              <p className="text-xs text-muted">Confirme com a senha da conta para desligar.</p>
+              <p className="text-xs text-muted">{tr("Confirme com a senha da conta para desligar.")}</p>
               <div className="flex gap-2">
-                <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Senha"
+                <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder={tr("Senha")}
                   className="flex-1 rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent" />
-                <button onClick={disable} disabled={busy || !pw} className="rounded-lg bg-red-500/90 px-3 py-2 text-sm text-white disabled:opacity-50">Desativar</button>
-                <button onClick={() => { setDisabling(false); setPw(""); }} className="px-2 text-sm text-muted hover:text-ink">Cancelar</button>
+                <button onClick={disable} disabled={busy || !pw} className="rounded-lg bg-red-500/90 px-3 py-2 text-sm text-white disabled:opacity-50">{tr("Desativar")}</button>
+                <button onClick={() => { setDisabling(false); setPw(""); }} className="px-2 text-sm text-muted hover:text-ink">{tr("Cancelar")}</button>
               </div>
             </div>
           )}
         </div>
       ) : setup ? (
         <div className="space-y-3 rounded-xl border border-border bg-surface px-4 py-4">
-          <p className="text-sm text-ink">1. Escaneie o QR no seu app autenticador:</p>
+          <p className="text-sm text-ink">{tr("1. Escaneie o QR no seu app autenticador:")}</p>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={setup.qr} alt="QR de pareamento" className="mx-auto h-44 w-44 rounded-lg bg-white p-1" />
-          <p className="text-center text-xs text-muted">ou digite manualmente: <code className="rounded bg-surface2 px-1.5 py-0.5 text-ink">{setup.secret}</code></p>
-          <p className="text-sm text-ink">2. Digite o código de 6 dígitos que aparece no app:</p>
+          <img src={setup.qr} alt={tr("QR de pareamento")} className="mx-auto h-44 w-44 rounded-lg bg-white p-1" />
+          <p className="text-center text-xs text-muted">{tr("ou digite manualmente:")} <code className="rounded bg-surface2 px-1.5 py-0.5 text-ink">{setup.secret}</code></p>
+          <p className="text-sm text-ink">{tr("2. Digite o código de 6 dígitos que aparece no app:")}</p>
           <div className="flex gap-2">
             <input value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
               inputMode="numeric" placeholder="000000"
               className="flex-1 rounded-lg border border-border bg-surface2 px-3 py-2 text-center font-mono text-lg tracking-widest text-ink outline-none focus:border-accent" />
-            <button onClick={confirm} disabled={busy || code.length < 6} className="rounded-lg bg-accent px-4 py-2 text-sm text-white disabled:opacity-50">Ativar</button>
+            <button onClick={confirm} disabled={busy || code.length < 6} className="rounded-lg bg-accent px-4 py-2 text-sm text-white disabled:opacity-50">{tr("Ativar")}</button>
           </div>
-          <button onClick={() => { setSetup(null); setCode(""); }} className="text-xs text-muted hover:text-ink">Cancelar</button>
+          <button onClick={() => { setSetup(null); setCode(""); }} className="text-xs text-muted hover:text-ink">{tr("Cancelar")}</button>
         </div>
       ) : (
         <button onClick={startSetup} disabled={busy} className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-hover disabled:opacity-50">
@@ -1546,11 +1559,11 @@ function AuditLogSection() {
   }, [events, q]);
   return (
     <>
-      <Heading info="Atividades recentes da sua conta (login, senha, 2FA, chaves).">Logs de segurança</Heading>
+      <Heading info={tr("Atividades recentes da sua conta (login, senha, 2FA, chaves).")}>{tr("Logs de segurança")}</Heading>
       {events === null ? (
-        <p className="text-sm text-muted">Carregando…</p>
+        <p className="text-sm text-muted">{tr("Carregando…")}</p>
       ) : events.length === 0 ? (
-        <p className="text-sm text-muted">Nenhum evento registrado ainda.</p>
+        <p className="text-sm text-muted">{tr("Nenhum evento registrado ainda.")}</p>
       ) : (
         <>
           <div className="relative mb-2">
@@ -1558,12 +1571,12 @@ function AuditLogSection() {
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Buscar nos logs…"
+              placeholder={tr("Buscar nos logs…")}
               className="w-full rounded-lg border border-border bg-surface2 py-2 pl-9 pr-3 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
             />
           </div>
           {filtered.length === 0 ? (
-            <p className="px-1 py-3 text-sm text-muted">Nenhum evento corresponde à busca.</p>
+            <p className="px-1 py-3 text-sm text-muted">{tr("Nenhum evento corresponde à busca.")}</p>
           ) : (
             <div className="max-h-72 divide-y divide-border overflow-y-auto rounded-xl border border-border">
               {filtered.map((e) => (
@@ -1583,17 +1596,17 @@ function AuditLogSection() {
 function MiniappsTab() {
   return (
     <div>
-      <Heading>Miniapps</Heading>
+      <Heading>{tr("Miniapps")}</Heading>
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-violet-400/20 bg-violet-500/10 text-violet-300">
             <Dices size={18} />
           </span>
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-ink">Imaginai</p>
-            <p className="truncate text-xs text-muted">Mesa de RPG</p>
+            <p className="text-sm font-medium text-ink">{tr("Imaginai")}</p>
+            <p className="truncate text-xs text-muted">{tr("Mesa de RPG")}</p>
           </div>
-          <span className="shrink-0 rounded-full bg-surface2 px-2 py-0.5 text-[10px] text-muted">Em breve</span>
+          <span className="shrink-0 rounded-full bg-surface2 px-2 py-0.5 text-[10px] text-muted">{tr("Em breve")}</span>
         </div>
       </div>
     </div>
@@ -1618,7 +1631,7 @@ function AccountTab({ user, profile, set }: { user: User | null; profile: Record
     try {
       set("avatar", await fileToAvatarDataUrl(file));
     } catch (err) {
-      setAvatarErr(err instanceof Error ? err.message : "Falha ao carregar imagem");
+      setAvatarErr(err instanceof Error ? err.message : tr("Falha ao carregar imagem"));
     }
   }
 
@@ -1626,23 +1639,23 @@ function AccountTab({ user, profile, set }: { user: User | null; profile: Record
     setMsg(null);
     try {
       await api.post("/auth/change-password", { current_password: cur, new_password: nw });
-      setMsg("Senha alterada ✓"); setCur(""); setNw("");
+      setMsg(tr("Senha alterada ✓")); setCur(""); setNw("");
     } catch (e) {
-      setMsg(e instanceof ApiError ? e.message : "Falha ao alterar senha");
+      setMsg(e instanceof ApiError ? e.message : tr("Falha ao alterar senha"));
     }
   }
 
   return (
     <div>
-      <Heading>Sua conta</Heading>
-      <p className="mb-3 text-xs text-muted">Gerencie as informações da sua conta.</p>
+      <Heading>{tr("Sua conta")}</Heading>
+      <p className="mb-3 text-xs text-muted">{tr("Gerencie as informações da sua conta.")}</p>
 
       <div className="flex gap-4">
         <div className="flex shrink-0 flex-col items-center">
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pickAvatar} />
           <button
             onClick={() => fileRef.current?.click()}
-            title="Enviar uma foto"
+            title={tr("Enviar uma foto")}
             className="group relative h-16 w-16 overflow-hidden rounded-full bg-surface2"
           >
             {avatar ? (
@@ -1659,43 +1672,44 @@ function AccountTab({ user, profile, set }: { user: User | null; profile: Record
           </button>
           {avatar && (
             <button onClick={() => set("avatar", "")} className="mt-1 w-16 text-center text-[11px] text-muted transition-colors hover:text-ink">
-              Remover
+              
+              {tr("Remover")}
             </button>
           )}
           {avatarErr && <p className="mt-1 max-w-16 text-[11px] text-red-400">{avatarErr}</p>}
         </div>
         <div className="min-w-0 flex-1 space-y-1">
-          <p className="text-xs text-muted">Nome</p>
+          <p className="text-xs text-muted">{tr("Nome")}</p>
           <input
             value={name}
             onChange={(e) => set("name", e.target.value)}
-            placeholder="Seu nome"
+            placeholder={tr("Seu nome")}
             className="w-full bg-transparent text-lg font-medium text-ink outline-none placeholder:text-muted"
           />
-          <p className="pt-1 text-xs text-muted">Sobre você</p>
+          <p className="pt-1 text-xs text-muted">{tr("Sobre você")}</p>
           <textarea
             rows={2}
             value={profile.about ?? ""}
             onChange={(e) => set("about", e.target.value)}
-            placeholder="Fale sobre você e seus interesses"
+            placeholder={tr("Fale sobre você e seus interesses")}
             className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
           />
         </div>
       </div>
 
-      <Row label="Gênero">
+      <Row label={tr("Gênero")}>
         <Select
           value={profile.gender ?? ""}
           onChange={(e) => set("gender", e.target.value)}
           className="rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none"
         >
-          <option value="">Prefiro não dizer</option>
-          <option value="Masculino">Masculino</option>
-          <option value="Feminino">Feminino</option>
-          <option value="Outro">Outro</option>
+          <option value="">{tr("Prefiro não dizer")}</option>
+          <option value="Masculino">{tr("Masculino")}</option>
+          <option value="Feminino">{tr("Feminino")}</option>
+          <option value="Outro">{tr("Outro")}</option>
         </Select>
       </Row>
-      <Row label="Data de nascimento">
+      <Row label={tr("Data de nascimento")}>
         <input
           type="date"
           value={profile.birthdate ?? ""}
@@ -1703,22 +1717,22 @@ function AccountTab({ user, profile, set }: { user: User | null; profile: Record
           className="rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none [color-scheme:dark]"
         />
       </Row>
-      <Row label="Alterar Senha">
-        <LinkBtn onClick={() => setShowPass((v) => !v)}>{showPass ? "Ocultar" : "Mostrar"}</LinkBtn>
+      <Row label={tr("Alterar Senha")}>
+        <LinkBtn onClick={() => setShowPass((v) => !v)}>{showPass ? tr("Ocultar") : tr("Mostrar")}</LinkBtn>
       </Row>
       {showPass && (
         <div className="space-y-2 pb-2">
-          <input type="password" value={cur} onChange={(e) => setCur(e.target.value)} placeholder="Senha atual" className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent" />
-          <input type="password" value={nw} onChange={(e) => setNw(e.target.value)} placeholder="Nova senha (mín. 8)" className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent" />
+          <input type="password" value={cur} onChange={(e) => setCur(e.target.value)} placeholder={tr("Senha atual")} className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent" />
+          <input type="password" value={nw} onChange={(e) => setNw(e.target.value)} placeholder={tr("Nova senha (mín. 8)")} className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent" />
           <div className="flex items-center gap-3">
-            <button onClick={changePassword} disabled={!cur || nw.length < 8} className="rounded-lg bg-accent px-4 py-1.5 text-sm text-ink disabled:opacity-50">Alterar senha</button>
+            <button onClick={changePassword} disabled={!cur || nw.length < 8} className="rounded-lg bg-accent px-4 py-1.5 text-sm text-ink disabled:opacity-50">{tr("Alterar senha")}</button>
             {msg && <span className="text-xs text-muted">{msg}</span>}
           </div>
         </div>
       )}
 
-      <Heading>Formato de data e hora</Heading>
-      <Row label="Formato de hora">
+      <Heading>{tr("Formato de data e hora")}</Heading>
+      <Row label={tr("Formato de hora")}>
         <Select
           value={profile.time_format ?? "24h"}
           onChange={(e) => set("time_format", e.target.value)}
@@ -1728,7 +1742,7 @@ function AccountTab({ user, profile, set }: { user: User | null; profile: Record
           <option value="12h">12 horas (2:30 PM)</option>
         </Select>
       </Row>
-      <Row label="Formato de data">
+      <Row label={tr("Formato de data")}>
         <Select
           value={profile.date_format ?? "dmy"}
           onChange={(e) => set("date_format", e.target.value)}
@@ -1740,7 +1754,7 @@ function AccountTab({ user, profile, set }: { user: User | null; profile: Record
         </Select>
       </Row>
 
-      <Heading>Controle de gasto</Heading>
+      <Heading>{tr("Controle de gasto")}</Heading>
       <BudgetSettings profile={profile} set={set} />
     </div>
   );
@@ -1762,8 +1776,9 @@ function BudgetSettings({ profile, set }: { profile: Record<string, any>; set: (
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="flex items-center gap-1.5 text-sm font-medium text-ink">
-            Orçamento mensal
-            <InfoDot text="Você usa a sua própria chave de API — isto só te avisa (ou pausa) para não tomar susto na fatura." />
+            
+            {tr("Orçamento mensal")}
+            <InfoDot text={tr("Você usa a sua própria chave de API — isto só te avisa (ou pausa) para não tomar susto na fatura.")} />
           </p>
         </div>
         <Toggle on={on} onClick={() => setB({ enabled: !on })} />
@@ -1772,7 +1787,8 @@ function BudgetSettings({ profile, set }: { profile: Record<string, any>; set: (
         <div className="mt-3 space-y-3">
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-2 text-sm text-ink-soft">
-              Teto (US$/mês)
+              
+              {tr("Teto (US$/mês)")}
               <input
                 type="number" min={0} step={1}
                 defaultValue={cap || ""}
@@ -1782,9 +1798,10 @@ function BudgetSettings({ profile, set }: { profile: Record<string, any>; set: (
               />
             </label>
             <label className="flex items-center gap-2 text-sm text-ink-soft">
-              Ao atingir
+              
+              {tr("Ao atingir")}
               <Select value={b.mode === "pause" ? "pause" : "warn"} onChange={(e) => setB({ mode: e.target.value })} className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
-                <option value="warn">Só avisar</option>
+                <option value="warn">{tr("Só avisar")}</option>
                 <option value="pause">Avisar e pausar</option>
               </Select>
             </label>
@@ -1794,13 +1811,13 @@ function BudgetSettings({ profile, set }: { profile: Record<string, any>; set: (
               <div className="h-2 overflow-hidden rounded-full bg-surface2">
                 <div className={`h-full rounded-full transition-all ${pct >= 100 ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-accent"}`} style={{ width: `${pct}%` }} />
               </div>
-              <p className="mt-1 text-xs text-muted">US$ {spent.toFixed(2)} de US$ {cap.toFixed(2)} usados este mês ({pct}%).</p>
+              <p className="mt-1 text-xs text-muted">US$ {spent.toFixed(2)}  {tr("de US$")} {cap.toFixed(2)}  {tr("usados este mês (")}{pct}%).</p>
             </div>
           )}
           <p className="text-[11px] leading-4 text-muted">
             {b.mode === "pause"
-              ? "Ao passar do teto, novas mensagens (chat, WhatsApp e automações) ficam pausadas até o mês virar ou você ajustar aqui."
-              : "Ao passar do teto, mostramos um aviso — nada é bloqueado."}
+              ? tr("Ao passar do teto, novas mensagens (chat, WhatsApp e automações) ficam pausadas até o mês virar ou você ajustar aqui.")
+              : tr("Ao passar do teto, mostramos um aviso — nada é bloqueado.")}
           </p>
         </div>
       )}
@@ -1854,60 +1871,60 @@ function StatusTab({ user, onGoto }: { user: User | null; onGoto: (cat: Cat, vie
     catch { setOrTest("fail"); }
     finally { setTesting(false); }
   }
-  if (loading) return <div><Heading>Status do sistema</Heading><p className="text-sm text-muted">Carregando…</p></div>;
-  if (!st) return <div><Heading>Status do sistema</Heading><p className="text-sm text-red-400">Falha ao carregar o status.</p></div>;
+  if (loading) return <div><Heading>{tr("Status do sistema")}</Heading><p className="text-sm text-muted">{tr("Carregando…")}</p></div>;
+  if (!st) return <div><Heading>{tr("Status do sistema")}</Heading><p className="text-sm text-red-400">{tr("Falha ao carregar o status.")}</p></div>;
 
   const b = st.budget;
   return (
     <div>
-      <Heading>Status do sistema</Heading>
-      <p className="mb-3 text-xs text-muted">Prontidão da sua conta. Cada usuário tem as próprias chaves e configurações.</p>
+      <Heading>{tr("Status do sistema")}</Heading>
+      <p className="mb-3 text-xs text-muted">{tr("Prontidão da sua conta. Cada usuário tem as próprias chaves e configurações.")}</p>
       <div className="space-y-2">
         <StatusRow
-          label="Chave do OpenRouter"
+          label={tr("Chave do OpenRouter")}
           state={st.openrouter_key ? "ok" : "off"}
-          detail={st.openrouter_key ? (orTest === "ok" ? "Válida ✓" : orTest === "fail" ? "A chave falhou no teste" : "Configurada") : "Necessária para conversar"}
-          actionLabel={st.openrouter_key ? undefined : "Configurar"}
+          detail={st.openrouter_key ? (orTest === "ok" ? tr("Válida ✓") : orTest === "fail" ? tr("A chave falhou no teste") : tr("Configurada")) : tr("Necessária para conversar")}
+          actionLabel={st.openrouter_key ? undefined : tr("Configurar")}
           onAction={() => onGoto("connections", "apis/providers")}
           extra={st.openrouter_key && (
             <button onClick={testOpenRouter} disabled={testing} className="shrink-0 rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-60">
-              {testing ? "Testando…" : "Testar"}
+              {testing ? tr("Testando…") : tr("Testar")}
             </button>
           )}
         />
         <StatusRow
-          label="Modelo padrão"
+          label={tr("Modelo padrão")}
           state={st.default_model ? "ok" : "warn"}
-          detail={st.default_model ?? "Nenhum definido — escolha no seletor do chat"}
+          detail={st.default_model ?? tr("Nenhum definido — escolha no seletor do chat")}
         />
         <StatusRow
-          label="Pesquisa na web"
+          label={tr("Pesquisa na web")}
           state="ok"
           detail={`Mecanismo: ${["duckduckgo", "searxng", "metasearch"].includes(st.web.provider) ? "Metabusca" : st.web.provider}`}
-          actionLabel="Configurar"
+          actionLabel={tr("Configurar")}
           onAction={() => onGoto("connections", "web")}
         />
         <StatusRow
-          label="Voz local"
+          label={tr("Voz local")}
           state={st.voice ? "ok" : "off"}
-          detail={st.voice ? "Provedor configurado" : "Não configurada (opcional)"}
-          actionLabel="Configurar"
+          detail={st.voice ? tr("Provedor configurado") : tr("Não configurada (opcional)")}
+          actionLabel={tr("Configurar")}
           onAction={() => onGoto("connections", "voice")}
         />
         <StatusRow
           label="WhatsApp"
           state={st.whatsapp.count === 0 ? "off" : st.whatsapp.connected > 0 ? "ok" : "warn"}
-          detail={st.whatsapp.count === 0 ? "Nenhum número conectado (opcional)" : `${st.whatsapp.connected}/${st.whatsapp.count} conectado(s)`}
-          actionLabel="Gerenciar"
+          detail={st.whatsapp.count === 0 ? tr("Nenhum número conectado (opcional)") : `${st.whatsapp.connected}/${st.whatsapp.count} conectado(s)`}
+          actionLabel={tr("Gerenciar")}
           onAction={() => onGoto("integrations", "whatsapp")}
         />
-        <StatusRow label="Google" state={st.google > 0 ? "ok" : "off"} detail={st.google > 0 ? `${st.google} conta(s)` : "Não conectado (opcional)"} actionLabel="Gerenciar" onAction={() => onGoto("integrations", "google")} />
-        <StatusRow label="Casa (Tuya)" state={st.tuya ? "ok" : "off"} detail={st.tuya ? "Conectada" : "Não conectada (opcional)"} actionLabel="Gerenciar" onAction={() => onGoto("integrations", "tuya")} />
+        <StatusRow label={tr("Google")} state={st.google > 0 ? "ok" : "off"} detail={st.google > 0 ? `${st.google} conta(s)` : tr("Não conectado (opcional)")} actionLabel={tr("Gerenciar")} onAction={() => onGoto("integrations", "google")} />
+        <StatusRow label="Casa (Tuya)" state={st.tuya ? "ok" : "off"} detail={st.tuya ? tr("Conectada") : tr("Não conectada (opcional)")} actionLabel={tr("Gerenciar")} onAction={() => onGoto("integrations", "tuya")} />
         <StatusRow
-          label="Orçamento mensal"
+          label={tr("Orçamento mensal")}
           state={!b.enabled ? "off" : b.over ? (b.blocked ? "warn" : "warn") : "ok"}
           detail={!b.enabled ? "Desativado (opcional)" : `US$ ${b.spent.toFixed(2)} de US$ ${b.cap.toFixed(2)}${b.over ? (b.blocked ? " — pausado" : " — acima do teto") : ""}`}
-          actionLabel="Ajustar"
+          actionLabel={tr("Ajustar")}
           onAction={() => onGoto("account")}
         />
       </div>
@@ -1916,9 +1933,9 @@ function StatusTab({ user, onGoto }: { user: User | null; onGoto: (cat: Cat, vie
         <>
           <Heading>Infraestrutura (admin)</Heading>
           <div className="space-y-2">
-            <StatusRow label="Banco de dados" state={st.admin.db ? "ok" : "off"} detail={st.admin.db ? "Respondendo" : "Sem resposta"} />
-            <StatusRow label="WhatsApp por QR Code" state={st.admin.evolution_configured ? "ok" : "off"} detail={st.admin.whatsapp_qr_backend === "local" ? "Motor local" : st.admin.evolution_configured ? "Evolution API" : "Não habilitado (opcional)"} />
-            <StatusRow label="Cadastro de novos usuários" state={st.admin.signup_open ? "warn" : "ok"} detail={st.admin.signup_open ? "Aberto" : "Fechado"} />
+            <StatusRow label={tr("Banco de dados")} state={st.admin.db ? "ok" : "off"} detail={st.admin.db ? tr("Respondendo") : tr("Sem resposta")} />
+            <StatusRow label={tr("WhatsApp por QR Code")} state={st.admin.evolution_configured ? "ok" : "off"} detail={st.admin.whatsapp_qr_backend === "local" ? tr("Motor local") : st.admin.evolution_configured ? tr("Evolution API") : tr("Não habilitado (opcional)")} />
+            <StatusRow label={tr("Cadastro de novos usuários")} state={st.admin.signup_open ? "warn" : "ok"} detail={st.admin.signup_open ? tr("Aberto") : tr("Fechado")} />
           </div>
         </>
       )}
@@ -1961,8 +1978,8 @@ function ShortcutsTab({ profile, set }: { profile: Record<string, any>; set: (k:
   return (
     <div>
       <div className="flex items-center justify-between">
-        <Heading>Atalhos de teclado</Heading>
-        <LinkBtn onClick={() => set("shortcuts", {})}>Restaurar padrões</LinkBtn>
+        <Heading>{tr("Atalhos de teclado")}</Heading>
+        <LinkBtn onClick={() => set("shortcuts", {})}>{tr("Restaurar padrões")}</LinkBtn>
       </div>
       {SHORTCUT_GROUPS.map((g) => (
         <div key={g.title} className="mb-4">
@@ -1976,12 +1993,12 @@ function ShortcutsTab({ profile, set }: { profile: Record<string, any>; set: (k:
               return (
                 <div key={a.id} className="flex items-center gap-2.5 rounded-lg border border-border bg-surface px-3 py-2">
                   <span className={`flex-1 truncate text-sm ${b.enabled ? "text-ink" : "text-muted line-through"}`}>{a.label}</span>
-                  {conflict && <span className="shrink-0 text-[11px] text-amber-400">em conflito</span>}
+                  {conflict && <span className="shrink-0 text-[11px] text-amber-400">{tr("em conflito")}</span>}
                   <button
                     onClick={() => setRecording(isRec ? null : a.id)}
                     className={`min-w-[96px] shrink-0 rounded-md border px-2 py-1 text-center text-xs transition-colors ${isRec ? "animate-pulse border-accent bg-accent/10 text-accent-hover" : "border-border text-ink-soft hover:bg-hover"}`}
                   >
-                    {isRec ? "Pressione…" : (
+                    {isRec ? tr("Pressione…") : (
                       <span className="flex items-center justify-center gap-1">
                         {prettyCombo(b.keys).map((k, i) => (
                           <kbd key={i} className="rounded bg-surface2 px-1.5 py-0.5 font-mono text-[10px] leading-4 text-ink-soft">{k}</kbd>
@@ -1989,7 +2006,7 @@ function ShortcutsTab({ profile, set }: { profile: Record<string, any>; set: (k:
                       </span>
                     )}
                   </button>
-                  <button onClick={() => resetOne(a.id)} title="Voltar ao padrão" disabled={!custom} className="shrink-0 rounded-md p-1 text-muted transition-colors hover:text-ink disabled:opacity-30">
+                  <button onClick={() => resetOne(a.id)} title={tr("Voltar ao padrão")} disabled={!custom} className="shrink-0 rounded-md p-1 text-muted transition-colors hover:text-ink disabled:opacity-30">
                     <RotateCcw size={14} />
                   </button>
                   <Toggle on={b.enabled} onClick={() => setBinding(a.id, { enabled: !b.enabled })} />
@@ -2000,8 +2017,8 @@ function ShortcutsTab({ profile, set }: { profile: Record<string, any>; set: (k:
         </div>
       ))}
       <p className="text-xs text-muted">
-        Clique no atalho e pressione a combinação — precisa incluir <span className="text-ink-soft">Ctrl/⌘</span> ou <span className="text-ink-soft">Alt</span>. Esc cancela.
-        Não disparam enquanto você digita (a menos que use Ctrl/⌘/Alt). Lembre de salvar.
+        
+        {tr("Clique no atalho e pressione a combinação — precisa incluir")} <span className="text-ink-soft">Ctrl/⌘</span> ou <span className="text-ink-soft">{tr("Alt")}</span>{tr(". Esc cancela. Não disparam enquanto você digita (a menos que use Ctrl/⌘/Alt). Lembre de salvar.")}
       </p>
     </div>
   );
@@ -2035,12 +2052,12 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
 
   async function exportChats() {
     const raw = await prompt({
-      title: "Exportar chats",
-      body: "Defina uma senha para CIFRAR o export, ou deixe em branco para exportar sem criptografia.",
+      title: tr("Exportar chats"),
+      body: tr("Defina uma senha para CIFRAR o export, ou deixe em branco para exportar sem criptografia."),
       placeholder: "Senha (opcional)",
       password: true,
       allowEmpty: true,
-      confirmLabel: "Exportar",
+      confirmLabel: tr("Exportar"),
     });
     if (raw === null) return; // cancelou
     const pw = raw.trim();
@@ -2065,11 +2082,11 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
         const parsed = JSON.parse(text);
         if (parsed && parsed.aw_enc === 1) {
           const raw = await prompt({
-            title: "Arquivo cifrado",
-            body: "Este arquivo está protegido. Digite a senha para importar.",
-            placeholder: "Senha",
+            title: tr("Arquivo cifrado"),
+            body: tr("Este arquivo está protegido. Digite a senha para importar."),
+            placeholder: tr("Senha"),
             password: true,
-            confirmLabel: "Importar",
+            confirmLabel: tr("Importar"),
           });
           const pw = (raw ?? "").trim();
           if (!pw) { setBusy(false); return; }
@@ -2077,31 +2094,31 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
         } else {
           body = { items: Array.isArray(parsed) ? parsed : (parsed.items ?? [parsed]) };
         }
-      } catch { toast("Arquivo inválido."); return; }
+      } catch { toast(tr("Arquivo inválido.")); return; }
       await api.post("/chats/bulk/import", body);
-      toast("Chats importados. Recarregue a página.", "success");
+      toast(tr("Chats importados. Recarregue a página."), "success");
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Falha ao importar.");
+      toast(e instanceof ApiError ? e.message : tr("Falha ao importar."));
     } finally {
       setBusy(false);
     }
   }
 
   async function archiveAll() {
-    if (!(await confirm({ title: "Arquivar TODOS os chats?", confirmLabel: "Arquivar" }))) return;
+    if (!(await confirm({ title: tr("Arquivar TODOS os chats?"), confirmLabel: tr("Arquivar") }))) return;
     await api.post("/chats/bulk/archive-all");
-    toast("Chats arquivados. Recarregue a página.", "success");
+    toast(tr("Chats arquivados. Recarregue a página."), "success");
   }
   async function deleteAll() {
     const ok = await confirm({
-      title: "Excluir TODOS os chats?",
-      body: "Esta ação é irreversível.",
-      confirmLabel: "Excluir tudo",
+      title: tr("Excluir TODOS os chats?"),
+      body: tr("Esta ação é irreversível."),
+      confirmLabel: tr("Excluir tudo"),
       danger: true,
     });
     if (!ok) return;
     await api.post("/chats/bulk/delete-all");
-    toast("Chats excluídos. Recarregue a página.", "success");
+    toast(tr("Chats excluídos. Recarregue a página."), "success");
   }
 
   return (
@@ -2113,23 +2130,23 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
         className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) importChats(f); e.target.value = ""; }}
       />
-      <Heading>Chats</Heading>
-      <Row label="Importar Chats"><LinkBtn onClick={() => fileRef.current?.click()}>{busy ? "…" : "Importar"}</LinkBtn></Row>
-      <Row label="Exportar Chats"><LinkBtn onClick={exportChats}>Exportar</LinkBtn></Row>
-      <Row label="Chats Arquivados"><LinkBtn onClick={onArchived}>Gerenciar</LinkBtn></Row>
-      <Row label="Chats compartilhados"><LinkBtn onClick={onManageShared}>Gerenciar</LinkBtn></Row>
-      <Row label="Arquivar Todos os Chats"><LinkBtn onClick={archiveAll}>Arquivar tudo</LinkBtn></Row>
-      <Row label="Excluir Todos os Chats">
-        <button onClick={deleteAll} className="shrink-0 text-sm text-red-400 hover:text-red-300">Excluir tudo</button>
+      <Heading>{tr("Chats")}</Heading>
+      <Row label={tr("Importar Chats")}><LinkBtn onClick={() => fileRef.current?.click()}>{busy ? "…" : tr("Importar")}</LinkBtn></Row>
+      <Row label={tr("Exportar Chats")}><LinkBtn onClick={exportChats}>{tr("Exportar")}</LinkBtn></Row>
+      <Row label={tr("Chats Arquivados")}><LinkBtn onClick={onArchived}>{tr("Gerenciar")}</LinkBtn></Row>
+      <Row label={tr("Chats compartilhados")}><LinkBtn onClick={onManageShared}>{tr("Gerenciar")}</LinkBtn></Row>
+      <Row label={tr("Arquivar Todos os Chats")}><LinkBtn onClick={archiveAll}>{tr("Arquivar tudo")}</LinkBtn></Row>
+      <Row label={tr("Excluir Todos os Chats")}>
+        <button onClick={deleteAll} className="shrink-0 text-sm text-red-400 hover:text-red-300">{tr("Excluir tudo")}</button>
       </Row>
 
-      <Heading>Memória da IA</Heading>
-      <Row label="Memória" info="Permita a IA lembrar de fatos entre as conversas">
+      <Heading>{tr("Memória da IA")}</Heading>
+      <Row label={tr("Memória")} info={tr("Permita a IA lembrar de fatos entre as conversas")}>
         <div className="flex items-center gap-1.5">
           {memOn && (
             <button
               onClick={() => setMemCfgOpen((v) => !v)}
-              title="Configurações da memória"
+              title={tr("Configurações da memória")}
               className={`rounded-lg p-1.5 transition-colors ${memCfgOpen ? "bg-hover text-ink" : "text-muted hover:bg-hover hover:text-ink"}`}
             >
               <Settings size={16} />
@@ -2140,9 +2157,9 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
       </Row>
       {memOn && memCfgOpen && (
         <div className="mb-1 grid gap-4 rounded-xl border border-border bg-surface2/40 p-4 sm:grid-cols-2">
-          <p className="text-xs text-muted sm:col-span-2">Padrões para novos chats — cada chat pode sobrescrever em Controles.</p>
+          <p className="text-xs text-muted sm:col-span-2">{tr("Padrões para novos chats — cada chat pode sobrescrever em Controles.")}</p>
           <div>
-            <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">Salvar novas memórias em</p>
+            <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">{tr("Salvar novas memórias em")}</p>
             <Select
               value={mem?.write ?? "global"}
               onChange={(e) => saveMem({ write: e.target.value as MemoryConfig["write"] })}
@@ -2154,7 +2171,7 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
             </Select>
           </div>
           <div>
-            <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">Ler memórias de (união)</p>
+            <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-muted">{tr("Ler memórias de (união)")}</p>
             <div className="flex flex-wrap gap-1.5">
               {(["global", "model", "chat"] as const).map((k) => {
                 const on = memRead[k] !== false;
@@ -2172,19 +2189,19 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
           </div>
           <div className="flex items-center justify-between sm:col-span-2">
             <div>
-              <p className="text-sm text-ink">Revisar antes de salvar</p>
-              <p className="text-xs text-muted">Novas memórias ficam pendentes até você aprovar (em Espaço → Memória).</p>
+              <p className="text-sm text-ink">{tr("Revisar antes de salvar")}</p>
+              <p className="text-xs text-muted">{tr("Novas memórias ficam pendentes até você aprovar (em Espaço → Memória).")}</p>
             </div>
             <Toggle on={mem?.review === true} onClick={() => saveMem({ review: !(mem?.review === true) })} />
           </div>
         </div>
       )}
-      <Row label="Aprendizado proativo" info="A IA revisa as conversas de vez em quando e sugere skills e memórias — sempre com a sua aprovação">
+      <Row label={tr("Aprendizado proativo")} info={tr("A IA revisa as conversas de vez em quando e sugere skills e memórias — sempre com a sua aprovação")}>
         <Toggle on={learnOn} onClick={toggleLearn} />
       </Row>
 
-      <Heading>Arquivos</Heading>
-      <Row label="Gerenciar arquivos"><LinkBtn onClick={() => toast("Em breve.", "info")}>Gerenciar</LinkBtn></Row>
+      <Heading>{tr("Arquivos")}</Heading>
+      <Row label={tr("Gerenciar arquivos")}><LinkBtn onClick={() => toast(tr("Em breve."), "info")}>{tr("Gerenciar")}</LinkBtn></Row>
     </div>
   );
 }
@@ -2198,16 +2215,16 @@ type ApiSection = "providers" | "voice" | "search" | "finance";
 
 const API_SECTION_COPY: Record<Exclude<ApiSection, "providers">, { title: string; description: string }> = {
   voice: {
-    title: "Voz",
-    description: "Credencial usada para transcrição e síntese de voz.",
+    title: tr("Voz"),
+    description: tr("Credencial usada para transcrição e síntese de voz."),
   },
   search: {
-    title: "Pesquisa na web",
-    description: "Mecanismos que alimentam a Pesquisa na Web e o Deep Search.",
+    title: tr("Pesquisa na web"),
+    description: tr("Mecanismos que alimentam a Pesquisa na Web e o Deep Search."),
   },
   finance: {
-    title: "Finanças",
-    description: "Fontes de mercado usadas pelas ferramentas de cotações.",
+    title: tr("Finanças"),
+    description: tr("Fontes de mercado usadas pelas ferramentas de cotações."),
   },
 };
 
@@ -2228,10 +2245,10 @@ function ApiCategoryCard({
 }) {
   const ready = configured === total;
   const statusText = configured === 0
-    ? "Nenhuma chave"
+    ? tr("Nenhuma chave")
     : total === 1
-      ? "Chave configurada"
-      : `${configured} de ${total} configuradas`;
+      ? tr("Chave configurada")
+      : tr("{configured} de {total} configuradas", { configured: configured, total: total });
   return (
     <button
       type="button"
@@ -2279,20 +2296,20 @@ function ApisPanel({
         <p className="mb-3 text-xs leading-5 text-muted">{copy.description}</p>
         <div className="rounded-xl border border-border bg-surface px-4 py-2">
           {section === "voice" && (
-            <SecretField label="Chave do provedor de voz" name="voice" configured={status?.voice ?? false} hint="TTS/STT — endpoint compatível com OpenAI (VOICE_BASE_URL). Use OpenAI ou um servidor local." onSaved={reloadSecrets} />
+            <SecretField label={tr("Chave do provedor de voz")} name="voice" configured={status?.voice ?? false} hint={tr("TTS/STT — endpoint compatível com OpenAI (VOICE_BASE_URL). Use OpenAI ou um servidor local.")} onSaved={reloadSecrets} />
           )}
           {section === "search" && (
             <>
-              <SecretField label="Chave Tavily" name="tavily" configured={status?.tavily ?? false} hint="tavily.com — ferramenta Pesquisa na Web / Deep Search." onSaved={reloadSecrets} />
+              <SecretField label={tr("Chave Tavily")} name="tavily" configured={status?.tavily ?? false} hint={tr("tavily.com — ferramenta Pesquisa na Web / Deep Search.")} onSaved={reloadSecrets} />
               <div className="border-t border-border" />
-              <SecretField label="Chave Brave Search" name="brave" configured={status?.brave ?? false} hint="brave.com/search/api" onSaved={reloadSecrets} />
+              <SecretField label={tr("Chave Brave Search")} name="brave" configured={status?.brave ?? false} hint="brave.com/search/api" onSaved={reloadSecrets} />
             </>
           )}
           {section === "finance" && (
             <>
-              <SecretField label="Chave Finnhub" name="finnhub" configured={status?.finnhub ?? false} hint="finnhub.io — ferramenta Cotação (Ações)." onSaved={reloadSecrets} />
+              <SecretField label={tr("Chave Finnhub")} name="finnhub" configured={status?.finnhub ?? false} hint={tr("finnhub.io — ferramenta Cotação (Ações).")} onSaved={reloadSecrets} />
               <div className="border-t border-border" />
-              <SecretField label="Chave Alpha Vantage" name="alphavantage" configured={status?.alphavantage ?? false} hint="alphavantage.co" onSaved={reloadSecrets} />
+              <SecretField label={tr("Chave Alpha Vantage")} name="alphavantage" configured={status?.alphavantage ?? false} hint="alphavantage.co" onSaved={reloadSecrets} />
             </>
           )}
         </div>
@@ -2307,7 +2324,7 @@ function ApisPanel({
       <div className="grid gap-3 sm:grid-cols-2">
         <ApiCategoryCard
           icon={<Server size={20} />}
-          title="Provedores"
+          title={tr("Provedores")}
           description="OpenRouter, LiteLLM e personalizados"
           configured={status?.openrouter ? 1 : 0}
           total={1}
@@ -2315,24 +2332,24 @@ function ApisPanel({
         />
         <ApiCategoryCard
           icon={<AudioLines size={20} />}
-          title="Voz"
-          description="Transcrição e síntese"
+          title={tr("Voz")}
+          description={tr("Transcrição e síntese")}
           configured={status?.voice ? 1 : 0}
           total={1}
           onOpen={() => setSection("voice")}
         />
         <ApiCategoryCard
           icon={<Search size={20} />}
-          title="Pesquisa"
-          description="Tavily e Brave Search"
+          title={tr("Pesquisa")}
+          description={tr("Tavily e Brave Search")}
           configured={(status?.tavily ? 1 : 0) + (status?.brave ? 1 : 0)}
           total={2}
           onOpen={() => setSection("search")}
         />
         <ApiCategoryCard
           icon={<Activity size={20} />}
-          title="Finanças"
-          description="Finnhub e Alpha Vantage"
+          title={tr("Finanças")}
+          description={tr("Finnhub e Alpha Vantage")}
           configured={(status?.finnhub ? 1 : 0) + (status?.alphavantage ? 1 : 0)}
           total={2}
           onOpen={() => setSection("finance")}

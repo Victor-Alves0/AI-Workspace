@@ -1,21 +1,22 @@
+import { tr } from "@/lib/i18n";
 // Lê um arquivo de imagem, redimensiona (mantendo proporção, lado maior = `max`)
 // e devolve um data URL JPEG. Mantém o avatar pequeno o bastante p/ caber no
 // perfil (JSONB) sem estourar o limite do backend.
 export async function fileToAvatarDataUrl(file: File, max = 256, quality = 0.85): Promise<string> {
   if (!file.type.startsWith("image/")) {
-    throw new Error("Selecione um arquivo de imagem");
+    throw new Error(tr("Selecione um arquivo de imagem"));
   }
   const dataUrl = await new Promise<string>((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(r.result as string);
-    r.onerror = () => reject(new Error("Falha ao ler o arquivo"));
+    r.onerror = () => reject(new Error(tr("Falha ao ler o arquivo")));
     r.readAsDataURL(file);
   });
 
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {
     const i = new Image();
     i.onload = () => resolve(i);
-    i.onerror = () => reject(new Error("Imagem inválida"));
+    i.onerror = () => reject(new Error(tr("Imagem inválida")));
     i.src = dataUrl;
   });
 
@@ -26,7 +27,7 @@ export async function fileToAvatarDataUrl(file: File, max = 256, quality = 0.85)
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas indisponível");
+  if (!ctx) throw new Error(tr("Canvas indisponível"));
   ctx.drawImage(img, 0, 0, w, h);
   return canvas.toDataURL("image/jpeg", quality);
 }

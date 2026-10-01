@@ -10,6 +10,7 @@ import type { CodespaceFileEntry } from "@/lib/types";
 import { usePrompt } from "@/components/ConfirmDialog";
 import { AnchoredMenu, MenuItem } from "@/components/ui";
 import { toast } from "@/components/Toaster";
+import { tr } from "@/lib/i18n";
 
 /** remove o prefixo "N\t" (número de linha) que /files/content devolve */
 export function stripLineNumbers(content: string): string {
@@ -109,14 +110,14 @@ function EntryRow({
   async function rename() {
     setMenuOpen(false);
     const base = basename(entry.path);
-    const v = await prompt({ title: "Renomear", defaultValue: base });
+    const v = await prompt({ title: tr("Renomear"), defaultValue: base });
     if (!v || !v.trim() || v.trim() === base) return;
     const dest = joinPath(dirname(entry.path), v.trim());
     try {
       await api.patch(`/codespace/projects/${projectId}/files/move`, { path: entry.path, dest_path: dest });
       onChanged();
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Falha ao renomear");
+      toast(e instanceof ApiError ? e.message : tr("Falha ao renomear"));
     }
   }
 
@@ -150,7 +151,7 @@ function EntryRow({
       </button>
       {menuOpen && (
         <AnchoredMenu anchorRef={btnRef} onClose={() => setMenuOpen(false)}>
-          <MenuItem icon={<Pencil size={13} />} onClick={rename}>Renomear</MenuItem>
+          <MenuItem icon={<Pencil size={13} />} onClick={rename}>{tr("Renomear")}</MenuItem>
         </AnchoredMenu>
       )}
     </div>
@@ -164,7 +165,7 @@ function EntryRow({
  *  Cada entrada é arrastável: solta numa pasta pra mover, ou fora do explorador
  *  (ex.: sobre o campo de mensagem do chat) pra referenciar o arquivo. */
 export default function CodespaceFileBrowser({
-  projectId, onUse, useLabel = "Referenciar no chat", dense = false, initialPath,
+  projectId, onUse, useLabel = tr("Referenciar no chat"), dense = false, initialPath,
 }: {
   projectId: string;
   onUse?: (path: string, content: string) => void;
@@ -280,7 +281,7 @@ export default function CodespaceFileBrowser({
       }
     } catch {
       if (openFileRequestRef.current === requestId) {
-        setContent("(falha ao ler o arquivo)");
+        setContent(tr("(falha ao ler o arquivo)"));
         setContentMeta(null);
       }
     } finally {
@@ -296,7 +297,7 @@ export default function CodespaceFileBrowser({
       refresh();
       if (selected === srcPath) setSelected(dest);
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Falha ao mover");
+      toast(e instanceof ApiError ? e.message : tr("Falha ao mover"));
     }
   }
 
@@ -332,7 +333,7 @@ export default function CodespaceFileBrowser({
       }
     } catch (e) {
       if (openFileRequestRef.current === requestId) {
-        setSaveError(e instanceof ApiError ? e.message : "Falha ao salvar");
+        setSaveError(e instanceof ApiError ? e.message : tr("Falha ao salvar"));
       }
     } finally {
       // Um save antigo não pode reabilitar os controles enquanto o arquivo novo
@@ -355,7 +356,7 @@ export default function CodespaceFileBrowser({
           <Search size={12} className="shrink-0 text-muted" />
           <input
             value={query} onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar arquivo…"
+            placeholder={tr("Buscar arquivo…")}
             className="min-w-0 flex-1 bg-transparent py-0.5 text-xs text-ink outline-none placeholder:text-muted"
           />
           {searching && <Loader2 size={11} className="shrink-0 animate-spin text-muted" />}
@@ -368,7 +369,7 @@ export default function CodespaceFileBrowser({
             onDragOver={(e) => e.preventDefault()} onDrop={(e) => onDropOnPath(e, "")}
             className="flex flex-wrap items-center gap-1 border-b border-border px-2.5 py-2 text-xs text-muted"
           >
-            <button onClick={() => setPath("")} className="rounded p-0.5 hover:bg-hover hover:text-ink" title="Raiz"><Home size={13} /></button>
+            <button onClick={() => setPath("")} className="rounded p-0.5 hover:bg-hover hover:text-ink" title={tr("Raiz")}><Home size={13} /></button>
             {crumbs.map((c) => (
               <span key={c.path} className="flex items-center gap-1" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.stopPropagation(); onDropOnPath(e, c.path); }}>
                 <ChevronRight size={11} />
@@ -380,9 +381,9 @@ export default function CodespaceFileBrowser({
         <div className="flex-1 overflow-y-auto p-1.5">
           {showingSearch ? (
             searchResults === null ? (
-              <p className="px-2 py-4 text-xs text-muted">Buscando…</p>
+              <p className="px-2 py-4 text-xs text-muted">{tr("Buscando…")}</p>
             ) : searchResults.length === 0 ? (
-              <p className="px-2 py-4 text-xs text-muted">Nada encontrado.</p>
+              <p className="px-2 py-4 text-xs text-muted">{tr("Nada encontrado.")}</p>
             ) : (
               searchResults.map((e) => (
                 <EntryRow
@@ -394,9 +395,9 @@ export default function CodespaceFileBrowser({
           ) : listError ? (
             <p className="px-2 py-4 text-xs text-red-400">{listError}</p>
           ) : entries === null ? (
-            <p className="px-2 py-4 text-xs text-muted">Carregando…</p>
+            <p className="px-2 py-4 text-xs text-muted">{tr("Carregando…")}</p>
           ) : entries.length === 0 ? (
-            <p className="px-2 py-4 text-xs text-muted">Pasta vazia.</p>
+            <p className="px-2 py-4 text-xs text-muted">{tr("Pasta vazia.")}</p>
           ) : (
             entries.map((e) => (
               <EntryRow
@@ -413,7 +414,8 @@ export default function CodespaceFileBrowser({
       <div className="flex min-w-0 flex-1 flex-col rounded-xl border border-border bg-surface">
         {!selected ? (
           <p className="grid h-full min-h-[120px] place-items-center px-6 text-center text-sm text-muted">
-            Escolha um arquivo.
+            
+            {tr("Escolha um arquivo.")}
           </p>
         ) : (
           <>
@@ -424,18 +426,18 @@ export default function CodespaceFileBrowser({
                   <>
                     <button onClick={save} disabled={saving}
                       className="flex items-center gap-1 rounded-full bg-accent px-2.5 py-1 text-[11px] font-medium text-white hover:bg-accent-hover disabled:opacity-60">
-                      {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} Salvar
+                      {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}  {tr("Salvar")}
                     </button>
                     <button onClick={() => setEditing(false)} disabled={saving}
                       className="flex items-center gap-1 rounded-full border border-border bg-surface2 px-2.5 py-1 text-[11px] text-ink-soft hover:bg-hover">
-                      <X size={12} /> Cancelar
+                      <X size={12} />  {tr("Cancelar")}
                     </button>
                   </>
                 ) : (
                   <>
                     <button onClick={startEdit} disabled={loadingContent}
                       className="flex items-center gap-1 rounded-full border border-border bg-surface2 px-2.5 py-1 text-[11px] text-ink-soft transition-colors hover:bg-hover disabled:opacity-60">
-                      <Pencil size={12} /> Editar
+                      <Pencil size={12} />  {tr("Editar")}
                     </button>
                     {onUse && (
                       <button
@@ -444,7 +446,7 @@ export default function CodespaceFileBrowser({
                           // arquivo grande vem cortado do servidor — marca o corte
                           // no texto inserido, senão a IA acha que o arquivo acaba ali
                           contentMeta?.truncated
-                            ? `${content}\n… (arquivo truncado — ${contentMeta.total_lines} linhas no total)`
+                            ? tr("{content}\n… (arquivo truncado — {total_lines} linhas no total)", { content: content, total_lines: contentMeta.total_lines })
                             : content,
                         )}
                         disabled={loadingContent}
@@ -459,7 +461,7 @@ export default function CodespaceFileBrowser({
             {saveError && <p className="border-b border-border bg-red-500/10 px-3 py-1.5 text-[11px] text-red-400">{saveError}</p>}
             <div className="flex-1 overflow-auto">
               {loadingContent ? (
-                <p className="p-4 text-xs text-muted">Carregando…</p>
+                <p className="p-4 text-xs text-muted">{tr("Carregando…")}</p>
               ) : editing ? (
                 <textarea
                   value={draft} onChange={(e) => setDraft(e.target.value)} spellCheck={false}
@@ -485,7 +487,8 @@ export default function CodespaceFileBrowser({
             </div>
             {!editing && contentMeta?.truncated && (
               <p className="border-t border-border px-3 py-1.5 text-[11px] text-amber-500">
-                arquivo truncado ({contentMeta.total_lines} linhas no total).
+                
+                {tr("arquivo truncado (")}{contentMeta.total_lines}  {tr("linhas no total).")}
               </p>
             )}
           </>
@@ -522,7 +525,7 @@ const CodeView = forwardRef<HTMLDivElement, {
       ref={ref}
       draggable
       onDragStart={onDragStartSnippet}
-      title="Selecione um trecho e arraste até o chat para enviá-lo com arquivo e linhas"
+      title={tr("Selecione um trecho e arraste até o chat para enviá-lo com arquivo e linhas")}
       className="w-max min-w-full py-3 font-mono text-[11px] leading-5"
     >
       {lines.map((l, i) => (

@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import type { User } from "@/lib/types";
+import { tr } from "@/lib/i18n";
 
 export default function Home() {
   const router = useRouter();
@@ -16,7 +17,8 @@ export default function Home() {
 
   return (
     <div className="flex h-full items-center justify-center text-muted">
-      Carregando…
+      
+      {tr("Carregando…")}
     </div>
   );
 }

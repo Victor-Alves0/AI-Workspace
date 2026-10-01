@@ -7,6 +7,7 @@ import type { ActivityStep, Chat, SubagentLive, TeamLive, ToolEvent } from "@/li
 import { applySubagentProgress } from "@/lib/subagent";
 import { splitStreamArtifacts, type StreamArtifact } from "@/lib/artifacts";
 import { parseReasoningEffort } from "@/components/PromptBox";
+import { tr } from "@/lib/i18n";
 
 export interface GuardNote {
   name: string;
@@ -363,7 +364,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
           at = state.steps.length - 1;
         }
         const prev = (state.steps[at] as { kind: "tool"; event: ToolEvent }).event;
-        const cur: TeamLive = prev.team ?? { name: ev.team || "Equipe", goal: ev.goal, size: 0, running: true, members: [] };
+        const cur: TeamLive = prev.team ?? { name: ev.team || tr("Equipe"), goal: ev.goal, size: 0, running: true, members: [] };
         let next: TeamLive = cur;
         if (ev.status === "team_start") {
           const ms = (ev.members ?? []) as { name: string; task: string }[];
@@ -406,7 +407,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
           at = state.steps.length - 1;
         }
         const prev = (state.steps[at] as { kind: "tool"; event: ToolEvent }).event;
-        const cur: SubagentLive = prev.live ?? { name: ev.agent || "Agente", task: ev.task, adhoc: ev.adhoc, running: true, timeline: [] };
+        const cur: SubagentLive = prev.live ?? { name: ev.agent || tr("Agente"), task: ev.task, adhoc: ev.adhoc, running: true, timeline: [] };
         const next: SubagentLive =
           ev.status === "progress" ? applySubagentProgress(cur, ev)
           : ev.status === "background" ? { ...cur, running: false, background: true }
@@ -426,7 +427,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         }
       } else if (ev.type === "guard_reset") {
         archiveCommentary();
-        state.steps.push({ kind: "commentary", text: "Revisando a resposta após a verificação de saída." });
+        state.steps.push({ kind: "commentary", text: tr("Revisando a resposta após a verificação de saída.") });
         state.acc = ""; state.reason = ""; state.tools = [];
         if (paint()) {
           setStreamPhase("preparing");

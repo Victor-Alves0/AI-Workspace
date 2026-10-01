@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
+import { tr } from "@/lib/i18n";
 
 type Json = Record<string, any>;
 
@@ -68,8 +69,8 @@ export default function DebugPage() {
   if (denied) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 text-muted">
-        <p>Acesso negado — o painel de debug é apenas para admin.</p>
-        <button onClick={() => router.push("/chat")} className="text-accent">← Voltar ao chat</button>
+        <p>{tr("Acesso negado — o painel de debug é apenas para admin.")}</p>
+        <button onClick={() => router.push("/chat")} className="text-accent">{tr("← Voltar ao chat")}</button>
       </div>
     );
   }
@@ -78,45 +79,46 @@ export default function DebugPage() {
     <div className="h-full overflow-y-auto bg-bg p-6">
       <div className="mx-auto max-w-5xl space-y-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold">Painel de Debug</h1>
+          <h1 className="text-xl font-semibold">{tr("Painel de Debug")}</h1>
           <div className="flex items-center gap-3 text-sm">
             <label className="flex items-center gap-2 text-muted">
               <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
               Auto-refresh
             </label>
             <button onClick={() => { loadStatic(); loadLive(); }} className="rounded-lg border border-border px-3 py-1.5 hover:border-accent">
-              Atualizar
+              
+              {tr("Atualizar")}
             </button>
             <button onClick={() => router.push("/chat")} className="text-muted hover:text-ink-soft">← Chat</button>
           </div>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <Section title="Sistema">
+          <Section title={tr("Sistema")}>
             {info ? (
               <div className="space-y-1 text-sm">
-                <Row k="Versão" v={info.version} />
-                <Row k="Ambiente" v={info.app_env} />
-                <Row k="Python" v={info.python} />
-                <Row k="Plataforma" v={info.platform} />
+                <Row k={tr("Versão")} v={info.version} />
+                <Row k={tr("Ambiente")} v={info.app_env} />
+                <Row k={tr("Python")} v={info.python} />
+                <Row k={tr("Plataforma")} v={info.platform} />
                 <div className="flex items-center justify-between">
-                  <span className="text-muted">APP_SECRET seguro</span>
+                  <span className="text-muted">{tr("APP_SECRET seguro")}</span>
                   <Dot ok={!info.secret_insecure} />
                 </div>
-                <Row k="Provider de busca" v={info.web_search_provider} />
-                <Row k="Sandbox timeout" v={`${info.tool_sandbox?.timeout_s}s / ${info.tool_sandbox?.cpu_s}s CPU / ${info.tool_sandbox?.mem_mb}MB`} />
+                <Row k={tr("Provider de busca")} v={info.web_search_provider} />
+                <Row k={tr("Sandbox timeout")} v={`${info.tool_sandbox?.timeout_s}s / ${info.tool_sandbox?.cpu_s}s CPU / ${info.tool_sandbox?.mem_mb}MB`} />
               </div>
             ) : (
               <p className="text-sm text-muted">…</p>
             )}
           </Section>
 
-          <Section title="Saúde">
+          <Section title={tr("Saúde")}>
             {health ? (
               <div className="space-y-2 text-sm">
                 <div className="flex items-center gap-2">
                   <Dot ok={health.ok} />
-                  <span>{health.ok ? "Tudo ok" : "Problemas detectados"}</span>
+                  <span>{health.ok ? tr("Tudo ok") : tr("Problemas detectados")}</span>
                 </div>
                 {Object.entries(health.components ?? {}).map(([k, v]: [string, any]) => (
                   <div key={k} className="flex items-center justify-between">
@@ -133,7 +135,7 @@ export default function DebugPage() {
             )}
           </Section>
 
-          <Section title="Provedores">
+          <Section title={tr("Provedores")}>
             {providers ? (
               <div className="space-y-2 text-sm">
                 {Object.entries(providers).map(([k, v]: [string, any]) => (
@@ -142,7 +144,7 @@ export default function DebugPage() {
                     <span className="flex items-center gap-2 text-xs">
                       {"key_configured" in v && (
                         <span className={v.key_configured ? "text-green-400" : "text-muted"}>
-                          {v.key_configured ? "chave ✓" : "sem chave"}
+                          {v.key_configured ? "chave ✓" : tr("sem chave")}
                         </span>
                       )}
                       {"reachable" in v && <Dot ok={v.reachable} />}
@@ -156,10 +158,10 @@ export default function DebugPage() {
             )}
           </Section>
 
-          <Section title="SIFT (tools por usuário)">
+          <Section title={tr("SIFT (tools por usuário)")}>
             {sift ? (
               <div className="space-y-1 text-sm">
-                <Row k="Usuários em cache" v={sift.cached_users} />
+                <Row k={tr("Usuários em cache")} v={sift.cached_users} />
                 {(sift.instances ?? []).map((i: any) => (
                   <div key={i.user_id} className="flex items-center justify-between text-xs">
                     <span className="font-mono text-muted">{i.user_id.slice(0, 8)}…</span>
@@ -175,7 +177,7 @@ export default function DebugPage() {
           </Section>
         </div>
 
-        <Section title="Métricas de Request">
+        <Section title={tr("Métricas de Request")}>
           {metrics ? (
             <div className="space-y-2 text-sm">
               <div className="flex gap-6 text-xs text-muted">
@@ -189,10 +191,10 @@ export default function DebugPage() {
                 <table className="w-full text-left text-xs">
                   <thead className="text-muted">
                     <tr>
-                      <th className="py-1">Rota</th>
-                      <th>Reqs</th>
-                      <th>Média</th>
-                      <th>Erros</th>
+                      <th className="py-1">{tr("Rota")}</th>
+                      <th>{tr("Reqs")}</th>
+                      <th>{tr("Média")}</th>
+                      <th>{tr("Erros")}</th>
                     </tr>
                   </thead>
                   <tbody className="font-mono">
@@ -213,7 +215,7 @@ export default function DebugPage() {
           )}
         </Section>
 
-        <Section title="Logs recentes">
+        <Section title={tr("Logs recentes")}>
           <div className="mb-2 flex gap-2 text-xs">
             {["", "INFO", "WARNING", "ERROR"].map((l) => (
               <button
@@ -226,7 +228,7 @@ export default function DebugPage() {
             ))}
           </div>
           <div className="max-h-80 overflow-y-auto rounded-lg bg-surface2 p-2 font-mono text-xs">
-            {logs.length === 0 && <p className="text-muted">sem logs</p>}
+            {logs.length === 0 && <p className="text-muted">{tr("sem logs")}</p>}
             {logs.map((l, i) => (
               <div key={i} className="border-b border-border/40 py-0.5">
                 <span

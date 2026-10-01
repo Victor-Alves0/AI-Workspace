@@ -6,10 +6,11 @@ import {
 } from "lucide-react";
 import type { Chat, Folder } from "@/lib/types";
 import { useClickOutside } from "./ui";
+import { dateLocale, tr } from "@/lib/i18n";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  return d.toLocaleDateString(dateLocale(), { day: "2-digit", month: "2-digit", year: "2-digit" });
 }
 
 /** Menu "Conversas": busca nos chats + multi-seleção p/ excluir, atribuir a um
@@ -81,7 +82,7 @@ export default function ChatManager({
         {/* cabeçalho */}
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
           <MessagesSquare size={18} className="text-accent-hover" />
-          <span className="text-sm font-semibold text-ink">Conversas</span>
+          <span className="text-sm font-semibold text-ink">{tr("Conversas")}</span>
           <span className="text-xs text-muted">{chats.length}</span>
           <button onClick={onClose} className="ml-auto rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={16} /></button>
         </div>
@@ -93,7 +94,7 @@ export default function ChatManager({
             autoFocus
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Buscar conversas…"
+            placeholder={tr("Buscar conversas…")}
             className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
           />
           {q && <button onClick={() => setQ("")} className="rounded-md p-0.5 text-muted hover:text-ink"><X size={14} /></button>}
@@ -125,7 +126,7 @@ export default function ChatManager({
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2">
           <button onClick={toggleAll} className="flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-ink">
             {allSelected ? <CheckSquare size={16} className="text-accent-hover" /> : <Square size={16} />}
-            {sel.size > 0 ? `${sel.size} selecionada${sel.size === 1 ? "" : "s"}` : "Selecionar tudo"}
+            {sel.size > 0 ? `${sel.size} selecionada${sel.size === 1 ? "" : "s"}` : tr("Selecionar tudo")}
           </button>
           {sel.size > 0 && (
             <div className="ml-auto flex items-center gap-1.5">
@@ -136,12 +137,12 @@ export default function ChatManager({
                   disabled={busy}
                   className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-50"
                 >
-                  <FolderInput size={14} /> Mover para <ChevronDown size={13} />
+                  <FolderInput size={14} />  {tr("Mover para")} <ChevronDown size={13} />
                 </button>
                 {moveOpen && (
                   <div className="absolute right-0 top-10 z-50 max-h-64 w-60 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-menu animate-pop">
                     <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted">Projetos (pastas)</p>
-                    {folders.length === 0 && <p className="px-2 py-2 text-xs text-muted">Nenhuma pasta criada.</p>}
+                    {folders.length === 0 && <p className="px-2 py-2 text-xs text-muted">{tr("Nenhuma pasta criada.")}</p>}
                     {folders.map((f) => (
                       <button
                         key={f.id}
@@ -157,7 +158,8 @@ export default function ChatManager({
                       onClick={() => move(null)}
                       className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm text-muted transition-colors hover:bg-hover hover:text-ink"
                     >
-                      Tirar da pasta (raiz)
+                      
+                      {tr("Tirar da pasta (raiz)")}
                     </button>
                   </div>
                 )}
@@ -167,7 +169,7 @@ export default function ChatManager({
                 disabled={busy}
                 className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm text-muted transition-colors hover:border-red-400/40 hover:text-red-400 disabled:opacity-50"
               >
-                {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} Excluir
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}  {tr("Excluir")}
               </button>
             </div>
           )}
@@ -177,7 +179,7 @@ export default function ChatManager({
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           {filtered.length === 0 ? (
             <p className="py-14 text-center text-sm text-muted">
-              {q ? `Nenhuma conversa para “${q}”.` : "Nenhuma conversa ainda."}
+              {q ? tr("Nenhuma conversa para “{q}”.", { q: q }) : tr("Nenhuma conversa ainda.")}
             </p>
           ) : (
             <ul className="space-y-0.5">
@@ -188,7 +190,7 @@ export default function ChatManager({
                     key={c.id}
                     className={`group flex items-center gap-2.5 rounded-xl px-2.5 py-2 transition-colors ${picked ? "bg-accent/10" : "hover:bg-hover"}`}
                   >
-                    <button onClick={() => toggle(c.id)} className="shrink-0 text-muted transition-colors hover:text-ink" title="Selecionar">
+                    <button onClick={() => toggle(c.id)} className="shrink-0 text-muted transition-colors hover:text-ink" title={tr("Selecionar")}>
                       {picked ? <CheckSquare size={17} className="text-accent-hover" /> : <Square size={17} />}
                     </button>
                     <button

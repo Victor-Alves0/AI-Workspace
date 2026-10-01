@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { Model, ModelConfig } from "@/lib/types";
 import { Select } from "@/components/ui";
+import { tr } from "@/lib/i18n";
 
 export default function ModelSelector({
   value,
@@ -26,7 +27,8 @@ export default function ModelSelector({
   if (error) {
     return (
       <span className="text-xs text-amber-400">
-        Configure a chave do OpenRouter em Configurações
+        
+        {tr("Configure a chave do OpenRouter em Configurações")}
       </span>
     );
   }
@@ -46,9 +48,9 @@ export default function ModelSelector({
       onChange={(e) => handle(e.target.value)}
       className="max-w-[280px] truncate rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm outline-none focus:border-accent"
     >
-      <option value="">Selecione um modelo…</option>
+      <option value="">{tr("Selecione um modelo…")}</option>
       {custom.length > 0 && (
-        <optgroup label="Meus modelos">
+        <optgroup label={tr("Meus modelos")}>
           {custom.map((c) => (
             <option key={c.id} value={`custom:${c.id}`}>
               ★ {c.name}
@@ -56,7 +58,7 @@ export default function ModelSelector({
           ))}
         </optgroup>
       )}
-      <optgroup label="Providers">
+      <optgroup label={tr("Providers")}>
         {models.map((m) => (
           <option key={m.id} value={m.id}>
             {m.name}{m.provider ? ` · ${m.provider}` : ""}

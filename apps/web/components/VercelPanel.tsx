@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Check, ChevronLeft, Loader2, TriangleAlert, Trash2, Wifi } from "lucide-react";
 import { SiVercel } from "react-icons/si";
 import { api } from "@/lib/api";
+import { tr } from "@/lib/i18n";
 
 interface VercelStatus { connected: boolean }
 
@@ -25,25 +26,25 @@ export default function VercelPanel({ onBack }: { onBack: () => void }) {
     try {
       await api.put("/integrations/vercel", { token: token.trim() });
       setToken("");
-      setMsg("Token salvo.");
+      setMsg(tr("Token salvo."));
       await load();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : "Falha ao salvar.");
+      setMsg(e instanceof Error ? e.message : tr("Falha ao salvar."));
     } finally { setBusy(false); }
   }
   async function runTest() {
     setTest("loading"); setMsg("");
     try {
       const r = await api.post<{ ok: boolean; user?: string; error?: string }>("/integrations/vercel/test");
-      if (r.ok) { setTest("ok"); setMsg(`Conectado como ${r.user ?? "usuário"}.`); }
-      else { setTest("fail"); setMsg(r.error || "Não foi possível conectar."); }
+      if (r.ok) { setTest("ok"); setMsg(tr("Conectado como {0}.", { "0": r.user ?? "usuário" })); }
+      else { setTest("fail"); setMsg(r.error || tr("Não foi possível conectar.")); }
     } catch (e) {
-      setTest("fail"); setMsg(e instanceof Error ? e.message : "Falha no teste.");
+      setTest("fail"); setMsg(e instanceof Error ? e.message : tr("Falha no teste."));
     }
   }
   async function disconnect() {
     setBusy(true);
-    try { await api.del("/integrations/vercel"); setMsg("Desconectado."); await load(); }
+    try { await api.del("/integrations/vercel"); setMsg(tr("Desconectado.")); await load(); }
     finally { setBusy(false); }
   }
 
@@ -51,7 +52,7 @@ export default function VercelPanel({ onBack }: { onBack: () => void }) {
   return (
     <div className="pt-1">
       <button onClick={onBack} className="mb-3 flex items-center gap-1 text-sm text-muted transition-colors hover:text-ink">
-        <ChevronLeft size={16} /> Voltar
+        <ChevronLeft size={16} />  {tr("Voltar")}
       </button>
 
       <div className="flex items-center gap-2.5">
@@ -59,35 +60,35 @@ export default function VercelPanel({ onBack }: { onBack: () => void }) {
           <SiVercel size={17} />
         </span>
         <div>
-          <p className="text-sm font-semibold text-ink">Vercel</p>
+          <p className="text-sm font-semibold text-ink">{tr("Vercel")}</p>
           <p className="text-xs text-muted">Projetos e deployments</p>
         </div>
-        {connected && <span className="ml-auto flex items-center gap-1 text-xs text-green-400"><Check size={13} /> Conectado</span>}
+        {connected && <span className="ml-auto flex items-center gap-1 text-xs text-green-400"><Check size={13} />  {tr("Conectado")}</span>}
       </div>
 
       <div className="mt-4 space-y-3 rounded-xl border border-border bg-surface p-4">
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-muted">Personal Access Token</span>
+          <span className="mb-1 block text-xs font-medium text-muted">{tr("Personal Access Token")}</span>
           <input
             type="password"
             value={token}
             onChange={(e) => setToken(e.target.value)}
-            placeholder={connected ? "•••••••• (já configurado — cole para trocar)" : "vercel_..."}
+            placeholder={connected ? tr("•••••••• (já configurado — cole para trocar)") : "vercel_..."}
             className="w-full rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs text-ink outline-none focus:border-accent"
           />
-          <span className="mt-1 block text-[11px] text-muted">Crie em vercel.com → Settings → Tokens. Guardado cifrado.</span>
+          <span className="mt-1 block text-[11px] text-muted">{tr("Crie em vercel.com → Settings → Tokens. Guardado cifrado.")}</span>
         </label>
         <div className="flex flex-wrap items-center gap-2">
           <button onClick={save} disabled={busy || !token.trim()} className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50">
-            {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Salvar
+            {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}  {tr("Salvar")}
           </button>
           {connected && (
             <>
               <button onClick={runTest} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover">
-                {test === "loading" ? <Loader2 size={14} className="animate-spin" /> : <Wifi size={14} />} Testar
+                {test === "loading" ? <Loader2 size={14} className="animate-spin" /> : <Wifi size={14} />}  {tr("Testar")}
               </button>
               <button onClick={disconnect} disabled={busy} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-muted transition-colors hover:border-red-400/40 hover:text-red-400 disabled:opacity-50">
-                <Trash2 size={14} /> Desconectar
+                <Trash2 size={14} />  {tr("Desconectar")}
               </button>
             </>
           )}

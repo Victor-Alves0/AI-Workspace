@@ -22,6 +22,7 @@ import {
 import { api } from "@/lib/api";
 import type { ObsConfig, ObsSpan, ObsSummary, ObsTrace } from "@/lib/types";
 import { InfoDot, Select } from "@/components/ui";
+import { dateLocale, tr } from "@/lib/i18n";
 
 const KIND_COLOR: Record<string, string> = {
   http: "#6366f1", chat: "#8b5cf6", api: "#0ea5e9", automation: "#f59e0b",
@@ -33,28 +34,28 @@ const SPAN_COLOR: Record<string, string> = {
   client: "#ec4899", agent: "#06b6d4",
 };
 const SPAN_KIND_LABEL: Record<string, string> = {
-  "": "Todas", llm: "Modelo", tool: "Ferramentas", http: "Requisições externas",
-  agent: "Agentes", internal: "Preparação e turno", rag: "Conhecimento", memory: "Memória",
+  "": tr("Todas"), llm: tr("Modelo"), tool: "Ferramentas", http: tr("Requisições externas"),
+  agent: tr("Agentes"), internal: tr("Preparação e turno"), rag: "Conhecimento", memory: tr("Memória"),
 };
 
 // nomes legíveis dos números que as etapas registram
 const ATTR_LABEL: Record<string, string> = {
-  ttfb_ms: "1º byte do provedor", first_reasoning_ms: "começou a pensar", first_token_ms: "1ª palavra",
-  first_tool_call_ms: "1ª chamada de ferramenta", reasoning_ms: "tempo pensando",
-  generation_ms: "tempo gerando", tokens_per_s: "tokens por segundo", prompt_chars: "contexto (caracteres)",
-  prompt_msgs: "mensagens no contexto", tools_n: "ferramentas anunciadas", prompt_tokens: "tokens de entrada",
-  completion_tokens: "tokens de saída", total_tokens: "tokens no total", cached_tokens: "tokens do cache",
-  reasoning_tokens: "tokens de raciocínio", cost: "custo (US$)", args_chars: "entrada (caracteres)",
-  result_chars: "saída (caracteres)", queue_ms: "espera por vaga", steps: "passos", output_chars: "saída (caracteres)",
-  pool_queue_ms: "fila do pool de busca", engines_ms: "tempo nos motores", attempts: "tentativas",
-  results: "resultados", status_code: "status HTTP", resp_bytes: "bytes da resposta", http_ms: "tempo HTTP",
-  depth: "profundidade", attachments: "anexos", lag_ms: "atraso do loop", iteration: "iteração",
-  server_ttft_ms: "1ª palavra (servidor)", llm_ms: "tempo no modelo", llm_iterations: "chamadas ao modelo",
-  tool_calls: "ferramentas chamadas", tool_results: "resultados de ferramentas", tool_executions: "ferramentas executadas",
-  user_chars: "mensagem (caracteres)", outcome: "resultado", turn_kind: "tipo de turno", parent_name: "disparado por",
-  parent_span_name: "na etapa", bg: "2º plano", has_tools: "com ferramentas", background: "2º plano",
-  cache: "cache", backend: "motores", provider: "provedor", inner: "ferramenta", timed_out: "estourou o tempo",
-  until: "medido até",
+  ttfb_ms: tr("1º byte do provedor"), first_reasoning_ms: tr("começou a pensar"), first_token_ms: "1ª palavra",
+  first_tool_call_ms: tr("1ª chamada de ferramenta"), reasoning_ms: tr("tempo pensando"),
+  generation_ms: tr("tempo gerando"), tokens_per_s: tr("tokens por segundo"), prompt_chars: "contexto (caracteres)",
+  prompt_msgs: tr("mensagens no contexto"), tools_n: tr("ferramentas anunciadas"), prompt_tokens: tr("tokens de entrada"),
+  completion_tokens: tr("tokens de saída"), total_tokens: tr("tokens no total"), cached_tokens: tr("tokens do cache"),
+  reasoning_tokens: tr("tokens de raciocínio"), cost: "custo (US$)", args_chars: "entrada (caracteres)",
+  result_chars: tr("saída (caracteres)"), queue_ms: tr("espera por vaga"), steps: tr("passos"), output_chars: tr("saída (caracteres)"),
+  pool_queue_ms: tr("fila do pool de busca"), engines_ms: tr("tempo nos motores"), attempts: tr("tentativas"),
+  results: tr("resultados"), status_code: tr("status HTTP"), resp_bytes: tr("bytes da resposta"), http_ms: tr("tempo HTTP"),
+  depth: tr("profundidade"), attachments: tr("anexos"), lag_ms: tr("atraso do loop"), iteration: tr("iteração"),
+  server_ttft_ms: "1ª palavra (servidor)", llm_ms: tr("tempo no modelo"), llm_iterations: tr("chamadas ao modelo"),
+  tool_calls: tr("ferramentas chamadas"), tool_results: tr("resultados de ferramentas"), tool_executions: tr("ferramentas executadas"),
+  user_chars: "mensagem (caracteres)", outcome: tr("resultado"), turn_kind: tr("tipo de turno"), parent_name: tr("disparado por"),
+  parent_span_name: "na etapa", bg: "2º plano", has_tools: tr("com ferramentas"), background: "2º plano",
+  cache: tr("cache"), backend: tr("motores"), provider: "provedor", inner: tr("ferramenta"), timed_out: tr("estourou o tempo"),
+  until: tr("medido até"),
 };
 const MS_ATTR = (k: string) => k.endsWith("_ms");
 
@@ -72,13 +73,13 @@ function fmtMs(ms: number | null | undefined): string {
 function fmtNum(k: string, v: number): string {
   if (MS_ATTR(k)) return fmtMs(v);
   if (k === "cost") return `$${v.toFixed(4)}`;
-  if (Math.abs(v) >= 1000) return v.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
-  return v.toLocaleString("pt-BR", { maximumFractionDigits: 1 });
+  if (Math.abs(v) >= 1000) return v.toLocaleString(dateLocale(), { maximumFractionDigits: 0 });
+  return v.toLocaleString(dateLocale(), { maximumFractionDigits: 1 });
 }
 
 function fmtTime(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "medium" });
+  return new Date(iso).toLocaleString(dateLocale(), { dateStyle: "short", timeStyle: "medium" });
 }
 
 const CARD = "rounded-xl border border-border bg-surface p-4";
@@ -127,7 +128,7 @@ function Bar({ value, max, colorHex = "rgb(var(--c-accent))" }: { value: number;
 }
 
 function Loading() {
-  return <p className="py-8 text-center text-sm text-muted">Carregando…</p>;
+  return <p className="py-8 text-center text-sm text-muted">{tr("Carregando…")}</p>;
 }
 
 function Modal({ title, sub, onClose, onBack, children, wide }: {
@@ -145,7 +146,7 @@ function Modal({ title, sub, onClose, onBack, children, wide }: {
         className={`flex max-h-[90vh] w-full ${wide ? "max-w-5xl" : "max-w-4xl"} flex-col overflow-hidden rounded-2xl border border-border bg-bg shadow-xl`}>
         <div className="flex items-center gap-2 border-b border-border px-5 py-3.5">
           {onBack && (
-            <button onClick={onBack} title="Voltar" className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><ArrowLeft size={16} /></button>
+            <button onClick={onBack} title={tr("Voltar")} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><ArrowLeft size={16} /></button>
           )}
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-base font-semibold text-ink">{title}</h2>
@@ -210,9 +211,9 @@ function RoutesTable({ routes, onOpen }: { routes: RouteRow[]; onOpen: (r: Route
       <table className="w-full text-left text-xs">
         <thead className="bg-surface2 text-muted">
           <tr>
-            <th className={TH}>Endpoint</th><th className={TH}>Chamadas</th><th className={TH}>p50</th>
-            <th className={TH}>p95</th><th className={TH}>p99</th><th className={TH}>Banco</th>
-            <th className={TH}>IA</th><th className={TH}>Tempo total</th><th className={TH}>Erros</th>
+            <th className={TH}>{tr("Endpoint")}</th><th className={TH}>{tr("Chamadas")}</th><th className={TH}>p50</th>
+            <th className={TH}>p95</th><th className={TH}>p99</th><th className={TH}>{tr("Banco")}</th>
+            <th className={TH}>IA</th><th className={TH}>{tr("Tempo total")}</th><th className={TH}>{tr("Erros")}</th>
           </tr>
         </thead>
         <tbody>
@@ -249,18 +250,19 @@ function SummaryPanel({ summary, onRoute }: { summary: ObsSummary; onRoute: (r: 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Chamadas" value={String(t.traces)} sub={`${t.errors} com erro (${errRate}%)`} icon={<Activity size={13} />} />
-        <Stat label="Latência p50" value={fmtMs(t.p50_ms)} sub={`p95 ${fmtMs(t.p95_ms)} · p99 ${fmtMs(t.p99_ms)}`} icon={<Gauge size={13} />} />
-        <Stat label="Banco (médio)" value={fmtMs(t.avg_db_ms)} sub={`${t.db_queries.toLocaleString("pt-BR")} queries`} icon={<Database size={13} />} />
-        <Stat label="Tempo no modelo" value={fmtMs(t.llm_ms)} sub="soma do período" icon={<Zap size={13} />} />
+        <Stat label={tr("Chamadas")} value={String(t.traces)} sub={tr("{errors} com erro ({errRate}%)", { errors: t.errors, errRate: errRate })} icon={<Activity size={13} />} />
+        <Stat label={tr("Latência p50")} value={fmtMs(t.p50_ms)} sub={`p95 ${fmtMs(t.p95_ms)} · p99 ${fmtMs(t.p99_ms)}`} icon={<Gauge size={13} />} />
+        <Stat label={tr("Banco (médio)")} value={fmtMs(t.avg_db_ms)} sub={`${t.db_queries.toLocaleString(dateLocale())} queries`} icon={<Database size={13} />} />
+        <Stat label={tr("Tempo no modelo")} value={fmtMs(t.llm_ms)} sub={tr("soma do período")} icon={<Zap size={13} />} />
       </div>
       <div className={CARD}>
-        <p className="mb-1 text-xs font-medium text-ink-soft">Volume por hora</p>
+        <p className="mb-1 text-xs font-medium text-ink-soft">{tr("Volume por hora")}</p>
         <Sparkline values={summary.series.map((s) => s.count)} />
       </div>
       <div>
         <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-ink-soft">
-          Endpoints por tempo total <InfoDot text="Tempo total = chamadas × duração. Clique para ver onde o tempo de cada chamada vai." />
+          
+          {tr("Endpoints por tempo total")} <InfoDot text={tr("Tempo total = chamadas × duração. Clique para ver onde o tempo de cada chamada vai.")} />
         </p>
         <RoutesTable routes={summary.routes as RouteRow[]} onOpen={onRoute} />
       </div>
@@ -310,26 +312,26 @@ function OperationsPanel({ hours, onOpen }: { hours: number; onOpen: (name: stri
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5">
           <Search size={14} className="text-muted" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filtrar etapa…"
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr("Filtrar etapa…")}
             className="w-44 bg-transparent text-xs text-ink outline-none placeholder:text-muted" />
         </div>
         <Select value={ordem} onChange={(e) => setOrdem(e.target.value as typeof ordem)}
           className="rounded-lg border border-border bg-surface px-2 py-1.5 text-xs text-ink outline-none">
-          <option value="total">Ordenar por tempo total</option>
-          <option value="self">Ordenar por tempo próprio</option>
-          <option value="p95">Ordenar por p95</option>
-          <option value="count">Ordenar por nº de execuções</option>
+          <option value="total">{tr("Ordenar por tempo total")}</option>
+          <option value="self">{tr("Ordenar por tempo próprio")}</option>
+          <option value="p95">{tr("Ordenar por p95")}</option>
+          <option value="count">{tr("Ordenar por nº de execuções")}</option>
         </Select>
-        <InfoDot text="Tempo próprio = duração da etapa menos o tempo das etapas dentro dela. É o tempo gasto NELA mesma — o melhor indicador de gargalo." />
+        <InfoDot text={tr("Tempo próprio = duração da etapa menos o tempo das etapas dentro dela. É o tempo gasto NELA mesma — o melhor indicador de gargalo.")} />
       </div>
-      {!ops ? <Loading /> : lista.length === 0 ? <p className="py-8 text-center text-sm text-muted">Nenhuma etapa registrada no período.</p> : (
+      {!ops ? <Loading /> : lista.length === 0 ? <p className="py-8 text-center text-sm text-muted">{tr("Nenhuma etapa registrada no período.")}</p> : (
         <div className="overflow-x-auto rounded-xl border border-border">
           <table className="w-full text-left text-xs">
             <thead className="bg-surface2 text-muted">
               <tr>
-                <th className={TH}>Etapa</th><th className={TH}>Vezes</th><th className={TH}>p50</th><th className={TH}>p95</th>
-                <th className={TH}>p99</th><th className={TH}>Máx</th><th className={TH}>Total</th>
-                <th className={TH}>Tempo próprio</th><th className={TH}>Banco</th><th className={TH}>Erros</th>
+                <th className={TH}>{tr("Etapa")}</th><th className={TH}>{tr("Vezes")}</th><th className={TH}>p50</th><th className={TH}>p95</th>
+                <th className={TH}>p99</th><th className={TH}>{tr("Máx")}</th><th className={TH}>{tr("Total")}</th>
+                <th className={TH}>{tr("Tempo próprio")}</th><th className={TH}>{tr("Banco")}</th><th className={TH}>{tr("Erros")}</th>
               </tr>
             </thead>
             <tbody>
@@ -341,7 +343,7 @@ function OperationsPanel({ hours, onOpen }: { hours: number; onOpen: (name: stri
                       <span className="truncate font-mono text-ink" title={o.name}>{o.name}</span>
                     </div>
                   </td>
-                  <td className={`${TD} tabular-nums text-ink-soft`}>{o.count.toLocaleString("pt-BR")}</td>
+                  <td className={`${TD} tabular-nums text-ink-soft`}>{o.count.toLocaleString(dateLocale())}</td>
                   <td className={`${TD} tabular-nums text-ink-soft`}>{fmtMs(o.p50_ms)}</td>
                   <td className={`${TD} tabular-nums text-ink-soft`}>{fmtMs(o.p95_ms)}</td>
                   <td className={`${TD} tabular-nums text-muted`}>{fmtMs(o.p99_ms)}</td>
@@ -378,15 +380,15 @@ function OperationDetail({ name, hours, onClose, onTrace }: {
   const attrs = Object.entries(d?.attrs ?? {}).filter(([k]) => k !== "offset_ms");
   return (
     <Modal title={<span className="font-mono">{name}</span>} onClose={onClose} wide
-      sub={d?.duration ? `${d.count} execuções · média ${fmtMs(d.duration.avg)} · p50 ${fmtMs(d.duration.p50)} · p95 ${fmtMs(d.duration.p95)} · máx ${fmtMs(d.duration.max)}` : undefined}>
-      {!d ? <Loading /> : d.count === 0 ? <p className="py-8 text-center text-sm text-muted">Sem execuções no período.</p> : (
+      sub={d?.duration ? tr("{count} execuções · média {1} · p50 {2} · p95 {3} · máx {4}", { count: d.count, "1": fmtMs(d.duration.avg), "2": fmtMs(d.duration.p50), "3": fmtMs(d.duration.p95), "4": fmtMs(d.duration.max) }) : undefined}>
+      {!d ? <Loading /> : d.count === 0 ? <p className="py-8 text-center text-sm text-muted">{tr("Sem execuções no período.")}</p> : (
         <div className="space-y-5">
           {attrs.length > 0 && (
             <section>
-              <p className="mb-2 text-xs font-medium text-ink-soft">O que ela registra</p>
+              <p className="mb-2 text-xs font-medium text-ink-soft">{tr("O que ela registra")}</p>
               <div className="overflow-x-auto rounded-xl border border-border">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-surface2 text-muted"><tr><th className={TH}>Número</th><th className={TH}>Média</th><th className={TH}>p50</th><th className={TH}>p95</th><th className={TH}>Máx</th><th className={TH}>Amostras</th></tr></thead>
+                  <thead className="bg-surface2 text-muted"><tr><th className={TH}>{tr("Número")}</th><th className={TH}>{tr("Média")}</th><th className={TH}>p50</th><th className={TH}>p95</th><th className={TH}>{tr("Máx")}</th><th className={TH}>{tr("Amostras")}</th></tr></thead>
                   <tbody>
                     {attrs.map(([k, s]) => (
                       <tr key={k} className="border-t border-border">
@@ -405,10 +407,10 @@ function OperationDetail({ name, hours, onClose, onTrace }: {
           )}
           {d.groups.length > 0 && (
             <section>
-              <p className="mb-2 text-xs font-medium text-ink-soft">Por destino</p>
+              <p className="mb-2 text-xs font-medium text-ink-soft">{tr("Por destino")}</p>
               <div className="overflow-x-auto rounded-xl border border-border">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-surface2 text-muted"><tr><th className={TH}>Destino</th><th className={TH}>Vezes</th><th className={TH}>Média</th><th className={TH}>p95</th><th className={TH}>Máx</th></tr></thead>
+                  <thead className="bg-surface2 text-muted"><tr><th className={TH}>{tr("Destino")}</th><th className={TH}>{tr("Vezes")}</th><th className={TH}>{tr("Média")}</th><th className={TH}>p95</th><th className={TH}>{tr("Máx")}</th></tr></thead>
                   <tbody>
                     {d.groups.map((g) => (
                       <tr key={g.key} className="border-t border-border">
@@ -426,7 +428,7 @@ function OperationDetail({ name, hours, onClose, onTrace }: {
           )}
           {d.errors.length > 0 && (
             <section>
-              <p className="mb-2 text-xs font-medium text-ink-soft">Erros mais comuns</p>
+              <p className="mb-2 text-xs font-medium text-ink-soft">{tr("Erros mais comuns")}</p>
               <div className="space-y-1">
                 {d.errors.map((e) => (
                   <div key={e.error} className="flex items-start gap-2 rounded-lg bg-red-500/10 px-3 py-1.5 text-xs">
@@ -438,7 +440,7 @@ function OperationDetail({ name, hours, onClose, onTrace }: {
             </section>
           )}
           <section>
-            <p className="mb-2 text-xs font-medium text-ink-soft">Execuções mais lentas</p>
+            <p className="mb-2 text-xs font-medium text-ink-soft">{tr("Execuções mais lentas")}</p>
             <div className="overflow-hidden rounded-xl border border-border">
               {d.slowest.map((s) => (
                 <button key={s.span_id} onClick={() => onTrace(s.trace_id)}
@@ -484,18 +486,19 @@ function RouteDetail({ route, hours, onClose, onTrace, onOperation }: {
     <Modal wide onClose={onClose}
       title={<span><KindChip kind={route.kind} label={route.method || route.kind} /> <span className="ml-1 font-mono">{route.path}</span></span>}
       sub={d && d.count > 0 ? `${d.count} chamadas · ${d.errors ?? 0} erros` : undefined}>
-      {!d ? <Loading /> : d.count === 0 ? <p className="py-8 text-center text-sm text-muted">Sem chamadas no período.</p> : (
+      {!d ? <Loading /> : d.count === 0 ? <p className="py-8 text-center text-sm text-muted">{tr("Sem chamadas no período.")}</p> : (
         <div className="space-y-5">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Stat label="p50" value={fmtMs(d.p50_ms)} sub={`média ${fmtMs(d.avg_ms)}`} icon={<Gauge size={13} />} />
+            <Stat label="p50" value={fmtMs(d.p50_ms)} sub={tr("média {0}", { "0": fmtMs(d.avg_ms) })} icon={<Gauge size={13} />} />
             <Stat label="p95 / p99" value={fmtMs(d.p95_ms)} sub={`p99 ${fmtMs(d.p99_ms)} · máx ${fmtMs(d.max_ms)}`} icon={<Timer size={13} />} />
-            <Stat label="Banco por chamada" value={fmtMs(d.avg_db_ms)} sub={`${d.avg_queries} queries`} icon={<Database size={13} />} />
+            <Stat label={tr("Banco por chamada")} value={fmtMs(d.avg_db_ms)} sub={`${d.avg_queries} queries`} icon={<Database size={13} />} />
             <Stat label="Modelo / rede" value={fmtMs(d.avg_llm_ms)} sub={`externo ${fmtMs(d.avg_http_ms)}`} icon={<Zap size={13} />} />
           </div>
 
           <section>
             <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-ink-soft">
-              Onde o tempo de cada chamada vai <InfoDot text="Média por chamada de cada etapa de 1º nível. 'Sem etapa medida' é o tempo do próprio handler fora de qualquer etapa (candidato a instrumentar)." />
+              
+              {tr("Onde o tempo de cada chamada vai")} <InfoDot text={tr("Média por chamada de cada etapa de 1º nível. 'Sem etapa medida' é o tempo do próprio handler fora de qualquer etapa (candidato a instrumentar).")} />
             </p>
             <div className="mb-2 flex h-5 w-full overflow-hidden rounded-lg bg-surface2">
               {topo.map((b) => (
@@ -503,7 +506,7 @@ function RouteDetail({ route, hours, onClose, onTrace, onOperation }: {
                   style={{ width: `${explicado ? (b.per_call_ms / explicado) * 100 : 0}%`, background: color(SPAN_COLOR, b.kind) }} />
               ))}
               {(d.avg_unaccounted_ms ?? 0) > 0 && (
-                <div title={`sem etapa medida: ${fmtMs(d.avg_unaccounted_ms)}`}
+                <div title={tr("sem etapa medida: {0}", { "0": fmtMs(d.avg_unaccounted_ms) })}
                   style={{ width: `${explicado ? ((d.avg_unaccounted_ms ?? 0) / explicado) * 100 : 0}%` }}
                   className="bg-[repeating-linear-gradient(45deg,transparent,transparent_4px,rgb(var(--c-border))_4px,rgb(var(--c-border))_8px)]" />
               )}
@@ -511,7 +514,7 @@ function RouteDetail({ route, hours, onClose, onTrace, onOperation }: {
             <div className="overflow-x-auto rounded-xl border border-border">
               <table className="w-full text-left text-xs">
                 <thead className="bg-surface2 text-muted">
-                  <tr><th className={TH}>Etapa</th><th className={TH}>Por chamada</th><th className={TH}>Vezes por chamada</th><th className={TH}>p95</th></tr>
+                  <tr><th className={TH}>{tr("Etapa")}</th><th className={TH}>{tr("Por chamada")}</th><th className={TH}>{tr("Vezes por chamada")}</th><th className={TH}>p95</th></tr>
                 </thead>
                 <tbody>
                   {d.breakdown.map((b) => (
@@ -528,7 +531,7 @@ function RouteDetail({ route, hours, onClose, onTrace, onOperation }: {
                     </tr>
                   ))}
                   <tr className="border-t border-border">
-                    <td className="px-3 py-2 italic text-muted">sem etapa medida</td>
+                    <td className="px-3 py-2 italic text-muted">{tr("sem etapa medida")}</td>
                     <td className={`${TD} tabular-nums text-muted`}>{fmtMs(d.avg_unaccounted_ms)}</td>
                     <td className={TD} /><td className={TD} />
                   </tr>
@@ -539,10 +542,10 @@ function RouteDetail({ route, hours, onClose, onTrace, onOperation }: {
 
           {d.children.length > 0 && (
             <section>
-              <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-ink-soft"><GitBranch size={13} /> O que estas chamadas disparam</p>
+              <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-ink-soft"><GitBranch size={13} />  {tr("O que estas chamadas disparam")}</p>
               <div className="overflow-x-auto rounded-xl border border-border">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-surface2 text-muted"><tr><th className={TH}>Trabalho disparado</th><th className={TH}>Vezes</th><th className={TH}>Média</th><th className={TH}>p95</th></tr></thead>
+                  <thead className="bg-surface2 text-muted"><tr><th className={TH}>{tr("Trabalho disparado")}</th><th className={TH}>{tr("Vezes")}</th><th className={TH}>{tr("Média")}</th><th className={TH}>p95</th></tr></thead>
                   <tbody>
                     {d.children.map((c) => (
                       <tr key={c.name} className="border-t border-border">
@@ -559,7 +562,7 @@ function RouteDetail({ route, hours, onClose, onTrace, onOperation }: {
           )}
 
           <section>
-            <p className="mb-2 text-xs font-medium text-ink-soft">Distribuição da duração</p>
+            <p className="mb-2 text-xs font-medium text-ink-soft">{tr("Distribuição da duração")}</p>
             <div className="space-y-1">
               {d.histogram.map((h) => (
                 <div key={h.bucket} className="flex items-center gap-2 text-xs">
@@ -574,7 +577,7 @@ function RouteDetail({ route, hours, onClose, onTrace, onOperation }: {
           </section>
 
           <section>
-            <p className="mb-2 text-xs font-medium text-ink-soft">Chamadas mais lentas</p>
+            <p className="mb-2 text-xs font-medium text-ink-soft">{tr("Chamadas mais lentas")}</p>
             <TraceRows traces={d.slowest} onOpen={onTrace} />
           </section>
         </div>
@@ -644,7 +647,7 @@ function SpanRow({ span, total, depth, selfMs }: { span: ObsSpan; total: number;
           </div>
         </div>
         <span className="w-16 shrink-0 text-right font-mono text-[11px] tabular-nums text-ink-soft">{fmtMs(span.duration_ms)}</span>
-        <span className="w-16 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted" title="tempo próprio (sem as etapas de dentro)">{fmtMs(selfMs)}</span>
+        <span className="w-16 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted" title={tr("tempo próprio (sem as etapas de dentro)")}>{fmtMs(selfMs)}</span>
         <span className="w-16 shrink-0 text-right text-[10px] text-muted">
           {(span.db_reads + span.db_writes) > 0 && `${span.db_reads}r/${span.db_writes}w`}
         </span>
@@ -653,7 +656,8 @@ function SpanRow({ span, total, depth, selfMs }: { span: ObsSpan; total: number;
         <div className="space-y-1.5 px-4 pb-2 pl-8">
           {span.error && <p className="text-[11px] text-red-500">{span.error}</p>}
           <p className="text-[10px] text-muted">
-            começou em {fmtMs(span.offset_ms)} · duração {fmtMs(span.duration_ms)} · próprio {fmtMs(selfMs)}
+            
+            {tr("começou em")} {fmtMs(span.offset_ms)}  {tr("· duração")} {fmtMs(span.duration_ms)}  {tr("· próprio")} {fmtMs(selfMs)}
             {span.db_ms > 0 && ` · banco ${fmtMs(span.db_ms)}`}{span.http_ms > 0 && ` · HTTP ${fmtMs(span.http_ms)}`}
           </p>
           <AttrChips attrs={span.attrs || {}} />
@@ -672,7 +676,7 @@ function TraceRows({ traces, onOpen }: { traces: ObsTrace[]; onOpen: (id: string
           className="flex w-full items-center gap-2 border-b border-border/60 px-3 py-2 text-left last:border-0 hover:bg-hover">
           <KindChip kind={t.kind} label={t.method || t.kind} />
           <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink">{t.path || t.name}</span>
-          {typeof t.attrs?.parent_trace === "string" && <GitBranch size={11} className="shrink-0 text-muted" aria-label="disparado por outra operação" />}
+          {typeof t.attrs?.parent_trace === "string" && <GitBranch size={11} className="shrink-0 text-muted" aria-label={tr("disparado por outra operação")} />}
           {t.status === "error" && <span className="shrink-0 text-[10px] text-red-500">erro {t.status_code || ""}</span>}
           {t.llm_ms > 0 && <span className="shrink-0 text-[10px] text-violet-400"><Zap size={10} className="inline" /> {fmtMs(t.llm_ms)}</span>}
           {t.db_queries > 0 && <span className="shrink-0 text-[10px] text-sky-400"><Database size={10} className="inline" /> {t.db_queries}</span>}
@@ -734,22 +738,22 @@ function TraceDetail({ traceId, onClose }: { traceId: string; onClose: () => voi
   delete attrsTrace.parent_span;
   return (
     <Modal wide onClose={onClose} onBack={pilha.length > 1 ? () => setPilha((p) => p.slice(0, -1)) : undefined}
-      title={t ? <span><KindChip kind={t.kind} label={t.method || t.kind} /> <span className="ml-1">{t.name}</span></span> : "Trace"}
+      title={t ? <span><KindChip kind={t.kind} label={t.method || t.kind} /> <span className="ml-1">{t.name}</span></span> : tr("Trace")}
       sub={t && (
         <span className="flex flex-wrap items-center gap-x-2">
           <span>{fmtTime(t.started_at)} · {fmtMs(t.duration_ms)} · {t.db_queries} queries ({fmtMs(t.db_ms)})
             {t.llm_ms > 0 && ` · modelo ${fmtMs(t.llm_ms)}`} · {t.span_count} etapas</span>
-          <button onClick={() => void navigator.clipboard?.writeText(t.id)} title="Copiar id" className="inline-flex items-center gap-1 text-muted hover:text-ink">
+          <button onClick={() => void navigator.clipboard?.writeText(t.id)} title={tr("Copiar id")} className="inline-flex items-center gap-1 text-muted hover:text-ink">
             <Copy size={11} /> {t.id.slice(0, 8)}
           </button>
         </span>
       )}>
-      {erro ? <p className="py-8 text-center text-sm text-muted">Trace não encontrado (pode ainda estar em andamento).</p>
+      {erro ? <p className="py-8 text-center text-sm text-muted">{tr("Trace não encontrado (pode ainda estar em andamento).")}</p>
         : !data ? <Loading /> : (
           <div className="space-y-4">
             {(data.parent || data.children.length > 0) && (
               <section className="rounded-xl border border-border p-3">
-                <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-ink-soft"><GitBranch size={13} /> Cadeia</p>
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-ink-soft"><GitBranch size={13} />  {tr("Cadeia")}</p>
                 {data.parent && (
                   <button onClick={() => abrir(data.parent!.id)} className="mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-xs hover:bg-hover">
                     <span className="w-24 shrink-0 text-muted">disparado por</span>
@@ -771,14 +775,14 @@ function TraceDetail({ traceId, onClose }: { traceId: string; onClose: () => voi
               </section>
             )}
             <AttrChips attrs={attrsTrace} />
-            {ordered.length === 0 ? <p className="py-6 text-center text-sm text-muted">Sem etapas instrumentadas nesta chamada.</p> : (
+            {ordered.length === 0 ? <p className="py-6 text-center text-sm text-muted">{tr("Sem etapas instrumentadas nesta chamada.")}</p> : (
               <div className="rounded-xl border border-border">
                 <div className="flex items-center gap-2 border-b border-border bg-surface2 px-1 py-1 text-[10px] text-muted">
-                  <span style={{ width: 260 }} className="pl-6">Etapa</span>
-                  <span className="flex-1">Linha do tempo</span>
-                  <span className="w-16 text-right">Duração</span>
-                  <span className="w-16 text-right">Próprio</span>
-                  <span className="w-16 text-right">Banco</span>
+                  <span style={{ width: 260 }} className="pl-6">{tr("Etapa")}</span>
+                  <span className="flex-1">{tr("Linha do tempo")}</span>
+                  <span className="w-16 text-right">{tr("Duração")}</span>
+                  <span className="w-16 text-right">{tr("Próprio")}</span>
+                  <span className="w-16 text-right">{tr("Banco")}</span>
                 </div>
                 {ordered.map((s) => (
                   <SpanRow key={s.id} span={s} total={t?.duration_ms || 1} depth={depth.get(s.id) ?? 0} selfMs={self.get(s.id) ?? 0} />
@@ -825,20 +829,20 @@ function TraceList({ hours, onOpen }: { hours: number; onOpen: (id: string) => v
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5">
           <Search size={14} className="text-muted" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar rota/nome…"
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr("Buscar rota/nome…")}
             className="w-40 bg-transparent text-xs text-ink outline-none placeholder:text-muted" />
         </div>
         <Select value={kind} onChange={(e) => setKind(e.target.value)} className="rounded-lg border border-border bg-surface px-2 py-1.5 text-xs text-ink outline-none">
-          <option value="">Todo tipo</option>
+          <option value="">{tr("Todo tipo")}</option>
           {["http", "chat", "api", "automation", "channel", "worker", "runtime", "client"].map((k) => <option key={k} value={k}>{k}</option>)}
         </Select>
         <Select value={statusF} onChange={(e) => setStatusF(e.target.value)} className="rounded-lg border border-border bg-surface px-2 py-1.5 text-xs text-ink outline-none">
-          <option value="">Qualquer status</option>
+          <option value="">{tr("Qualquer status")}</option>
           <option value="ok">OK</option>
-          <option value="error">Erro</option>
+          <option value="error">{tr("Erro")}</option>
         </Select>
         <Select value={minMs} onChange={(e) => setMinMs(Number(e.target.value))} className="rounded-lg border border-border bg-surface px-2 py-1.5 text-xs text-ink outline-none">
-          <option value={0}>Qualquer duração</option>
+          <option value={0}>{tr("Qualquer duração")}</option>
           <option value={200}>≥ 200ms</option>
           <option value={1000}>≥ 1s</option>
           <option value={3000}>≥ 3s</option>
@@ -846,11 +850,11 @@ function TraceList({ hours, onOpen }: { hours: number; onOpen: (id: string) => v
           <option value={60000}>≥ 1min</option>
         </Select>
         <button onClick={() => void load()} className="ml-auto flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs text-ink-soft hover:bg-hover">
-          <RefreshCw size={13} /> Atualizar
+          <RefreshCw size={13} />  {tr("Atualizar")}
         </button>
       </div>
-      <p className="text-[11px] text-muted">{total} chamadas no período (mostrando {traces.length})</p>
-      {loading ? <Loading /> : traces.length === 0 ? <p className="py-8 text-center text-sm text-muted">Nenhuma chamada encontrada.</p>
+      <p className="text-[11px] text-muted">{total}  {tr("chamadas no período (mostrando")} {traces.length})</p>
+      {loading ? <Loading /> : traces.length === 0 ? <p className="py-8 text-center text-sm text-muted">{tr("Nenhuma chamada encontrada.")}</p>
         : <TraceRows traces={traces} onOpen={onOpen} />}
     </div>
   );
@@ -882,37 +886,38 @@ function RuntimePanel({ onTrace }: { onTrace: (id: string) => void }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Atraso do event loop (1 min)" value={`p95 ${fmtMs(l["1m"].p95)}`}
-          sub={`máx ${fmtMs(l["1m"].max)} · 15 min: máx ${fmtMs(l["15m"].max)}`} icon={<Cpu size={13} />}
-          hint="Quanto o servidor demora para atender uma tarefa pronta. Alto = algo síncrono pesado travando TODAS as requisições." />
-        <Stat label="Rodando agora" value={String(r.open_traces.length)} sub={`${r.active_generations ?? 0} gerações · ${r.bg_tasks} em 2º plano`} icon={<Activity size={13} />} />
-        <Stat label="Banco (conexões)" value={`${pool.checkedout ?? "?"} em uso`} sub={`pool ${pool.size ?? "?"} · extra ${pool.overflow ?? 0}`} icon={<Database size={13} />} />
-        <Stat label="Processo" value={r.memory_mb != null ? `${r.memory_mb} MB` : "—"}
-          sub={`${r.tasks ?? "?"} tarefas · CPU ${r.cpu_s ?? "?"}s · no ar ${Math.round(r.uptime_s / 60)} min`} icon={<Layers size={13} />} />
+        <Stat label={tr("Atraso do event loop (1 min)")} value={`p95 ${fmtMs(l["1m"].p95)}`}
+          sub={tr("máx {0} · 15 min: máx {1}", { "0": fmtMs(l["1m"].max), "1": fmtMs(l["15m"].max) })} icon={<Cpu size={13} />}
+          hint={tr("Quanto o servidor demora para atender uma tarefa pronta. Alto = algo síncrono pesado travando TODAS as requisições.")} />
+        <Stat label={tr("Rodando agora")} value={String(r.open_traces.length)} sub={tr("{0} gerações · {bg_tasks} em 2º plano", { "0": r.active_generations ?? 0, bg_tasks: r.bg_tasks })} icon={<Activity size={13} />} />
+        <Stat label={tr("Banco (conexões)")} value={`${pool.checkedout ?? "?"} em uso`} sub={`pool ${pool.size ?? "?"} · extra ${pool.overflow ?? 0}`} icon={<Database size={13} />} />
+        <Stat label={tr("Processo")} value={r.memory_mb != null ? `${r.memory_mb} MB` : "—"}
+          sub={tr("{0} tarefas · CPU {1}s · no ar {2} min", { "0": r.tasks ?? "?", "1": r.cpu_s ?? "?", "2": Math.round(r.uptime_s / 60) })} icon={<Layers size={13} />} />
       </div>
       <div className={CARD}>
-        <p className={`mb-1 text-xs font-medium ${lagRuim ? "text-amber-400" : "text-ink-soft"}`}>Atraso do event loop (últimos 60s)</p>
+        <p className={`mb-1 text-xs font-medium ${lagRuim ? "text-amber-400" : "text-ink-soft"}`}>{tr("Atraso do event loop (últimos 60s)")}</p>
         <Sparkline values={r.lag_series.map((s) => s.ms)} h={40} />
         <p className="mt-1 text-[11px] text-muted">
-          fila de gravação {r.sink.queued} · gravados {r.sink.written.toLocaleString("pt-BR")} · descartados {r.sink.dropped}
+          
+          {tr("fila de gravação")} {r.sink.queued} · gravados {r.sink.written.toLocaleString(dateLocale())} · descartados {r.sink.dropped}
         </p>
       </div>
       <section>
-        <p className="mb-2 text-xs font-medium text-ink-soft">Travadas recentes</p>
-        {r.stalls.length === 0 ? <p className="rounded-xl border border-border px-3 py-3 text-xs text-muted">Nenhuma travada acima de 250ms desde que o servidor subiu.</p> : (
+        <p className="mb-2 text-xs font-medium text-ink-soft">{tr("Travadas recentes")}</p>
+        {r.stalls.length === 0 ? <p className="rounded-xl border border-border px-3 py-3 text-xs text-muted">{tr("Nenhuma travada acima de 250ms desde que o servidor subiu.")}</p> : (
           <div className="space-y-1.5">
             {r.stalls.map((s) => (
               <div key={s.at} className="rounded-xl border border-border px-3 py-2 text-xs">
                 <div className="flex items-center gap-2">
                   <AlertTriangle size={13} className={s.lag_ms >= 1000 ? "text-red-500" : "text-amber-400"} />
                   <span className="font-semibold tabular-nums text-ink">{fmtMs(s.lag_ms)}</span>
-                  <span className="text-muted">{new Date(s.at * 1000).toLocaleTimeString("pt-BR")}</span>
+                  <span className="text-muted">{new Date(s.at * 1000).toLocaleTimeString(dateLocale())}</span>
                 </div>
                 {s.suspects.length > 0 && (
                   <div className="mt-1 space-y-0.5 pl-5">
                     {s.suspects.map((x) => (
                       <button key={x.trace} onClick={() => onTrace(x.trace)} className="block text-left text-muted hover:text-ink">
-                        {x.name} <span className="font-mono">{x.last_span && `· última etapa ${x.last_span}`}</span> · aberto há {fmtMs(x.age_ms)}
+                        {x.name} <span className="font-mono">{x.last_span && tr("· última etapa {last_span}", { last_span: x.last_span })}</span>  {tr("· aberto há")} {fmtMs(x.age_ms)}
                       </button>
                     ))}
                   </div>
@@ -923,8 +928,8 @@ function RuntimePanel({ onTrace }: { onTrace: (id: string) => void }) {
         )}
       </section>
       <section>
-        <p className="mb-2 text-xs font-medium text-ink-soft">Operações em andamento</p>
-        {r.open_traces.length === 0 ? <p className="rounded-xl border border-border px-3 py-3 text-xs text-muted">Nada rodando agora.</p> : (
+        <p className="mb-2 text-xs font-medium text-ink-soft">{tr("Operações em andamento")}</p>
+        {r.open_traces.length === 0 ? <p className="rounded-xl border border-border px-3 py-3 text-xs text-muted">{tr("Nada rodando agora.")}</p> : (
           <div className="overflow-hidden rounded-xl border border-border">
             {r.open_traces.map((t) => (
               <div key={t.id} className="flex items-center gap-2 border-b border-border/60 px-3 py-2 text-xs last:border-0">
@@ -949,7 +954,7 @@ function RuntimePanel({ onTrace }: { onTrace: (id: string) => void }) {
 
 type Tab = "summary" | "ops" | "routes" | "traces" | "runtime";
 const TABS: [Tab, string][] = [
-  ["summary", "Resumo"], ["ops", "Gargalos"], ["routes", "Endpoints"], ["traces", "Chamadas"], ["runtime", "Tempo real"],
+  ["summary", tr("Resumo")], ["ops", tr("Gargalos")], ["routes", tr("Endpoints")], ["traces", tr("Chamadas")], ["runtime", tr("Tempo real")],
 ];
 
 export default function ObservabilityView() {
@@ -985,7 +990,7 @@ export default function ObservabilityView() {
         {tab !== "runtime" && (
           <Select value={hours} onChange={(e) => setHours(Number(e.target.value))}
             className="ml-auto rounded-lg border border-border bg-surface px-2 py-1.5 text-xs text-ink outline-none">
-            <option value={1}>Última hora</option>
+            <option value={1}>{tr("Última hora")}</option>
             <option value={6}>6 horas</option>
             <option value={24}>24 horas</option>
             <option value={168}>7 dias</option>

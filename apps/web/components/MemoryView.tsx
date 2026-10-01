@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import type { MemoryBank, MemoryConfig, MemoryItem, MemoryScopes } from "@/lib/types";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { AnchoredMenu, dismissKeyboard, finePointer, Select } from "@/components/ui";
+import { tr } from "@/lib/i18n";
 
 type Tab = "global" | "model" | "chat" | "project" | "bank";
 
@@ -40,8 +41,8 @@ function ChatMemoryPicker({
         onClick={() => setOpen((current) => !current)}
         className="flex max-w-[280px] items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-ink outline-none transition-colors hover:border-accent/50 focus-visible:border-accent"
       >
-        <span title={selected?.title ?? "Selecionar chat"} className="min-w-0 flex-1 truncate text-left">
-          {selected ? `${selected.title} (${selected.count})` : "Nenhum chat com memória"}
+        <span title={selected?.title ?? tr("Selecionar chat")} className="min-w-0 flex-1 truncate text-left">
+          {selected ? `${selected.title} (${selected.count})` : tr("Nenhum chat com memória")}
         </span>
         <ChevronDown size={14} className="shrink-0 text-muted" />
       </button>
@@ -58,14 +59,14 @@ function ChatMemoryPicker({
               autoFocus={finePointer()}
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Buscar chat"
-              aria-label="Buscar chat com memória"
+              placeholder={tr("Buscar chat")}
+              aria-label={tr("Buscar chat com memória")}
               className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
             />
           </div>
           <div
             role="listbox"
-            aria-label="Chats com memória"
+            aria-label={tr("Chats com memória")}
             onTouchMove={dismissKeyboard}
             className="max-h-[min(19rem,55dvh)] overflow-y-auto overscroll-contain p-1.5"
           >
@@ -87,7 +88,7 @@ function ChatMemoryPicker({
               </button>
             ))}
             {shown.length === 0 && (
-              <p className="px-3 py-6 text-center text-sm text-muted">Nenhum chat encontrado.</p>
+              <p className="px-3 py-6 text-center text-sm text-muted">{tr("Nenhum chat encontrado.")}</p>
             )}
           </div>
         </AnchoredMenu>
@@ -186,9 +187,9 @@ export default function MemoryView() {
 
   async function remove(m: MemoryItem) {
     const ok = await confirm({
-      title: "Excluir memória?",
+      title: tr("Excluir memória?"),
       body: <span className="text-muted">“{m.text.slice(0, 120)}”</span>,
-      confirmLabel: "Excluir", danger: true,
+      confirmLabel: tr("Excluir"), danger: true,
     });
     if (!ok) return;
     // idem saveEdit: uma recusa do servidor não pode virar promise rejeitada silenciosa
@@ -227,8 +228,8 @@ export default function MemoryView() {
   async function deleteBank(b: MemoryBank) {
     const ok = await confirm({
       title: `Excluir o banco "${b.name}"?`,
-      body: <span className="text-muted">Isso apaga o banco e suas {b.count} memória(s). Modelos acoplados param de compartilhá-lo. Não dá para desfazer.</span>,
-      confirmLabel: "Excluir", danger: true,
+      body: <span className="text-muted">{tr("Isso apaga o banco e suas")} {b.count}  {tr("memória(s). Modelos acoplados param de compartilhá-lo. Não dá para desfazer.")}</span>,
+      confirmLabel: tr("Excluir"), danger: true,
     });
     if (!ok) return;
     await api.del(`/memory/banks/${b.id}`);
@@ -256,9 +257,9 @@ export default function MemoryView() {
     if (!ids.length) return;
     if (action === "delete") {
       const ok = await confirm({
-        title: "Excluir memórias?",
-        body: <>Isso exclui <span className="font-medium text-ink">{ids.length}</span> {ids.length === 1 ? "memória" : "memórias"}. Não dá para desfazer.</>,
-        confirmLabel: "Excluir", danger: true,
+        title: tr("Excluir memórias?"),
+        body: <>{tr("Isso exclui")} <span className="font-medium text-ink">{ids.length}</span> {ids.length === 1 ? tr("memória") : tr("memórias")}{tr(". Não dá para desfazer.")}</>,
+        confirmLabel: tr("Excluir"), danger: true,
       });
       if (!ok) return;
     }
@@ -274,11 +275,11 @@ export default function MemoryView() {
         <div className="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4">
           <div className="mb-2 flex items-center justify-between">
             <p className="flex items-center gap-1.5 text-sm font-semibold text-ink">
-              <Clock size={15} className="text-amber-500" /> Pendentes de revisão ({pending.length})
+              <Clock size={15} className="text-amber-500" />  {tr("Pendentes de revisão (")}{pending.length})
             </p>
             <div className="flex items-center gap-1.5">
-              <button onClick={() => apply("enable", pending.map((m) => m.id))} disabled={busy} className="rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover disabled:opacity-50">Aprovar todas</button>
-              <button onClick={() => apply("delete", pending.map((m) => m.id))} disabled={busy} className="rounded-full border border-border px-3 py-1 text-xs text-muted transition-colors hover:border-red-400/40 hover:text-red-400 disabled:opacity-50">Recusar todas</button>
+              <button onClick={() => apply("enable", pending.map((m) => m.id))} disabled={busy} className="rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover disabled:opacity-50">{tr("Aprovar todas")}</button>
+              <button onClick={() => apply("delete", pending.map((m) => m.id))} disabled={busy} className="rounded-full border border-border px-3 py-1 text-xs text-muted transition-colors hover:border-red-400/40 hover:text-red-400 disabled:opacity-50">{tr("Recusar todas")}</button>
             </div>
           </div>
           <div className="space-y-1.5">
@@ -286,8 +287,8 @@ export default function MemoryView() {
               <div key={m.id} className="flex items-start gap-2 rounded-lg border border-border/70 bg-bg px-3 py-2 text-sm">
                 <span className="min-w-0 flex-1 text-ink-soft">{m.text}</span>
                 <div className="flex shrink-0 items-center gap-1">
-                  <button onClick={() => apply("enable", [m.id])} title="Aprovar" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-green-400"><Check size={14} /></button>
-                  <button onClick={() => apply("delete", [m.id])} title="Recusar" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-red-400"><X size={14} /></button>
+                  <button onClick={() => apply("enable", [m.id])} title={tr("Aprovar")} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-green-400"><Check size={14} /></button>
+                  <button onClick={() => apply("delete", [m.id])} title={tr("Recusar")} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-red-400"><X size={14} /></button>
                 </div>
               </div>
             ))}
@@ -297,7 +298,7 @@ export default function MemoryView() {
 
       {/* Segmentado de escopo */}
       <div className="flex flex-wrap items-center gap-2">
-        {([["global", "Global", <Globe key="g" size={15} />], ["model", "Por modelo", <Box key="m" size={15} />], ["chat", "Por chat", <MessagesSquare key="c" size={15} />], ["project", "Por projeto", <FolderOpen key="p" size={15} />], ["bank", "Bancos", <Boxes key="b" size={15} />]] as const).map(
+        {([["global", tr("Global"), <Globe key="g" size={15} />], ["model", tr("Por modelo"), <Box key="m" size={15} />], ["chat", tr("Por chat"), <MessagesSquare key="c" size={15} />], ["project", tr("Por projeto"), <FolderOpen key="p" size={15} />], ["bank", tr("Bancos"), <Boxes key="b" size={15} />]] as const).map(
           ([k, label, icon]) => (
             <button
               key={k}
@@ -316,7 +317,7 @@ export default function MemoryView() {
           >
             {scopes?.models.length ? scopes.models.map((m) => (
               <option key={m.id} value={m.id}>{m.name} ({m.count})</option>
-            )) : <option value="">Nenhum modelo com memória</option>}
+            )) : <option value="">{tr("Nenhum modelo com memória")}</option>}
           </Select>
         )}
         {tab === "chat" && (
@@ -330,7 +331,7 @@ export default function MemoryView() {
           >
             {scopes?.projects.length ? scopes.projects.map((p) => (
               <option key={p.id} value={p.id}>{p.name} ({p.count})</option>
-            )) : <option value="">Nenhum projeto com memória</option>}
+            )) : <option value="">{tr("Nenhum projeto com memória")}</option>}
           </Select>
         )}
         {tab === "bank" && (
@@ -348,14 +349,14 @@ export default function MemoryView() {
               onClick={() => setNewBank({ name: "", description: "" })}
               className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink"
             >
-              <Plus size={14} /> Novo banco
+              <Plus size={14} />  {tr("Novo banco")}
             </button>
             {selBank && banks.find((b) => b.id === selBank) && (
               <button
                 onClick={() => deleteBank(banks.find((b) => b.id === selBank)!)}
                 className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-muted transition-colors hover:border-red-400/40 hover:text-red-400"
               >
-                <Trash2 size={14} /> Excluir banco
+                <Trash2 size={14} />  {tr("Excluir banco")}
               </button>
             )}
           </>
@@ -365,7 +366,8 @@ export default function MemoryView() {
       {/* Explicação da aba Bancos + form de criação */}
       {tab === "bank" && (
         <div className="rounded-xl border border-border bg-surface px-3 py-2.5 text-xs text-muted">
-          Bancos são coleções de memória <span className="text-ink-soft">compartilháveis entre modelos</span>. Acople o mesmo banco a vários modelos (no editor do modelo, seção Memória) e eles passam a ler/escrever nele — sem depender do escopo global.
+          
+          {tr("Bancos são coleções de memória")} <span className="text-ink-soft">{tr("compartilháveis entre modelos")}</span>{tr(". Acople o mesmo banco a vários modelos (no editor do modelo, seção Memória) e eles passam a ler/escrever nele — sem depender do escopo global.")}
         </div>
       )}
       {newBank && (
@@ -374,19 +376,19 @@ export default function MemoryView() {
             autoFocus
             value={newBank.name}
             onChange={(e) => setNewBank({ ...newBank, name: e.target.value })}
-            placeholder="Nome do banco (ex.: Projeto X, Pessoal)"
+            placeholder={tr("Nome do banco (ex.: Projeto X, Pessoal)")}
             className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
           />
           <input
             value={newBank.description}
             onChange={(e) => setNewBank({ ...newBank, description: e.target.value })}
-            placeholder="Descrição (opcional)"
+            placeholder={tr("Descrição (opcional)")}
             className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
           />
           <div className="flex justify-end gap-2">
-            <button onClick={() => setNewBank(null)} className="rounded-full px-3 py-1.5 text-sm text-muted hover:text-ink">Cancelar</button>
+            <button onClick={() => setNewBank(null)} className="rounded-full px-3 py-1.5 text-sm text-muted hover:text-ink">{tr("Cancelar")}</button>
             <button onClick={createBank} disabled={busy || !newBank.name.trim()} className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50">
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Criar banco
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}  {tr("Criar banco")}
             </button>
           </div>
         </div>
@@ -399,7 +401,7 @@ export default function MemoryView() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Buscar nas memórias…"
+            placeholder={tr("Buscar nas memórias…")}
             className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
           />
         </div>
@@ -408,7 +410,7 @@ export default function MemoryView() {
           disabled={(tab === "bank" && !activeBankId) || (tab === "project" && !activeProjectId)}
           className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
         >
-          <Plus size={15} /> Adicionar
+          <Plus size={15} />  {tr("Adicionar")}
         </button>
       </div>
 
@@ -417,18 +419,18 @@ export default function MemoryView() {
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2">
           <button onClick={toggleAll} className="flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-ink">
             {allSelected ? <CheckSquare size={16} className="text-accent-hover" /> : <Square size={16} />}
-            {sel.size > 0 ? `${sel.size} selecionada${sel.size === 1 ? "" : "s"}` : "Selecionar tudo"}
+            {sel.size > 0 ? `${sel.size} selecionada${sel.size === 1 ? "" : "s"}` : tr("Selecionar tudo")}
           </button>
           {sel.size > 0 && (
             <div className="ml-auto flex items-center gap-1.5">
               <button onClick={() => bulk("enable")} disabled={busy} className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover disabled:opacity-50">
-                <RotateCcw size={14} /> Ativar
+                <RotateCcw size={14} />  {tr("Ativar")}
               </button>
               <button onClick={() => bulk("disable")} disabled={busy} className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover disabled:opacity-50">
-                <Ban size={14} /> Desativar
+                <Ban size={14} />  {tr("Desativar")}
               </button>
               <button onClick={() => bulk("delete")} disabled={busy} className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-sm text-muted transition-colors hover:border-red-400/40 hover:text-red-400 disabled:opacity-50">
-                <Trash2 size={14} /> Excluir
+                <Trash2 size={14} />  {tr("Excluir")}
               </button>
             </div>
           )}
@@ -443,13 +445,13 @@ export default function MemoryView() {
             value={newText}
             onChange={(e) => setNewText(e.target.value)}
             rows={2}
-            placeholder="Escreva um fato para a IA lembrar…"
+            placeholder={tr("Escreva um fato para a IA lembrar…")}
             className="w-full resize-y rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
           />
           <div className="mt-2 flex justify-end gap-2">
-            <button onClick={() => setAdding(false)} className="rounded-full px-3 py-1.5 text-sm text-muted hover:text-ink">Cancelar</button>
+            <button onClick={() => setAdding(false)} className="rounded-full px-3 py-1.5 text-sm text-muted hover:text-ink">{tr("Cancelar")}</button>
             <button onClick={add} disabled={busy || !newText.trim()} className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50">
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Salvar
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}  {tr("Salvar")}
             </button>
           </div>
         </div>
@@ -460,11 +462,11 @@ export default function MemoryView() {
         <div className="flex justify-center py-16"><Loader2 size={20} className="animate-spin text-muted" /></div>
       ) : items.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-border px-4 py-14 text-center text-sm text-muted">
-          {tab === "model" && !activeModelId ? "Selecione um modelo."
-            : tab === "chat" && !activeChatId ? "Selecione um chat."
-            : tab === "project" && !activeProjectId ? "Nenhum projeto (pasta) com memória ainda."
-            : tab === "bank" && !activeBankId ? "Crie um banco para começar."
-            : "Nenhuma memória neste escopo ainda."}
+          {tab === "model" && !activeModelId ? tr("Selecione um modelo.")
+            : tab === "chat" && !activeChatId ? tr("Selecione um chat.")
+            : tab === "project" && !activeProjectId ? tr("Nenhum projeto (pasta) com memória ainda.")
+            : tab === "bank" && !activeBankId ? tr("Crie um banco para começar.")
+            : tr("Nenhuma memória neste escopo ainda.")}
         </p>
       ) : (
         <div className="space-y-2">
@@ -484,20 +486,20 @@ export default function MemoryView() {
                   <div className="mt-2 flex justify-end gap-2">
                     <button onClick={() => setEditing(null)} className="rounded-full px-3 py-1 text-sm text-muted hover:text-ink"><X size={14} /></button>
                     <button onClick={() => saveEdit(m.id)} disabled={busy} className="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50">
-                      {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Salvar
+                      {busy ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}  {tr("Salvar")}
                     </button>
                   </div>
                 </div>
               ) : (
                 <div className="flex items-start gap-3">
-                  <button onClick={() => toggleSel(m.id)} className="mt-0.5 shrink-0 text-muted transition-colors hover:text-ink" title="Selecionar">
+                  <button onClick={() => toggleSel(m.id)} className="mt-0.5 shrink-0 text-muted transition-colors hover:text-ink" title={tr("Selecionar")}>
                     {picked ? <CheckSquare size={16} className="text-accent-hover" /> : <Square size={16} />}
                   </button>
                   <div className="min-w-0 flex-1">
                     <p className={`text-sm leading-5 ${m.disabled ? "text-muted line-through decoration-muted/50" : "text-ink"}`}>{m.text}</p>
                     <div className="mt-1 flex flex-wrap items-center gap-2">
                       {m.disabled && (
-                        <span className="rounded-full bg-surface2 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted">Desativada</span>
+                        <span className="rounded-full bg-surface2 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted">{tr("Desativada")}</span>
                       )}
                       {(m.model_name || m.chat_title || m.project_name) && (
                         <span className="text-[11px] text-muted">{m.model_name ?? m.chat_title ?? m.project_name}</span>
@@ -505,13 +507,13 @@ export default function MemoryView() {
                     </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1 touch-reveal opacity-0 transition-opacity group-hover:opacity-100">
-                    <button onClick={() => apply(m.disabled ? "enable" : "disable", [m.id])} title={m.disabled ? "Ativar" : "Desativar"} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
+                    <button onClick={() => apply(m.disabled ? "enable" : "disable", [m.id])} title={m.disabled ? tr("Ativar") : tr("Desativar")} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
                       {m.disabled ? <RotateCcw size={14} /> : <Ban size={14} />}
                     </button>
-                    <button onClick={() => { setEditing(m.id); setEditText(m.text); }} title="Editar" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
+                    <button onClick={() => { setEditing(m.id); setEditText(m.text); }} title={tr("Editar")} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
                       <Pencil size={14} />
                     </button>
-                    <button onClick={() => remove(m)} title="Excluir" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-red-400">
+                    <button onClick={() => remove(m)} title={tr("Excluir")} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-red-400">
                       <Trash2 size={14} />
                     </button>
                   </div>
@@ -535,12 +537,12 @@ export function MemoryStatusPill() {
   return (
     <span
       title={enabled
-        ? "A memória está ativada."
-        : "A memória está desativada. Ative em Configurações → Controle de Dados → Memória."}
+        ? tr("A memória está ativada.")
+        : tr("A memória está desativada. Ative em Configurações → Controle de Dados → Memória.")}
       className="inline-flex cursor-help items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-xs text-ink-soft"
     >
       <span aria-hidden className={`h-2 w-2 rounded-full ${enabled ? "bg-emerald-400" : "bg-red-400"}`} />
-      <span>{enabled ? "Ativado" : "Desativado"}</span>
+      <span>{enabled ? tr("Ativado") : tr("Desativado")}</span>
     </span>
   );
 }

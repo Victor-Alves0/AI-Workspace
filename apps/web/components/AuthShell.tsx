@@ -3,6 +3,7 @@
 import { forwardRef, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import RisingLines from "./RisingLines";
+import { tr } from "@/lib/i18n";
 
 /** Moldura das telas de entrada (login e assistente de primeiro uso): um cartão em duas
  *  metades — a arte da marca à esquerda, o formulário à direita. No celular a arte sai
@@ -34,7 +35,7 @@ export default function AuthShell({
           <div className="absolute left-8 top-8 flex items-center gap-2.5">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/logo.png" alt="" className="h-7 w-7 rounded-lg" />
-            <span className="text-[15px] font-semibold tracking-tight text-white">AI Workspace</span>
+            <span className="text-[15px] font-semibold tracking-tight text-white">{tr("AI Workspace")}</span>
           </div>
           {steps > 1 && (
             <div className="absolute bottom-9 left-1/2 flex -translate-x-1/2 gap-2.5">
@@ -50,7 +51,7 @@ export default function AuthShell({
             <div className="flex items-center gap-2.5 md:invisible">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/logo.png" alt="" className="h-7 w-7 rounded-lg" />
-              <span className="text-[15px] font-semibold tracking-tight text-ink">AI Workspace</span>
+              <span className="text-[15px] font-semibold tracking-tight text-ink">{tr("AI Workspace")}</span>
             </div>
             {corner}
           </div>
@@ -58,9 +59,9 @@ export default function AuthShell({
             <div className="w-full max-w-[320px]">{children}</div>
           </div>
           <p className="text-center text-[11px] text-muted">
-            <a href="/privacy" className="transition-colors hover:text-ink-soft">Privacidade</a>
+            <a href="/privacy" className="transition-colors hover:text-ink-soft">{tr("Privacidade")}</a>
             {" · "}
-            <a href="/terms" className="transition-colors hover:text-ink-soft">Termos</a>
+            <a href="/terms" className="transition-colors hover:text-ink-soft">{tr("Termos")}</a>
           </p>
         </div>
       </div>
@@ -84,7 +85,7 @@ export const AuthField = forwardRef<HTMLInputElement, React.InputHTMLAttributes<
         {...props}
       />
       {senha && (
-        <button type="button" tabIndex={-1} onClick={() => setVer((v) => !v)} title={ver ? "Ocultar senha" : "Mostrar senha"} className="text-muted transition-colors hover:text-ink">
+        <button type="button" tabIndex={-1} onClick={() => setVer((v) => !v)} title={ver ? tr("Ocultar senha") : tr("Mostrar senha")} className="text-muted transition-colors hover:text-ink">
           {ver ? <EyeOff size={15} /> : <Eye size={15} />}
         </button>
       )}

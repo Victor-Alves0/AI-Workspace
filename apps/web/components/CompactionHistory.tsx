@@ -4,11 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, GitBranch, Maximize2, Pencil, Pin, Plus, RotateCcw, Minus, Search, Trash2, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Compaction } from "@/lib/types";
+import { dateLocale, tr } from "@/lib/i18n";
 
 function fmtWhen(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleString(dateLocale(), { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 const NODE_W = 172;
@@ -235,12 +236,12 @@ export default function CompactionHistory({
         {/* cabeçalho + busca */}
         <div className="flex items-center gap-3 border-b border-border px-5 py-3">
           <h2 className="flex shrink-0 items-center gap-2 text-base font-semibold text-ink">
-            <GitBranch size={17} className="text-muted" /> Grafo de contexto
+            <GitBranch size={17} className="text-muted" />  {tr("Grafo de contexto")}
           </h2>
           <div className="ml-auto flex items-center gap-2 rounded-lg bg-surface px-3 py-1.5">
             <Search size={14} className="text-muted" />
             <input
-              value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filtrar por nome, data ou mensagem…"
+              value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr("Filtrar por nome, data ou mensagem…")}
               className="w-56 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
             />
           </div>
@@ -250,9 +251,9 @@ export default function CompactionHistory({
         {/* canvas */}
         <div className="relative min-h-0 flex-1 overflow-hidden bg-[radial-gradient(circle,rgb(var(--c-border))_1px,transparent_1px)] [background-size:22px_22px]">
           {items === null ? (
-            <p className="grid h-full place-items-center text-sm text-muted">Carregando…</p>
+            <p className="grid h-full place-items-center text-sm text-muted">{tr("Carregando…")}</p>
           ) : items.length === 0 ? (
-            <p className="grid h-full place-items-center px-8 text-center text-sm text-muted">Nenhum checkpoint ainda. Use &quot;Compactar agora&quot; para criar o primeiro ponto.</p>
+            <p className="grid h-full place-items-center px-8 text-center text-sm text-muted">{tr("Nenhum checkpoint ainda. Use \"Compactar agora\" para criar o primeiro ponto.")}</p>
           ) : (
             <div
               ref={viewportRef}
@@ -299,7 +300,7 @@ export default function CompactionHistory({
                           {isChild ? <GitBranch size={11} /> : <Pin size={11} className={c.pinned ? "fill-accent-hover" : ""} />}
                         </span>
                         <span className="truncate text-sm font-medium text-ink">{label(c)}</span>
-                        {c.pinned && <span className="ml-auto shrink-0 rounded-full bg-accent/20 px-1.5 py-0.5 text-[9px] font-medium text-accent-hover">Atual</span>}
+                        {c.pinned && <span className="ml-auto shrink-0 rounded-full bg-accent/20 px-1.5 py-0.5 text-[9px] font-medium text-accent-hover">{tr("Atual")}</span>}
                       </div>
                       <p className="mt-0.5 truncate text-[11px] text-muted">{c.message_count} msgs · {fmtWhen(c.created_at)}</p>
                     </div>
@@ -317,8 +318,8 @@ export default function CompactionHistory({
                   }}
                 >
                   <p className="flex items-center gap-1.5 text-sm font-medium text-ink">
-                    {hovered.name || "Checkpoint"}
-                    {hovered.pinned && <span className="rounded-full bg-accent/20 px-1.5 py-0.5 text-[9px] text-accent-hover">Atual</span>}
+                    {hovered.name || tr("Checkpoint")}
+                    {hovered.pinned && <span className="rounded-full bg-accent/20 px-1.5 py-0.5 text-[9px] text-accent-hover">{tr("Atual")}</span>}
                   </p>
                   <p className="mt-0.5 text-[11px] text-muted">{fmtWhen(hovered.created_at)} · {hovered.message_count} mensagens</p>
                   {hovered.last_message && <p className="mt-1.5 line-clamp-3 text-xs text-ink-soft/80">{hovered.last_message}</p>}
@@ -330,9 +331,9 @@ export default function CompactionHistory({
           {/* controles de zoom */}
           {items && items.length > 0 && (
             <div className="absolute bottom-3 right-3 flex flex-col gap-1 rounded-xl border border-border bg-surface/90 p-1 shadow-menu backdrop-blur">
-              <button onClick={() => zoom(1)} title="Aproximar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Plus size={15} /></button>
-              <button onClick={() => zoom(-1)} title="Afastar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Minus size={15} /></button>
-              <button onClick={() => { setOffsets({}); fit(); }} title="Ajustar à tela" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Maximize2 size={15} /></button>
+              <button onClick={() => zoom(1)} title={tr("Aproximar")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Plus size={15} /></button>
+              <button onClick={() => zoom(-1)} title={tr("Afastar")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Minus size={15} /></button>
+              <button onClick={() => { setOffsets({}); fit(); }} title={tr("Ajustar à tela")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Maximize2 size={15} /></button>
             </div>
           )}
 
@@ -349,7 +350,7 @@ export default function CompactionHistory({
                       <input
                         autoFocus value={editName} onChange={(e) => setEditName(e.target.value)}
                         onKeyDown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") setEditing(false); }}
-                        placeholder="Nome do checkpoint"
+                        placeholder={tr("Nome do checkpoint")}
                         className="w-full rounded-md border border-border bg-bg px-2 py-1 text-sm text-ink outline-none focus:border-accent"
                       />
                       <button onClick={saveName} className="rounded p-1 text-green-400 hover:bg-hover"><Check size={14} /></button>
@@ -377,23 +378,23 @@ export default function CompactionHistory({
                         confirmRestore ? "border-amber-500/50 bg-amber-500/15 text-amber-300" : "border-border text-ink-soft hover:bg-hover"
                       }`}
                     >
-                      <RotateCcw size={12} /> {busy === selected.id ? "…" : confirmRestore ? "Confirmar" : "Restaurar"}
+                      <RotateCcw size={12} /> {busy === selected.id ? "…" : confirmRestore ? tr("Confirmar") : tr("Restaurar")}
                     </button>
                   )}
-                  <button onClick={() => { setEditing(true); setEditName(selected.name ?? ""); }} title="Renomear" className="rounded-lg border border-border p-1.5 text-muted hover:bg-hover hover:text-ink"><Pencil size={13} /></button>
+                  <button onClick={() => { setEditing(true); setEditName(selected.name ?? ""); }} title={tr("Renomear")} className="rounded-lg border border-border p-1.5 text-muted hover:bg-hover hover:text-ink"><Pencil size={13} /></button>
                   {selected.pinned ? (
                     // checkpoint ATIVO: excluir = DESCOMPACTAR (desfazer esta compactação)
                     <button
                       onClick={remove} disabled={busy !== null}
-                      title="Descompactar: as mensagens voltam ao contexto da IA"
+                      title={tr("Descompactar: as mensagens voltam ao contexto da IA")}
                       className={`flex flex-1 items-center justify-center gap-1 rounded-lg border px-2 py-1.5 text-xs transition-colors disabled:opacity-60 ${
                         confirmDel ? "border-red-500/50 bg-red-500/15 text-red-300" : "border-border text-ink-soft hover:bg-hover hover:text-red-300"
                       }`}
                     >
-                      <Trash2 size={12} /> {busy === selected.id ? "…" : confirmDel ? "Confirmar" : "Descompactar"}
+                      <Trash2 size={12} /> {busy === selected.id ? "…" : confirmDel ? tr("Confirmar") : tr("Descompactar")}
                     </button>
                   ) : (
-                    <button onClick={remove} disabled={busy !== null} title="Excluir"
+                    <button onClick={remove} disabled={busy !== null} title={tr("Excluir")}
                       className={`rounded-lg border p-1.5 transition-colors ${confirmDel ? "border-red-500/50 bg-red-500/15 text-red-300" : "border-border text-muted hover:bg-hover hover:text-red-300"}`}>
                       <Trash2 size={13} />
                     </button>

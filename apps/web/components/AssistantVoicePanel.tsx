@@ -15,6 +15,7 @@ import {
 } from "@/lib/wakeword";
 import { api } from "@/lib/api";
 import type { WakeCreds } from "@/lib/types";
+import { tr } from "@/lib/i18n";
 
 // modelo pequeno de PT-BR hospedado pela vosk-browser (CORS liberado); serve de
 // default para o campo ficar utilizável sem caça ao link.
@@ -107,14 +108,14 @@ export default function AssistantVoicePanel() {
       setVoskInstalledUrl(effVoskUrl);
     } catch (e) {
       setVoskState("error");
-      setVoskMsg(`Falha ao carregar: ${e instanceof Error ? e.message : String(e)} — verifique a URL/CORS/formato.`);
+      setVoskMsg(tr("Falha ao carregar: {0} — verifique a URL/CORS/formato.", { "0": e instanceof Error ? e.message : String(e) }));
     }
   };
   const uninstallVosk = () => {
     try { localStorage.removeItem("aiw_wake_vosk"); } catch { /* noop */ }
     setVoskInstalledUrl(null);
     setVoskState("idle");
-    setVoskMsg("Desinstalado (o navegador ainda pode manter o arquivo no cache HTTP).");
+    setVoskMsg(tr("Desinstalado (o navegador ainda pode manter o arquivo no cache HTTP)."));
   };
 
   // --- Baixar modelo Whisper (on-device; ~150MB na 1ª vez) ---
@@ -122,16 +123,16 @@ export default function AssistantVoicePanel() {
   const [whMsg, setWhMsg] = useState("");
   const downloadWhisper = async () => {
     setWhState("loading");
-    setWhMsg("Baixando o Whisper (~150MB na 1ª vez; depois fica em cache)…");
+    setWhMsg(tr("Baixando o Whisper (~150MB na 1ª vez; depois fica em cache)…"));
     try {
       await loadWhisperModel();
       setWhState("ok");
-      setWhMsg("✓ Whisper instalado (offline a partir de agora).");
+      setWhMsg(tr("✓ Whisper instalado (offline a partir de agora)."));
       try { localStorage.setItem("aiw_wake_whisper", "1"); } catch { /* noop */ }
       setWhInstalled(true);
     } catch (e) {
       setWhState("error");
-      setWhMsg(`Falha ao baixar o Whisper: ${e instanceof Error ? e.message : String(e)}`);
+      setWhMsg(tr("Falha ao baixar o Whisper: {0}", { "0": e instanceof Error ? e.message : String(e) }));
     }
   };
   const uninstallWhisper = async () => {
@@ -139,7 +140,7 @@ export default function AssistantVoicePanel() {
     try { localStorage.removeItem("aiw_wake_whisper"); } catch { /* noop */ }
     setWhInstalled(false);
     setWhState("idle");
-    setWhMsg("Modelo Whisper removido do cache do navegador.");
+    setWhMsg(tr("Modelo Whisper removido do cache do navegador."));
   };
 
   // --- Confirmar modelos OpenWakeWord (baixa/valida os 3 .onnx, sem mic) ---
@@ -149,16 +150,16 @@ export default function AssistantVoicePanel() {
   const [owwState, setOwwState] = useState<"idle" | "loading" | "ok" | "error">("idle");
   const [owwMsg, setOwwMsg] = useState("");
   const confirmOww = async () => {
-    if (!owwModelUrl) { setOwwState("error"); setOwwMsg("Informe a URL do seu modelo (.onnx) primeiro."); return; }
+    if (!owwModelUrl) { setOwwState("error"); setOwwMsg(tr("Informe a URL do seu modelo (.onnx) primeiro.")); return; }
     setOwwState("loading");
-    setOwwMsg("Baixando/validando os modelos ONNX (melspectrograma + embedding + o seu)…");
+    setOwwMsg(tr("Baixando/validando os modelos ONNX (melspectrograma + embedding + o seu)…"));
     try {
       await loadOwwModels(owwModelUrl, owwMelUrl, owwEmbUrl);
       setOwwState("ok");
-      setOwwMsg("✓ Modelos OpenWakeWord carregados. Use o teste abaixo para calibrar a sensibilidade.");
+      setOwwMsg(tr("✓ Modelos OpenWakeWord carregados. Use o teste abaixo para calibrar a sensibilidade."));
     } catch (e) {
       setOwwState("error");
-      setOwwMsg(`Falha ao carregar: ${e instanceof Error ? e.message : String(e)} — verifique as URLs/CORS/formato .onnx.`);
+      setOwwMsg(tr("Falha ao carregar: {0} — verifique as URLs/CORS/formato .onnx.", { "0": e instanceof Error ? e.message : String(e) }));
     }
   };
 
@@ -216,10 +217,10 @@ export default function AssistantVoicePanel() {
       engine === "vosk"
         ? `Carregando o modelo "${voskName(effVoskUrl)}"…`
         : engine === "whisper"
-        ? "Carregando o Whisper… (baixa ~150MB na 1ª vez)"
+        ? tr("Carregando o Whisper… (baixa ~150MB na 1ª vez)")
         : engine === "openwakeword"
-        ? "Carregando os modelos ONNX (baixa na 1ª vez)…"
-        : "Preparando… (o navegador vai pedir o microfone)",
+        ? tr("Carregando os modelos ONNX (baixa na 1ª vez)…")
+        : tr("Preparando… (o navegador vai pedir o microfone)"),
     );
     setHeard("");
     setScore(0);
@@ -239,7 +240,7 @@ export default function AssistantVoicePanel() {
             setState("listening");
             setMsg(
               engine === "openwakeword"
-                ? "Escutando… diga a palavra do seu modelo (veja o score subir)."
+                ? tr("Escutando… diga a palavra do seu modelo (veja o score subir).")
                 : engine === "vosk"
                 ? `Modelo "${voskName(effVoskUrl)}" pronto. Escutando… diga "${word}".`
                 : `Escutando… diga "${word}".`,
@@ -251,7 +252,7 @@ export default function AssistantVoicePanel() {
         },
         () => {
           setState("heard");
-          setMsg(engine === "openwakeword" ? "✓ Detectado! O modelo disparou acima do limiar." : `✓ Ouvi "${word}"! A wake word está funcionando.`);
+          setMsg(engine === "openwakeword" ? tr("✓ Detectado! O modelo disparou acima do limiar.") : tr("✓ Ouvi \"{word}\"! A wake word está funcionando.", { word: word }));
           void stopTest();
         },
       );
@@ -260,11 +261,11 @@ export default function AssistantVoicePanel() {
       timerRef.current = setTimeout(() => {
         void stopTest();
         setState((s) => (s === "heard" ? s : "idle"));
-        setMsg((m) => (state === "heard" ? m : "Tempo esgotado — não ouvi a palavra. Tente falar mais perto do mic."));
+        setMsg((m) => (state === "heard" ? m : tr("Tempo esgotado — não ouvi a palavra. Tente falar mais perto do mic.")));
       }, 20_000);
     } catch (e) {
       setState("error");
-      setMsg(e instanceof Error ? e.message : "Falha ao iniciar a escuta.");
+      setMsg(e instanceof Error ? e.message : tr("Falha ao iniciar a escuta."));
     }
   };
 
@@ -272,7 +273,7 @@ export default function AssistantVoicePanel() {
 
   return (
     <div className="space-y-5">
-      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">Detecção de voz</h3>
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted">{tr("Detecção de voz")}</h3>
 
       {/* Porcupine */}
       <div className="space-y-3 rounded-xl border border-border bg-surface2/40 p-4">
@@ -285,16 +286,16 @@ export default function AssistantVoicePanel() {
             type="password"
             value={cfg.picovoice_key ?? ""}
             onChange={(e) => patch({ picovoice_key: e.target.value })}
-            placeholder="cole sua AccessKey grátis"
+            placeholder={tr("cole sua AccessKey grátis")}
             className="w-full rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs text-ink outline-none focus:border-accent"
           />
           <span className="mt-1 block text-[11px] text-muted">
-            Grátis em <span className="font-mono text-ink-soft">console.picovoice.ai</span>. Necessária para as
-            palavras embutidas (Jarvis, Computer…).
+            
+            {tr("Grátis em")} <span className="font-mono text-ink-soft">console.picovoice.ai</span>{tr(". Necessária para as palavras embutidas (Jarvis, Computer…).")}
           </span>
         </label>
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-muted">Modelo .ppn custom (opcional)</span>
+          <span className="mb-1 block text-xs font-medium text-muted">{tr("Modelo .ppn custom (opcional)")}</span>
           <input
             value={cfg.ppn_url ?? ""}
             onChange={(e) => patch({ ppn_url: e.target.value })}
@@ -302,8 +303,8 @@ export default function AssistantVoicePanel() {
             className="w-full rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs text-ink outline-none focus:border-accent"
           />
           <span className="mt-1 block text-[11px] text-muted">
-            Para uma palavra própria (&quot;hey Max&quot;): gere o .ppn no console da Picovoice e cole a URL. No
-            modelo, escolha a palavra &quot;Personalizada&quot;.
+            
+            {tr("Para uma palavra própria (\"hey Max\"): gere o .ppn no console da Picovoice e cole a URL. No modelo, escolha a palavra \"Personalizada\".")}
           </span>
         </label>
       </div>
@@ -311,12 +312,11 @@ export default function AssistantVoicePanel() {
       {/* Whisper (on-device, melhor com nomes) */}
       <div className="space-y-3 rounded-xl border border-border bg-surface2/40 p-4">
         <div className="flex items-center gap-2 text-sm font-medium text-ink">
-          <Ear size={15} className="text-muted" /> Whisper
+          <Ear size={15} className="text-muted" />  {tr("Whisper")}
         </div>
         <p className="text-[11px] text-muted">
-          On-device, sem chave, reconhece <strong>nomes</strong> (&quot;akeno&quot;) muito melhor que o Vosk.
-          A palavra vem da <span className="text-ink-soft">Palavra de ativação</span> do modelo. O modelo (~150MB)
-          baixa 1x e fica em cache (offline depois).
+          
+          {tr("On-device, sem chave, reconhece")} <strong>nomes</strong>  {tr("(\"akeno\") muito melhor que o Vosk. A palavra vem da")} <span className="text-ink-soft">{tr("Palavra de ativação")}</span>  {tr("do modelo. O modelo (~150MB) baixa 1x e fica em cache (offline depois).")}
         </p>
         <div className="flex items-center gap-2">
           {whInstalled ? (
@@ -324,7 +324,7 @@ export default function AssistantVoicePanel() {
               onClick={uninstallWhisper}
               className="flex items-center gap-1.5 rounded-lg border border-border bg-bg px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-red-500/10 hover:text-red-400"
             >
-              <Trash2 size={13} /> Desinstalar
+              <Trash2 size={13} />  {tr("Desinstalar")}
             </button>
           ) : (
             <button
@@ -333,10 +333,11 @@ export default function AssistantVoicePanel() {
               className="flex items-center gap-1.5 rounded-lg border border-border bg-bg px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-hover disabled:opacity-50"
             >
               {whState === "loading" ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-              Baixar modelo
+              
+              {tr("Baixar modelo")}
             </button>
           )}
-          {whInstalled && <span className="flex items-center gap-1 text-[11px] text-green-400"><Check size={12} /> Instalado</span>}
+          {whInstalled && <span className="flex items-center gap-1 text-[11px] text-green-400"><Check size={12} />  {tr("Instalado")}</span>}
         </div>
         {whMsg && (
           <p className={`text-[11px] ${whState === "ok" ? "text-green-400" : whState === "error" ? "text-red-400" : "text-muted"}`}>
@@ -348,10 +349,10 @@ export default function AssistantVoicePanel() {
       {/* Vosk */}
       <div className="space-y-3 rounded-xl border border-border bg-surface2/40 p-4">
         <div className="flex items-center gap-2 text-sm font-medium text-ink">
-          <Ear size={15} className="text-muted" /> Vosk
+          <Ear size={15} className="text-muted" />  {tr("Vosk")}
         </div>
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-muted">URL do modelo (.zip ou .tar.gz)</span>
+          <span className="mb-1 block text-xs font-medium text-muted">{tr("URL do modelo (.zip ou .tar.gz)")}</span>
           <input
             value={cfg.vosk_model_url ?? ""}
             onChange={(e) => { patch({ vosk_model_url: e.target.value }); setVoskState("idle"); setVoskMsg(""); }}
@@ -359,9 +360,9 @@ export default function AssistantVoicePanel() {
             className="w-full rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs text-ink outline-none focus:border-accent"
           />
           <span className="mt-1 block text-[11px]">
-            <span className="text-muted">Em uso: </span>
+            <span className="text-muted">{tr("Em uso:")} </span>
             <span className="font-mono text-ink-soft">{voskName(effVoskUrl)}</span>
-            <span className="text-muted"> {usingDefaultVosk ? "(padrão)" : "(seu link)"}</span>
+            <span className="text-muted"> {usingDefaultVosk ? tr("(padrão)") : tr("(seu link)")}</span>
           </span>
         </label>
         <div className="flex items-center gap-2">
@@ -371,7 +372,7 @@ export default function AssistantVoicePanel() {
               onClick={uninstallVosk}
               className="flex items-center gap-1.5 rounded-lg border border-border bg-bg px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-red-500/10 hover:text-red-400"
             >
-              <Trash2 size={13} /> Desinstalar
+              <Trash2 size={13} />  {tr("Desinstalar")}
             </button>
           ) : (
             <button
@@ -380,10 +381,10 @@ export default function AssistantVoicePanel() {
               className="flex items-center gap-1.5 rounded-lg border border-border bg-bg px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-hover disabled:opacity-50"
             >
               {voskState === "loading" ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-              {voskInstalledUrl && voskInstalledUrl !== effVoskUrl ? "Reinstalar (link mudou)" : "Baixar modelo"}
+              {voskInstalledUrl && voskInstalledUrl !== effVoskUrl ? tr("Reinstalar (link mudou)") : tr("Baixar modelo")}
             </button>
           )}
-          {voskInstalledUrl === effVoskUrl && <span className="flex items-center gap-1 text-[11px] text-green-400"><Check size={12} /> Instalado</span>}
+          {voskInstalledUrl === effVoskUrl && <span className="flex items-center gap-1 text-[11px] text-green-400"><Check size={12} />  {tr("Instalado")}</span>}
         </div>
         {voskMsg && (
           <p className={`text-[11px] ${voskState === "ok" ? "text-green-400" : voskState === "error" ? "text-red-400" : "text-muted"}`}>
@@ -398,11 +399,10 @@ export default function AssistantVoicePanel() {
           <Ear size={15} className="text-muted" /> OpenWakeWord
         </div>
         <p className="text-[11px] text-muted">
-          Palavra/nome <strong>próprio</strong>, com um modelo que você treina (Colab do openWakeWord) e hospeda.
-          Roda on-device (ONNX). Precisa das 3 URLs com <span className="text-ink-soft">CORS liberado</span>.
+          Palavra/nome <strong>{tr("próprio")}</strong>{tr(", com um modelo que você treina (Colab do openWakeWord) e hospeda. Roda on-device (ONNX). Precisa das 3 URLs com")} <span className="text-ink-soft">{tr("CORS liberado")}</span>.
         </p>
         <label className="block">
-          <span className="mb-1 block text-xs font-medium text-muted">URL do seu modelo (.onnx)</span>
+          <span className="mb-1 block text-xs font-medium text-muted">{tr("URL do seu modelo (.onnx)")}</span>
           <input
             value={cfg.oww_model_url ?? ""}
             onChange={(e) => { patch({ oww_model_url: e.target.value }); setOwwState("idle"); setOwwMsg(""); }}
@@ -411,7 +411,7 @@ export default function AssistantVoicePanel() {
           />
         </label>
         <details className="text-[11px]">
-          <summary className="cursor-pointer text-muted hover:text-ink-soft">Modelos compartilhados (avançado)</summary>
+          <summary className="cursor-pointer text-muted hover:text-ink-soft">{tr("Modelos compartilhados (avançado)")}</summary>
           <div className="mt-2 space-y-2">
             <label className="block">
               <span className="mb-1 block font-medium text-muted">Melspectrograma (.onnx)</span>
@@ -431,7 +431,7 @@ export default function AssistantVoicePanel() {
                 className="w-full rounded-lg border border-border bg-bg px-3 py-1.5 font-mono text-ink outline-none focus:border-accent"
               />
             </label>
-            <p className="text-muted">Vazio = usa os padrões públicos acima.</p>
+            <p className="text-muted">{tr("Vazio = usa os padrões públicos acima.")}</p>
           </div>
         </details>
         <div className="flex items-center gap-2">
@@ -441,9 +441,10 @@ export default function AssistantVoicePanel() {
             className="flex items-center gap-1.5 rounded-lg border border-border bg-bg px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:bg-hover disabled:opacity-50"
           >
             {owwState === "loading" ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-            Confirmar modelos
+            
+            {tr("Confirmar modelos")}
           </button>
-          {owwState === "ok" && <span className="flex items-center gap-1 text-[11px] text-green-400"><Check size={12} /> Carregado</span>}
+          {owwState === "ok" && <span className="flex items-center gap-1 text-[11px] text-green-400"><Check size={12} />  {tr("Carregado")}</span>}
         </div>
         {owwMsg && (
           <p className={`text-[11px] ${owwState === "ok" ? "text-green-400" : owwState === "error" ? "text-red-400" : "text-muted"}`}>
@@ -455,30 +456,30 @@ export default function AssistantVoicePanel() {
       {/* Testar escuta */}
       <div className="space-y-3 rounded-xl border border-accent/30 bg-accent/5 p-4">
         <div className="flex items-center gap-2 text-sm font-medium text-ink">
-          <Ear size={15} className="text-accent" /> Testar escuta
+          <Ear size={15} className="text-accent" />  {tr("Testar escuta")}
         </div>
         <div className="flex flex-wrap items-end gap-2">
           <label className="block">
-            <span className="mb-1 block text-[11px] font-medium text-muted">Engine</span>
+            <span className="mb-1 block text-[11px] font-medium text-muted">{tr("Engine")}</span>
             <Select
               value={engine}
               onChange={(e) => setEngine(e.target.value as "porcupine" | "vosk" | "whisper" | "openwakeword")}
               disabled={testing}
               className="rounded-lg border border-border bg-bg px-2 py-2 text-sm text-ink outline-none focus:border-accent disabled:opacity-50"
             >
-              <option value="porcupine">Porcupine</option>
-              <option value="whisper">Whisper</option>
-              <option value="vosk">Vosk</option>
+              <option value="porcupine">{tr("Porcupine")}</option>
+              <option value="whisper">{tr("Whisper")}</option>
+              <option value="vosk">{tr("Vosk")}</option>
               <option value="openwakeword">OpenWakeWord</option>
             </Select>
           </label>
           <label className="block">
-            <span className="mb-1 block text-[11px] font-medium text-muted">Palavra</span>
+            <span className="mb-1 block text-[11px] font-medium text-muted">{tr("Palavra")}</span>
             <input
               value={word}
               onChange={(e) => setWord(e.target.value)}
               disabled={testing}
-              placeholder="Jarvis"
+              placeholder={tr("Jarvis")}
               className="w-40 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent disabled:opacity-50"
             />
           </label>
@@ -487,7 +488,7 @@ export default function AssistantVoicePanel() {
             className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
           >
             {state === "loading" ? <Loader2 size={15} className="animate-spin" /> : state === "heard" ? <Check size={15} /> : <Ear size={15} />}
-            {testing ? "Parar" : "Testar"}
+            {testing ? tr("Parar") : tr("Testar")}
           </button>
         </div>
         {msg && (
@@ -517,7 +518,7 @@ export default function AssistantVoicePanel() {
             {engine === "openwakeword" ? (
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
-                  <span className="shrink-0 text-[11px] text-muted">Score</span>
+                  <span className="shrink-0 text-[11px] text-muted">{tr("Score")}</span>
                   <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface2">
                     <div
                       className={`h-full rounded-full transition-[width] duration-75 ${score >= 0.5 ? "bg-green-400" : "bg-accent"}`}
@@ -526,16 +527,17 @@ export default function AssistantVoicePanel() {
                   </div>
                   <span className="w-10 shrink-0 text-right font-mono text-[11px] text-ink-soft">{score.toFixed(2)}</span>
                 </div>
-                <p className="text-[11px] text-muted">Diga sua palavra e veja o pico. Ajuste o limiar no modelo um pouco abaixo do pico.</p>
+                <p className="text-[11px] text-muted">{tr("Diga sua palavra e veja o pico. Ajuste o limiar no modelo um pouco abaixo do pico.")}</p>
               </div>
             ) : engine !== "porcupine" ? (
               <p className="text-xs text-ink-soft">
-                Entendido: <span className="font-medium text-ink">{heard || "—"}</span>
+                
+                {tr("Entendido:")} <span className="font-medium text-ink">{heard || "—"}</span>
               </p>
             ) : (
               <p className="text-[11px] text-muted">
-                Porcupine não transcreve (é detector de palavra). A barra acima mostra que o mic está captando;
-                a palavra só acende quando reconhecida. Sem barra = mic não está chegando.
+                
+                {tr("Porcupine não transcreve (é detector de palavra). A barra acima mostra que o mic está captando; a palavra só acende quando reconhecida. Sem barra = mic não está chegando.")}
               </p>
             )}
           </div>

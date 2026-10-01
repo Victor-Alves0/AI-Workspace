@@ -6,6 +6,7 @@ import type { LucideIcon } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ImaginaiCodexResult } from "../types";
 import { EntityImage, ImaginaiFeatureStatus, ImaginaiToolbar, mediaSrc } from "../shared";
+import { tr } from "@/lib/i18n";
 
 export function codexDescription(value: ImaginaiCodexResult["description"]): string {
   if (value == null) return "";
@@ -15,20 +16,20 @@ export function codexDescription(value: ImaginaiCodexResult["description"]): str
 
 const KINDS: Record<string, { label: string; icon: LucideIcon }> = {
   npc: { label: "NPC", icon: User },
-  creature: { label: "Criatura", icon: PawPrint },
-  location: { label: "Local", icon: MapIcon },
-  faction: { label: "Facção", icon: Flag },
-  item: { label: "Item", icon: Package },
-  lore: { label: "Lore", icon: BookOpen },
+  creature: { label: tr("Criatura"), icon: PawPrint },
+  location: { label: tr("Local"), icon: MapIcon },
+  faction: { label: tr("Facção"), icon: Flag },
+  item: { label: tr("Item"), icon: Package },
+  lore: { label: tr("Lore"), icon: BookOpen },
 };
 
 const CATEGORIES = [
-  { key: "all", label: "Tudo" },
+  { key: "all", label: tr("Tudo") },
   { key: "npc", label: "NPCs" },
-  { key: "location", label: "Locais" },
-  { key: "faction", label: "Facções" },
-  { key: "item", label: "Itens" },
-  { key: "lore", label: "Lore" },
+  { key: "location", label: tr("Locais") },
+  { key: "faction", label: tr("Facções") },
+  { key: "item", label: tr("Itens") },
+  { key: "lore", label: tr("Lore") },
 ];
 
 export function kindLabel(kind: string): string {
@@ -54,7 +55,7 @@ export function ImaginaiCodexPanel({ campaignId }: { campaignId: string }) {
         const response = await api.get<{ results: ImaginaiCodexResult[] }>(`/mini-apps/imaginai/campaigns/${campaignId}/codex?search=${encodeURIComponent(query)}&kind=${encodeURIComponent(kind)}`);
         if (!cancelled) setResults(response.results);
       } catch (searchError) {
-        if (!cancelled) setError(searchError instanceof Error ? searchError.message : "Não foi possível consultar o Codex");
+        if (!cancelled) setError(searchError instanceof Error ? searchError.message : tr("Não foi possível consultar o Codex"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -67,37 +68,37 @@ export function ImaginaiCodexPanel({ campaignId }: { campaignId: string }) {
     const hidden = selected.knowledge === "aware";
     return (
       <div className="imaginai-feature-scroll">
-        <button type="button" onClick={() => setSelected(null)} className="imaginai-small-button -ml-1.5"><ChevronLeft size={14} /> Codex</button>
+        <button type="button" onClick={() => setSelected(null)} className="imaginai-small-button -ml-1.5"><ChevronLeft size={14} />  {tr("Codex")}</button>
         <div className="mt-2 flex items-start justify-between gap-2">
           <div className="min-w-0">
             <p className="text-[10px] uppercase tracking-wider text-violet-300">{kindLabel(selected.kind)}</p>
             <h3 className="mt-0.5 text-sm font-semibold text-ink">{selected.name}</h3>
           </div>
-          {selected.knowledge === "rumor" ? <span className="rounded-full bg-amber-400/10 px-2 py-1 text-[9px] text-amber-300">Rumor</span> : null}
+          {selected.knowledge === "rumor" ? <span className="rounded-full bg-amber-400/10 px-2 py-1 text-[9px] text-amber-300">{tr("Rumor")}</span> : null}
         </div>
-        {selected.subject ? <p className="mt-1 text-[10px] text-muted">Sobre {selected.subject}</p> : null}
+        {selected.subject ? <p className="mt-1 text-[10px] text-muted">{tr("Sobre")} {selected.subject}</p> : null}
         {selected.image_url && !hidden ? <EntityImage url={selected.image_url} alt={selected.name} className="mt-3 aspect-[4/3] w-full" /> : null}
         {hidden ? (
           <div className="mt-4 rounded-xl border border-dashed border-border bg-surface2/35 p-3">
-            <div className="flex items-center gap-2 text-xs text-muted"><LockKeyhole size={14} /> Ainda não descoberto</div>
+            <div className="flex items-center gap-2 text-xs text-muted"><LockKeyhole size={14} />  {tr("Ainda não descoberto")}</div>
             <div className="imaginai-redaction mt-3 w-full" /><div className="imaginai-redaction mt-2 w-4/5" /><div className="imaginai-redaction mt-2 w-2/3" />
           </div>
         ) : (
-          <p className="mt-3 whitespace-pre-wrap break-words text-xs leading-5 text-ink-soft">{codexDescription(selected.description) || "Nenhum detalhe registrado."}</p>
+          <p className="mt-3 whitespace-pre-wrap break-words text-xs leading-5 text-ink-soft">{codexDescription(selected.description) || tr("Nenhum detalhe registrado.")}</p>
         )}
-        {selected.confidence != null ? <p className="mt-3 text-[10px] text-muted">Confiança da fonte: {Math.round(selected.confidence * 100)}%</p> : null}
+        {selected.confidence != null ? <p className="mt-3 text-[10px] text-muted">{tr("Confiança da fonte:")} {Math.round(selected.confidence * 100)}%</p> : null}
       </div>
     );
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ImaginaiToolbar value={query} onChange={setQuery} placeholder="Buscar no mundo" />
-      <div className="imaginai-chips mt-2 shrink-0" role="group" aria-label="Categorias do Codex">
+      <ImaginaiToolbar value={query} onChange={setQuery} placeholder={tr("Buscar no mundo")} />
+      <div className="imaginai-chips mt-2 shrink-0" role="group" aria-label={tr("Categorias do Codex")}>
         {CATEGORIES.map((category) => <button key={category.key} type="button" aria-pressed={kind === category.key} onClick={() => setKind(category.key)} className="imaginai-chip">{category.label}</button>)}
       </div>
       <div className="imaginai-feature-scroll mt-2">
-        {loading && !results.length ? <ImaginaiFeatureStatus><Loader2 size={17} className="animate-spin" /></ImaginaiFeatureStatus> : error ? <ImaginaiFeatureStatus error>{error}</ImaginaiFeatureStatus> : results.length === 0 ? <ImaginaiFeatureStatus>Nada encontrado.</ImaginaiFeatureStatus> : (
+        {loading && !results.length ? <ImaginaiFeatureStatus><Loader2 size={17} className="animate-spin" /></ImaginaiFeatureStatus> : error ? <ImaginaiFeatureStatus error>{error}</ImaginaiFeatureStatus> : results.length === 0 ? <ImaginaiFeatureStatus>{tr("Nada encontrado.")}</ImaginaiFeatureStatus> : (
           <div className="space-y-0.5">
             {results.map((result) => {
               const locked = result.knowledge === "aware";
@@ -107,7 +108,7 @@ export function ImaginaiCodexPanel({ campaignId }: { campaignId: string }) {
                   // eslint-disable-next-line @next/next/no-img-element
                   ? <img src={mediaSrc(result.image_url)} alt="" loading="lazy" className="h-7 w-7 shrink-0 rounded-lg object-cover" />
                   : <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300"><Icon size={13} /></span>}
-                <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-ink">{result.name}</span><span className="block truncate text-[10px] text-muted">{locked ? "Detalhes ocultos" : kindLabel(result.kind)}</span></span>
+                <span className="min-w-0 flex-1"><span className="block truncate text-xs font-medium text-ink">{result.name}</span><span className="block truncate text-[10px] text-muted">{locked ? tr("Detalhes ocultos") : kindLabel(result.kind)}</span></span>
                 <ChevronRight size={14} className="shrink-0 text-muted" />
               </button>;
             })}

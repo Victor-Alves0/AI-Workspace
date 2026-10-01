@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { Gauge, Layers, Timer, Zap } from "lucide-react";
 import type { CallStats } from "@/app/chat/useGeneration";
+import { dateLocale, tr } from "@/lib/i18n";
 
-const fmtInt = new Intl.NumberFormat("pt-BR");
-const fmtRate = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtInt = new Intl.NumberFormat(dateLocale());
+const fmtRate = new Intl.NumberFormat(dateLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 function fmtLatency(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${fmtRate.format(ms / 1000)} s`;
@@ -34,19 +35,19 @@ export function CallStatsBar({ stats }: { stats: CallStats }) {
   const rate = elapsed >= 500 && stats.tokens > 0 ? stats.tokens / (elapsed / 1000) : null;
   return (
     <div className="flex items-center justify-center gap-4 overflow-hidden whitespace-nowrap px-2 pt-0.5 text-xs text-muted tabular-nums max-[340px]:hidden md:-mt-2 md:pt-0">
-      <span className="flex items-center gap-1" title={stats.exact ? "Tokens gerados nesta resposta" : "Tokens gerados nesta resposta (estimativa)"}>
+      <span className="flex items-center gap-1" title={stats.exact ? tr("Tokens gerados nesta resposta") : tr("Tokens gerados nesta resposta (estimativa)")}>
         <Layers size={12} />
         {stats.exact ? "" : "~"}{fmtInt.format(stats.tokens)} tokens
       </span>
-      <span className="flex items-center gap-1" title="Latência do provedor: do pedido ao 1º byte da resposta (última chamada ao modelo)">
+      <span className="flex items-center gap-1" title={tr("Latência do provedor: do pedido ao 1º byte da resposta (última chamada ao modelo)")}>
         <Gauge size={12} />
         {stats.latencyMs === null ? "—" : fmtLatency(stats.latencyMs)}
       </span>
-      <span className="flex items-center gap-1" title="Tempo desta resposta">
+      <span className="flex items-center gap-1" title={tr("Tempo desta resposta")}>
         <Timer size={12} />
         {fmtElapsed(elapsed)}
       </span>
-      <span className="flex items-center gap-1" title="Tokens por segundo">
+      <span className="flex items-center gap-1" title={tr("Tokens por segundo")}>
         <Zap size={12} />
         {rate === null ? "—" : fmtRate.format(rate)} t/s
       </span>

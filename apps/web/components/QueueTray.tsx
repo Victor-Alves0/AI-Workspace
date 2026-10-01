@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, CornerDownRight, GitFork, ListEnd, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { AnchoredMenu, MenuItem } from "./ui";
+import { tr } from "@/lib/i18n";
 
 /** Item da fila de mensagens do composer. `sent` = já foi injetado no turno em curso
  *  ("Enviar agora" durante a geração) e só espera o turno acabar para ir ao histórico. */
@@ -51,27 +52,27 @@ function Row({ item, onSendNow, onDelete, onEdit, onFork }: {
   return (
     <div className={`group flex h-9 items-center gap-2 rounded-lg px-1.5 ${item.sent ? "opacity-60" : ""}`}>
       {item.sent
-        ? <Check size={14} className="flex-none text-accent-hover" aria-label="Enviada" />
+        ? <Check size={14} className="flex-none text-accent-hover" aria-label={tr("Enviada")} />
         : <ListEnd size={14} className="flex-none text-muted" />}
       <span className="min-w-0 flex-1 truncate text-sm text-ink-soft" title={item.text}>{item.text}</span>
       {item.sent ? (
-        <span className="flex-none pr-1 text-xs text-muted">Enviada</span>
+        <span className="flex-none pr-1 text-xs text-muted">{tr("Enviada")}</span>
       ) : (
         <>
-          <button type="button" onClick={onSendNow} title="Enviar agora"
+          <button type="button" onClick={onSendNow} title={tr("Enviar agora")}
             className="flex h-7 flex-none items-center gap-1 rounded-lg px-2 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink">
-            <CornerDownRight size={13} /> Enviar agora
+            <CornerDownRight size={13} />  {tr("Enviar agora")}
           </button>
-          <button type="button" onClick={onDelete} title="Remover da fila" aria-label="Remover da fila" className={icon}>
+          <button type="button" onClick={onDelete} title={tr("Remover da fila")} aria-label={tr("Remover da fila")} className={icon}>
             <Trash2 size={14} />
           </button>
-          <button ref={moreRef} type="button" onClick={() => setMenu((v) => !v)} title="Mais opções" aria-label="Mais opções" className={icon}>
+          <button ref={moreRef} type="button" onClick={() => setMenu((v) => !v)} title={tr("Mais opções")} aria-label={tr("Mais opções")} className={icon}>
             <MoreHorizontal size={15} />
           </button>
           {menu && (
             <AnchoredMenu anchorRef={moreRef} onClose={() => setMenu(false)} className="min-w-[180px]">
-              <MenuItem icon={<Pencil size={15} />} onClick={() => { setMenu(false); onEdit(); }}>Editar</MenuItem>
-              <MenuItem icon={<GitFork size={15} />} onClick={() => { setMenu(false); onFork(); }}>Fork com esta mensagem</MenuItem>
+              <MenuItem icon={<Pencil size={15} />} onClick={() => { setMenu(false); onEdit(); }}>{tr("Editar")}</MenuItem>
+              <MenuItem icon={<GitFork size={15} />} onClick={() => { setMenu(false); onFork(); }}>{tr("Fork com esta mensagem")}</MenuItem>
             </AnchoredMenu>
           )}
         </>
@@ -100,8 +101,8 @@ function EditRow({ text, onSave, onCancel }: { text: string; onSave: (t: string)
           if (e.key === "Escape") { e.preventDefault(); onCancel(); }
         }}
         className="min-w-0 flex-1 resize-none bg-transparent py-1 text-sm text-ink outline-none" />
-      <button type="button" onClick={onCancel} className="h-7 flex-none rounded-lg px-2 text-xs text-muted hover:bg-hover hover:text-ink">Cancelar</button>
-      <button type="button" onClick={save} className="h-7 flex-none rounded-lg bg-accent px-2.5 text-xs font-medium text-white hover:bg-accent-hover">Salvar</button>
+      <button type="button" onClick={onCancel} className="h-7 flex-none rounded-lg px-2 text-xs text-muted hover:bg-hover hover:text-ink">{tr("Cancelar")}</button>
+      <button type="button" onClick={save} className="h-7 flex-none rounded-lg bg-accent px-2.5 text-xs font-medium text-white hover:bg-accent-hover">{tr("Salvar")}</button>
     </div>
   );
 }

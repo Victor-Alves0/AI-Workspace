@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowLeftRight, ArrowUp, BarChart3, CalendarDays, Check, ChevronDown, Coins, Cpu, Database, DollarSign, MessageSquare, Search, Sparkles, Wrench, Zap } from "lucide-react";
 import { api } from "@/lib/api";
 import { useClickOutside } from "./ui";
+import { dateLocale, tr } from "@/lib/i18n";
 
 type ByModel = { id: string; model: string; provider: string; vendor: string; messages: number; tokens: number; cost: number; pct: number };
 type Stack = { t: number; c: number; m: number };
@@ -47,13 +48,13 @@ type ModelDetail = {
 const COLORS = ["#8b5cf6", "#60a5fa", "#34d399", "#fbbf24", "#f472b6", "#64748b"];
 const MONTHS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
 
-const nf = new Intl.NumberFormat("pt-BR");
+const nf = new Intl.NumberFormat(dateLocale());
 const fmtN = (n: number) => nf.format(Math.round(n));
-const fmtUSD = (n: number) => `$${n.toLocaleString("pt-BR", { minimumFractionDigits: n < 1 ? 4 : 2, maximumFractionDigits: n < 1 ? 4 : 2 })}`;
+const fmtUSD = (n: number) => `$${n.toLocaleString(dateLocale(), { minimumFractionDigits: n < 1 ? 4 : 2, maximumFractionDigits: n < 1 ? 4 : 2 })}`;
 // 4,78M / 144K / 982 — compacto como no painel do OpenRouter
 const fmtC = (n: number) => {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}M`;
-  if (n >= 1_000) return `${(n / 1_000).toLocaleString("pt-BR", { maximumFractionDigits: n >= 10_000 ? 0 : 1 })}K`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toLocaleString(dateLocale(), { maximumFractionDigits: 2 })}M`;
+  if (n >= 1_000) return `${(n / 1_000).toLocaleString(dateLocale(), { maximumFractionDigits: n >= 10_000 ? 0 : 1 })}K`;
   return fmtN(n);
 };
 const metricVal = (m: Metric, o: { tokens: number; cost: number; messages: number }) =>
@@ -61,16 +62,16 @@ const metricVal = (m: Metric, o: { tokens: number; cost: number; messages: numbe
 const fmtMetric = (m: Metric, v: number) => (m === "cost" ? fmtUSD(v) : fmtC(v));
 
 const RANGES: { key: RangeKey; label: string }[] = [
-  { key: "7d", label: "Últimos 7 dias" },
-  { key: "30d", label: "Último mês" },
-  { key: "6m", label: "Últimos 6 meses" },
-  { key: "1y", label: "Último ano" },
-  { key: "all", label: "Tudo" },
+  { key: "7d", label: tr("Últimos 7 dias") },
+  { key: "30d", label: tr("Último mês") },
+  { key: "6m", label: tr("Últimos 6 meses") },
+  { key: "1y", label: tr("Último ano") },
+  { key: "all", label: tr("Tudo") },
 ];
 const METRICS: { key: Metric; label: string }[] = [
-  { key: "tokens", label: "Tokens" },
-  { key: "cost", label: "Gasto" },
-  { key: "messages", label: "Requisições" },
+  { key: "tokens", label: tr("Tokens") },
+  { key: "cost", label: tr("Gasto") },
+  { key: "messages", label: tr("Requisições") },
 ];
 
 /* --------------------- Resumo: nº grande + delta + barras empilhadas --------------------- */
@@ -90,12 +91,12 @@ function Summary({ data, metric, busy, onMetric }: {
   const n = data.per_day.length;
   const step = n <= 12 ? 1 : Math.ceil(n / 8);
   const active = tip ? data.per_day[tip.i] : null;
-  const granLabel = data.granularity === "day" ? "por dia" : data.granularity === "week" ? "por semana" : "por mês";
+  const granLabel = data.granularity === "day" ? "por dia" : data.granularity === "week" ? "por semana" : tr("por mês");
 
   return (
     <div className="relative rounded-2xl border border-border bg-surface p-4">
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <h2 className="text-sm font-semibold text-ink">Resumo de uso</h2>
+        <h2 className="text-sm font-semibold text-ink">{tr("Resumo de uso")}</h2>
         <div className="flex rounded-lg border border-border bg-surface2 p-0.5">
           {METRICS.map((m) => (
             <button
@@ -107,7 +108,7 @@ function Summary({ data, metric, busy, onMetric }: {
             </button>
           ))}
         </div>
-        <span className="ml-auto text-[11px] text-muted">Empilhado {granLabel}, por modelo</span>
+        <span className="ml-auto text-[11px] text-muted">{tr("Empilhado")} {granLabel}{tr(", por modelo")}</span>
       </div>
 
       <div className="mb-1 flex items-baseline gap-3">
@@ -115,7 +116,7 @@ function Summary({ data, metric, busy, onMetric }: {
         {delta != null && (
           <span className={`flex items-center gap-0.5 text-xs font-medium ${delta >= 0 ? "text-emerald-400" : "text-red-400"}`}>
             {delta >= 0 ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
-            {Math.abs(delta).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% vs. período anterior
+            {Math.abs(delta).toLocaleString(dateLocale(), { maximumFractionDigits: 1 })}{tr("% vs. período anterior")}
           </span>
         )}
       </div>
@@ -176,7 +177,7 @@ function Summary({ data, metric, busy, onMetric }: {
               </p>
             );
           })}
-          {!data.series.some((s) => active.by[s.id]) && <p className="text-muted">sem uso</p>}
+          {!data.series.some((s) => active.by[s.id]) && <p className="text-muted">{tr("sem uso")}</p>}
         </div>
       )}
     </div>
@@ -198,7 +199,7 @@ function TopModels({ data, metric, onPick }: { data: Overview; metric: Metric; o
     <div className="rounded-2xl border border-border bg-surface p-4">
       <div className="mb-3 flex items-center gap-2">
         <Cpu size={15} className="text-accent-hover" />
-        <h2 className="text-sm font-semibold text-ink">Top modelos</h2>
+        <h2 className="text-sm font-semibold text-ink">{tr("Top modelos")}</h2>
         <span className="text-[11px] text-muted">por {METRICS.find((m) => m.key === metric)?.label.toLowerCase()}</span>
       </div>
       {/* até 10 modelos; ~5 à vista e o resto na rolagem interna do cartão */}
@@ -228,7 +229,7 @@ function TopModels({ data, metric, onPick }: { data: Overview; metric: Metric; o
             </button>
           );
         })}
-        {list.length === 0 && <p className="text-xs text-muted">Sem uso no período.</p>}
+        {list.length === 0 && <p className="text-xs text-muted">{tr("Sem uso no período.")}</p>}
       </div>
     </div>
   );
@@ -275,16 +276,16 @@ function ActivityCard({ act }: { act: Activity }) {
     <div className="relative rounded-2xl border border-border bg-surface p-4">
       <div className="mb-3 flex items-center gap-2">
         <BarChart3 size={15} className="text-accent-hover" />
-        <h2 className="text-sm font-semibold text-ink">Atividade</h2>
+        <h2 className="text-sm font-semibold text-ink">{tr("Atividade")}</h2>
         <span className="ml-auto text-[11px] text-muted">Tokens · {act.year ?? new Date().getFullYear()}</span>
       </div>
 
       <div className="mb-4 flex flex-wrap gap-x-6 gap-y-2">
         {[
-          ["Maior sequência", `${act.longest_streak} dias`],
-          ["Média/dia", fmtC(act.avg_day)],
-          ["Média/semana", fmtC(act.avg_week)],
-          ["Total no ano", fmtC(act.year_tokens ?? act.total_tokens)],
+          [tr("Maior sequência"), `${act.longest_streak} dias`],
+          [tr("Média/dia"), fmtC(act.avg_day)],
+          [tr("Média/semana"), fmtC(act.avg_week)],
+          [tr("Total no ano"), fmtC(act.year_tokens ?? act.total_tokens)],
         ].map(([l, v]) => (
           <div key={l}>
             <p className="text-[11px] text-muted">{l}</p>
@@ -302,7 +303,7 @@ function ActivityCard({ act }: { act: Activity }) {
           </div>
           <div className="flex gap-1">
             <div className="flex w-8 shrink-0 flex-col gap-[2px] pr-1 text-right">
-              {["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"].map((l, i) => (
+              {[tr("Seg"), tr("Ter"), tr("Qua"), tr("Qui"), tr("Sex"), tr("Sáb"), tr("Dom")].map((l, i) => (
                 <span key={i} className="h-[10px] text-[9px] leading-[10px] text-muted">{l}</span>
               ))}
             </div>
@@ -315,7 +316,7 @@ function ActivityCard({ act }: { act: Activity }) {
                       className={`h-[10px] w-[10px] rounded-[2px] ${CELL[level(c.t)]} ${c.future ? "opacity-30" : ""}`}
                       onMouseEnter={c.future ? undefined : (e) => {
                         const r = (e.target as HTMLElement).getBoundingClientRect();
-                        setTip({ x: r.left + 5, y: r.top - 8, text: `${fmtN(c.t)} tokens em ${c.date.toLocaleDateString("pt-BR")}` });
+                        setTip({ x: r.left + 5, y: r.top - 8, text: tr("{0} tokens em {1}", { "0": fmtN(c.t), "1": c.date.toLocaleDateString(dateLocale()) }) });
                       }}
                       onMouseLeave={() => setTip(null)}
                     />
@@ -325,9 +326,11 @@ function ActivityCard({ act }: { act: Activity }) {
             </div>
           </div>
           <div className="mt-2 flex items-center gap-1 pl-9 text-[10px] text-muted">
-            Menos
+            
+            {tr("Menos")}
             {CELL.map((c, i) => <span key={i} className={`h-[10px] w-[10px] rounded-[2px] ${c}`} />)}
-            Mais
+            
+            {tr("Mais")}
           </div>
         </div>
       </div>
@@ -348,17 +351,17 @@ function CreditsCard({ credits }: { credits: Credits | null }) {
     <div className="rounded-2xl border border-border bg-surface p-4">
       <div className="mb-3 flex items-center gap-2">
         <Coins size={16} className="text-accent-hover" />
-        <h2 className="text-sm font-semibold text-ink">Créditos</h2>
+        <h2 className="text-sm font-semibold text-ink">{tr("Créditos")}</h2>
         <span className="ml-auto text-[11px] text-muted">OpenRouter</span>
       </div>
       {credits ? (
         <>
           {/* saldo atual em destaque — é o que o usuário realmente quer saber */}
           <p className="text-3xl font-bold tracking-tight text-ink">{fmtUSD(credits.remaining)}</p>
-          <p className="text-xs text-muted">Saldo disponível na sua conta</p>
+          <p className="text-xs text-muted">{tr("Saldo disponível na sua conta")}</p>
         </>
       ) : (
-        <p className="text-sm text-muted">Configure sua chave do OpenRouter em Configurações → Conexões para ver o saldo.</p>
+        <p className="text-sm text-muted">{tr("Configure sua chave do OpenRouter em Configurações → Conexões para ver o saldo.")}</p>
       )}
     </div>
   );
@@ -422,13 +425,13 @@ function DetailBars({ days }: { days: ModelDay[] }) {
 }
 
 function ModelDetail({ detail, loading }: { detail: ModelDetail | null; loading: boolean }) {
-  if (loading) return <div className="flex items-center justify-center py-16 text-sm text-muted">Carregando…</div>;
-  if (!detail) return <div className="flex items-center justify-center py-16 text-sm text-muted">Escolha um modelo.</div>;
+  if (loading) return <div className="flex items-center justify-center py-16 text-sm text-muted">{tr("Carregando…")}</div>;
+  if (!detail) return <div className="flex items-center justify-center py-16 text-sm text-muted">{tr("Escolha um modelo.")}</div>;
   if (detail.totals.messages === 0) {
     return (
       <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border py-16 text-center">
         <Cpu size={28} className="text-muted" />
-        <p className="text-sm text-muted">Sem uso de <span className="font-medium text-ink">{detail.model}</span> no período.</p>
+        <p className="text-sm text-muted">{tr("Sem uso de")} <span className="font-medium text-ink">{detail.model}</span>  {tr("no período.")}</p>
       </div>
     );
   }
@@ -459,10 +462,10 @@ function ModelDetail({ detail, loading }: { detail: ModelDetail | null; loading:
 
       {/* números-chave */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat icon={<Sparkles size={15} />} label="Requisições" value={fmtN(t.messages)} />
-        <Stat icon={<Zap size={15} />} label="Tokens" value={fmtC(t.tokens)} sub={`${fmtN(t.avg_tokens)}/msg`} />
-        <Stat icon={<DollarSign size={15} />} label="Custo" value={fmtUSD(t.cost)} />
-        <Stat icon={<DollarSign size={15} />} label="Custo médio" value={fmtUSD(t.avg_cost)} sub="por resposta" />
+        <Stat icon={<Sparkles size={15} />} label={tr("Requisições")} value={fmtN(t.messages)} />
+        <Stat icon={<Zap size={15} />} label={tr("Tokens")} value={fmtC(t.tokens)} sub={`${fmtN(t.avg_tokens)}/msg`} />
+        <Stat icon={<DollarSign size={15} />} label={tr("Custo")} value={fmtUSD(t.cost)} />
+        <Stat icon={<DollarSign size={15} />} label={tr("Custo médio")} value={fmtUSD(t.avg_cost)} sub="por resposta" />
       </div>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -470,7 +473,7 @@ function ModelDetail({ detail, loading }: { detail: ModelDetail | null; loading:
         <div className="rounded-2xl border border-border bg-surface p-4">
           <div className="mb-3 flex items-center gap-2">
             <ArrowLeftRight size={15} className="text-accent-hover" />
-            <h3 className="text-sm font-semibold text-ink">Entrada × Saída</h3>
+            <h3 className="text-sm font-semibold text-ink">{tr("Entrada × Saída")}</h3>
           </div>
           <div className="flex h-3 w-full overflow-hidden rounded-full bg-surface2">
             <div className="h-full bg-[#60a5fa]" style={{ width: `${inPct}%` }} />
@@ -478,14 +481,14 @@ function ModelDetail({ detail, loading }: { detail: ModelDetail | null; loading:
           </div>
           <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
             <div>
-              <p className="flex items-center gap-1.5 text-xs text-muted"><span className="h-2 w-2 rounded-sm bg-[#60a5fa]" /> Entrada</p>
+              <p className="flex items-center gap-1.5 text-xs text-muted"><span className="h-2 w-2 rounded-sm bg-[#60a5fa]" />  {tr("Entrada")}</p>
               <p className="font-semibold text-ink">{fmtC(t.prompt_tokens)}</p>
-              <p className="flex items-center gap-1 text-[11px] text-muted"><Database size={11} /> {fmtC(t.cached_tokens)} em cache</p>
+              <p className="flex items-center gap-1 text-[11px] text-muted"><Database size={11} /> {fmtC(t.cached_tokens)}  {tr("em cache")}</p>
             </div>
             <div>
-              <p className="flex items-center gap-1.5 text-xs text-muted"><span className="h-2 w-2 rounded-sm bg-[#34d399]" /> Saída</p>
+              <p className="flex items-center gap-1.5 text-xs text-muted"><span className="h-2 w-2 rounded-sm bg-[#34d399]" />  {tr("Saída")}</p>
               <p className="font-semibold text-ink">{fmtC(t.completion_tokens)}</p>
-              <p className="flex items-center gap-1 text-[11px] text-muted"><Cpu size={11} /> {fmtC(t.reasoning_tokens)} de raciocínio</p>
+              <p className="flex items-center gap-1 text-[11px] text-muted"><Cpu size={11} /> {fmtC(t.reasoning_tokens)}  {tr("de raciocínio")}</p>
             </div>
           </div>
         </div>
@@ -494,9 +497,9 @@ function ModelDetail({ detail, loading }: { detail: ModelDetail | null; loading:
         <div className="rounded-2xl border border-border bg-surface p-4">
           <div className="mb-3 flex items-center gap-2">
             <BarChart3 size={15} className="text-accent-hover" />
-            <h3 className="text-sm font-semibold text-ink">Tokens no período</h3>
+            <h3 className="text-sm font-semibold text-ink">{tr("Tokens no período")}</h3>
             <span className="ml-auto text-[11px] text-muted">
-              {detail.granularity === "day" ? "por dia" : detail.granularity === "week" ? "por semana" : "por mês"}
+              {detail.granularity === "day" ? "por dia" : detail.granularity === "week" ? "por semana" : tr("por mês")}
             </span>
           </div>
           <DetailBars days={detail.per_day} />
@@ -508,11 +511,11 @@ function ModelDetail({ detail, loading }: { detail: ModelDetail | null; loading:
         <div className="rounded-2xl border border-border bg-surface p-4">
           <div className="mb-3 flex items-center gap-2">
             <Wrench size={15} className="text-accent-hover" />
-            <h3 className="text-sm font-semibold text-ink">Por ferramenta</h3>
+            <h3 className="text-sm font-semibold text-ink">{tr("Por ferramenta")}</h3>
             <span className="ml-auto text-[11px] text-muted">tokens · chamadas</span>
           </div>
           {detail.by_tool.length === 0 ? (
-            <p className="py-4 text-center text-xs text-muted">Nenhuma ferramenta usada no período.</p>
+            <p className="py-4 text-center text-xs text-muted">{tr("Nenhuma ferramenta usada no período.")}</p>
           ) : (
             <div className="space-y-2.5">
               {detail.by_tool.slice(0, 10).map((x) => (
@@ -535,11 +538,11 @@ function ModelDetail({ detail, loading }: { detail: ModelDetail | null; loading:
         <div className="rounded-2xl border border-border bg-surface p-4">
           <div className="mb-3 flex items-center gap-2">
             <MessageSquare size={15} className="text-accent-hover" />
-            <h3 className="text-sm font-semibold text-ink">Por conversa</h3>
+            <h3 className="text-sm font-semibold text-ink">{tr("Por conversa")}</h3>
             <span className="ml-auto text-[11px] text-muted">tokens · custo</span>
           </div>
           {detail.by_chat.length === 0 ? (
-            <p className="py-4 text-center text-xs text-muted">Sem conversas no período.</p>
+            <p className="py-4 text-center text-xs text-muted">{tr("Sem conversas no período.")}</p>
           ) : (
             <div className="space-y-2.5">
               {detail.by_chat.slice(0, 10).map((x) => (
@@ -588,7 +591,7 @@ function ModelSelect({ models, value, onPick, colorOf }: {
             <span className="max-w-[180px] truncate" title={cur.model}>{cur.model}</span>
           </>
         ) : (
-          <span className="text-muted">Escolha um modelo</span>
+          <span className="text-muted">{tr("Escolha um modelo")}</span>
         )}
         <ChevronDown size={14} className="text-muted" />
       </button>
@@ -598,7 +601,7 @@ function ModelSelect({ models, value, onPick, colorOf }: {
             <Search size={14} className="text-muted" />
             <input
               autoFocus value={q} onChange={(e) => setQ(e.target.value)}
-              placeholder="Buscar modelo…"
+              placeholder={tr("Buscar modelo…")}
               className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
             />
           </div>
@@ -619,7 +622,7 @@ function ModelSelect({ models, value, onPick, colorOf }: {
                 </span>
               </button>
             ))}
-            {rows.length === 0 && <p className="px-3 py-5 text-center text-sm text-muted">Nenhum modelo.</p>}
+            {rows.length === 0 && <p className="px-3 py-5 text-center text-sm text-muted">{tr("Nenhum modelo.")}</p>}
           </div>
         </div>
       )}
@@ -672,14 +675,16 @@ function RangePicker({ value, onChange }: { value: Period; onChange: (p: Period)
             </button>
           ))}
           <div className="my-1.5 border-t border-border" />
-          <p className="px-2.5 pb-1.5 pt-0.5 text-[11px] font-medium uppercase tracking-wider text-muted">Intervalo</p>
+          <p className="px-2.5 pb-1.5 pt-0.5 text-[11px] font-medium uppercase tracking-wider text-muted">{tr("Intervalo")}</p>
           <div className="grid grid-cols-2 gap-2 px-2.5">
             <label className="text-[11px] text-muted">
-              De
+              
+              {tr("De")}
               <input type="date" value={from} max={to || hojeIso()} onChange={(e) => setFrom(e.target.value)} className={`mt-1 ${campo}`} />
             </label>
             <label className="text-[11px] text-muted">
-              Até
+              
+              {tr("Até")}
               <input type="date" value={to} min={from || undefined} max={hojeIso()} onChange={(e) => setTo(e.target.value)} className={`mt-1 ${campo}`} />
             </label>
           </div>
@@ -689,7 +694,8 @@ function RangePicker({ value, onChange }: { value: Period; onChange: (p: Period)
               onClick={() => { onChange({ key: "custom", from, to }); setOpen(false); }}
               className="rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Aplicar
+              
+              {tr("Aplicar")}
             </button>
           </div>
         </div>
@@ -758,10 +764,10 @@ export default function AnalyticsView() {
   const empty = useMemo(() => !!data && (data.activity?.total_tokens ?? 0) === 0 && data.totals.messages === 0, [data]);
 
   if (loading) {
-    return <div className="flex items-center justify-center py-24 text-sm text-muted">Carregando…</div>;
+    return <div className="flex items-center justify-center py-24 text-sm text-muted">{tr("Carregando…")}</div>;
   }
   if (!data) {
-    return <div className="flex items-center justify-center py-24 text-sm text-muted">Não foi possível carregar a analítica.</div>;
+    return <div className="flex items-center justify-center py-24 text-sm text-muted">{tr("Não foi possível carregar a analítica.")}</div>;
   }
 
   if (empty) {
@@ -769,8 +775,8 @@ export default function AnalyticsView() {
       <div className="mx-auto grid max-w-5xl grid-cols-1 gap-3 lg:grid-cols-5">
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border bg-surface py-20 text-center lg:col-span-3">
           <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-surface2 text-accent-hover"><BarChart3 size={26} /></span>
-          <h2 className="text-lg font-semibold text-ink">Sem dados ainda</h2>
-          <p className="mt-1.5 max-w-sm text-sm text-muted">Converse com seus modelos e as métricas de uso aparecem aqui.</p>
+          <h2 className="text-lg font-semibold text-ink">{tr("Sem dados ainda")}</h2>
+          <p className="mt-1.5 max-w-sm text-sm text-muted">{tr("Converse com seus modelos e as métricas de uso aparecem aqui.")}</p>
         </div>
         <div className="lg:col-span-2">
           <CreditsCard credits={data.credits} />
@@ -790,7 +796,7 @@ export default function AnalyticsView() {
       {/* barra: abas + período (compartilhado pelas duas abas) */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex rounded-lg border border-border bg-surface2 p-0.5">
-          {([["overview", "Visão geral"], ["model", "Por modelo"]] as [Tab, string][]).map(([k, l]) => (
+          {([["overview", tr("Visão geral")], ["model", tr("Por modelo")]] as [Tab, string][]).map(([k, l]) => (
             <button
               key={k}
               onClick={() => {
@@ -823,12 +829,12 @@ export default function AnalyticsView() {
           </div>
 
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-            <Stat icon={<MessageSquare size={15} />} label="Conversas" value={fmtN(data.totals.chats)} />
-            <Stat icon={<Sparkles size={15} />} label="Respostas" value={fmtN(data.totals.messages)} />
-            <Stat icon={<Zap size={15} />} label="Tokens" value={fmtC(data.totals.tokens)} sub={`${fmtN(data.totals.avg_tokens)}/msg`} />
-            <Stat icon={<DollarSign size={15} />} label="Custo" value={fmtUSD(data.totals.cost)} />
-            <Stat icon={<Cpu size={15} />} label="Raciocínio" value={fmtC(data.totals.reasoning_tokens)} sub="tokens" />
-            <Stat icon={<BarChart3 size={15} />} label="Entrada/Saída" value={`${fmtC(data.totals.prompt_tokens)}/${fmtC(data.totals.completion_tokens)}`} sub="tokens" />
+            <Stat icon={<MessageSquare size={15} />} label={tr("Conversas")} value={fmtN(data.totals.chats)} />
+            <Stat icon={<Sparkles size={15} />} label={tr("Respostas")} value={fmtN(data.totals.messages)} />
+            <Stat icon={<Zap size={15} />} label={tr("Tokens")} value={fmtC(data.totals.tokens)} sub={`${fmtN(data.totals.avg_tokens)}/msg`} />
+            <Stat icon={<DollarSign size={15} />} label={tr("Custo")} value={fmtUSD(data.totals.cost)} />
+            <Stat icon={<Cpu size={15} />} label={tr("Raciocínio")} value={fmtC(data.totals.reasoning_tokens)} sub="tokens" />
+            <Stat icon={<BarChart3 size={15} />} label={tr("Entrada/Saída")} value={`${fmtC(data.totals.prompt_tokens)}/${fmtC(data.totals.completion_tokens)}`} sub="tokens" />
           </div>
         </>
       ) : (

@@ -9,6 +9,7 @@ import type { ToolCatalogItem } from "@/lib/playground";
 import ModelField from "./ModelField";
 import Markdown from "./Markdown";
 import { Select } from "@/components/ui";
+import { tr } from "@/lib/i18n";
 
 function splitModel(v: string): { model: string; model_config_id: string | null } {
   return v.startsWith("custom:") ? { model: "", model_config_id: v.slice(7) } : { model: v, model_config_id: null };
@@ -50,7 +51,7 @@ function DirectTab() {
     try {
       params = JSON.parse(paramsText || "{}");
     } catch {
-      setErr("JSON de parâmetros inválido"); return;
+      setErr(tr("JSON de parâmetros inválido")); return;
     }
     setBusy(true);
     try {
@@ -59,23 +60,23 @@ function DirectTab() {
       else setResult(r.result);
       setLatency(r.latency_ms ?? null);
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao executar");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao executar"));
     } finally { setBusy(false); }
   }
 
   return (
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
       <div className="rounded-2xl border border-border bg-surface p-4">
-        <label className="block text-xs text-muted">Ferramenta
+        <label className="block text-xs text-muted">{tr("Ferramenta")}
           <Select value={path} onChange={(e) => pick(e.target.value)} className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent">
-            <option value="">Selecione…</option>
+            <option value="">{tr("Selecione…")}</option>
             {cat && (
               <>
-                <optgroup label="Sistema">
+                <optgroup label={tr("Sistema")}>
                   {cat.builtins.map((t) => <option key={t.path} value={t.path}>{t.name} ({t.path})</option>)}
                 </optgroup>
                 {cat.user_tools.length > 0 && (
-                  <optgroup label="Suas ferramentas">
+                  <optgroup label={tr("Suas ferramentas")}>
                     {cat.user_tools.map((t) => <option key={t.path} value={t.path}>{t.name} ({t.path})</option>)}
                   </optgroup>
                 )}
@@ -84,24 +85,24 @@ function DirectTab() {
           </Select>
         </label>
         {selected?.description && <p className="mt-2 text-xs text-muted">{selected.description}</p>}
-        <label className="mt-3 block text-xs text-muted">Parâmetros (JSON)
+        <label className="mt-3 block text-xs text-muted">{tr("Parâmetros (JSON)")}
           <textarea value={paramsText} onChange={(e) => setParamsText(e.target.value)} rows={7} spellCheck={false} className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 font-mono text-xs text-ink outline-none focus:border-accent" />
         </label>
         <button onClick={run} disabled={busy || !path} className="mt-3 flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50">
-          {busy ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />} Executar
+          {busy ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}  {tr("Executar")}
         </button>
         {err && <p className="mt-2 text-xs text-red-400">{err}</p>}
       </div>
 
       <div className="rounded-2xl border border-border bg-surface p-4">
         <div className="mb-2 flex items-center justify-between">
-          <p className="flex items-center gap-1.5 text-sm font-medium text-ink"><Terminal size={15} /> Resultado</p>
+          <p className="flex items-center gap-1.5 text-sm font-medium text-ink"><Terminal size={15} />  {tr("Resultado")}</p>
           {latency !== null && <span className="flex items-center gap-1 text-[11px] text-muted"><Zap size={11} /> {latency} ms</span>}
         </div>
         {result !== null ? (
           <pre className="max-h-[420px] overflow-auto rounded-lg bg-bg p-3 font-mono text-xs text-ink">{pretty(result)}</pre>
         ) : (
-          <p className="py-10 text-center text-sm text-muted">Escolha uma ferramenta e execute para ver o retorno cru.</p>
+          <p className="py-10 text-center text-sm text-muted">{tr("Escolha uma ferramenta e execute para ver o retorno cru.")}</p>
         )}
       </div>
     </div>
@@ -138,8 +139,8 @@ function TraceTab() {
 
   async function run() {
     setErr(null);
-    if (!model) { setErr("Escolha um modelo."); return; }
-    if (!prompt.trim()) { setErr("Escreva um prompt."); return; }
+    if (!model) { setErr(tr("Escolha um modelo.")); return; }
+    if (!prompt.trim()) { setErr(tr("Escreva um prompt.")); return; }
     setRunning(true); setItems([]); setAnswer(""); setStarted(true);
     const ac = new AbortController();
     abortRef.current = ac;
@@ -152,29 +153,29 @@ function TraceTab() {
         else if (e.type === "notice") setItems((it) => [...it, { kind: "notice", message: e.message || "" }]);
         else if (e.type === "token") setAnswer((a) => a + (e.text || ""));
         else if (e.type === "done") { if (e.content) setAnswer(e.content); }
-        else if (e.type === "error") setErr(e.message || "Falha no trace");
+        else if (e.type === "error") setErr(e.message || tr("Falha no trace"));
       }, ac.signal);
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha no trace");
+      setErr(e instanceof ApiError ? e.message : tr("Falha no trace"));
     } finally { setRunning(false); }
   }
 
   return (
     <div>
       <div className="rounded-2xl border border-border bg-surface p-4">
-        <div className="text-xs text-muted">Modelo (use um preset com ferramentas ativas)</div>
+        <div className="text-xs text-muted">{tr("Modelo (use um preset com ferramentas ativas)")}</div>
         <ModelField models={ext} custom={custom} includeCustom value={model} onChange={setModel} className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none transition-colors hover:border-accent/50" />
-        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} placeholder="Prompt que force o uso de uma ferramenta (ex.: 'que horas são em Tóquio?')" className="mt-2 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent placeholder:text-muted" />
+        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} placeholder={tr("Prompt que force o uso de uma ferramenta (ex.: 'que horas são em Tóquio?')")} className="mt-2 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent placeholder:text-muted" />
         {err && <p className="mt-2 text-xs text-red-400">{err}</p>}
         <button onClick={run} disabled={running} className="mt-3 flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50">
-          {running ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />} Rodar
+          {running ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />}  {tr("Rodar")}
         </button>
       </div>
 
       {started && (
         <div className="mt-4 space-y-2">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted">Linha do tempo</p>
-          {items.length === 0 && !running && <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted">Nenhuma ferramenta foi chamada neste turno.</p>}
+          <p className="text-xs font-medium uppercase tracking-wide text-muted">{tr("Linha do tempo")}</p>
+          {items.length === 0 && !running && <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted">{tr("Nenhuma ferramenta foi chamada neste turno.")}</p>}
           {items.map((it, i) => (
             <div key={i} className="rounded-xl border border-border bg-surface p-3">
               {it.kind === "call" && (
@@ -195,7 +196,7 @@ function TraceTab() {
           {running && <span className="flex items-center gap-1.5 text-sm text-muted"><Loader2 size={13} className="animate-spin" /> processando…</span>}
           {answer && (
             <div className="mt-3 rounded-xl border border-border bg-surface p-3">
-              <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted">Resposta final</p>
+              <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted">{tr("Resposta final")}</p>
               <div className="text-sm"><Markdown content={answer} /></div>
             </div>
           )}
@@ -210,8 +211,8 @@ export default function ToolDebugView() {
   return (
     <div>
       <div className="mb-4 flex items-center gap-1 rounded-lg border border-border bg-surface p-1 text-sm w-fit">
-        <button onClick={() => setTab("direct")} className={`rounded-md px-3 py-1 transition-colors ${tab === "direct" ? "bg-surface2 font-medium text-ink" : "text-muted hover:text-ink"}`}>Direto</button>
-        <button onClick={() => setTab("trace")} className={`rounded-md px-3 py-1 transition-colors ${tab === "trace" ? "bg-surface2 font-medium text-ink" : "text-muted hover:text-ink"}`}>Trace de turno</button>
+        <button onClick={() => setTab("direct")} className={`rounded-md px-3 py-1 transition-colors ${tab === "direct" ? "bg-surface2 font-medium text-ink" : "text-muted hover:text-ink"}`}>{tr("Direto")}</button>
+        <button onClick={() => setTab("trace")} className={`rounded-md px-3 py-1 transition-colors ${tab === "trace" ? "bg-surface2 font-medium text-ink" : "text-muted hover:text-ink"}`}>{tr("Trace de turno")}</button>
       </div>
       {tab === "direct" ? <DirectTab /> : <TraceTab />}
     </div>

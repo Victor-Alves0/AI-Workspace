@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ChevronDown, ExternalLink, Telescope } from "lucide-react";
 import type { DeepResearch } from "@/lib/types";
 import Markdown from "./Markdown";
+import { tr } from "@/lib/i18n";
 
 /** Card da pesquisa profunda (research.deep.run): minimizável (clique no
  *  cabeçalho). Expandido mostra as fontes numeradas + resumo destilado
@@ -22,7 +23,7 @@ export default function DeepResearchCard({ data }: { data: DeepResearch }) {
           <Telescope size={16} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-ink">Pesquisa profunda</p>
+          <p className="truncate text-sm font-medium text-ink">{tr("Pesquisa profunda")}</p>
           <p className="truncate text-xs text-muted">{data.query}</p>
         </div>
         <span className="shrink-0 rounded-full bg-surface2 px-2 py-0.5 text-[10px] text-muted">
@@ -38,7 +39,7 @@ export default function DeepResearchCard({ data }: { data: DeepResearch }) {
             className="flex w-full items-center gap-1.5 px-3.5 py-2 text-xs text-muted transition-colors hover:text-ink"
           >
             <ChevronDown size={14} className={`transition-transform ${openBrief ? "" : "-rotate-90"}`} />
-            {openBrief ? "Ocultar resumo da pesquisa" : "Ver resumo da pesquisa"}
+            {openBrief ? tr("Ocultar resumo da pesquisa") : tr("Ver resumo da pesquisa")}
           </button>
           {openBrief && (
             <div className="px-4 pb-3 pt-0 text-sm">

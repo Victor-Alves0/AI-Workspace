@@ -3,17 +3,18 @@
 import { BookOpen, Map as MapIcon, Package, Plus, ScrollText, Search, Sparkles, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { API_URL } from "@/lib/api";
+import { tr } from "@/lib/i18n";
 
 export const DND_CHARACTER_SECTIONS = [
-  { id: "inventory", label: "Inventário", icon: Package },
-  { id: "spells", label: "Magias", icon: Sparkles },
-  { id: "sheet", label: "Ficha", icon: ScrollText },
+  { id: "inventory", label: tr("Inventário"), icon: Package },
+  { id: "spells", label: tr("Magias"), icon: Sparkles },
+  { id: "sheet", label: tr("Ficha"), icon: ScrollText },
 ] as const;
 
 export const DND_WORLD_SECTIONS = [
-  { id: "journal", label: "Diário", icon: BookOpen },
-  { id: "map", label: "Mapa", icon: MapIcon },
-  { id: "codex", label: "Codex", icon: ScrollText },
+  { id: "journal", label: tr("Diário"), icon: BookOpen },
+  { id: "map", label: tr("Mapa"), icon: MapIcon },
+  { id: "codex", label: tr("Codex"), icon: ScrollText },
 ] as const;
 
 export type CharacterSection = (typeof DND_CHARACTER_SECTIONS)[number]["id"];
@@ -57,7 +58,7 @@ export function ImaginaiSheetHead({ label, onClose }: { label: string; onClose: 
   return (
     <div className="imaginai-feature-head">
       <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-violet-300">{label}</p>
-      <button type="button" onClick={onClose} title="Fechar" aria-label="Fechar aba" className="-mr-1.5 flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-ink">
+      <button type="button" onClick={onClose} title={tr("Fechar")} aria-label={tr("Fechar aba")} className="-mr-1.5 flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg text-muted transition-colors hover:bg-hover hover:text-ink">
         <X size={15} />
       </button>
     </div>

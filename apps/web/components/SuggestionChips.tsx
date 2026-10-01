@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Code2, GraduationCap, Lightbulb, ListChecks, PenLine, X } from "lucide-react";
 import { SUGGESTION_CATEGORIES, pickFrom, type SuggestionCategoryId } from "@/lib/suggestions";
+import { tr } from "@/lib/i18n";
 
 const ICONS: Record<SuggestionCategoryId, typeof PenLine> = {
   escrever: PenLine,
@@ -25,7 +26,7 @@ export default function SuggestionChips({ onPick }: { onPick: (text: string) => 
         <div className="flex items-center gap-2 px-4 pb-1 pt-3 text-xs text-muted">
           <Icon size={14} />
           <span className="flex-1">{cat.label}</span>
-          <button type="button" onClick={() => setOpen(null)} title="Fechar" aria-label="Fechar sugestões"
+          <button type="button" onClick={() => setOpen(null)} title={tr("Fechar")} aria-label={tr("Fechar sugestões")}
             className="-mr-1 rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink">
             <X size={16} />
           </button>

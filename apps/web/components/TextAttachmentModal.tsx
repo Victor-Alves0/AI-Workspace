@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Loader2 } from "lucide-react";
+import { tr } from "@/lib/i18n";
 
 /** Anexo de TEXTO aberto numa janela, sem sair da conversa (como o "Texto colado" do
  *  ChatGPT). No compositor ele é editável — salvar troca o anexo antes do envio; numa
@@ -33,7 +34,7 @@ export default function TextAttachmentModal({
         return r.text();
       })
       .then((t) => { if (vivo) { setOriginal(t); setText(t); } })
-      .catch(() => { if (vivo) setError("Não foi possível abrir o anexo."); });
+      .catch(() => { if (vivo) setError(tr("Não foi possível abrir o anexo.")); });
     return () => { vivo = false; };
   }, [url]);
 
@@ -52,7 +53,7 @@ export default function TextAttachmentModal({
       await onSave(text);
       onClose();
     } catch {
-      setError("Não foi possível salvar as alterações.");
+      setError(tr("Não foi possível salvar as alterações."));
     } finally {
       setSaving(false);
     }
@@ -91,7 +92,8 @@ export default function TextAttachmentModal({
             onClick={onClose}
             className="rounded-full border border-border px-5 py-2 text-sm text-ink transition-colors hover:bg-hover"
           >
-            Fechar
+            
+            {tr("Fechar")}
           </button>
           {editable && (
             <button
@@ -99,7 +101,7 @@ export default function TextAttachmentModal({
               disabled={!mudou || saving}
               className="rounded-full bg-ink px-5 py-2 text-sm font-medium text-bg transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {saving ? "Salvando…" : "Salvar alterações"}
+              {saving ? tr("Salvando…") : tr("Salvar alterações")}
             </button>
           )}
         </div>

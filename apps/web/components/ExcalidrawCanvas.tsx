@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Maximize2, Minimize2, PenTool } from "lucide-react";
+import { tr } from "@/lib/i18n";
 
 // versões fixadas (mesmas validadas no script original do Victor)
 const EXCALIDRAW_V = "0.18.1";
@@ -18,7 +19,7 @@ const REACT_V = "19.0.0";
  *  traços pretos do Mermaid viram claros). Forçar um fundo escuro aqui fazia o
  *  filtro invertê-lo p/ cinza-claro e "apagar" o desenho. */
 function buildSrcDoc(mermaid: string, title: string, height: number): string {
-  const payload = JSON.stringify({ mermaid, title: title || "Diagrama", height })
+  const payload = JSON.stringify({ mermaid, title: title || tr("Diagrama"), height })
     .replace(/</g, "\\u003c")
     .replace(/>/g, "\\u003e")
     .replace(/&/g, "\\u0026");
@@ -47,13 +48,13 @@ function buildSrcDoc(mermaid: string, title: string, height: number): string {
     '<div id="app" class="msg">Carregando canvas…</div>',
     '<div id="err" class="err"></div>',
     '<script type="module">',
-    "const CONFIG = " + payload + ";",
+    tr("const CONFIG = ") + payload + ";",
     "const fatal = (m) => { const a=document.getElementById('app'); a.className='msg'; a.textContent='Não foi possível carregar o Excalidraw: '+m; };",
     "async function main(){",
     "  const RM = await import('react'); const React = RM.default || RM;",
     "  const RD = await import('react-dom/client'); const createRoot = RD.createRoot || (RD.default && RD.default.createRoot);",
-    "  const exc = await import('https://esm.sh/@excalidraw/excalidraw@" + EXCALIDRAW_V + "/dist/prod/index.js?external=react,react-dom');",
-    "  const mmd = await import('https://esm.sh/@excalidraw/mermaid-to-excalidraw@" + MERMAID_V + "');",
+    tr("  const exc = await import('https://esm.sh/@excalidraw/excalidraw@") + EXCALIDRAW_V + "/dist/prod/index.js?external=react,react-dom');",
+    tr("  const mmd = await import('https://esm.sh/@excalidraw/mermaid-to-excalidraw@") + MERMAID_V + "');",
     "  const h = React.createElement;",
     "  const App = () => {",
     "    const [api, setApi] = React.useState(null);",
@@ -100,18 +101,18 @@ export default function ExcalidrawCanvas({ mermaid, title }: { mermaid: string; 
     <div className="my-2 overflow-hidden rounded-xl border border-border bg-surface">
       <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
         <PenTool size={13} className="text-accent-hover" />
-        <span className="truncate text-xs font-medium text-ink">{title || "Diagrama"}</span>
-        <span className="ml-auto text-[10px] text-muted">Excalidraw</span>
+        <span className="truncate text-xs font-medium text-ink">{title || tr("Diagrama")}</span>
+        <span className="ml-auto text-[10px] text-muted">{tr("Excalidraw")}</span>
         <button
           onClick={() => setExpanded((v) => !v)}
-          title={expanded ? "Recolher" : "Expandir"}
+          title={expanded ? tr("Recolher") : tr("Expandir")}
           className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-ink"
         >
           {expanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
         </button>
       </div>
       <iframe
-        title={title || "Excalidraw"}
+        title={title || tr("Excalidraw")}
         srcDoc={srcDoc}
         sandbox="allow-scripts allow-same-origin allow-downloads allow-popups"
         className="block w-full border-0"

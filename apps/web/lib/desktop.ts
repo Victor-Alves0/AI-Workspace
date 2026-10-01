@@ -1,3 +1,4 @@
+import { tr } from "@/lib/i18n";
 /** Ponte com o shell desktop (Tauri). No navegador, tudo aqui vira no-op.
  *
  * As preferências abaixo são DA MÁQUINA, não da conta: ficam num arquivo local do
@@ -136,13 +137,13 @@ export async function checkDesktopUpdate(): Promise<{ version: string } | null> 
  *  quando não dá — quem chama mostra o caminho manual. */
 export async function installDesktopUpdate(): Promise<string | null> {
   const check = bridge()?.updater?.check;
-  if (!check) return "atualização automática indisponível nesta versão do app";
+  if (!check) return tr("atualização automática indisponível nesta versão do app");
   try {
     const upd = await check();
-    if (!upd) return "nenhuma atualização pendente";
+    if (!upd) return tr("nenhuma atualização pendente");
     await upd.downloadAndInstall();
   } catch (e) {
-    return e instanceof Error ? e.message : "falha ao baixar a atualização";
+    return e instanceof Error ? e.message : tr("falha ao baixar a atualização");
   }
   try {
     await bridge()?.process?.relaunch?.();

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Maximize2, Minus, Plus, RotateCcw, Search, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { InvestigationViz, InvestigationVizNode } from "@/lib/types";
+import { tr } from "@/lib/i18n";
 
 type XY = { x: number; y: number };
 type View = { x: number; y: number; k: number };
@@ -206,7 +207,7 @@ export default function InvestigationGraphView({ graphId }: { graphId: string })
       <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded-lg border border-border bg-surface/90 px-2.5 py-1.5 backdrop-blur">
         <Search size={13} className="text-muted" />
         <input
-          value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filtrar por rótulo/tipo…"
+          value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr("Filtrar por rótulo/tipo…")}
           className="w-44 bg-transparent text-xs text-ink outline-none placeholder:text-muted"
         />
       </div>
@@ -223,10 +224,11 @@ export default function InvestigationGraphView({ graphId }: { graphId: string })
       )}
 
       {graph === null ? (
-        <p className="grid h-full place-items-center text-sm text-muted">Carregando…</p>
+        <p className="grid h-full place-items-center text-sm text-muted">{tr("Carregando…")}</p>
       ) : graph.nodes.length === 0 ? (
         <p className="grid h-full place-items-center px-8 text-center text-sm text-muted">
-          Grafo vazio. Peça à IA para investigar um alvo/binário — ela registra os achados aqui.
+          
+          {tr("Grafo vazio. Peça à IA para investigar um alvo/binário — ela registra os achados aqui.")}
         </p>
       ) : (
         <div
@@ -272,7 +274,7 @@ export default function InvestigationGraphView({ graphId }: { graphId: string })
                     style={{
                       width: r * 2, height: r * 2,
                       background: typeColor.get(nd.type) ?? "#8a93a3",
-                      outline: isSel ? "2px solid rgb(var(--c-ink))" : "none",
+                      outline: isSel ? tr("2px solid rgb(var(--c-ink))") : "none",
                       outlineOffset: 2,
                       opacity: nd.confidence === "possible" ? 0.6 : 1,
                     }}
@@ -294,7 +296,7 @@ export default function InvestigationGraphView({ graphId }: { graphId: string })
             <span className="mt-1 inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: typeColor.get(selected.type) ?? "#8a93a3" }} />
             <div className="min-w-0 flex-1">
               <p className="break-words font-mono text-[12px] text-ink">{selected.label}</p>
-              <p className="text-[10px] text-muted">{selected.type} · confiança: {selected.confidence}</p>
+              <p className="text-[10px] text-muted">{selected.type}  {tr("· confiança:")} {selected.confidence}</p>
             </div>
             <button onClick={() => setSelected(null)} className="shrink-0 rounded p-0.5 text-muted hover:text-ink"><X size={13} /></button>
           </div>
@@ -326,16 +328,17 @@ export default function InvestigationGraphView({ graphId }: { graphId: string })
 
       {graph?.truncated && (
         <p className="absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full border border-border bg-surface/90 px-2.5 py-1 text-[10px] text-muted backdrop-blur">
-          grafo grande — mostrando os primeiros nós
+          
+          {tr("grafo grande — mostrando os primeiros nós")}
         </p>
       )}
 
       {/* controles */}
       <div className="absolute bottom-3 right-3 flex flex-col gap-1 rounded-xl border border-border bg-surface/90 p-1 shadow-menu backdrop-blur">
-        <button onClick={() => zoom(1)} title="Aproximar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Plus size={15} /></button>
-        <button onClick={() => zoom(-1)} title="Afastar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Minus size={15} /></button>
-        <button onClick={() => { setOffsets({}); setSelected(null); fit(); }} title="Ajustar à tela" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Maximize2 size={15} /></button>
-        <button onClick={() => { didFit.current = false; load(); }} title="Recarregar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><RotateCcw size={15} /></button>
+        <button onClick={() => zoom(1)} title={tr("Aproximar")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Plus size={15} /></button>
+        <button onClick={() => zoom(-1)} title={tr("Afastar")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Minus size={15} /></button>
+        <button onClick={() => { setOffsets({}); setSelected(null); fit(); }} title={tr("Ajustar à tela")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Maximize2 size={15} /></button>
+        <button onClick={() => { didFit.current = false; load(); }} title={tr("Recarregar")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><RotateCcw size={15} /></button>
       </div>
     </div>
   );

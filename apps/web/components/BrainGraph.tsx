@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Maximize2, Minus, Plus, RotateCcw, Search } from "lucide-react";
 import { api } from "@/lib/api";
 import type { BrainGraphData } from "@/lib/types";
+import { tr } from "@/lib/i18n";
 
 type XY = { x: number; y: number };
 type View = { x: number; y: number; k: number };
@@ -189,16 +190,17 @@ export default function BrainGraph({
       <div className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded-lg border border-border bg-surface/90 px-2.5 py-1.5 backdrop-blur">
         <Search size={13} className="text-muted" />
         <input
-          value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filtrar notas…"
+          value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr("Filtrar notas…")}
           className="w-40 bg-transparent text-xs text-ink outline-none placeholder:text-muted"
         />
       </div>
 
       {graph === null ? (
-        <p className="grid h-full place-items-center text-sm text-muted">Carregando…</p>
+        <p className="grid h-full place-items-center text-sm text-muted">{tr("Carregando…")}</p>
       ) : graph.nodes.length === 0 ? (
         <p className="grid h-full place-items-center px-8 text-center text-sm text-muted">
-          Nenhuma nota ainda. Crie notas (ou peça à IA) e as ligações [[assim]] aparecem aqui.
+          
+          {tr("Nenhuma nota ainda. Crie notas (ou peça à IA) e as ligações [[assim]] aparecem aqui.")}
         </p>
       ) : (
         <div
@@ -231,7 +233,7 @@ export default function BrainGraph({
                   key={nd.id}
                   onPointerDown={(e) => onPointerDownNode(e, nd.id)}
                   onPointerUp={() => pickNode(nd)}
-                  title={nd.ghost ? `${nd.title} (ainda não existe — clique para criar)` : nd.title}
+                  title={nd.ghost ? tr("{title} (ainda não existe — clique para criar)", { title: nd.title }) : nd.title}
                   className={`absolute flex cursor-pointer flex-col items-center transition-opacity ${dim ? "opacity-20" : "opacity-100"}`}
                   style={{ left: p.x - 60, top: p.y - r, width: 120 }}
                 >
@@ -255,10 +257,10 @@ export default function BrainGraph({
 
       {/* controles */}
       <div className="absolute bottom-3 right-3 flex flex-col gap-1 rounded-xl border border-border bg-surface/90 p-1 shadow-menu backdrop-blur">
-        <button onClick={() => zoom(1)} title="Aproximar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Plus size={15} /></button>
-        <button onClick={() => zoom(-1)} title="Afastar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Minus size={15} /></button>
-        <button onClick={() => { setOffsets({}); fit(); }} title="Ajustar à tela" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Maximize2 size={15} /></button>
-        <button onClick={() => { didFit.current = false; load(); }} title="Recarregar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><RotateCcw size={15} /></button>
+        <button onClick={() => zoom(1)} title={tr("Aproximar")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Plus size={15} /></button>
+        <button onClick={() => zoom(-1)} title={tr("Afastar")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Minus size={15} /></button>
+        <button onClick={() => { setOffsets({}); fit(); }} title={tr("Ajustar à tela")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Maximize2 size={15} /></button>
+        <button onClick={() => { didFit.current = false; load(); }} title={tr("Recarregar")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><RotateCcw size={15} /></button>
       </div>
     </div>
   );

@@ -7,12 +7,13 @@ import type { AppNotification, Automation, AutomationRun } from "@/lib/types";
 import { disablePush, enablePush, pushEnabled, pushSupported } from "@/lib/push";
 import AutomationEditor from "@/components/AutomationEditor";
 import { useConfirm } from "@/components/ConfirmDialog";
+import { dateLocale, tr } from "@/lib/i18n";
 
 const UNIT_LABEL: Record<string, string> = { minutes: "min", hours: "h", days: "d" };
 const WATCHER_LABEL: Record<string, string> = {
-  page: "Página", web_search: "Busca web", price: "Preço", rss: "RSS",
+  page: tr("Página"), web_search: tr("Busca web"), price: tr("Preço"), rss: "RSS",
 };
-const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+const WEEKDAYS = [tr("Dom"), tr("Seg"), tr("Ter"), tr("Qua"), tr("Qui"), tr("Sex"), tr("Sáb")];
 
 function fmtWhen(iso: string | null): string {
   if (!iso) return "—";
@@ -34,36 +35,36 @@ const KIND_TILE: Record<string, string> = {
 };
 // estado por pílula (separado da cor do tipo).
 function statePill(a: Automation): { label: string; cls: string } {
-  if (a.kind === "reminder" && !a.next_run_at) return { label: "Concluído", cls: "bg-sky-500/12 text-sky-300" };
+  if (a.kind === "reminder" && !a.next_run_at) return { label: tr("Concluído"), cls: "bg-sky-500/12 text-sky-300" };
   return a.enabled
-    ? { label: "Ativa", cls: "bg-green-500/12 text-green-300" }
-    : { label: "Pausada", cls: "bg-surface2 text-muted" };
+    ? { label: tr("Ativa"), cls: "bg-green-500/12 text-green-300" }
+    : { label: tr("Pausada"), cls: "bg-surface2 text-muted" };
 }
 const KIND_FILTERS: { key: string; label: string }[] = [
-  { key: "all", label: "Todas" },
-  { key: "scheduled", label: "Agendadas" },
-  { key: "monitor", label: "Monitores" },
-  { key: "reminder", label: "Lembretes" },
+  { key: "all", label: tr("Todas") },
+  { key: "scheduled", label: tr("Agendadas") },
+  { key: "monitor", label: tr("Monitores") },
+  { key: "reminder", label: tr("Lembretes") },
 ];
 
 function scheduleLabel(a: Automation): string {
   if (a.kind === "reminder") {
-    if (!a.next_run_at) return "Lembrete · concluído";
-    return `Lembrete · ${new Date(a.next_run_at).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`;
+    if (!a.next_run_at) return tr("Lembrete · concluído");
+    return `Lembrete · ${new Date(a.next_run_at).toLocaleString(dateLocale(), { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`;
   }
   if (a.kind === "monitor") {
     const w = WATCHER_LABEL[a.watcher_type ?? ""] ?? "Monitor";
     const m = Math.max(1, Math.round((a.interval_seconds ?? 300) / 60));
-    return `${w} · a cada ${m}min`;
+    return tr("{w} · a cada {m}min", { w: w, m: m });
   }
   const s = a.schedule ?? {};
   const time = s.time ?? "09:00";
-  if (s.mode === "daily") return `Diariamente às ${time}`;
+  if (s.mode === "daily") return tr("Diariamente às {time}", { time: time });
   if (s.mode === "weekly") {
     const days = (s.days ?? []).map((d) => WEEKDAYS[d % 7]).join("/") || "?";
     return `${days} às ${time}`;
   }
-  if (s.mode === "monthly") return `Dia ${s.day ?? 1} de cada mês às ${time}`;
+  if (s.mode === "monthly") return tr("Dia {0} de cada mês às {time}", { "0": s.day ?? 1, time: time });
   const e = s.every ?? 1;
   const u = UNIT_LABEL[s.unit ?? "hours"] ?? "h";
   return `A cada ${e}${u}`;
@@ -107,7 +108,7 @@ export default function AutomationsView({
       if (pushOn) { await disablePush(); setPushOn(false); }
       else { await enablePush(); setPushOn(true); }
     } catch (e) {
-      setToast(e instanceof Error ? e.message : "Falha ao alterar notificações");
+      setToast(e instanceof Error ? e.message : tr("Falha ao alterar notificações"));
     } finally { setPushBusy(false); }
   }
 
@@ -138,7 +139,7 @@ export default function AutomationsView({
           if (finished.length) {
             reload();
             const done = itemsRef.current.find((it) => it.id === finished[0]);
-            setToast(done ? `“${done.title}” concluída.` : "Automação concluída.");
+            setToast(done ? tr("“{title}” concluída.", { title: done.title }) : tr("Automação concluída."));
           }
           return next;
         });
@@ -170,9 +171,9 @@ export default function AutomationsView({
   }
   async function remove(a: Automation) {
     const ok = await confirm({
-      title: "Excluir automação?",
-      body: <>Isso vai excluir <span className="font-medium text-ink">{a.title}</span>.</>,
-      confirmLabel: "Excluir",
+      title: tr("Excluir automação?"),
+      body: <>{tr("Isso vai excluir")} <span className="font-medium text-ink">{a.title}</span>.</>,
+      confirmLabel: tr("Excluir"),
       danger: true,
     });
     if (!ok) return;
@@ -187,12 +188,12 @@ export default function AutomationsView({
       const r = await api.post<{ ok: boolean; started?: boolean; already_running?: boolean; error?: string }>(
         `/automations/${a.id}/run`,
       );
-      if (r.already_running) setToast("Já está em execução.");
+      if (r.already_running) setToast(tr("Já está em execução."));
       else setToast(`“${a.title}” iniciada.`);
       setRunning((prev) => ({ ...prev, [a.id]: prev[a.id] || new Date().toISOString() }));
       setLiveRun(a); // abre a janela: dá pra ver o processo em tempo real
     } catch (e) {
-      setToast(e instanceof ApiError ? e.message : "Falha ao executar");
+      setToast(e instanceof ApiError ? e.message : tr("Falha ao executar"));
     } finally {
       setBusy(null);
     }
@@ -208,9 +209,9 @@ export default function AutomationsView({
   }
   async function clearAll() {
     const ok = await confirm({
-      title: "Limpar notificações?",
-      body: <>Isso vai apagar <span className="font-medium text-ink">todas as {notes.length}</span> notificações.</>,
-      confirmLabel: "Apagar todas",
+      title: tr("Limpar notificações?"),
+      body: <>{tr("Isso vai apagar")} <span className="font-medium text-ink">todas as {notes.length}</span>  {tr("notificações.")}</>,
+      confirmLabel: tr("Apagar todas"),
       danger: true,
     });
     if (!ok) return;
@@ -235,20 +236,20 @@ export default function AutomationsView({
               {onBack && (
                 <button
                   onClick={onBack}
-                  title="Espaço de Trabalho"
-                  aria-label="Voltar ao Espaço de Trabalho"
+                  title={tr("Espaço de Trabalho")}
+                  aria-label={tr("Voltar ao Espaço de Trabalho")}
                   className="flex h-8 w-8 flex-none items-center justify-center rounded-xl border border-transparent bg-surface text-ink-soft transition-colors hover:border-border hover:bg-surface2 hover:text-ink"
                 >
                   <ChevronLeft size={18} />
                 </button>
               )}
-              <h1 className="truncate text-2xl font-bold text-ink">Automações</h1>
+              <h1 className="truncate text-2xl font-bold text-ink">{tr("Automações")}</h1>
             </div>
             <button
               onClick={() => setCreating(true)}
               className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
             >
-              <Plus size={15} /> Nova automação
+              <Plus size={15} />  {tr("Nova automação")}
             </button>
           </div>
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -260,13 +261,13 @@ export default function AutomationsView({
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Buscar automações…"
+                  placeholder={tr("Buscar automações…")}
                   className="w-full rounded-xl border border-border bg-surface py-2 pl-9 pr-9 text-sm text-ink placeholder:text-muted focus:border-accent/50 focus:outline-none"
                 />
                 {query && (
                   <button
                     onClick={() => setQuery("")}
-                    title="Limpar busca"
+                    title={tr("Limpar busca")}
                     className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted transition-colors hover:bg-hover hover:text-ink"
                   >
                     <X size={14} />
@@ -294,12 +295,12 @@ export default function AutomationsView({
             {items.length === 0 ? (
               <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border py-16 text-center">
                 <CalendarClock size={32} className="text-muted" />
-                <p className="text-sm text-muted">Nenhuma automação ainda.</p>
+                <p className="text-sm text-muted">{tr("Nenhuma automação ainda.")}</p>
               </div>
             ) : filtered.length === 0 ? (
               <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border py-12 text-center">
                 <Search size={28} className="text-muted" />
-                <p className="text-sm text-muted">{query ? `Nenhuma automação encontrada para “${query}”.` : "Nenhuma automação com esse filtro."}</p>
+                <p className="text-sm text-muted">{query ? tr("Nenhuma automação encontrada para “{query}”.", { query: query }) : tr("Nenhuma automação com esse filtro.")}</p>
               </div>
             ) : (
               filtered.map((a) => {
@@ -309,7 +310,7 @@ export default function AutomationsView({
                   <div className="flex items-start gap-3">
                     <button
                       onClick={() => setEditing(a)}
-                      title="Editar automação"
+                      title={tr("Editar automação")}
                       className="flex min-w-0 flex-1 items-start gap-3 text-left"
                     >
                       <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${KIND_TILE[a.kind] ?? KIND_TILE.scheduled}`}>
@@ -322,34 +323,34 @@ export default function AutomationsView({
                         </div>
                         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
                           <span>{scheduleLabel(a)}</span>
-                          {a.enabled && a.next_run_at && <><span>·</span><span className="font-mono tabular-nums">próx. {fmtWhen(a.next_run_at)}</span></>}
-                          {a.run_count > 0 && <><span>·</span><span className="font-mono tabular-nums">{a.run_count}× rodou</span></>}
+                          {a.enabled && a.next_run_at && <><span>·</span><span className="font-mono tabular-nums">{tr("próx.")} {fmtWhen(a.next_run_at)}</span></>}
+                          {a.run_count > 0 && <><span>·</span><span className="font-mono tabular-nums">{a.run_count}{tr("× rodou")}</span></>}
                         </div>
-                        {a.last_error && <p className="mt-1 truncate text-xs text-red-400">Erro: {a.last_error}</p>}
+                        {a.last_error && <p className="mt-1 truncate text-xs text-red-400">{tr("Erro:")} {a.last_error}</p>}
                       </div>
                     </button>
                     <div className="flex shrink-0 items-center gap-1">
                       {running[a.id] ? (
                         <button
                           onClick={() => setLiveRun(a)}
-                          title="Em execução — clique para ver o processo"
+                          title={tr("Em execução — clique para ver o processo")}
                           className="flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 text-xs font-medium text-accent-hover transition-colors hover:bg-accent/25"
                         >
                           <Loader2 size={13} className="animate-spin" />
                           <span className="font-mono tabular-nums">{fmtElapsed(running[a.id])}</span>
                         </button>
                       ) : (
-                        <button onClick={() => runNow(a)} disabled={busy === a.id} title="Testar agora" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink disabled:opacity-50">
+                        <button onClick={() => runNow(a)} disabled={busy === a.id} title={tr("Testar agora")} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink disabled:opacity-50">
                           {busy === a.id ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />}
                         </button>
                       )}
-                      <button onClick={() => setHistoryFor(a)} title="Histórico de execuções" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
+                      <button onClick={() => setHistoryFor(a)} title={tr("Histórico de execuções")} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
                         <History size={15} />
                       </button>
-                      <button onClick={() => toggle(a)} title={a.enabled ? "Pausar" : "Ativar"} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
+                      <button onClick={() => toggle(a)} title={a.enabled ? tr("Pausar") : tr("Ativar")} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
                         {a.enabled ? <Pause size={15} /> : <Play size={15} />}
                       </button>
-                      <button onClick={() => remove(a)} title="Excluir" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-red-400">
+                      <button onClick={() => remove(a)} title={tr("Excluir")} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-red-400">
                         <Trash2 size={15} />
                       </button>
                     </div>
@@ -364,22 +365,22 @@ export default function AutomationsView({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <p className="flex items-center gap-1.5 text-sm font-semibold text-ink">
-                <Bell size={15} /> Notificações {unread > 0 && <span className="rounded-full bg-accent px-1.5 text-[11px] font-medium text-white">{unread}</span>}
+                <Bell size={15} />  {tr("Notificações")} {unread > 0 && <span className="rounded-full bg-accent px-1.5 text-[11px] font-medium text-white">{unread}</span>}
               </p>
               <div className="flex items-center gap-2">
                 {pushOk && (
                   <button
                     onClick={togglePush}
                     disabled={pushBusy}
-                    title={pushOn ? "Notificações push ativas neste dispositivo — clique para desativar" : "Ativar notificações push neste dispositivo"}
+                    title={pushOn ? tr("Notificações push ativas neste dispositivo — clique para desativar") : tr("Ativar notificações push neste dispositivo")}
                     className={`rounded-lg p-1 transition-colors disabled:opacity-50 ${pushOn ? "text-accent-hover hover:bg-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
                   >
                     {pushBusy ? <Loader2 size={15} className="animate-spin" /> : pushOn ? <BellRing size={15} /> : <BellOff size={15} />}
                   </button>
                 )}
-                {unread > 0 && <button onClick={readAll} className="text-xs text-muted hover:text-ink">Marcar todas</button>}
+                {unread > 0 && <button onClick={readAll} className="text-xs text-muted hover:text-ink">{tr("Marcar todas")}</button>}
                 {notes.length > 0 && (
-                  <button onClick={clearAll} title="Apagar todas as notificações" className="rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-red-400">
+                  <button onClick={clearAll} title={tr("Apagar todas as notificações")} className="rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-red-400">
                     <Trash2 size={15} />
                   </button>
                 )}
@@ -387,7 +388,7 @@ export default function AutomationsView({
             </div>
             <div className="space-y-1.5">
               {notes.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-border px-3 py-6 text-center text-xs text-muted">Sem notificações.</p>
+                <p className="rounded-xl border border-dashed border-border px-3 py-6 text-center text-xs text-muted">{tr("Sem notificações.")}</p>
               ) : (
                 notes.map((n) => (
                   <button
@@ -395,7 +396,7 @@ export default function AutomationsView({
                     onClick={() => openNote(n)}
                     className={`block w-full rounded-xl border px-3 py-2 text-left transition-colors hover:bg-hover ${n.read ? "border-border bg-surface" : "border-accent/40 bg-accent/10"}`}
                   >
-                    <p className="truncate text-xs font-medium text-ink">{n.title || "Automação"}</p>
+                    <p className="truncate text-xs font-medium text-ink">{n.title || tr("Automação")}</p>
                     <p className="mt-0.5 line-clamp-2 text-xs text-muted">{n.body}</p>
                     <p className="mt-1 text-[10px] text-muted">{fmtWhen(n.created_at)}</p>
                   </button>
@@ -491,9 +492,9 @@ function RunProgressModal({
           {isRunning ? (
             <div className="flex flex-col items-center justify-center gap-3 py-10 text-center">
               <Loader2 size={26} className="animate-spin text-accent-hover" />
-              <p className="text-sm font-medium text-ink">Trabalhando em segundo plano…</p>
+              <p className="text-sm font-medium text-ink">{tr("Trabalhando em segundo plano…")}</p>
               <p className="font-mono text-3xl tabular-nums text-ink">{startedAt ? fmtElapsed(startedAt) : "0:00"}</p>
-              <p className="max-w-xs text-xs text-muted">Pode fechar esta janela — a execução continua e você é avisado quando terminar.</p>
+              <p className="max-w-xs text-xs text-muted">{tr("Pode fechar esta janela — a execução continua e você é avisado quando terminar.")}</p>
             </div>
           ) : result ? (
             <div className="space-y-3">
@@ -508,7 +509,8 @@ function RunProgressModal({
               )}
               {result.chat_id && (
                 <button onClick={() => onOpenChat(result.chat_id!)} className="w-full rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover">
-                  Abrir conversa
+                  
+                  {tr("Abrir conversa")}
                 </button>
               )}
             </div>
@@ -523,9 +525,9 @@ function RunProgressModal({
 
 const RUN_STATUS: Record<string, { label: string; cls: string; icon: ReactNode }> = {
   ok: { label: "OK", cls: "text-emerald-500", icon: <Check size={13} /> },
-  error: { label: "Erro", cls: "text-rose-500", icon: <AlertTriangle size={13} /> },
-  no_change: { label: "Sem novidades", cls: "text-muted", icon: <Minus size={13} /> },
-  skipped: { label: "Pulada", cls: "text-muted", icon: <Minus size={13} /> },
+  error: { label: tr("Erro"), cls: "text-rose-500", icon: <AlertTriangle size={13} /> },
+  no_change: { label: tr("Sem novidades"), cls: "text-muted", icon: <Minus size={13} /> },
+  skipped: { label: tr("Pulada"), cls: "text-muted", icon: <Minus size={13} /> },
 };
 
 /** Histórico de execuções de uma automação (agendadas + testes manuais). */
@@ -546,7 +548,7 @@ function RunHistoryModal({
       <div onClick={(e) => e.stopPropagation()} className="flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <span className="flex items-center gap-2 text-sm font-semibold text-ink">
-            <History size={16} className="text-muted" /> Histórico — {automation.title}
+            <History size={16} className="text-muted" />  {tr("Histórico —")} {automation.title}
           </span>
           <button onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={16} /></button>
         </div>
@@ -554,7 +556,7 @@ function RunHistoryModal({
           {runs === null ? (
             <p className="flex items-center justify-center gap-2 py-10 text-sm text-muted"><Loader2 size={14} className="animate-spin" /> carregando…</p>
           ) : runs.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted">Nenhuma execução ainda.</p>
+            <p className="py-10 text-center text-sm text-muted">{tr("Nenhuma execução ainda.")}</p>
           ) : (
             <ul className="space-y-1">
               {runs.map((r) => {

@@ -45,6 +45,7 @@ import { SoundAutoplayContext } from "@/components/SoundChip";
 import { AgentChatContext } from "@/components/SubagentCard";
 import type { QueueItem } from "@/components/QueueTray";
 import { toast } from "@/components/Toaster";
+import { dateLocale, syncLocaleWithProfile, tr } from "@/lib/i18n";
 
 // fila de mensagens por chat (bandeja do composer), guardada no navegador
 const QUEUE_KEY = "aiw_msg_queue";
@@ -116,12 +117,12 @@ function findAsk(events: ToolEvent[]): AskSpec | null {
 const LEARN_BUILTIN: Prompt = {
   id: "builtin-learn",
   command: "learn",
-  title: "Aprender skill deste chat",
+  title: tr("Aprender skill deste chat"),
   content:
-    "Review the work we completed in this conversation. If it contains a reusable " +
+    tr("Review the work we completed in this conversation. If it contains a reusable ") +
     "multi-step procedure, distill it into a skill and call the propose_skill tool " +
     "(short name, a when-to-use description, and complete step-by-step content in " +
-    "markdown). If nothing here is worth turning into a skill, say so briefly instead.",
+    tr("markdown). If nothing here is worth turning into a skill, say so briefly instead."),
   enabled: true,
   created_at: "",
   updated_at: "",
@@ -168,7 +169,7 @@ function useHResize(key: string, def: number, min: number, max: number, edge: "l
   const divider = (
     <div
       onPointerDown={start}
-      title="Arraste para redimensionar"
+      title={tr("Arraste para redimensionar")}
       className={`group absolute inset-y-0 z-10 hidden w-2.5 cursor-col-resize items-stretch justify-center md:flex ${
         edge === "left" ? "-left-1" : "-right-1"
       }`}
@@ -469,7 +470,7 @@ export default function ChatPage() {
       // que o arquivo acaba ali
       const truncated = !!r.total_lines && !!r.end_line && r.end_line < r.total_lines;
       const body = stripLineNumbers(r.content)
-        + (truncated ? `\n… (arquivo truncado — ${r.total_lines} linhas no total)` : "");
+        + (truncated ? tr("\n… (arquivo truncado — {total_lines} linhas no total)", { total_lines: r.total_lines }) : "");
       const prefill = `Sobre o arquivo \`${payload.path}\`:\n\n\`\`\`${extLang(payload.path)}\n${body}\n\`\`\`\n\n`;
       setInput((v) => (v ? `${v}\n\n${prefill}` : prefill));
     } catch { /* falha ao ler — ignora, o usuário pode tentar de novo */ }
@@ -680,6 +681,10 @@ export default function ChatPage() {
   // onboarding (1º uso, por-usuário): dispara quando falta a chave do OpenRouter
   // e o usuário ainda não concluiu/pulou o wizard.
   const [showOnboarding, setShowOnboarding] = useState(false);
+  // idioma da interface: aparelho sem escolha própria segue o do perfil
+  useEffect(() => {
+    if (user) syncLocaleWithProfile((user.profile as Record<string, unknown> | undefined)?.language);
+  }, [user]);
   useEffect(() => {
     if (!user || (user.profile as Record<string, unknown> | undefined)?.onboarded) return;
     api.get<{ openrouter: boolean }>("/settings/secrets")
@@ -850,7 +855,7 @@ export default function ChatPage() {
       const id = Date.now() + Math.random();
       setToasts((t) => [...t, {
         id,
-        title: ok ? `${nome} conectado` : `Falha ao conectar ${nome}`,
+        title: ok ? `${nome} conectado` : tr("Falha ao conectar {nome}", { nome: nome }),
         body: ok ? undefined : (qs.get("reason") || undefined),
       }]);
       setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), ok ? 4500 : 9000);
@@ -1027,7 +1032,7 @@ export default function ChatPage() {
       return;
     }
     // SEM chat: só um RASCUNHO — nada é criado até o 1º envio/rodar
-    if (!curModel) { toast("Escolha um modelo."); return; }
+    if (!curModel) { toast(tr("Escolha um modelo.")); return; }
     setDraftRt({
       participants: [{ id: rid(), model: curModel, model_config_id: curCustomId, name: modelLabel || "Modelo 1", color: RT_COLORS[0] }],
       config: { turn_policy: "round_robin", max_rounds: 6 },
@@ -1038,7 +1043,7 @@ export default function ChatPage() {
   async function ensureRoundtableChat(): Promise<Chat | null> {
     if (active) return active;
     if (!draftRt) return null;
-    if (!curModel) { toast("Escolha um modelo."); return null; }
+    if (!curModel) { toast(tr("Escolha um modelo.")); return null; }
     // mesa iniciada no modo TEMPORÁRIO → chat view_once (apagado ao sair), a
     // versão "não salva" possível p/ a mesa (que exige um chat persistido).
     const viewOnce = temporary;
@@ -1547,9 +1552,9 @@ export default function ChatPage() {
     onDelete: async (id) => {
       const c = chats.find((x) => x.id === id);
       const ok = await confirm({
-        title: "Excluir chat?",
-        body: <>Isso vai excluir <span className="font-medium text-ink">{c?.title || "este chat"}</span>.</>,
-        confirmLabel: "Excluir",
+        title: tr("Excluir chat?"),
+        body: <>{tr("Isso vai excluir")} <span className="font-medium text-ink">{c?.title || "este chat"}</span>.</>,
+        confirmLabel: tr("Excluir"),
         danger: true,
       });
       if (!ok) return;
@@ -1568,7 +1573,7 @@ export default function ChatPage() {
   };
 
   const createFolder = async () => {
-    await api.post("/folders", { name: "Nova pasta" });
+    await api.post("/folders", { name: tr("Nova pasta") });
     await refreshFolders();
   };
   const renameFolder = async (id: string, name: string) => {
@@ -1592,9 +1597,9 @@ export default function ChatPage() {
   };
   const bulkDeleteChats = async (ids: string[]) => {
     const ok = await confirm({
-      title: ids.length === 1 ? "Excluir conversa?" : "Excluir conversas?",
-      body: <>Isso vai excluir <span className="font-medium text-ink">{ids.length}</span> {ids.length === 1 ? "conversa" : "conversas"}. Não dá para desfazer.</>,
-      confirmLabel: "Excluir",
+      title: ids.length === 1 ? tr("Excluir conversa?") : tr("Excluir conversas?"),
+      body: <>{tr("Isso vai excluir")} <span className="font-medium text-ink">{ids.length}</span> {ids.length === 1 ? "conversa" : "conversas"}{tr(". Não dá para desfazer.")}</>,
+      confirmLabel: tr("Excluir"),
       danger: true,
     });
     if (!ok) return;
@@ -1618,7 +1623,7 @@ export default function ChatPage() {
     setInput("");
     setDraftMiniApp("imaginai");
     setImaginaiDocksHidden(false);
-    setPendingKickoff(ideia || "Começar uma nova campanha");
+    setPendingKickoff(ideia || tr("Começar uma nova campanha"));
   }
 
   // Dispara o 1º turno da campanha nova quando o rascunho já está limpo: aqui o `send`
@@ -1639,7 +1644,7 @@ export default function ChatPage() {
       setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 6000);
     };
     if (command.name === "help") {
-      toast("Comandos", CHAT_COMMANDS.map((c) => `${c.usage} — ${c.description}`).join("\n"));
+      toast(tr("Comandos"), CHAT_COMMANDS.map((c) => `${c.usage} — ${c.description}`).join("\n"));
       setInput("");
       return;
     }
@@ -1649,14 +1654,14 @@ export default function ChatPage() {
       return;
     }
     if (command.name === "roll") {
-      if (!active) { toast("Abra uma conversa para rolar dados"); return; }
+      if (!active) { toast(tr("Abra uma conversa para rolar dados")); return; }
       const { expression, label } = splitRollArgs(args || "1d20");
       try {
         await api.post(`/chats/${active.id}/roll`, { expression, label });
         setInput("");
         await reloadMessages(active.id);
       } catch (e) {
-        toast("Rolagem inválida", e instanceof ApiError ? e.message : undefined);
+        toast(tr("Rolagem inválida"), e instanceof ApiError ? e.message : undefined);
       }
     }
   }
@@ -1689,7 +1694,7 @@ export default function ChatPage() {
     if ((!text && attachments.length === 0) || sending) return;
     const model = active ? active.model : curModel;
     if (!model) {
-      toast("Escolha um modelo.");
+      toast(tr("Escolha um modelo."));
       return;
     }
     if (!override) setInput("");
@@ -1755,7 +1760,7 @@ export default function ChatPage() {
         let chat = active;
         if (!chat) {
           chat = await api.post<Chat>("/chats", {
-            title: turnMiniApp === "imaginai" ? "Nova campanha" : "Novo Chat",
+            title: turnMiniApp === "imaginai" ? tr("Nova campanha") : tr("Novo Chat"),
             model,
             system_prompt: initialSystemPrompt,
             params: initialParams,
@@ -1810,7 +1815,7 @@ export default function ChatPage() {
           if (!stoppedRef.current.delete(chat.id)) setQueueReady((r) => ({ ...r, [chat.id]: true }));
         }
       }
-      if (state.acc) notify("Resposta pronta", state.acc.replace(/\s+/g, " ").slice(0, 90));
+      if (state.acc) notify(tr("Resposta pronta"), state.acc.replace(/\s+/g, " ").slice(0, 90));
     } catch (e) {
       if (isAbort(e)) { refreshBudget(); return; }   // Parar: nao e falha de envio
       // Conexão caiu NO MEIO do stream (tela bloqueada / troca de app no iOS matam o
@@ -1830,7 +1835,7 @@ export default function ChatPage() {
         return;
       }
       // orçamento pessoal estourado (modo "pausar") ou outra falha ao iniciar o turno
-      const msg = e instanceof ApiError ? e.message : "Falha ao enviar a mensagem";
+      const msg = e instanceof ApiError ? e.message : tr("Falha ao enviar a mensagem");
       // Desfaz somente o balão deste envio. Outras mensagens otimistas podem
       // existir em chats que o usuário abriu em seguida e não devem sumir.
       setMessages((m) => m.filter((x) => x.id !== temporaryMessageId));
@@ -1845,7 +1850,7 @@ export default function ChatPage() {
         setRefDocs((current) => current.length ? current : turnRefDocs);
         setRefChats((current) => current.length ? current : turnRefChats);
       }
-      notify(e instanceof ApiError && e.status === 402 ? "Orçamento mensal atingido" : "Erro", msg);
+      notify(e instanceof ApiError && e.status === 402 ? tr("Orçamento mensal atingido") : tr("Erro"), msg);
       refreshBudget();
     } finally {
       disposeStream();
@@ -1908,7 +1913,7 @@ export default function ChatPage() {
       await selectChat(clone.id);
       setForkSend({ chatId: clone.id, text: item.text });
     } catch (e) {
-      toast(e instanceof Error ? e.message : "Falha no fork.");
+      toast(e instanceof Error ? e.message : tr("Falha no fork."));
     }
   }
   // o envio no fork espera o chat novo estar ativo e livre (selectChat é assíncrono)
@@ -1995,7 +2000,7 @@ export default function ChatPage() {
       setMessages((m) => m.filter((x) => x.id !== id));
       return;
     }
-    if (!(await confirm({ title: "Excluir esta mensagem?", confirmLabel: "Excluir", danger: true }))) return;
+    if (!(await confirm({ title: tr("Excluir esta mensagem?"), confirmLabel: tr("Excluir"), danger: true }))) return;
     const prev = messages;
     setMessages((m) => m.filter((x) => x.id !== id));
     try {
@@ -2003,7 +2008,7 @@ export default function ChatPage() {
       refreshChats();
     } catch (e) {
       setMessages(prev); // reverte em caso de falha
-      toast(e instanceof ApiError ? e.message : "Falha ao excluir a mensagem");
+      toast(e instanceof ApiError ? e.message : tr("Falha ao excluir a mensagem"));
     }
   }, [active, confirm, messages, refreshChats]);
 
@@ -2045,7 +2050,7 @@ export default function ChatPage() {
         await reloadArtifacts(cid);
         if (state.imaginaiChanged) await refreshImaginaiCampaign(cid);
       }
-      if (state.acc) notify("Resposta pronta", state.acc.replace(/\s+/g, " ").slice(0, 90));
+      if (state.acc) notify(tr("Resposta pronta"), state.acc.replace(/\s+/g, " ").slice(0, 90));
     } finally {
       disposeStream();
       if (isActiveChat(cid)) {
@@ -2083,7 +2088,7 @@ export default function ChatPage() {
         await reloadArtifacts(cid);
         if (state.imaginaiChanged) await refreshImaginaiCampaign(cid);
       }
-      if (state.acc) notify("Resposta continuada", state.acc.replace(/\s+/g, " ").slice(0, 90));
+      if (state.acc) notify(tr("Resposta continuada"), state.acc.replace(/\s+/g, " ").slice(0, 90));
     } finally {
       disposeStream();
       if (isActiveChat(cid)) {
@@ -2113,11 +2118,11 @@ export default function ChatPage() {
         try {
           const blob = await rec.stop();
           void browser?.stop();
-          const hora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+          const hora = new Date().toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
           const ext = recordingFilename(blob).split(".").pop() || "webm";
-          await addFilesRef.current([new File([blob], `Gravação ${hora}.${ext}`, { type: blob.type || "audio/webm" })]);
+          await addFilesRef.current([new File([blob], tr("Gravação {hora}.{ext}", { hora: hora, ext: ext }), { type: blob.type || "audio/webm" })]);
         } catch (e) {
-          toast("Gravação falhou: " + (e as Error).message);
+          toast(tr("Gravação falhou: ") + (e as Error).message);
         }
         return;
       }
@@ -2135,11 +2140,11 @@ export default function ChatPage() {
             if (local) {
               setInput((v) => (v ? v + " " : "") + local);
             } else {
-              toast((e as Error).message || "Transcrição falhou.");
+              toast((e as Error).message || tr("Transcrição falhou."));
             }
           }
         } catch (e) {
-          toast("Gravação falhou: " + (e as Error).message);
+          toast(tr("Gravação falhou: ") + (e as Error).message);
         }
       }
     } else {
@@ -2148,7 +2153,7 @@ export default function ChatPage() {
       const voiceConfig = selectedModel?.filter_config?.voice as { stt_enabled?: boolean } | undefined;
       const ouveAudio = !!(selectedModel?.capabilities as Record<string, unknown> | undefined)?.audio;
       if (voiceConfig?.stt_enabled === false && !ouveAudio) {
-        toast("Escuta desligada neste modelo.");
+        toast(tr("Escuta desligada neste modelo."));
         return;
       }
       try {
@@ -2158,7 +2163,7 @@ export default function ChatPage() {
         setMicStream(recorderRef.current.stream);
         setRecording(true);
       } catch {
-        toast("Sem acesso ao microfone.");
+        toast(tr("Sem acesso ao microfone."));
       }
     }
   }
@@ -2248,7 +2253,7 @@ export default function ChatPage() {
         blob = await utter.done;
         voiceRef.current.utter = null;
       } catch {
-        toast("Sem acesso ao microfone.");
+        toast(tr("Sem acesso ao microfone."));
         break;
       }
       setVoiceLevel(0);
@@ -2283,20 +2288,20 @@ export default function ChatPage() {
     if (voiceRef.current.active) { stopVoiceMode(); return; }
     const mcId = curCustom?.id ?? active?.model_config_id ?? null;
     if (!mcId) {
-      toast("Modo voz desligado neste modelo.");
+      toast(tr("Modo voz desligado neste modelo."));
       return;
     }
     const selectedModel = curCustom ?? customModels.find((model) => model.id === mcId);
     const voiceConfig = selectedModel?.filter_config?.voice as { stt_enabled?: boolean } | undefined;
     if (voiceConfig?.stt_enabled === false) {
-      toast("Escuta desligada neste modelo.");
+      toast(tr("Escuta desligada neste modelo."));
       return;
     }
     let session: VoiceSession;
     try {
       session = await api.post<VoiceSession>("/voice/session", { model_config_id: mcId });
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Falha ao iniciar o modo voz.");
+      toast(e instanceof ApiError ? e.message : tr("Falha ao iniciar o modo voz."));
       return;
     }
     voiceRef.current = { active: true, utter: null, session };
@@ -2482,9 +2487,9 @@ export default function ChatPage() {
       await api.post(`/chats/${active.id}/compact`);
       await reloadMessages(active.id);
       refreshChats();
-      notify("Contexto compactado", "A conversa foi resumida para liberar espaço.");
+      notify(tr("Contexto compactado"), tr("A conversa foi resumida para liberar espaço."));
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Falha ao compactar");
+      toast(e instanceof ApiError ? e.message : tr("Falha ao compactar"));
     } finally {
       setCompacting(false);
     }
@@ -2548,33 +2553,33 @@ export default function ChatPage() {
       <div className="flex h-full flex-col items-center justify-center gap-3">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/logo.png" alt="" className="h-10 w-10 animate-pulse rounded-xl" />
-        <p className="text-sm text-muted">Carregando…</p>
+        <p className="text-sm text-muted">{tr("Carregando…")}</p>
       </div>
     );
   }
 
   // itens da paleta de comandos (Ctrl/⌘ K): ações + chats + modelos
   const paletteItems: PaletteItem[] = [
-    { id: "act-new", group: "Ações", label: "Novo chat", keywords: "conversa nova", icon: <MessageSquareDashed size={16} />, run: () => newChat() },
-    { id: "act-temp", group: "Ações", label: "Chat temporário", keywords: "privado incógnito não salvar", icon: <MessageSquareDashed size={16} />, run: () => { if (!temporary) toggleTemporary(); } },
-    { id: "act-round", group: "Ações", label: "Mesa-redonda", keywords: "multi modelo debate", icon: <Users size={16} />, run: () => enterRoundtable() },
-    { id: "act-ws", group: "Ações", label: "Espaço de Trabalho", keywords: "modelos ferramentas prompts skills", icon: <Wrench size={16} />, run: () => openWorkspace(null) },
-    { id: "act-auto", group: "Ações", label: "Automações", keywords: "agendar monitor", icon: <Bell size={16} />, run: () => openWorkspace("Automacoes") },
-    { id: "act-play", group: "Ações", label: "Playground", keywords: "benchmark comparar modelos debug ferramentas tools", icon: <FlaskConical size={16} />, run: () => openWorkspace("Playground") },
-    { id: "act-archived", group: "Ações", label: "Chats arquivados", keywords: "arquivo", icon: <Search size={16} />, run: () => setShowArchived(true) },
-    ...(user.role === "admin" ? [{ id: "act-admin", group: "Ações", label: "Painel do Admin", keywords: "usuarios rede backup", icon: <ShieldAlert size={16} />, run: () => router.push("/admin") } as PaletteItem] : []),
-    { id: "act-logout", group: "Ações", label: "Sair", keywords: "logout desconectar sair", icon: <X size={16} />, run: () => logout() },
-    { id: "set-general", group: "Configurações", label: "Configurações", sublabel: "Geral", icon: <SlidersHorizontal size={16} />, run: () => openSettings("general") },
-    { id: "set-status", group: "Configurações", label: "Status do sistema", keywords: "saude chave conexao", icon: <SlidersHorizontal size={16} />, run: () => openSettings("status") },
-    { id: "set-budget", group: "Configurações", label: "Orçamento mensal", keywords: "conta gasto limite custo", icon: <SlidersHorizontal size={16} />, run: () => openSettings("account") },
-    { id: "set-conn", group: "Configurações", label: "Conexões (APIs, Web, Voz)", keywords: "openrouter chave busca metabusca", icon: <SlidersHorizontal size={16} />, run: () => openSettings("connections") },
-    { id: "set-integ", group: "Configurações", label: "Integrações (WhatsApp, Google)", keywords: "whatsapp google tuya", icon: <SlidersHorizontal size={16} />, run: () => openSettings("integrations") },
+    { id: "act-new", group: tr("Ações"), label: tr("Novo chat"), keywords: "conversa nova", icon: <MessageSquareDashed size={16} />, run: () => newChat() },
+    { id: "act-temp", group: tr("Ações"), label: tr("Chat temporário"), keywords: tr("privado incógnito não salvar"), icon: <MessageSquareDashed size={16} />, run: () => { if (!temporary) toggleTemporary(); } },
+    { id: "act-round", group: tr("Ações"), label: "Mesa-redonda", keywords: "multi modelo debate", icon: <Users size={16} />, run: () => enterRoundtable() },
+    { id: "act-ws", group: tr("Ações"), label: tr("Espaço de Trabalho"), keywords: "modelos ferramentas prompts skills", icon: <Wrench size={16} />, run: () => openWorkspace(null) },
+    { id: "act-auto", group: tr("Ações"), label: tr("Automações"), keywords: "agendar monitor", icon: <Bell size={16} />, run: () => openWorkspace("Automacoes") },
+    { id: "act-play", group: tr("Ações"), label: tr("Playground"), keywords: "benchmark comparar modelos debug ferramentas tools", icon: <FlaskConical size={16} />, run: () => openWorkspace("Playground") },
+    { id: "act-archived", group: tr("Ações"), label: tr("Chats arquivados"), keywords: "arquivo", icon: <Search size={16} />, run: () => setShowArchived(true) },
+    ...(user.role === "admin" ? [{ id: "act-admin", group: tr("Ações"), label: tr("Painel do Admin"), keywords: "usuarios rede backup", icon: <ShieldAlert size={16} />, run: () => router.push("/admin") } as PaletteItem] : []),
+    { id: "act-logout", group: tr("Ações"), label: tr("Sair"), keywords: "logout desconectar sair", icon: <X size={16} />, run: () => logout() },
+    { id: "set-general", group: tr("Configurações"), label: tr("Configurações"), sublabel: tr("Geral"), icon: <SlidersHorizontal size={16} />, run: () => openSettings("general") },
+    { id: "set-status", group: tr("Configurações"), label: tr("Status do sistema"), keywords: "saude chave conexao", icon: <SlidersHorizontal size={16} />, run: () => openSettings("status") },
+    { id: "set-budget", group: tr("Configurações"), label: tr("Orçamento mensal"), keywords: "conta gasto limite custo", icon: <SlidersHorizontal size={16} />, run: () => openSettings("account") },
+    { id: "set-conn", group: tr("Configurações"), label: tr("Conexões (APIs, Web, Voz)"), keywords: "openrouter chave busca metabusca", icon: <SlidersHorizontal size={16} />, run: () => openSettings("connections") },
+    { id: "set-integ", group: tr("Configurações"), label: tr("Integrações (WhatsApp, Google)"), keywords: "whatsapp google tuya", icon: <SlidersHorizontal size={16} />, run: () => openSettings("integrations") },
     ...customModels.map((mc): PaletteItem => ({
-      id: `model-${mc.id}`, group: "Modelos", label: mc.name, sublabel: mc.base_model,
+      id: `model-${mc.id}`, group: tr("Modelos"), label: mc.name, sublabel: mc.base_model,
       keywords: "usar modelo trocar", icon: <Wrench size={16} />, run: () => selectCustom(mc),
     })),
     ...chats.slice(0, 60).map((c): PaletteItem => ({
-      id: `chat-${c.id}`, group: "Chats", label: c.title, keywords: "conversa abrir", run: () => selectChat(c.id),
+      id: `chat-${c.id}`, group: tr("Chats"), label: c.title, keywords: "conversa abrir", run: () => selectChat(c.id),
     })),
   ];
 
@@ -2604,7 +2609,7 @@ export default function ChatPage() {
   }
   const folderPicker = (up: boolean) => (
     <FolderPicker value={folderValue} onChange={(v) => void changeFolder(v)} menuUp={up}
-      lockedName={active?.project_id ? (csProject?.name ?? "Projeto") : null} />
+      lockedName={active?.project_id ? (csProject?.name ?? tr("Projeto")) : null} />
   );
   const picker = (
     <ModelPicker
@@ -2700,7 +2705,7 @@ export default function ChatPage() {
         <div className="sticky top-0 z-30 flex shrink-0 items-start justify-between gap-2 bg-bg px-2 py-2.5 sm:px-4">
           <div className="flex min-w-0 flex-col">
             <div className="flex items-center gap-1">
-              <button onClick={() => setMobileNav(true)} title="Menu" aria-label="Abrir menu" className="rounded-lg p-1.5 text-ink transition-colors hover:bg-hover md:hidden max-md:p-2.5 max-md:[&_svg]:size-6">
+              <button onClick={() => setMobileNav(true)} title={tr("Menu")} aria-label={tr("Abrir menu")} className="rounded-lg p-1.5 text-ink transition-colors hover:bg-hover md:hidden max-md:p-2.5 max-md:[&_svg]:size-6">
                 <Menu size={20} />
               </button>
               {picker}
@@ -2708,7 +2713,7 @@ export default function ChatPage() {
                   view_once, apagada ao sair). */}
               <button
                 onClick={() => { if (isRoundtable) setRtBarOpen((v) => !v); else { enterRoundtable(); setRtBarOpen(true); } }}
-                title={isRoundtable ? (rtBarOpen ? "Ocultar a mesa" : "Mostrar a mesa") : temporary ? "Mesa-redonda temporária (não será salva)" : "Mesa-redonda: fazer os modelos conversarem entre si"}
+                title={isRoundtable ? (rtBarOpen ? "Ocultar a mesa" : "Mostrar a mesa") : temporary ? tr("Mesa-redonda temporária (não será salva)") : tr("Mesa-redonda: fazer os modelos conversarem entre si")}
                 className={`rounded-lg p-1.5 transition-colors max-md:p-2.5 max-md:[&_svg]:size-[22px] ${isRoundtable && rtBarOpen ? "bg-accent/15 text-accent-hover" : isRoundtable ? "text-accent-hover hover:bg-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
               >
                 <Users size={18} />
@@ -2717,31 +2722,31 @@ export default function ChatPage() {
             {!active && !temporary && curModel && (
               <button onClick={setAsDefault} className="pl-2 text-left text-xs text-muted transition-colors hover:text-ink">
                 {user.default_model === (curCustomId ? `custom:${curCustomId}` : curModel)
-                  ? "Modelo padrão ✓"
-                  : "Definir como padrão"}
+                  ? tr("Modelo padrão ✓")
+                  : tr("Definir como padrão")}
               </button>
             )}
             {active?.mini_app === "imaginai" && (
               <span
-                title={imaginaiDocksHidden ? "Mesa de RPG — painéis ocultos" : "Mesa de RPG (Imaginai)"}
+                title={imaginaiDocksHidden ? tr("Mesa de RPG — painéis ocultos") : tr("Mesa de RPG (Imaginai)")}
                 className="flex cursor-default items-center gap-1 pl-2 text-xs text-violet-300"
               >
-                <Dices size={11} /> Imaginai
+                <Dices size={11} />  {tr("Imaginai")}
               </span>
             )}
             {active?.project_id && (
               <span className="flex items-center gap-2.5 pl-2 text-xs">
                 <span
-                  title={csProject?.name ? `Projeto: ${csProject.name}` : "Chat vinculado a um projeto do Codespace"}
+                  title={csProject?.name ? `Projeto: ${csProject.name}` : tr("Chat vinculado a um projeto do Codespace")}
                   className="flex cursor-default items-center gap-1 text-accent-hover"
                 >
-                  <Code2 size={11} /> Codespace
+                  <Code2 size={11} />  {tr("Codespace")}
                 </span>
                 {curModel && (
                   <button onClick={setAsProjectDefault} className="text-left text-muted transition-colors hover:text-ink">
                     {csProject?.default_model === (curCustomId ? `custom:${curCustomId}` : curModel)
-                      ? "Padrão do projeto ✓"
-                      : "Definir como padrão do projeto"}
+                      ? tr("Padrão do projeto ✓")
+                      : tr("Definir como padrão do projeto")}
                   </button>
                 )}
               </span>
@@ -2751,7 +2756,7 @@ export default function ChatPage() {
             {active && !temporary && showShareBtn && (
               <button
                 onClick={() => setShowShare(true)}
-                title="Compartilhar conversa (link público)"
+                title={tr("Compartilhar conversa (link público)")}
                 className={`rounded-lg p-2 transition-colors max-md:p-2.5 max-md:[&_svg]:size-[22px] ${active.public_id ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
               >
                 <Share2 size={18} />
@@ -2759,7 +2764,7 @@ export default function ChatPage() {
             )}
             <button
               onClick={toggleTemporary}
-              title="Chat temporário"
+              title={tr("Chat temporário")}
               className={`rounded-lg p-2 transition-colors max-md:p-2.5 max-md:[&_svg]:size-[22px] ${temporary ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
             >
               <MessageSquareDashed size={18} />
@@ -2767,7 +2772,7 @@ export default function ChatPage() {
             {filesProjectId && (
               <button
                 onClick={() => setCsFilesOpen((v) => !v)}
-                title="Arquivos do projeto"
+                title={tr("Arquivos do projeto")}
                 className={`rounded-lg p-2 transition-colors max-md:p-2.5 max-md:[&_svg]:size-[22px] ${csFilesOpen ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
               >
                 <Code2 size={18} />
@@ -2775,7 +2780,7 @@ export default function ChatPage() {
             )}
             <button
               onClick={() => setShowControls((v) => !v)}
-              title="Controles"
+              title={tr("Controles")}
               className={`rounded-lg p-2 transition-colors max-md:p-2.5 max-md:[&_svg]:size-[22px] ${showControls ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
             >
               <SlidersHorizontal size={18} />
@@ -2812,8 +2817,8 @@ export default function ChatPage() {
           >
             <ShieldAlert size={13} className="shrink-0" />
             {budget.blocked
-              ? `Orçamento mensal atingido (US$ ${budget.spent.toFixed(2)} de ${budget.cap.toFixed(2)}) — novas mensagens pausadas. Ajustar →`
-              : `Você passou do seu orçamento mensal (US$ ${budget.spent.toFixed(2)} de ${budget.cap.toFixed(2)}). Ajustar →`}
+              ? tr("Orçamento mensal atingido (US$ {0} de {1}) — novas mensagens pausadas. Ajustar →", { "0": budget.spent.toFixed(2), "1": budget.cap.toFixed(2) })
+              : tr("Você passou do seu orçamento mensal (US$ {0} de {1}). Ajustar →", { "0": budget.spent.toFixed(2), "1": budget.cap.toFixed(2) })}
           </button>
         )}
         <div className="flex flex-1 overflow-hidden">
@@ -2833,8 +2838,8 @@ export default function ChatPage() {
                     </span>
                   )}
                   <div className="text-center leading-snug">
-                    <h1 className="text-2xl font-semibold tracking-tight text-ink-soft">Good to See You!</h1>
-                    <p className="text-2xl font-semibold tracking-tight text-muted">How Can I be an Assistance?</p>
+                    <h1 className="text-2xl font-semibold tracking-tight text-ink-soft">{tr("Good to See You!")}</h1>
+                    <p className="text-2xl font-semibold tracking-tight text-muted">{tr("How Can I be an Assistance?")}</p>
                   </div>
                 </div>
                 <div
@@ -2847,7 +2852,7 @@ export default function ChatPage() {
                   <PromptBox value={input} onChange={setInput} onSend={send} onStop={isRoundtable && rtRunning ? pauseRoundtable : stopAndPauseQueue} onQueue={isRoundtable ? () => { void steerRoundtable(); } : enqueue} queue={isRoundtable ? undefined : queueProps} sending={sending || rtRunning} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} folder={folderPicker(false)} />
                 </div>
                 {/* menu do "+" abre para baixo aqui (há espaço); na conversa abre para cima */}
-                {temporary && <p className="mt-2 text-xs text-muted">Chat temporário — esta conversa não será salva.</p>}
+                {temporary && <p className="mt-2 text-xs text-muted">{tr("Chat temporário — esta conversa não será salva.")}</p>}
                 <div className="mt-5 w-full max-w-3xl px-4">
                   <SuggestionChips onPick={typeSuggestion} />
                 </div>
@@ -2877,12 +2882,14 @@ export default function ChatPage() {
                   >
                   {temporary && (
                     <div className="mx-auto w-fit rounded-full border border-border bg-surface px-4 py-1.5 text-center text-xs text-muted">
-                      Chat temporário — não será salvo
+                      
+                      {tr("Chat temporário — não será salvo")}
                     </div>
                   )}
                   {active?.view_once && (
                     <div className="mx-auto w-fit rounded-full border border-border bg-surface px-4 py-1.5 text-center text-xs text-muted">
-                      Visualização única — será apagado ao sair
+                      
+                      {tr("Visualização única — será apagado ao sair")}
                     </div>
                   )}
                   {messages.map((m) => {
@@ -3043,8 +3050,8 @@ export default function ChatPage() {
                           {!atBottom && (
                             <button
                               onClick={scrollToBottom}
-                              title="Ir para a última mensagem"
-                              aria-label="Ir para a última mensagem"
+                              title={tr("Ir para a última mensagem")}
+                              aria-label={tr("Ir para a última mensagem")}
                               className="animate-pop absolute -top-11 left-1/2 z-20 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface text-ink-soft shadow-menu transition-colors hover:bg-hover hover:text-ink"
                             >
                               <ArrowDown size={18} />
@@ -3052,13 +3059,13 @@ export default function ChatPage() {
                           )}
                           {showFolderReq && folderReq && (
                             <FolderRequestCard req={folderReq} anywhere={user?.role === "admin"}
-                              onApproved={(f) => { setDismissedFolderReq(lastMsg?.id ?? null); void changeFolder(f.home ? null : f.id).then(() => send(`Pasta liberada: ${f.path}`)); }}
-                              onDecline={() => { setDismissedFolderReq(lastMsg?.id ?? null); void send("Não liberei a pasta."); }} />
+                              onApproved={(f) => { setDismissedFolderReq(lastMsg?.id ?? null); void changeFolder(f.home ? null : f.id).then(() => send(tr("Pasta liberada: {path}", { path: f.path }))); }}
+                              onDecline={() => { setDismissedFolderReq(lastMsg?.id ?? null); void send(tr("Não liberei a pasta.")); }} />
                           )}
                           {showAsk && askSpec && (
                             <AskOptions spec={askSpec} onPick={(v) => send(v)} onDismiss={() => setDismissedAsk(lastMsg?.id ?? null)} />
                           )}
-                          <div ref={promptBoxRef}><PromptBox value={input} onChange={setInput} onSend={send} onStop={isRoundtable && rtRunning ? pauseRoundtable : stopAndPauseQueue} onQueue={isRoundtable ? () => { void steerRoundtable(); } : enqueue} queue={isRoundtable ? undefined : queueProps} sending={sending || rtRunning} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? "Escolha uma opção acima ou escreva sua resposta…" : undefined} folder={folderPicker(true)} /></div>
+                          <div ref={promptBoxRef}><PromptBox value={input} onChange={setInput} onSend={send} onStop={isRoundtable && rtRunning ? pauseRoundtable : stopAndPauseQueue} onQueue={isRoundtable ? () => { void steerRoundtable(); } : enqueue} queue={isRoundtable ? undefined : queueProps} sending={sending || rtRunning} recording={recording} micStream={micStream} addFilesRef={addFilesRef} onToggleMic={toggleMic} onCancelMic={cancelMic} onVoiceMode={toggleVoiceMode} modelTools={modelTools} prompts={prompts} skills={skills} attachedSkillIds={attachedSkillIds} onAttachedSkillIdsChange={setAttachedSkillIds} agents={agentsForMention} agentId={agentId} onAgentChange={setAgentId} knowledgeRefs={knowledgeRefs} refDocs={refDocs} onRefDocsChange={setRefDocs} chats={chats.filter((c) => c.id !== active?.id)} refChats={refChats} onRefChatsChange={setRefChats} capabilities={curCustom?.capabilities} attachments={attachments} onAttachmentsChange={setAttachments} reasoning={reasoningEffort} onReasoningChange={setReasoningEffort} reasoningModel={curCustom ? curCustom.base_model : curModel} context={contextInfo} onCompact={compactContext} onHistory={() => setShowCompactions(true)} compacting={compacting} menuUp activeMiniApp={activeMiniApp} onActiveMiniAppChange={handleMiniApp} temporary={temporary} placeholder={showAsk ? tr("Escolha uma opção acima ou escreva sua resposta…") : undefined} folder={folderPicker(true)} /></div>
                         </div>
                         {/* números da chamada atual/última; some ao trocar de chat */}
                         {callStats && callStats.chatId === (active?.id ?? null) && <CallStatsBar stats={callStats} />}
@@ -3122,21 +3129,21 @@ export default function ChatPage() {
             >
               <div
                 onPointerDown={startCsResize}
-                title="Arraste para redimensionar"
+                title={tr("Arraste para redimensionar")}
                 className="group absolute inset-y-0 -left-1 z-10 hidden w-2.5 cursor-col-resize items-stretch justify-center md:flex"
               >
                 <div className="w-[3px] rounded-full bg-transparent transition-colors group-hover:bg-accent/50 group-active:bg-accent" />
               </div>
               <div className="flex h-full flex-col gap-2">
                 <div className="flex items-center justify-between">
-                  <span className="flex items-center gap-1.5 text-sm font-medium text-ink"><Code2 size={15} className="text-accent-hover" /> Arquivos</span>
+                  <span className="flex items-center gap-1.5 text-sm font-medium text-ink"><Code2 size={15} className="text-accent-hover" />  {tr("Arquivos")}</span>
                   <button onClick={() => setCsFilesOpen(false)} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><X size={16} /></button>
                 </div>
                 <CodespaceFileBrowser
                   key={filesProjectId}
                   projectId={filesProjectId}
                   dense
-                  useLabel="Inserir no chat"
+                  useLabel={tr("Inserir no chat")}
                   onUse={(path, content) => {
                     const prefill = `Sobre o arquivo \`${path}\`:\n\n\`\`\`${extLang(path)}\n${content}\n\`\`\`\n\n`;
                     setInput((v) => (v ? `${v}\n\n${prefill}` : prefill));
@@ -3289,11 +3296,11 @@ export default function ChatPage() {
               {voicePhase === "listening" ? <Mic size={16} /> : voicePhase === "speaking" ? <Volume2 size={16} /> : <Loader2 size={16} className="animate-spin" />}
             </span>
             <span className="min-w-[7.5rem] text-sm text-ink">
-              {voicePhase === "listening" ? "Ouvindo…" : voicePhase === "thinking" ? "Processando…" : "Falando…"}
+              {voicePhase === "listening" ? tr("Ouvindo…") : voicePhase === "thinking" ? tr("Processando…") : tr("Falando…")}
             </span>
             <button
               onClick={stopVoiceMode}
-              title="Encerrar modo voz"
+              title={tr("Encerrar modo voz")}
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-hover text-muted transition-colors hover:bg-red-500/15 hover:text-red-400"
             >
               <Square size={15} />
@@ -3308,33 +3315,33 @@ export default function ChatPage() {
 /** Nome amigável (pt-BR) de uma ferramenta p/ a linha de status ao vivo. */
 // ações das ferramentas do Imaginai (o `action` dos argumentos), em linguagem de mesa
 const ACTION_LABELS: Record<string, string> = {
-  expand_world: "expandindo o mundo", build_world: "criando o mundo", set_concept: "registrando o conceito",
-  set_character: "registrando a ficha", roll_abilities: "rolando os atributos", begin_adventure: "abrindo a aventura",
-  spellbook: "escrevendo magias", entity_image: "guardando a imagem", resolve: "resolvendo a ação",
-  roll: "rolando o teste", adjudicate: "decidindo a consequência", roleplay: "interpretando o NPC",
-  saving_throw: "rolando a resistência", apply_effect: "aplicando o efeito", ally: "chamando um aliado",
-  fate: "decidindo o destino", new_character: "preparando um novo personagem", dice: "rolando dados",
+  expand_world: tr("expandindo o mundo"), build_world: tr("criando o mundo"), set_concept: tr("registrando o conceito"),
+  set_character: tr("registrando a ficha"), roll_abilities: tr("rolando os atributos"), begin_adventure: tr("abrindo a aventura"),
+  spellbook: tr("escrevendo magias"), entity_image: tr("guardando a imagem"), resolve: tr("resolvendo a ação"),
+  roll: tr("rolando o teste"), adjudicate: tr("decidindo a consequência"), roleplay: "interpretando o NPC",
+  saving_throw: tr("rolando a resistência"), apply_effect: tr("aplicando o efeito"), ally: tr("chamando um aliado"),
+  fate: tr("decidindo o destino"), new_character: tr("preparando um novo personagem"), dice: tr("rolando dados"),
 };
 
 function prettyTool(name: string): string {
   const map: Record<string, string> = {
-    code__files__browse: "lendo arquivos do projeto",
-    code__files__write: "editando arquivos do projeto",
-    code__graph__query: "consultando o grafo de código",
-    code__flow__analyze: "analisando o fluxo do código",
-    code__exec__run: "rodando comandos no projeto",
-    code__task__manage: "organizando tarefas do projeto",
-    web__search__query: "buscando na web",
-    web__page__read: "lendo uma página da web",
-    web__browser__use: "navegando no navegador",
-    research__deep__run: "fazendo uma pesquisa profunda",
-    media__video__transcribe: "transcrevendo o vídeo",
-    search_tools: "procurando a ferramenta certa",
-    execute_tool: "preparando uma ferramenta",
-    delegate: "preparando a delegação",
-    delegate_team: "montando a equipe",
-    run_code: "escrevendo código",
-    generate_image: "descrevendo a imagem",
+    code__files__browse: tr("lendo arquivos do projeto"),
+    code__files__write: tr("editando arquivos do projeto"),
+    code__graph__query: tr("consultando o grafo de código"),
+    code__flow__analyze: tr("analisando o fluxo do código"),
+    code__exec__run: tr("rodando comandos no projeto"),
+    code__task__manage: tr("organizando tarefas do projeto"),
+    web__search__query: tr("buscando na web"),
+    web__page__read: tr("lendo uma página da web"),
+    web__browser__use: tr("navegando no navegador"),
+    research__deep__run: tr("fazendo uma pesquisa profunda"),
+    media__video__transcribe: tr("transcrevendo o vídeo"),
+    search_tools: tr("procurando a ferramenta certa"),
+    execute_tool: tr("preparando uma ferramenta"),
+    delegate: tr("preparando a delegação"),
+    delegate_team: tr("montando a equipe"),
+    run_code: tr("escrevendo código"),
+    generate_image: tr("descrevendo a imagem"),
   };
   return map[name] ?? name.replace(/__/g, ".").replace(/_/g, " ");
 }
@@ -3402,8 +3409,8 @@ function SpeechController({
       type="button"
       onClick={toggleSpeakingPaused}
       disabled={loading}
-      title={loading ? "Preparando o áudio completo" : paused ? "Continuar leitura" : "Pausar leitura"}
-      aria-label={loading ? "Preparando o áudio completo" : paused ? "Continuar leitura" : "Pausar leitura"}
+      title={loading ? tr("Preparando o áudio completo") : paused ? tr("Continuar leitura") : tr("Pausar leitura")}
+      aria-label={loading ? tr("Preparando o áudio completo") : paused ? tr("Continuar leitura") : tr("Pausar leitura")}
       className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent text-white transition-colors hover:bg-accent-hover disabled:cursor-wait disabled:opacity-70"
     >
       {loading ? <Loader2 size={17} className="animate-spin" /> : paused ? <Play size={17} fill="currentColor" /> : <Pause size={17} fill="currentColor" />}
@@ -3415,7 +3422,7 @@ function SpeechController({
       <button
         type="button"
         onClick={() => setSpeakingRate(nextRate)}
-        title="Alterar velocidade"
+        title={tr("Alterar velocidade")}
         className="h-9 min-w-10 rounded-xl px-2 text-xs font-semibold text-ink-soft transition-colors hover:bg-hover hover:text-ink"
       >
         {progress.rate}×
@@ -3424,7 +3431,7 @@ function SpeechController({
         type="button"
         onClick={() => seekSpeaking(-15)}
         disabled={!progress.seekable}
-        title={progress.seekable ? "Voltar 15 segundos" : "Indisponível na voz do navegador"}
+        title={progress.seekable ? "Voltar 15 segundos" : tr("Indisponível na voz do navegador")}
         className="relative flex h-9 w-9 items-center justify-center rounded-xl text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-35"
       >
         <RotateCcw size={19} />
@@ -3434,7 +3441,7 @@ function SpeechController({
         type="button"
         onClick={() => seekSpeaking(15)}
         disabled={!progress.seekable}
-        title={progress.seekable ? "Avançar 15 segundos" : "Indisponível na voz do navegador"}
+        title={progress.seekable ? tr("Avançar 15 segundos") : tr("Indisponível na voz do navegador")}
         className="relative flex h-9 w-9 items-center justify-center rounded-xl text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-35"
       >
         <RotateCw size={19} />
@@ -3461,8 +3468,8 @@ function SpeechController({
         value={timelineValue}
         onChange={(event) => seekSpeakingTo(Number(event.target.value))}
         disabled={!canSeek || loading}
-        aria-label="Posição da leitura"
-        title={canSeek ? "Arraste para mudar a posição" : "A timeline estará disponível quando o áudio terminar de carregar"}
+        aria-label={tr("Posição da leitura")}
+        title={canSeek ? tr("Arraste para mudar a posição") : tr("A timeline estará disponível quando o áudio terminar de carregar")}
         className="speech-progress min-w-0 flex-1"
         style={{ "--speech-progress": `${timelinePercent}%` } as React.CSSProperties}
       />
@@ -3472,14 +3479,14 @@ function SpeechController({
     </div>
   );
 
-  const status = loading ? "Preparando áudio…" : paused ? "Leitura pausada" : "Lendo resposta";
+  const status = loading ? tr("Preparando áudio…") : paused ? tr("Leitura pausada") : tr("Lendo resposta");
 
   if (variant === "desktop" || variant === "floating") {
     return (
       <div className={variant === "floating"
         ? "absolute right-3 top-3 z-30 flex w-[min(22rem,calc(100%-1.5rem))]"
         : "speech-desktop-player min-w-0 items-center justify-start pl-3 pr-4"}>
-        <div role="region" aria-label="Leitura em voz alta" className="animate-pop min-w-0 w-full max-w-[22rem] rounded-2xl border border-border bg-surface p-2 shadow-prompt">
+        <div role="region" aria-label={tr("Leitura em voz alta")} className="animate-pop min-w-0 w-full max-w-[22rem] rounded-2xl border border-border bg-surface p-2 shadow-prompt">
           <div className="flex min-w-0 items-center gap-1">
             {playButton}
             <span className="min-w-0 flex-1 px-1">
@@ -3500,7 +3507,7 @@ function SpeechController({
           type="button"
           onClick={() => setMobileOpen((open) => !open)}
           aria-expanded={mobileOpen}
-          title={mobileOpen ? "Recolher controles de leitura" : "Mostrar controles de leitura"}
+          title={mobileOpen ? tr("Recolher controles de leitura") : tr("Mostrar controles de leitura")}
           className="flex h-6 w-full items-center justify-center gap-1.5 text-[11px] font-medium text-muted transition-colors hover:text-ink"
         >
           <span className="h-1 w-8 rounded-full bg-border" />
@@ -3508,7 +3515,7 @@ function SpeechController({
           {mobileOpen ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
         </button>
         {mobileOpen && (
-          <div role="region" aria-label="Controles da leitura em voz alta" className="animate-pop pt-1 text-ink">
+          <div role="region" aria-label={tr("Controles da leitura em voz alta")} className="animate-pop pt-1 text-ink">
             <div className="flex min-w-0 items-center justify-center gap-1">
               {playButton}
               <span className="min-w-0 flex-1 px-1 text-xs font-medium text-ink">{status}</span>
@@ -3572,7 +3579,7 @@ function MessageBubble({
             <div className="touch-reveal mt-1 flex items-center justify-end gap-1.5 pr-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
               {time && <span className="text-[11px] text-muted">{fmtTime(time)}</span>}
               {onDelete && (
-                <button title="Excluir" onClick={onDelete} className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-red-300">
+                <button title={tr("Excluir")} onClick={onDelete} className="rounded p-1 text-muted transition-colors hover:bg-hover hover:text-red-300">
                   <Trash2 size={13} />
                 </button>
               )}
@@ -3608,12 +3615,12 @@ function MessageBubble({
         {onSpeak && (
           <button
             onClick={() => onSpeak()}
-            title={speaking ? "Parar leitura" : "Ler em voz alta"}
+            title={speaking ? tr("Parar leitura") : tr("Ler em voz alta")}
             aria-pressed={speaking || undefined}
             className={`mt-1 flex items-center gap-1 text-xs transition-opacity hover:text-ink ${speaking ? "text-accent-hover opacity-100" : "text-muted touch-reveal opacity-0 group-hover:opacity-100"}`}
           >
             {speaking ? <Square size={12} fill="currentColor" /> : <Volume2 size={13} />}
-            {speaking ? "Parar" : "Ler"}
+            {speaking ? tr("Parar") : tr("Ler")}
           </button>
         )}
       </div>
@@ -3653,7 +3660,7 @@ function MessageNavigator({ messages, onJump }: { messages: Message[]; onJump: (
               autoFocus
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Pesquisar suas mensagens"
+              placeholder={tr("Pesquisar suas mensagens")}
               className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
             />
           </div>
@@ -3668,7 +3675,7 @@ function MessageNavigator({ messages, onJump }: { messages: Message[]; onJump: (
                 <span className="truncate text-sm text-ink-soft">{m.content}</span>
               </button>
             ))}
-            {filtered.length === 0 && <p className="px-3 py-4 text-center text-sm text-muted">Nada encontrado.</p>}
+            {filtered.length === 0 && <p className="px-3 py-4 text-center text-sm text-muted">{tr("Nada encontrado.")}</p>}
           </div>
         </div>
       )}
@@ -3711,11 +3718,12 @@ function CompactionDivider({ onOpen }: { onOpen: () => void }) {
       <span className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border" />
       <button
         onClick={onOpen}
-        title="Ver resumo no Grafo de contexto"
+        title={tr("Ver resumo no Grafo de contexto")}
         className="flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1 text-xs text-ink-soft transition-colors hover:border-accent/40 hover:text-ink"
       >
         <Scissors size={12} className="text-accent-hover" />
-        Contexto compactado
+        
+        {tr("Contexto compactado")}
         <GitBranch size={12} className="opacity-60" />
       </button>
       <span className="h-px flex-1 bg-gradient-to-l from-transparent via-border to-border" />
@@ -3726,8 +3734,8 @@ function CompactionDivider({ onOpen }: { onOpen: () => void }) {
 /** Chip "Guarda de saída acionado" — mostrado enquanto o servidor refaz a resposta. */
 function GuardRetry({ note }: { note: { name: string; action: string; fallback_model?: string | null } }) {
   const label = note.action === "fallback_model"
-    ? `trocando para ${note.fallback_model || "o modelo de fallback"}`
-    : "reforçando e refazendo";
+    ? tr("trocando para {0}", { "0": note.fallback_model || "o modelo de fallback" })
+    : tr("reforçando e refazendo");
   return (
     <div className="mx-auto flex max-w-3xl items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-300">
       <ShieldAlert size={14} className="shrink-0" />
@@ -3741,7 +3749,8 @@ function GeneratingImage() {
   return (
     <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-ink-soft">
       <ImageIcon size={14} className="animate-pulse text-accent-hover" />
-      Gerando imagem…
+      
+      {tr("Gerando imagem…")}
     </div>
   );
 }
@@ -3781,16 +3790,16 @@ function ShareModal({
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-border bg-surface p-5 shadow-2xl">
         <div className="mb-3 flex items-center justify-between">
-          <span className="flex items-center gap-2 text-sm font-semibold text-ink"><Share2 size={16} className="text-accent-hover" /> Compartilhar conversa</span>
+          <span className="flex items-center gap-2 text-sm font-semibold text-ink"><Share2 size={16} className="text-accent-hover" />  {tr("Compartilhar conversa")}</span>
           <button onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={16} /></button>
         </div>
         {!publicId ? (
           <>
-            <p className="mb-4 text-sm text-ink-soft">Gerar um link público? Qualquer pessoa com ele poderá ver esta conversa.</p>
+            <p className="mb-4 text-sm text-ink-soft">{tr("Gerar um link público? Qualquer pessoa com ele poderá ver esta conversa.")}</p>
             <div className="flex justify-end gap-2">
-              <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-muted transition-colors hover:bg-hover hover:text-ink">Cancelar</button>
+              <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-muted transition-colors hover:bg-hover hover:text-ink">{tr("Cancelar")}</button>
               <button onClick={generate} disabled={busy} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-                <Link2 size={14} /> {busy ? "Gerando…" : "Gerar link"}
+                <Link2 size={14} /> {busy ? tr("Gerando…") : tr("Gerar link")}
               </button>
             </div>
           </>
@@ -3799,13 +3808,14 @@ function ShareModal({
         <div className="flex items-center gap-2 rounded-xl border border-border bg-surface2 px-3 py-2">
           <Link2 size={14} className="shrink-0 text-muted" />
           <input readOnly value={busy && !url ? "Gerando link…" : url} className="min-w-0 flex-1 bg-transparent text-xs text-ink outline-none" />
-          <button onClick={copy} disabled={!url} title="Copiar" className="shrink-0 rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink disabled:opacity-40">
+          <button onClick={copy} disabled={!url} title={tr("Copiar")} className="shrink-0 rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink disabled:opacity-40">
             {copied ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
           </button>
         </div>
         <div className="mt-4 flex justify-end">
           <button onClick={revoke} disabled={busy || !publicId} className="rounded-lg px-3 py-1.5 text-sm text-rose-400 transition-colors hover:bg-hover disabled:opacity-40">
-            Parar de compartilhar
+            
+            {tr("Parar de compartilhar")}
           </button>
         </div>
         </>
@@ -3820,7 +3830,8 @@ function ConsultingKnowledge() {
   return (
     <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-ink-soft">
       <BookOpen size={14} className="animate-pulse text-accent-hover" />
-      Consultando base de conhecimento…
+      
+      {tr("Consultando base de conhecimento…")}
     </div>
   );
 }
@@ -3830,7 +3841,8 @@ function TranscribingAudio() {
   return (
     <div className="mt-2 inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 text-sm text-ink-soft">
       <Volume2 size={14} className="animate-pulse text-accent-hover" />
-      Transcrevendo áudio…
+      
+      {tr("Transcrevendo áudio…")}
     </div>
   );
 }

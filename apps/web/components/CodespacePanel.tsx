@@ -14,6 +14,7 @@ import { copyText } from "@/lib/clipboard";
 import CodespaceFileBrowser, { extLang } from "@/components/CodespaceFileBrowser";
 import CodespaceGraphView from "@/components/CodespaceGraphView";
 import { toast } from "@/components/Toaster";
+import { dateLocale, tr } from "@/lib/i18n";
 
 interface GithubAccountLite {
   id: string;
@@ -25,8 +26,8 @@ type Source = "git" | "git-ssh" | "local" | "folder";
 const SOURCE_META: Record<Source, { icon: typeof Globe; label: string }> = {
   git: { icon: Globe, label: "HTTPS" },
   "git-ssh": { icon: KeyRound, label: "SSH" },
-  local: { icon: HardDrive, label: "Local" },
-  folder: { icon: FolderOpen, label: "Pasta" },
+  local: { icon: HardDrive, label: tr("Local") },
+  folder: { icon: FolderOpen, label: tr("Pasta") },
 };
 
 const STATUS_DOT: Record<string, string> = {
@@ -34,7 +35,7 @@ const STATUS_DOT: Record<string, string> = {
   ready: "bg-green-400", error: "bg-red-400",
 };
 const STATUS_LABEL: Record<string, string> = {
-  pending: "Na fila", cloning: "Clonando…", indexing: "Indexando…", ready: "Pronto", error: "Erro",
+  pending: tr("Na fila"), cloning: tr("Clonando…"), indexing: tr("Indexando…"), ready: tr("Pronto"), error: tr("Erro"),
 };
 
 function StatusDot({ status }: { status: string }) {
@@ -50,11 +51,11 @@ function StatusDot({ status }: { status: string }) {
 /* chip de status semântico (verde=indexado, âmbar=em progresso, vermelho=erro) —
    estado do projeto que se lê num relance, separado do violeta da marca. */
 const STATUS_CHIP: Record<string, { label: string; cls: string; dot: string }> = {
-  pending:  { label: "Na fila",   cls: "border-amber-500/25 bg-amber-500/10 text-amber-300", dot: "bg-amber-400" },
-  cloning:  { label: "Clonando",  cls: "border-amber-500/25 bg-amber-500/10 text-amber-300", dot: "bg-amber-400" },
-  indexing: { label: "Indexando", cls: "border-amber-500/25 bg-amber-500/10 text-amber-300", dot: "bg-amber-400" },
-  ready:    { label: "Indexado",  cls: "border-green-500/25 bg-green-500/10 text-green-300", dot: "bg-green-400" },
-  error:    { label: "Erro",      cls: "border-red-500/25 bg-red-500/10 text-red-300",       dot: "bg-red-400" },
+  pending:  { label: tr("Na fila"),   cls: "border-amber-500/25 bg-amber-500/10 text-amber-300", dot: "bg-amber-400" },
+  cloning:  { label: tr("Clonando"),  cls: "border-amber-500/25 bg-amber-500/10 text-amber-300", dot: "bg-amber-400" },
+  indexing: { label: tr("Indexando"), cls: "border-amber-500/25 bg-amber-500/10 text-amber-300", dot: "bg-amber-400" },
+  ready:    { label: tr("Indexado"),  cls: "border-green-500/25 bg-green-500/10 text-green-300", dot: "bg-green-400" },
+  error:    { label: tr("Erro"),      cls: "border-red-500/25 bg-red-500/10 text-red-300",       dot: "bg-red-400" },
 };
 function StatusChip({ status }: { status: string }) {
   const s = STATUS_CHIP[status] ?? { label: status, cls: "border-border bg-surface2 text-muted", dot: "bg-muted" };
@@ -97,7 +98,7 @@ function EditableTitle({ value, onSave, className = "" }: { value: string; onSav
     <span className={`group flex min-w-0 items-center gap-1.5 ${className}`}>
       <span className="truncate">{value}</span>
       {saving ? <Loader2 size={12} className="shrink-0 animate-spin text-muted" /> : (
-        <button onClick={() => setEditing(true)} title="Renomear" className="shrink-0 rounded p-0.5 text-muted touch-reveal opacity-0 transition-opacity hover:text-ink group-hover:opacity-100">
+        <button onClick={() => setEditing(true)} title={tr("Renomear")} className="shrink-0 rounded p-0.5 text-muted touch-reveal opacity-0 transition-opacity hover:text-ink group-hover:opacity-100">
           <Pencil size={12} />
         </button>
       )}
@@ -124,13 +125,13 @@ function NewProjectModal({
   const needsRepo = source === "git" || source === "git-ssh";
 
   async function submit() {
-    if (needsRepo && !repoUrl.trim()) { setError("Informe a URL do repositório."); return; }
-    if (source === "folder" && !localPath.trim()) { setError("Informe o caminho da pasta no servidor."); return; }
+    if (needsRepo && !repoUrl.trim()) { setError(tr("Informe a URL do repositório.")); return; }
+    if (source === "folder" && !localPath.trim()) { setError(tr("Informe o caminho da pasta no servidor.")); return; }
     setSaving(true);
     setError("");
     try {
       const p = await api.post<CodespaceProject>("/codespace/projects", {
-        name: name.trim() || (source === "folder" ? localPath.trim().split(/[\\/]/).pop() : repoUrl.trim().split("/").pop()?.replace(/\.git$/, "")) || "Projeto",
+        name: name.trim() || (source === "folder" ? localPath.trim().split(/[\\/]/).pop() : repoUrl.trim().split("/").pop()?.replace(/\.git$/, "")) || tr("Projeto"),
         source,
         repo_url: repoUrl.trim(),
         local_path: localPath.trim(),
@@ -144,7 +145,7 @@ function NewProjectModal({
         onClose();
       }
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Falha ao criar o projeto");
+      setError(e instanceof ApiError ? e.message : tr("Falha ao criar o projeto"));
     } finally {
       setSaving(false);
     }
@@ -156,12 +157,12 @@ function NewProjectModal({
         <div className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
           <div className="flex items-center gap-2 border-b border-border px-4 py-3">
             <KeyRound size={18} className="text-accent-hover" />
-            <span className="flex-1 text-sm font-semibold text-ink">Adicione a deploy key</span>
+            <span className="flex-1 text-sm font-semibold text-ink">{tr("Adicione a deploy key")}</span>
           </div>
           <div className="flex flex-col gap-3 p-4">
             <p className="text-xs text-muted">
-              Cole esta chave pública como deploy key (leitura/escrita) no repositório remoto,
-              depois reindexe.
+              
+              {tr("Cole esta chave pública como deploy key (leitura/escrita) no repositório remoto, depois reindexe.")}
             </p>
             <div className="flex items-start gap-2 rounded-lg border border-border bg-surface2 px-3 py-2">
               <code className="min-w-0 flex-1 break-all font-mono text-[11px] text-ink-soft">{created.ssh_public_key}</code>
@@ -173,7 +174,8 @@ function NewProjectModal({
             </div>
             <button onClick={() => { onCreated(created); onClose(); }}
               className="mt-1 flex items-center justify-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover">
-              Concluir
+              
+              {tr("Concluir")}
             </button>
           </div>
         </div>
@@ -185,7 +187,7 @@ function NewProjectModal({
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-          <span className="flex-1 text-sm font-semibold text-ink">Novo projeto</span>
+          <span className="flex-1 text-sm font-semibold text-ink">{tr("Novo projeto")}</span>
           <button onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={16} /></button>
         </div>
         <div className="flex flex-col gap-3 p-4">
@@ -203,7 +205,7 @@ function NewProjectModal({
 
           {needsRepo && (
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-muted">URL do repositório</span>
+              <span className="text-xs font-medium text-muted">{tr("URL do repositório")}</span>
               <input value={repoUrl} onChange={(e) => setRepoUrl(e.target.value)}
                 placeholder={source === "git-ssh" ? "git@github.com:usuario/repo.git" : "https://github.com/usuario/repo.git"}
                 className="rounded-lg border border-border bg-surface2 px-3 py-2 font-mono text-xs text-ink outline-none focus:border-accent/50" />
@@ -211,40 +213,40 @@ function NewProjectModal({
           )}
           {source === "folder" && (
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-muted">Caminho da pasta (no servidor)</span>
+              <span className="text-xs font-medium text-muted">{tr("Caminho da pasta (no servidor)")}</span>
               <input value={localPath} onChange={(e) => setLocalPath(e.target.value)}
                 placeholder="/home/voce/meu-projeto  ou  C:\\projetos\\app"
                 className="rounded-lg border border-border bg-surface2 px-3 py-2 font-mono text-xs text-ink outline-none focus:border-accent/50" />
-              <span className="text-[11px] text-muted">Abre um diretório existente (estilo VSCode). Vira um repositório git se ainda não for.</span>
+              <span className="text-[11px] text-muted">{tr("Abre um diretório existente (estilo VSCode). Vira um repositório git se ainda não for.")}</span>
             </label>
           )}
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-muted">Nome {needsRepo && "(opcional)"}</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder={needsRepo ? "Deriva do repositório se vazio" : "Meu projeto"}
+            <span className="text-xs font-medium text-muted">{tr("Nome")} {needsRepo && "(opcional)"}</span>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder={needsRepo ? tr("Deriva do repositório se vazio") : tr("Meu projeto")}
               className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent/50 placeholder:text-muted" />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-muted">Branch</span>
+            <span className="text-xs font-medium text-muted">{tr("Branch")}</span>
             <input value={branch} onChange={(e) => setBranch(e.target.value)}
               className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent/50" />
           </label>
           {source === "git" && (
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-muted">Conta GitHub (repos privados)</span>
+              <span className="text-xs font-medium text-muted">{tr("Conta GitHub (repos privados)")}</span>
               <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}
                 className="rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none">
-                <option value="">Nenhuma (só repos públicos)</option>
+                <option value="">{tr("Nenhuma (só repos públicos)")}</option>
                 {accounts.map((a) => <option key={a.id} value={a.id}>{a.login}</option>)}
               </Select>
             </label>
           )}
           {source === "git-ssh" && (
-            <p className="text-[11px] text-muted">Uma deploy key é gerada e mostrada após criar — cole no repositório remoto.</p>
+            <p className="text-[11px] text-muted">{tr("Uma deploy key é gerada e mostrada após criar — cole no repositório remoto.")}</p>
           )}
           {error && <p className="text-xs text-red-400">{error}</p>}
           <button onClick={submit} disabled={saving}
             className="mt-1 flex items-center justify-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-            {saving ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />} Criar
+            {saving ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}  {tr("Criar")}
           </button>
         </div>
       </div>
@@ -275,21 +277,21 @@ async function resolveProjectChatModel(project: CodespaceProject, userDefault: s
   return (await resolveChatModel(project.default_model)) ?? (await resolveChatModel(userDefault));
 }
 
-const NO_MODEL_MSG = "Escolha um modelo padrão para o projeto (ou nas Configurações).";
+const NO_MODEL_MSG = tr("Escolha um modelo padrão para o projeto (ou nas Configurações).");
 
 function fmtStats(p: CodespaceProject): string {
   const s = p.stats;
   if (!s) return "";
   const parts: string[] = [];
   if (s.files != null) parts.push(`${s.files} arquivos`);
-  if (s.symbols != null) parts.push(`${s.symbols} símbolos`);
-  if (s.edges != null) parts.push(`${s.edges} relações`);
+  if (s.symbols != null) parts.push(tr("{symbols} símbolos", { symbols: s.symbols }));
+  if (s.edges != null) parts.push(tr("{edges} relações", { edges: s.edges }));
   return parts.join(" · ");
 }
 
 function fmtDate(iso: string): string {
   try {
-    return new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    return new Date(iso).toLocaleString(dateLocale(), { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
   } catch { return iso; }
 }
 
@@ -304,24 +306,24 @@ function ChatRow({ chat, onOpen, onRenamed, onDeleted }: {
 
   async function rename() {
     setMenuOpen(false);
-    const v = await prompt({ title: "Renomear chat", defaultValue: chat.title });
+    const v = await prompt({ title: tr("Renomear chat"), defaultValue: chat.title });
     if (!v || !v.trim() || v.trim() === chat.title) return;
     try {
       const updated = await api.patch<{ title: string }>(`/chats/${chat.id}`, { title: v.trim() });
       onRenamed(updated.title);
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Falha ao renomear o chat");
+      toast(e instanceof ApiError ? e.message : tr("Falha ao renomear o chat"));
     }
   }
 
   async function del() {
     setMenuOpen(false);
-    if (!(await confirm({ title: `Excluir "${chat.title}"?`, confirmLabel: "Excluir", danger: true }))) return;
+    if (!(await confirm({ title: `Excluir "${chat.title}"?`, confirmLabel: tr("Excluir"), danger: true }))) return;
     try {
       await api.del(`/chats/${chat.id}`);
       onDeleted();
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Falha ao excluir o chat");
+      toast(e instanceof ApiError ? e.message : tr("Falha ao excluir o chat"));
     }
   }
 
@@ -330,7 +332,7 @@ function ChatRow({ chat, onOpen, onRenamed, onDeleted }: {
       <button onClick={onOpen} className="flex min-w-0 flex-1 items-center justify-between gap-2 px-3 py-2.5 text-left">
         <span className="flex min-w-0 items-center gap-2">
           <MessageSquare size={14} className="shrink-0 text-muted" />
-          <span className="truncate text-sm text-ink">{chat.title || "Novo Chat"}</span>
+          <span className="truncate text-sm text-ink">{chat.title || tr("Novo Chat")}</span>
         </span>
         <span className="shrink-0 text-[11px] text-muted">{fmtDate(chat.updated_at)}</span>
       </button>
@@ -339,8 +341,8 @@ function ChatRow({ chat, onOpen, onRenamed, onDeleted }: {
       </button>
       {menuOpen && (
         <AnchoredMenu anchorRef={btnRef} onClose={() => setMenuOpen(false)}>
-          <MenuItem icon={<Pencil size={14} />} onClick={rename}>Renomear</MenuItem>
-          <MenuItem icon={<Trash2 size={14} />} onClick={del} danger>Excluir</MenuItem>
+          <MenuItem icon={<Pencil size={14} />} onClick={rename}>{tr("Renomear")}</MenuItem>
+          <MenuItem icon={<Trash2 size={14} />} onClick={del} danger>{tr("Excluir")}</MenuItem>
         </AnchoredMenu>
       )}
     </div>
@@ -372,7 +374,7 @@ function ProjectChatsTab({ project, onOpenChat }: { project: CodespaceProject; o
       });
       onOpenChat(chat.id);
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Falha ao criar o chat");
+      toast(e instanceof ApiError ? e.message : tr("Falha ao criar o chat"));
     } finally {
       setCreating(false);
     }
@@ -385,20 +387,20 @@ function ProjectChatsTab({ project, onOpenChat }: { project: CodespaceProject; o
       <div className="mb-3 flex items-center gap-2">
         <div className="flex flex-1 items-center gap-2 rounded-full border border-border bg-surface2 px-3 py-1.5">
           <Search size={13} className="text-muted" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar chat…"
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr("Buscar chat…")}
             className="flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted" />
         </div>
         <button onClick={novoChat} disabled={creating}
           className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-          {creating ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} Novo chat
+          {creating ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}  {tr("Novo chat")}
         </button>
       </div>
       {chats === null ? (
-        <p className="py-8 text-center text-sm text-muted">Carregando…</p>
+        <p className="py-8 text-center text-sm text-muted">{tr("Carregando…")}</p>
       ) : filtered.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border px-4 py-10 text-center">
           <MessageSquare size={22} className="mx-auto mb-2 text-muted" />
-          <p className="text-sm text-muted">{chats.length ? "Nada encontrado." : "Nenhum chat ainda."}</p>
+          <p className="text-sm text-muted">{chats.length ? tr("Nada encontrado.") : tr("Nenhum chat ainda.")}</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
@@ -477,11 +479,13 @@ function ProjectGraphTab({ project, onOpenFile }: { project: CodespaceProject; o
       <div className="mb-3 flex rounded-lg border border-border bg-surface2 p-0.5">
         <button onClick={() => setMode("overview")}
           className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-colors ${mode === "overview" ? "bg-accent text-white" : "text-ink-soft hover:bg-hover"}`}>
-          Visão geral
+          
+          {tr("Visão geral")}
         </button>
         <button onClick={() => setMode("search")}
           className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-colors ${mode === "search" ? "bg-accent text-white" : "text-ink-soft hover:bg-hover"}`}>
-          Buscar símbolo
+          
+          {tr("Buscar símbolo")}
         </button>
       </div>
 
@@ -493,29 +497,29 @@ function ProjectGraphTab({ project, onOpenFile }: { project: CodespaceProject; o
             <div className="flex flex-1 items-center gap-2 rounded-full border border-border bg-surface2 px-3 py-1.5">
               <Search size={14} className="text-muted" />
               <input value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()}
-                placeholder="Nome do símbolo…" className="flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted" />
+                placeholder={tr("Nome do símbolo…")} className="flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted" />
             </div>
             <button onClick={search} disabled={searching || !q.trim()}
               className="flex shrink-0 items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-              {searching ? <Loader2 size={13} className="animate-spin" /> : "Buscar"}
+              {searching ? <Loader2 size={13} className="animate-spin" /> : tr("Buscar")}
             </button>
           </div>
 
           {loadingEgo ? (
-            <p className="py-10 text-center text-sm text-muted">Carregando…</p>
+            <p className="py-10 text-center text-sm text-muted">{tr("Carregando…")}</p>
           ) : ego ? (
             <div>
               <button onClick={() => setEgo(null)} className="mb-3 flex items-center gap-1 text-xs text-muted hover:text-ink">
-                <ArrowLeft size={13} /> Voltar
+                <ArrowLeft size={13} />  {tr("Voltar")}
               </button>
               {ego.error ? (
                 <p className="text-sm text-red-400">{ego.error}</p>
               ) : (
                 <div className="flex flex-col gap-3">
                   <div className="flex flex-col gap-3 sm:flex-row">
-                    <EgoColumn title="Quem chama" edges={ego.called_by} />
+                    <EgoColumn title={tr("Quem chama")} edges={ego.called_by} />
                     <div className="flex min-w-0 flex-1 flex-col gap-2">
-                      <span className="px-1 text-[11px] font-medium uppercase tracking-wide text-accent-hover">Símbolo</span>
+                      <span className="px-1 text-[11px] font-medium uppercase tracking-wide text-accent-hover">{tr("Símbolo")}</span>
                       <div className="rounded-xl border-2 border-accent/40 bg-accent/10 px-3 py-2.5">
                         <div className="truncate font-mono text-sm font-semibold text-ink">{ego.symbol?.fqn}</div>
                         <div className="mt-0.5 truncate text-[11px] text-muted">{ego.symbol?.kind} · {ego.symbol?.path}{ego.symbol?.line ? `:${ego.symbol.line}` : ""}</div>
@@ -529,14 +533,14 @@ function ProjectGraphTab({ project, onOpenFile }: { project: CodespaceProject; o
                         </div>
                       )}
                     </div>
-                    <EgoColumn title="Quem ele chama" edges={ego.calls} />
+                    <EgoColumn title={tr("Quem ele chama")} edges={ego.calls} />
                   </div>
                   {ego.warnings.length > 0 && <p className="text-[11px] text-amber-500">{ego.warnings.join(" · ")}</p>}
                 </div>
               )}
             </div>
           ) : results === null ? null : results.length === 0 ? (
-            <p className="py-10 text-center text-sm text-muted">Nada encontrado.</p>
+            <p className="py-10 text-center text-sm text-muted">{tr("Nada encontrado.")}</p>
           ) : (
             <div className="space-y-1.5">
               {results.map((s, i) => (
@@ -587,7 +591,7 @@ function ProjectMemoryTab({ bankId }: { bankId: string }) {
       setDraft("");
       load();
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Falha ao adicionar");
+      toast(e instanceof ApiError ? e.message : tr("Falha ao adicionar"));
     } finally {
       setAdding(false);
     }
@@ -602,34 +606,34 @@ function ProjectMemoryTab({ bankId }: { bankId: string }) {
     <div>
       <div className="mb-3 flex items-center gap-2 rounded-full border border-border bg-surface2 px-3 py-1.5">
         <Search size={13} className="text-muted" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar memórias…"
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr("Buscar memórias…")}
           className="flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted" />
       </div>
       <div className="mb-3 flex items-start gap-2 rounded-xl border border-border bg-surface px-3 py-2">
         <textarea
           value={draft} onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) add(); }}
-          placeholder="Anotar algo neste projeto (Ctrl+Enter para salvar)…" rows={2}
+          placeholder={tr("Anotar algo neste projeto (Ctrl+Enter para salvar)…")} rows={2}
           className="flex-1 resize-none bg-transparent text-sm text-ink outline-none placeholder:text-muted"
         />
         <button onClick={add} disabled={adding || !draft.trim()}
           className="flex shrink-0 items-center gap-1 self-end rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-          {adding ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} Adicionar
+          {adding ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}  {tr("Adicionar")}
         </button>
       </div>
       {items === null ? (
-        <p className="py-8 text-center text-sm text-muted">Carregando…</p>
+        <p className="py-8 text-center text-sm text-muted">{tr("Carregando…")}</p>
       ) : items.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border px-4 py-10 text-center">
           <Brain size={22} className="mx-auto mb-2 text-muted" />
-          <p className="text-sm text-muted">{q ? "Nada encontrado." : "Nenhuma memória ainda neste projeto."}</p>
+          <p className="text-sm text-muted">{q ? tr("Nada encontrado.") : tr("Nenhuma memória ainda neste projeto.")}</p>
         </div>
       ) : (
         <div className="space-y-1.5">
           {items.map((m) => (
             <div key={m.id} className="flex items-start gap-2 rounded-xl border border-border bg-surface px-3 py-2.5">
               <p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm text-ink-soft">{m.text}</p>
-              <button onClick={() => del(m.id)} title="Excluir"
+              <button onClick={() => del(m.id)} title={tr("Excluir")}
                 className="shrink-0 rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-red-400">
                 <Trash2 size={13} />
               </button>
@@ -644,7 +648,7 @@ function ProjectMemoryTab({ bankId }: { bankId: string }) {
 /* ------------------------------ Preview vivo ------------------------------- */
 function PreviewStatusBadge({ status, withLabel = false }: { status: CodespacePreview["status"]; withLabel?: boolean }) {
   const map: Record<CodespacePreview["status"], [string, string]> = {
-    up: ["bg-green-400", "No ar"], starting: ["bg-amber-400 animate-pulse", "Subindo"],
+    up: ["bg-green-400", tr("No ar")], starting: ["bg-amber-400 animate-pulse", "Subindo"],
     crashed: ["bg-red-400", "Caiu"], stopped: ["bg-muted", "Parado"],
   };
   const [dot, label] = map[status];
@@ -691,17 +695,17 @@ function ProjectPreviewTab({ project }: { project: CodespaceProject }) {
   const urlOf = (p: CodespacePreview) => previewHref(`/codespace/preview/${p.port}/`) ?? "";
 
   async function stop(p: CodespacePreview) {
-    if (!(await confirm({ title: `Parar o preview na porta ${p.port}?`, confirmLabel: "Parar", danger: true }))) return;
+    if (!(await confirm({ title: tr("Parar o preview na porta {port}?", { port: p.port }), confirmLabel: tr("Parar"), danger: true }))) return;
     try { await api.post(`/codespace/projects/${project.id}/previews/${p.id}/stop`); await load(); } catch { /* ignore */ }
   }
 
-  if (previews === null) return <p className="py-8 text-center text-sm text-muted">Carregando…</p>;
+  if (previews === null) return <p className="py-8 text-center text-sm text-muted">{tr("Carregando…")}</p>;
   if (previews.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-border px-4 py-10 text-center">
         <Globe size={22} className="mx-auto mb-2 text-muted" />
-        <p className="mb-1 text-sm text-ink">Nenhum app no ar.</p>
-        <p className="text-xs text-muted">Peça à IA num chat do projeto para <span className="text-ink-soft">“pôr no ar pra eu testar”</span> — ela sobe o servidor e ele aparece aqui.</p>
+        <p className="mb-1 text-sm text-ink">{tr("Nenhum app no ar.")}</p>
+        <p className="text-xs text-muted">{tr("Peça à IA num chat do projeto para")} <span className="text-ink-soft">{tr("“pôr no ar pra eu testar”")}</span>  {tr("— ela sobe o servidor e ele aparece aqui.")}</p>
       </div>
     );
   }
@@ -728,9 +732,9 @@ function ProjectPreviewTab({ project }: { project: CodespaceProject }) {
               {urlOf(selected)} <ExternalLink size={11} className="shrink-0" />
             </a>
             <div className="ml-auto flex shrink-0 items-center gap-1">
-              <button onClick={() => setReloadKey((k) => k + 1)} title="Recarregar" className="rounded p-1 text-muted hover:bg-hover hover:text-ink"><RefreshCw size={13} /></button>
-              <button onClick={() => setLogsOpen((v) => !v)} title="Logs do servidor" className={`rounded p-1 hover:bg-hover ${logsOpen ? "text-accent-hover" : "text-muted hover:text-ink"}`}><Terminal size={13} /></button>
-              <button onClick={() => stop(selected)} title="Parar" className="rounded p-1 text-muted hover:bg-hover hover:text-red-400"><Square size={13} /></button>
+              <button onClick={() => setReloadKey((k) => k + 1)} title={tr("Recarregar")} className="rounded p-1 text-muted hover:bg-hover hover:text-ink"><RefreshCw size={13} /></button>
+              <button onClick={() => setLogsOpen((v) => !v)} title={tr("Logs do servidor")} className={`rounded p-1 hover:bg-hover ${logsOpen ? "text-accent-hover" : "text-muted hover:text-ink"}`}><Terminal size={13} /></button>
+              <button onClick={() => stop(selected)} title={tr("Parar")} className="rounded p-1 text-muted hover:bg-hover hover:text-red-400"><Square size={13} /></button>
             </div>
           </div>
           {selected.status === "up" ? (
@@ -739,12 +743,12 @@ function ProjectPreviewTab({ project }: { project: CodespaceProject }) {
             <div className="grid h-[62vh] place-items-center bg-bg px-8 text-center text-sm text-muted">
               {selected.status === "starting" ? (
                 <span className="flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Subindo o servidor…</span>
-              ) : selected.status === "crashed" ? "O servidor caiu — abra os logs para ver o erro." : "Parado."}
+              ) : selected.status === "crashed" ? tr("O servidor caiu — abra os logs para ver o erro.") : tr("Parado.")}
             </div>
           )}
           {logsOpen && (
             <pre className="max-h-48 overflow-auto whitespace-pre-wrap border-t border-border bg-bg px-3 py-2 font-mono text-[11px] leading-5 text-ink-soft">
-              {logs || "(sem saída ainda)"}
+              {logs || tr("(sem saída ainda)")}
             </pre>
           )}
         </div>
@@ -783,7 +787,7 @@ function ProjectDetail({
   }
 
   async function del() {
-    if (!(await confirm({ title: `Excluir "${project.name}"?`, body: "A working copy e o índice são apagados.", confirmLabel: "Excluir", danger: true }))) return;
+    if (!(await confirm({ title: `Excluir "${project.name}"?`, body: tr("A working copy e o índice são apagados."), confirmLabel: tr("Excluir"), danger: true }))) return;
     setBusy(true);
     try { await api.del(`/codespace/projects/${project.id}`); onDeleted(); } finally { setBusy(false); }
   }
@@ -801,7 +805,7 @@ function ProjectDetail({
         project_id: project.id,
       });
       onOpenChat(chat.id, prefill);
-    }).catch(() => toast("Falha ao abrir o chat para referenciar o arquivo"));
+    }).catch(() => toast(tr("Falha ao abrir o chat para referenciar o arquivo")));
   }
 
   function openInExplorer(path: string) {
@@ -812,7 +816,7 @@ function ProjectDetail({
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
       <button onClick={onBack} className="mb-3 flex items-center gap-1 text-xs text-muted hover:text-ink">
-        <ArrowLeft size={13} /> Todos os projetos
+        <ArrowLeft size={13} />  {tr("Todos os projetos")}
       </button>
 
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
@@ -832,9 +836,10 @@ function ProjectDetail({
             )}
             {project.index_status === "ready" && !project.stats?.files && (
               <p className="mt-1 text-xs text-amber-400">
-                Nenhum arquivo com símbolos para o grafo
+                
+                {tr("Nenhum arquivo com símbolos para o grafo")}
                 {project.stats?.unsupported_ext?.length ? ` (${project.stats.unsupported_ext.join(", ")})` : ""}
-                {" — "}os arquivos continuam legíveis e pesquisáveis pela IA.
+                {" — "}{tr("os arquivos continuam legíveis e pesquisáveis pela IA.")}
               </p>
             )}
             {project.index_status === "error" && <p className="mt-1 text-xs text-red-400">{project.error_message}</p>}
@@ -842,7 +847,7 @@ function ProjectDetail({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {project.source === "git-ssh" && (
-            <button onClick={() => setShowKey(true)} title="Ver deploy key pública" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
+            <button onClick={() => setShowKey(true)} title={tr("Ver deploy key pública")} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
               <KeyRound size={15} />
             </button>
           )}
@@ -850,7 +855,7 @@ function ProjectDetail({
             title="Reindexar (seguro)" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink disabled:opacity-60">
             <RefreshCw size={15} className={busy ? "animate-spin" : ""} />
           </button>
-          <button onClick={del} disabled={busy} title="Excluir" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-red-400 disabled:opacity-60">
+          <button onClick={del} disabled={busy} title={tr("Excluir")} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-red-400 disabled:opacity-60">
             <Trash2 size={15} />
           </button>
         </div>
@@ -860,7 +865,7 @@ function ProjectDetail({
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-4" onClick={() => setShowKey(false)}>
           <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-2xl border border-border bg-surface p-4 shadow-2xl">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm font-semibold text-ink">Deploy key pública</span>
+              <span className="text-sm font-semibold text-ink">{tr("Deploy key pública")}</span>
               <button onClick={() => setShowKey(false)} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={16} /></button>
             </div>
             <div className="flex items-start gap-2 rounded-lg border border-border bg-surface2 px-3 py-2">
@@ -873,14 +878,14 @@ function ProjectDetail({
 
       {project.index_status !== "ready" ? (
         <p className="rounded-2xl border border-dashed border-border px-4 py-10 text-center text-sm text-muted">
-          {project.index_status === "error" ? "A indexação falhou — corrija e reindexe." : "Aguardando a indexação terminar…"}
+          {project.index_status === "error" ? tr("A indexação falhou — corrija e reindexe.") : tr("Aguardando a indexação terminar…")}
         </p>
       ) : (
         <>
           <div className="mb-3 flex items-center gap-1 overflow-x-auto border-b border-border">
             {([
-              ["chats", "Chats"], ["arquivos", "Arquivos"], ["grafo", "Grafo"],
-              ["preview", "Preview"], ["tarefas", "Tarefas"], ["memoria", "Memória"], ["config", "Config"],
+              ["chats", tr("Chats")], ["arquivos", tr("Arquivos")], ["grafo", tr("Grafo")],
+              ["preview", tr("Preview")], ["tarefas", tr("Tarefas")], ["memoria", tr("Memória")], ["config", tr("Config")],
             ] as [Tab, string][]).map(([key, label]) => (
               <button key={key} onClick={() => setTab(key)}
                 className={`border-b-2 px-3 py-2 text-sm font-medium transition-colors ${tab === key ? "border-accent text-ink" : "border-transparent text-muted hover:text-ink"}`}>
@@ -898,11 +903,12 @@ function ProjectDetail({
             project.memory_bank_id ? <ProjectMemoryTab bankId={project.memory_bank_id} /> : (
               <div className="rounded-2xl border border-dashed border-border px-4 py-10 text-center">
                 <Brain size={22} className="mx-auto mb-2 text-muted" />
-                <p className="mb-3 text-sm text-muted">Este projeto ainda não tem um banco de memória.</p>
+                <p className="mb-3 text-sm text-muted">{tr("Este projeto ainda não tem um banco de memória.")}</p>
                 <button
                   onClick={async () => onUpdated(await api.post<CodespaceProject>(`/codespace/projects/${project.id}/memory-bank`))}
                   className="rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover">
-                  Criar banco de memória
+                  
+                  {tr("Criar banco de memória")}
                 </button>
               </div>
             )
@@ -915,10 +921,10 @@ function ProjectDetail({
 
 /* --------------------------------- Tarefas -------------------------------- */
 const TASK_STATUS: Record<string, { label: string; cls: string }> = {
-  running: { label: "Trabalhando", cls: "bg-accent/15 text-accent-hover" },
+  running: { label: tr("Trabalhando"), cls: "bg-accent/15 text-accent-hover" },
   awaiting_review: { label: "A revisar", cls: "bg-amber-400/15 text-amber-400" },
-  merged: { label: "Mesclada", cls: "bg-green-400/15 text-green-400" },
-  discarded: { label: "Descartada", cls: "bg-surface2 text-muted" },
+  merged: { label: tr("Mesclada"), cls: "bg-green-400/15 text-green-400" },
+  discarded: { label: tr("Descartada"), cls: "bg-surface2 text-muted" },
   error: { label: "Erro/conflito", cls: "bg-red-400/15 text-red-400" },
 };
 
@@ -947,26 +953,26 @@ function ProjectTasksTab({ project }: { project: CodespaceProject }) {
     setOpenId(t.id); setDiff(""); setDiffLoading(true);
     try {
       const r = await api.get<{ diff: string }>(`/codespace/projects/${project.id}/tasks/${t.id}/diff`);
-      setDiff(r.diff || "(sem mudanças)");
-    } catch { setDiff("(não foi possível carregar o diff)"); }
+      setDiff(r.diff || tr("(sem mudanças)"));
+    } catch { setDiff(tr("(não foi possível carregar o diff)")); }
     finally { setDiffLoading(false); }
   }
 
   async function merge(t: CodespaceTask, openPr: boolean) {
-    const label = openPr ? "abrir um Pull Request no GitHub" : "mesclar no branch do projeto";
-    if (!(await confirm({ title: `Aprovar a tarefa?`, body: `Isso vai ${label}.`, confirmLabel: "Aprovar" }))) return;
+    const label = openPr ? tr("abrir um Pull Request no GitHub") : tr("mesclar no branch do projeto");
+    if (!(await confirm({ title: `Aprovar a tarefa?`, body: tr("Isso vai {label}.", { label: label }), confirmLabel: tr("Aprovar") }))) return;
     setBusy(t.id);
     try {
       const r = await api.post<{ pr?: { html_url?: string } }>(`/codespace/projects/${project.id}/tasks/${t.id}/merge`,
         openPr ? { open_pr: true } : { push: hasGithub });
       if (openPr && r.pr?.html_url) window.open(r.pr.html_url, "_blank");
       await load(); setOpenId(null);
-    } catch (e) { toast(e instanceof ApiError ? e.message : "Falha ao mesclar"); }
+    } catch (e) { toast(e instanceof ApiError ? e.message : tr("Falha ao mesclar")); }
     finally { setBusy(null); }
   }
 
   async function discard(t: CodespaceTask) {
-    if (!(await confirm({ title: "Descartar a tarefa?", body: "As mudanças não mescladas serão perdidas.", confirmLabel: "Descartar", danger: true }))) return;
+    if (!(await confirm({ title: "Descartar a tarefa?", body: tr("As mudanças não mescladas serão perdidas."), confirmLabel: tr("Descartar"), danger: true }))) return;
     setBusy(t.id);
     try { await api.post(`/codespace/projects/${project.id}/tasks/${t.id}/discard`); await load(); setOpenId(null); }
     finally { setBusy(null); }
@@ -977,10 +983,10 @@ function ProjectTasksTab({ project }: { project: CodespaceProject }) {
     return (
       <div className="rounded-2xl border border-dashed border-border px-4 py-10 text-center">
         <GitBranch size={22} className="mx-auto mb-2 text-muted" />
-        <p className="text-sm text-muted">Nenhuma tarefa isolada ainda.</p>
+        <p className="text-sm text-muted">{tr("Nenhuma tarefa isolada ainda.")}</p>
         <p className="mx-auto mt-1 max-w-sm text-xs text-muted">
-          Peça no chat para trabalhar numa tarefa isolada, ou use subagentes com “worktree isolado” —
-          cada agente trabalha numa branch própria e o resultado aparece aqui para você revisar e mesclar.
+          
+          {tr("Peça no chat para trabalhar numa tarefa isolada, ou use subagentes com “worktree isolado” — cada agente trabalha numa branch própria e o resultado aparece aqui para você revisar e mesclar.")}
         </p>
       </div>
     );
@@ -997,7 +1003,7 @@ function ProjectTasksTab({ project }: { project: CodespaceProject }) {
             <div className="flex items-center gap-2 px-3 py-2.5">
               <GitBranch size={15} className="shrink-0 text-muted" />
               <button onClick={() => openDiff(t)} className="min-w-0 flex-1 text-left">
-                <div className="truncate text-sm text-ink">{t.title || t.branch || "Tarefa"}</div>
+                <div className="truncate text-sm text-ink">{t.title || t.branch || tr("Tarefa")}</div>
                 <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted">
                   <span className={`rounded-full px-1.5 py-0.5 ${st.cls}`}>{st.label}</span>
                   {t.agent && <span>{t.agent}</span>}
@@ -1012,13 +1018,13 @@ function ProjectTasksTab({ project }: { project: CodespaceProject }) {
                 <div className="flex shrink-0 items-center gap-1">
                   <button onClick={() => merge(t, false)} disabled={busy === t.id} title="Aprovar e mesclar"
                     className="inline-flex items-center gap-1 rounded-lg bg-accent px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50">
-                    {busy === t.id ? <Loader2 size={12} className="animate-spin" /> : <GitMerge size={12} />} Mesclar
+                    {busy === t.id ? <Loader2 size={12} className="animate-spin" /> : <GitMerge size={12} />}  {tr("Mesclar")}
                   </button>
                   {hasGithub && (
-                    <button onClick={() => merge(t, true)} disabled={busy === t.id} title="Abrir Pull Request no GitHub"
+                    <button onClick={() => merge(t, true)} disabled={busy === t.id} title={tr("Abrir Pull Request no GitHub")}
                       className="rounded-lg border border-border px-2 py-1 text-xs text-muted transition-colors hover:text-ink">PR</button>
                   )}
-                  <button onClick={() => discard(t)} disabled={busy === t.id} title="Descartar"
+                  <button onClick={() => discard(t)} disabled={busy === t.id} title={tr("Descartar")}
                     className="rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-red-400"><Trash2 size={14} /></button>
                 </div>
               )}
@@ -1062,30 +1068,31 @@ function ProjectConfigTab({ project, onUpdated }: { project: CodespaceProject; o
   return (
     <div className="space-y-5">
       <div>
-        <div className="mb-3 flex items-center gap-2 text-sm font-medium text-ink"><Terminal size={15} /> Execução (sandbox)</div>
+        <div className="mb-3 flex items-center gap-2 text-sm font-medium text-ink"><Terminal size={15} />  {tr("Execução (sandbox)")}</div>
         <div className="flex items-center justify-between gap-3">
           <span className="flex items-center gap-1.5 text-sm text-ink">
-            Permitir execução neste projeto
-            <InfoDot text="A IA roda comandos do projeto (testes, build, lint, instalar deps) num sandbox com o projeto como diretório de trabalho, para verificar as mudanças. Desligado, a ferramenta de execução recusa." />
+            
+            {tr("Permitir execução neste projeto")}
+            <InfoDot text={tr("A IA roda comandos do projeto (testes, build, lint, instalar deps) num sandbox com o projeto como diretório de trabalho, para verificar as mudanças. Desligado, a ferramenta de execução recusa.")} />
           </span>
           <Toggle on={execOn} onChange={setExecOn} />
         </div>
       </div>
       <div>
-        <label className="mb-1 block text-xs font-medium text-muted">Comando de preparo (setup)</label>
-        <input value={setupCmd} onChange={(e) => setSetupCmd(e.target.value)} placeholder="ex.: npm install"
+        <label className="mb-1 block text-xs font-medium text-muted">{tr("Comando de preparo (setup)")}</label>
+        <input value={setupCmd} onChange={(e) => setSetupCmd(e.target.value)} placeholder={tr("ex.: npm install")}
           className="w-full rounded-lg border border-border bg-bg px-3 py-2 font-mono text-sm text-ink outline-none focus:border-accent" />
       </div>
       <div>
-        <label className="mb-1 block text-xs font-medium text-muted">Comando de teste</label>
-        <input value={testCmd} onChange={(e) => setTestCmd(e.target.value)} placeholder="ex.: npm test"
+        <label className="mb-1 block text-xs font-medium text-muted">{tr("Comando de teste")}</label>
+        <input value={testCmd} onChange={(e) => setTestCmd(e.target.value)} placeholder={tr("ex.: npm test")}
           className="w-full rounded-lg border border-border bg-bg px-3 py-2 font-mono text-sm text-ink outline-none focus:border-accent" />
-        <p className="mt-1 text-[11px] text-muted">A IA usa este comando ao “rodar os testes” sem especificar outro.</p>
+        <p className="mt-1 text-[11px] text-muted">{tr("A IA usa este comando ao “rodar os testes” sem especificar outro.")}</p>
       </div>
       <button onClick={save} disabled={!dirty || saving}
         className="inline-flex items-center gap-2 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50">
         {saving ? <Loader2 size={14} className="animate-spin" /> : saved ? <Check size={14} /> : null}
-        {saved ? "Salvo" : "Salvar"}
+        {saved ? tr("Salvo") : tr("Salvar")}
       </button>
     </div>
   );
@@ -1137,7 +1144,7 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
         : parsed && typeof parsed === "object" && Array.isArray((parsed as { items?: unknown }).items)
           ? (parsed as { items: unknown[] }).items
           : null;
-      if (!items) throw new Error("Escolha um arquivo de exportação de projetos válido.");
+      if (!items) throw new Error(tr("Escolha um arquivo de exportação de projetos válido."));
       for (const item of items) {
         if (!item || typeof item !== "object") { failed += 1; continue; }
         const project = item as Record<string, unknown>;
@@ -1175,9 +1182,9 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
         } catch { failed += 1; }
       }
       await load();
-      setNotice(failed ? `${imported} projeto(s) importado(s); ${failed} não puderam ser importados.` : `${imported} projeto(s) importado(s).`);
+      setNotice(failed ? tr("{imported} projeto(s) importado(s); {failed} não puderam ser importados.", { imported: imported, failed: failed }) : `${imported} projeto(s) importado(s).`);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Não foi possível ler o arquivo.");
+      setNotice(error instanceof Error ? error.message : tr("Não foi possível ler o arquivo."));
     } finally {
       if (projectFileRef.current) projectFileRef.current.value = "";
     }
@@ -1206,7 +1213,7 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
   const openProject = projects.find((p) => p.id === openId) ?? null;
 
   async function del(p: CodespaceProject) {
-    if (!(await confirm({ title: `Excluir "${p.name}"?`, body: "A working copy e o índice são apagados.", confirmLabel: "Excluir", danger: true }))) return;
+    if (!(await confirm({ title: `Excluir "${p.name}"?`, body: tr("A working copy e o índice são apagados."), confirmLabel: tr("Excluir"), danger: true }))) return;
     setBusyId(p.id);
     try {
       await api.del(`/codespace/projects/${p.id}`);
@@ -1238,32 +1245,33 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
       <div className="mb-6 flex flex-wrap items-center justify-between gap-x-3 gap-y-2.5">
         <div className="flex min-w-0 items-center gap-3">
           {onBack && (
-            <button onClick={onBack} title="Espaço de Trabalho" aria-label="Voltar ao Espaço de Trabalho" className="flex h-8 w-8 flex-none items-center justify-center rounded-xl border border-transparent bg-surface text-ink-soft transition-colors hover:border-border hover:bg-surface2 hover:text-ink">
+            <button onClick={onBack} title={tr("Espaço de Trabalho")} aria-label={tr("Voltar ao Espaço de Trabalho")} className="flex h-8 w-8 flex-none items-center justify-center rounded-xl border border-transparent bg-surface text-ink-soft transition-colors hover:border-border hover:bg-surface2 hover:text-ink">
               <ChevronLeft size={18} />
             </button>
           )}
           <h1 className="truncate text-2xl font-bold text-ink">
-            Codespace<span className="ml-2 font-semibold text-muted">{projects.length}</span>
+            
+            {tr("Codespace")}<span className="ml-2 font-semibold text-muted">{projects.length}</span>
           </h1>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <div className="relative">
             <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filtrar projetos…"
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr("Filtrar projetos…")}
               className="w-56 rounded-full border border-border bg-surface py-1.5 pl-9 pr-3 text-sm text-ink outline-none transition-[border-color] focus:border-accent/50 placeholder:text-muted" />
           </div>
           <input ref={projectFileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => void importProjects(e.target.files)} />
           <button onClick={() => projectFileRef.current?.click()}
             className="whitespace-nowrap rounded-full border border-border bg-surface px-4 py-1.5 text-ink-soft transition-colors hover:bg-surface2">
-            <Upload size={14} className="mr-1.5 inline" />Importar
+            <Upload size={14} className="mr-1.5 inline" />{tr("Importar")}
           </button>
           <button onClick={exportProjects} disabled={projects.length === 0}
             className="whitespace-nowrap rounded-full border border-border bg-surface px-4 py-1.5 text-ink-soft transition-colors hover:bg-surface2 disabled:opacity-50">
-            <Download size={14} className="mr-1.5 inline" />Exportar
+            <Download size={14} className="mr-1.5 inline" />{tr("Exportar")}
           </button>
           <button onClick={() => setShowNew(true)}
             className="flex items-center gap-1.5 whitespace-nowrap rounded-full bg-accent px-4 py-1.5 font-medium text-white transition-colors hover:bg-accent-hover">
-            <Plus size={15} /> Novo projeto
+            <Plus size={15} />  {tr("Novo projeto")}
           </button>
         </div>
       </div>
@@ -1271,14 +1279,14 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
       {notice && <p role="status" className="mb-4 rounded-xl border border-border bg-surface px-3 py-2 text-sm text-ink-soft">{notice}</p>}
 
       {loading ? (
-        <p className="py-10 text-center text-sm text-muted">Carregando…</p>
+        <p className="py-10 text-center text-sm text-muted">{tr("Carregando…")}</p>
       ) : projects.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border px-4 py-14 text-center">
           <Globe size={24} className="mx-auto mb-3 text-muted" />
-          <p className="text-sm font-medium text-ink">Nenhum projeto ainda</p>
+          <p className="text-sm font-medium text-ink">{tr("Nenhum projeto ainda")}</p>
         </div>
       ) : filtered.length === 0 ? (
-        <p className="py-10 text-center text-sm text-muted">Nenhum projeto encontrado.</p>
+        <p className="py-10 text-center text-sm text-muted">{tr("Nenhum projeto encontrado.")}</p>
       ) : (
         <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
           {filtered.map((p) => {
@@ -1295,7 +1303,7 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
                     <StatusChip status={p.index_status} />
                   </div>
                   <p className="mt-0.5 truncate font-mono text-[11px] text-muted">
-                    {p.source === "local" ? "local · sem remoto" : `${p.repo_url} · ${p.branch}`}
+                    {p.source === "local" ? tr("local · sem remoto") : `${p.repo_url} · ${p.branch}`}
                   </p>
                   {p.index_status === "ready" && (fmtStats(p) || p.stats?.refined) && (
                     <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[11px] tabular-nums text-muted">
@@ -1310,7 +1318,7 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
                 <span
                   role="button"
                   onClick={(e) => { e.stopPropagation(); del(p); }}
-                  title="Excluir"
+                  title={tr("Excluir")}
                   className="shrink-0 rounded-lg p-1.5 text-muted touch-reveal opacity-0 transition-opacity hover:bg-hover hover:text-red-400 group-hover:opacity-100"
                 >
                   {busyId === p.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}

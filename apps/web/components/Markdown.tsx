@@ -10,6 +10,7 @@ import { Check, Copy, File, ImageOff } from "lucide-react";
 import { API_URL, previewHref } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import SoundChip, { SFX_PROTOCOL, soundPromptFromHref, withSoundLinks } from "./SoundChip";
+import { dateLocale, tr } from "@/lib/i18n";
 
 /*
  * Markdown das mensagens, no formato dos harnesses de referência (opencode
@@ -71,12 +72,12 @@ export function parseFenceInfo(info: string | undefined): { lang: string; title:
 
 const LANG_LABEL: Record<string, string> = {
   js: "JavaScript", javascript: "JavaScript", jsx: "JSX", ts: "TypeScript", typescript: "TypeScript",
-  tsx: "TSX", py: "Python", python: "Python", sh: "Shell", bash: "Bash", zsh: "Shell", shell: "Shell",
+  tsx: "TSX", py: tr("Python"), python: tr("Python"), sh: tr("Shell"), bash: tr("Bash"), zsh: tr("Shell"), shell: tr("Shell"),
   ps1: "PowerShell", powershell: "PowerShell", json: "JSON", yaml: "YAML", yml: "YAML", html: "HTML",
-  css: "CSS", scss: "SCSS", sql: "SQL", rust: "Rust", rs: "Rust", go: "Go", java: "Java", kotlin: "Kotlin",
-  c: "C", cpp: "C++", "c++": "C++", cs: "C#", csharp: "C#", php: "PHP", ruby: "Ruby", rb: "Ruby",
-  swift: "Swift", md: "Markdown", markdown: "Markdown", xml: "XML", dockerfile: "Dockerfile",
-  toml: "TOML", ini: "INI", diff: "Diff", lua: "Lua", r: "R", text: "Texto", txt: "Texto", plaintext: "Texto",
+  css: "CSS", scss: "SCSS", sql: "SQL", rust: tr("Rust"), rs: tr("Rust"), go: tr("Go"), java: tr("Java"), kotlin: tr("Kotlin"),
+  c: "C", cpp: "C++", "c++": "C++", cs: "C#", csharp: "C#", php: "PHP", ruby: tr("Ruby"), rb: tr("Ruby"),
+  swift: tr("Swift"), md: tr("Markdown"), markdown: tr("Markdown"), xml: "XML", dockerfile: tr("Dockerfile"),
+  toml: "TOML", ini: "INI", diff: tr("Diff"), lua: tr("Lua"), r: "R", text: tr("Texto"), txt: tr("Texto"), plaintext: tr("Texto"),
 };
 
 const AUTO_MAX = 6000;        // autodetecção só em blocos pequenos (percorre várias gramáticas)
@@ -131,7 +132,7 @@ export function CodeBlock({ code, info, streaming = false }: { code: string; inf
   // ao vivo: realça só com a linguagem declarada (autodetecção muda de ideia a cada pedaço)
   const hl = useMemo(() => highlight(body, lang, !streaming), [body, lang, streaming]);
   const langShown = hl?.lang || lang;
-  const label = title || LANG_LABEL[langShown] || langShown || "código";
+  const label = title || LANG_LABEL[langShown] || langShown || tr("código");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
@@ -161,7 +162,7 @@ export function CodeBlock({ code, info, streaming = false }: { code: string; inf
           className="flex shrink-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[11px] text-muted transition-colors hover:bg-hover hover:text-ink"
         >
           {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
-          {copied ? "Copiado" : "Copiar"}
+          {copied ? tr("Copiado") : tr("Copiar")}
         </button>
       </div>
       <pre className="rounded-b-xl">
@@ -195,10 +196,10 @@ function MdImage({ src, alt, streaming = false }: { src: string; alt: string; st
     return (
       <span
         className="my-2 inline-flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs text-muted"
-        title="A mídia será carregada quando a resposta terminar"
+        title={tr("A mídia será carregada quando a resposta terminar")}
       >
         <File size={14} className="shrink-0" />
-        <span className="max-w-[240px] truncate">{alt || "Preparando mídia…"}</span>
+        <span className="max-w-[240px] truncate">{alt || tr("Preparando mídia…")}</span>
       </span>
     );
   }
@@ -390,7 +391,8 @@ function Markdown({
           onClick={() => setExpanded(true)}
           className="mt-2 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-medium text-ink-soft transition-colors hover:bg-hover hover:text-ink"
         >
-          Mostrar mensagem completa · {content.length.toLocaleString("pt-BR")} caracteres
+          
+          {tr("Mostrar mensagem completa ·")} {content.length.toLocaleString(dateLocale())} caracteres
         </button>
       )}
     </div>

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { ArrowDownRight, ArrowUpRight, ExternalLink, TrendingUp } from "lucide-react";
 import { api } from "@/lib/api";
 import type { StockQuote } from "@/lib/types";
+import { dateLocale, tr } from "@/lib/i18n";
 
 // verde/vermelho semânticos (sobem c/ seta+sinal, não cor sozinha) — legíveis no escuro
 const UP = "#16c784";
@@ -11,27 +12,27 @@ const DOWN = "#f0616d";
 
 const RANGES: { k: string; l: string }[] = [
   { k: "1d", l: "1D" }, { k: "5d", l: "5D" }, { k: "1mo", l: "1M" }, { k: "6mo", l: "6M" },
-  { k: "ytd", l: "YTD" }, { k: "1y", l: "1A" }, { k: "5y", l: "5A" }, { k: "max", l: "Máx" },
+  { k: "ytd", l: "YTD" }, { k: "1y", l: "1A" }, { k: "5y", l: "5A" }, { k: "max", l: tr("Máx") },
 ];
 
 const STAT_LABELS: Record<string, string> = {
-  open: "Abertura", high: "Alta", low: "Baixa",
-  high_52w: "Máx. 52 sem", low_52w: "Mín. 52 sem",
-  market_cap: "Cap. merc.", pe: "Índice P/L", dividend_yield: "Dividendo", volume: "Volume",
+  open: tr("Abertura"), high: tr("Alta"), low: tr("Baixa"),
+  high_52w: tr("Máx. 52 sem"), low_52w: tr("Mín. 52 sem"),
+  market_cap: "Cap. merc.", pe: tr("Índice P/L"), dividend_yield: tr("Dividendo"), volume: tr("Volume"),
 };
 const STAT_ORDER = ["open", "high", "low", "market_cap", "pe", "dividend_yield", "high_52w", "low_52w", "volume"];
 
 function fmtPrice(v: number): string {
-  return v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: Math.abs(v) < 1 ? 4 : 2 });
+  return v.toLocaleString(dateLocale(), { minimumFractionDigits: 2, maximumFractionDigits: Math.abs(v) < 1 ? 4 : 2 });
 }
 function fmtCompact(n: number): string {
   const a = Math.abs(n);
-  const f = (x: number, s: string) => x.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + " " + s;
+  const f = (x: number, s: string) => x.toLocaleString(dateLocale(), { maximumFractionDigits: 2 }) + " " + s;
   if (a >= 1e12) return f(n / 1e12, "tri");
   if (a >= 1e9) return f(n / 1e9, "bi");
   if (a >= 1e6) return f(n / 1e6, "mi");
   if (a >= 1e3) return f(n / 1e3, "mil");
-  return n.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+  return n.toLocaleString(dateLocale(), { maximumFractionDigits: 2 });
 }
 function fmtStat(key: string, v: number): string {
   if (key === "market_cap" || key === "volume") return fmtCompact(v);
@@ -42,8 +43,8 @@ function fmtStat(key: string, v: number): string {
 function fmtTime(t: number, range: string): string {
   const d = new Date(t * 1000);
   if (range === "1d" || range === "5d")
-    return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: range === "5y" || range === "max" ? "2-digit" : undefined });
+    return d.toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleDateString(dateLocale(), { day: "2-digit", month: "2-digit", year: range === "5y" || range === "max" ? "2-digit" : undefined });
 }
 
 /** Card de cotação estilo Google (finance.quote.get / rota /finance/quote).
@@ -128,7 +129,7 @@ export default function StockCard({ quote }: { quote: StockQuote }) {
             </span>
           </>
         ) : (
-          <span className="text-sm text-muted">Sem preço estruturado — veja as fontes abaixo.</span>
+          <span className="text-sm text-muted">{tr("Sem preço estruturado — veja as fontes abaixo.")}</span>
         )}
       </div>
 
@@ -202,7 +203,7 @@ export default function StockCard({ quote }: { quote: StockQuote }) {
               </>
             ) : (
               <div className="flex h-full items-center justify-center text-xs text-muted">
-                {loading ? "Carregando…" : "Sem série para este período."}
+                {loading ? tr("Carregando…") : tr("Sem série para este período.")}
               </div>
             )}
           </div>

@@ -8,6 +8,7 @@ import type { Model, ModelConfig } from "@/lib/types";
 import ModelField from "./ModelField";
 import Markdown from "./Markdown";
 import { toast } from "@/components/Toaster";
+import { tr } from "@/lib/i18n";
 
 function splitModel(v: string): { model: string; model_config_id: string | null } {
   return v.startsWith("custom:") ? { model: "", model_config_id: v.slice(7) } : { model: v, model_config_id: null };
@@ -56,8 +57,8 @@ export default function CompareView() {
 
   async function run() {
     setErr(null);
-    if (chosen.length < 2) { setErr("Escolha ao menos 2 modelos."); return; }
-    if (!prompt.trim()) { setErr("Escreva um prompt."); return; }
+    if (chosen.length < 2) { setErr(tr("Escolha ao menos 2 modelos.")); return; }
+    if (!prompt.trim()) { setErr(tr("Escreva um prompt.")); return; }
     setRunning(true);
     setCols([]);
     const ac = new AbortController();
@@ -75,11 +76,11 @@ export default function CompareView() {
         } else if (e.type === "error" && typeof e.col === "number") {
           setCols((cs) => cs.map((c, i) => (i === e.col ? { ...c, done: true, error: e.message } : c)));
         } else if (e.type === "error") {
-          setErr(e.message || "Falha na comparação");
+          setErr(e.message || tr("Falha na comparação"));
         }
       }, ac.signal);
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha na comparação");
+      setErr(e instanceof ApiError ? e.message : tr("Falha na comparação"));
     } finally {
       setRunning(false);
     }
@@ -94,12 +95,12 @@ export default function CompareView() {
   async function saveAsBenchmark() {
     try {
       const { id } = await api.post<{ id: string }>("/playground/benchmarks", {
-        name: `Comparação: ${prompt.slice(0, 40)}`,
+        name: tr("Comparação: {0}", { "0": prompt.slice(0, 40) }),
         cases: [{ prompt, ...(system ? { system } : {}) }],
       });
-      toast("Salvo em Benchmarks.", "success");
+      toast(tr("Salvo em Benchmarks."), "success");
     } catch {
-      setErr("Falha ao salvar como benchmark");
+      setErr(tr("Falha ao salvar como benchmark"));
     }
   }
 
@@ -119,7 +120,7 @@ export default function CompareView() {
           ))}
           {slots.length < 4 && (
             <button onClick={() => setSlots((sl) => [...sl, ""])} className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs text-muted transition-colors hover:text-ink">
-              <Plus size={14} /> Adicionar modelo
+              <Plus size={14} />  {tr("Adicionar modelo")}
             </button>
           )}
         </div>
@@ -128,7 +129,7 @@ export default function CompareView() {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           rows={3}
-          placeholder="Prompt para enviar a todos os modelos…"
+          placeholder={tr("Prompt para enviar a todos os modelos…")}
           className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
         />
         {showSystem ? (
@@ -136,22 +137,22 @@ export default function CompareView() {
             value={system}
             onChange={(e) => setSystem(e.target.value)}
             rows={2}
-            placeholder="System prompt (opcional, aplicado a todos)…"
+            placeholder={tr("System prompt (opcional, aplicado a todos)…")}
             className="mt-2 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
           />
         ) : (
-          <button onClick={() => setShowSystem(true)} className="mt-2 text-xs text-muted hover:text-ink">+ System prompt</button>
+          <button onClick={() => setShowSystem(true)} className="mt-2 text-xs text-muted hover:text-ink">{tr("+ System prompt")}</button>
         )}
 
         {err && <p className="mt-2 text-xs text-red-400">{err}</p>}
 
         <div className="mt-3 flex items-center gap-2">
           <button onClick={run} disabled={running} className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50">
-            {running ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />} Rodar
+            {running ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />}  {tr("Rodar")}
           </button>
           {cols.length > 0 && !running && prompt && (
             <button onClick={saveAsBenchmark} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover">
-              <Save size={14} /> Salvar como benchmark
+              <Save size={14} />  {tr("Salvar como benchmark")}
             </button>
           )}
         </div>
@@ -164,8 +165,8 @@ export default function CompareView() {
               <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
                 <p className="truncate text-sm font-medium text-ink" title={c.model}>{c.label}</p>
                 <div className="flex shrink-0 items-center gap-1">
-                  {fastest === c && <span title="Mais rápido" className="flex items-center gap-0.5 rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-hover"><Zap size={10} /> rápido</span>}
-                  {cheap === c && <span title="Mais barato" className="flex items-center gap-0.5 rounded-full bg-green-500/15 px-1.5 py-0.5 text-[10px] font-medium text-green-500"><Trophy size={10} /> barato</span>}
+                  {fastest === c && <span title={tr("Mais rápido")} className="flex items-center gap-0.5 rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-hover"><Zap size={10} />  {tr("rápido")}</span>}
+                  {cheap === c && <span title={tr("Mais barato")} className="flex items-center gap-0.5 rounded-full bg-green-500/15 px-1.5 py-0.5 text-[10px] font-medium text-green-500"><Trophy size={10} /> barato</span>}
                 </div>
               </div>
               <div className="min-h-[120px] flex-1 overflow-y-auto px-3 py-2 text-sm">

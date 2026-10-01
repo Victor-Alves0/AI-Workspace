@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { ChartSpec } from "@/lib/types";
+import { dateLocale, tr } from "@/lib/i18n";
 
 // paleta categórica validada (coluna dark) — atribuída em ordem fixa, nunca ciclada
 const CAT = ["#3987e5", "#199e70", "#c98500", "#008300", "#9085e9", "#e66767", "#d55181", "#d95926"];
@@ -11,10 +12,10 @@ const plotW = W - PL - PR, plotH = H - PT - PB;
 
 function fmt(n: number): string {
   const a = Math.abs(n);
-  if (a >= 1e9) return (n / 1e9).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "B";
-  if (a >= 1e6) return (n / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "M";
-  if (a >= 1e3) return (n / 1e3).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "k";
-  return n.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+  if (a >= 1e9) return (n / 1e9).toLocaleString(dateLocale(), { maximumFractionDigits: 1 }) + "B";
+  if (a >= 1e6) return (n / 1e6).toLocaleString(dateLocale(), { maximumFractionDigits: 1 }) + "M";
+  if (a >= 1e3) return (n / 1e3).toLocaleString(dateLocale(), { maximumFractionDigits: 1 }) + "k";
+  return n.toLocaleString(dateLocale(), { maximumFractionDigits: 2 });
 }
 
 /** Gráfico genérico (tool chart.render.plot). SVG inline, leve, tema escuro. */
@@ -55,7 +56,7 @@ export default function ChartView({ spec }: { spec: ChartSpec }) {
         <div className="mb-1 flex flex-wrap gap-x-3 gap-y-1 px-1">
           {series.map((s, i) => (
             <span key={i} className="flex items-center gap-1.5 text-[11px] text-muted">
-              <span className="h-2 w-2 rounded-full" style={{ background: CAT[i % CAT.length] }} /> {s.name || `Série ${i + 1}`}
+              <span className="h-2 w-2 rounded-full" style={{ background: CAT[i % CAT.length] }} /> {s.name || tr("Série {0}", { "0": i + 1 })}
             </span>
           ))}
         </div>

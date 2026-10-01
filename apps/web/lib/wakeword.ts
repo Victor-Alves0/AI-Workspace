@@ -1,3 +1,4 @@
+import { tr } from "@/lib/i18n";
 // Wake word ("hey nome") ON-DEVICE, com dois engines selecionáveis. Tudo por
 // DYNAMIC IMPORT: as libs WASM (pesadas) só baixam quando a escuta é ligada, então
 // não incham o bundle base nem afetam quem não usa.
@@ -121,7 +122,7 @@ export async function transcribeWhisper(blob: Blob, model?: string): Promise<str
 // Porcupine
 // --------------------------------------------------------------------------- //
 async function startPorcupine(opts: WakeOptions, onWake: () => void): Promise<WakeHandle> {
-  if (!opts.accessKey) throw new Error("Porcupine precisa de uma AccessKey da Picovoice (Configurações do modelo → Voz).");
+  if (!opts.accessKey) throw new Error(tr("Porcupine precisa de uma AccessKey da Picovoice (Configurações do modelo → Voz)."));
   const { PorcupineWorker, BuiltInKeyword } = await import("@picovoice/porcupine-web");
   const { WebVoiceProcessor } = await import("@picovoice/web-voice-processor");
 
@@ -169,8 +170,8 @@ async function startPorcupine(opts: WakeOptions, onWake: () => void): Promise<Wa
 // --------------------------------------------------------------------------- //
 async function startVosk(opts: WakeOptions, onWake: () => void): Promise<WakeHandle> {
   const phrase = (opts.callName || "").trim().toLowerCase();
-  if (!phrase) throw new Error("O modo Vosk precisa de um 'chamado/nome' para reconhecer.");
-  if (!opts.voskModelUrl) throw new Error("Informe a URL do modelo Vosk (Configurações do modelo → Voz).");
+  if (!phrase) throw new Error(tr("O modo Vosk precisa de um 'chamado/nome' para reconhecer."));
+  if (!opts.voskModelUrl) throw new Error(tr("Informe a URL do modelo Vosk (Configurações do modelo → Voz)."));
   const { createModel } = await import("vosk-browser");
 
   const model = await createModel(opts.voskModelUrl);
@@ -272,7 +273,7 @@ function resampleTo16k(data: Float32Array, fromRate: number): Float32Array {
 
 async function startWhisper(opts: WakeOptions, onWake: () => void): Promise<WakeHandle> {
   const phrase = (opts.callName || "").trim().toLowerCase();
-  if (!phrase) throw new Error("O modo Whisper precisa de um 'nome' para reconhecer.");
+  if (!phrase) throw new Error(tr("O modo Whisper precisa de um 'nome' para reconhecer."));
   const asr = await getWhisperPipe(opts.whisperModel || WHISPER_DEFAULT);
   opts.onReady?.();
 
@@ -410,7 +411,7 @@ function _session(url: string): Promise<OrtSession> {
 }
 
 async function getOwwSessions(modelUrl: string, melspecUrl: string, embeddingUrl: string) {
-  if (!modelUrl) throw new Error("Informe a URL do seu modelo OpenWakeWord (.onnx).");
+  if (!modelUrl) throw new Error(tr("Informe a URL do seu modelo OpenWakeWord (.onnx)."));
   const [mel, emb, wake] = await Promise.all([
     _session(melspecUrl), _session(embeddingUrl), _session(modelUrl),
   ]);

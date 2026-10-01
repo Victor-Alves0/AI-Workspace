@@ -4,6 +4,8 @@ import "./globals.css";
 import { ConfirmProvider } from "@/components/ConfirmDialog";
 import DesktopContextMenu from "@/components/DesktopContextMenu";
 import DesktopTitleBar from "@/components/DesktopTitleBar";
+import I18nRoot from "@/components/I18nRoot";
+import { tr } from "@/lib/i18n";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -12,13 +14,13 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "AI Workspace",
+  title: tr("AI Workspace"),
   description: "Seu workspace de IA local-first",
-  applicationName: "AI Workspace",
+  applicationName: tr("AI Workspace"),
   // instalado pelo atalho ("Adicionar à tela de início") abre em janela própria
   appleWebApp: {
     capable: true,
-    title: "AI Workspace",
+    title: tr("AI Workspace"),
     statusBarStyle: "black-translucent",
   },
 };
@@ -44,9 +46,11 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" className={inter.variable}>
       <body>
-        <DesktopTitleBar />
-        <DesktopContextMenu />
-        <ConfirmProvider>{children}</ConfirmProvider>
+        <I18nRoot>
+          <DesktopTitleBar />
+          <DesktopContextMenu />
+          <ConfirmProvider>{children}</ConfirmProvider>
+        </I18nRoot>
       </body>
     </html>
   );

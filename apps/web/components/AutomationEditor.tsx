@@ -7,18 +7,19 @@ import type { Automation, AutomationOptions, Chat, Model, ModelConfig, SystemToo
 import ModelField from "./ModelField";
 import TransferModal, { type TransferItem } from "./TransferModal";
 import { InfoDot, Select } from "@/components/ui";
+import { tr } from "@/lib/i18n";
 
 // mesmas chaves de tools/interaction.py::ACTION_CATEGORIES (teste de invariante no servidor)
 const ACTION_CATEGORIES = [
   { key: "google", label: "Gmail e Agenda" },
   { key: "messaging", label: "WhatsApp, Telegram, Discord" },
-  { key: "slack", label: "Slack" },
+  { key: "slack", label: tr("Slack") },
   { key: "github", label: "GitHub" },
-  { key: "notion", label: "Notion" },
-  { key: "tuya", label: "Casa" },
-  { key: "codespace", label: "Codespace" },
-  { key: "remote", label: "Terminal remoto" },
-  { key: "civitai", label: "Civitai" },
+  { key: "notion", label: tr("Notion") },
+  { key: "tuya", label: tr("Casa") },
+  { key: "codespace", label: tr("Codespace") },
+  { key: "remote", label: tr("Terminal remoto") },
+  { key: "civitai", label: tr("Civitai") },
 ];
 
 type Draft = Pick<
@@ -33,37 +34,37 @@ const UNITS: { key: "minutes" | "hours" | "days"; label: string }[] = [
 ];
 
 const FREQ_MODES: { key: string; label: string }[] = [
-  { key: "interval", label: "A cada intervalo" },
-  { key: "between", label: "Entre (intervalo aleatório)" },
-  { key: "daily", label: "Diariamente" },
-  { key: "weekly", label: "Dias da semana" },
-  { key: "monthly", label: "Mensal (dia do mês)" },
+  { key: "interval", label: tr("A cada intervalo") },
+  { key: "between", label: tr("Entre (intervalo aleatório)") },
+  { key: "daily", label: tr("Diariamente") },
+  { key: "weekly", label: tr("Dias da semana") },
+  { key: "monthly", label: tr("Mensal (dia do mês)") },
 ];
 
 // getDay() do JS: 0=domingo … 6=sábado
-const WEEKDAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+const WEEKDAYS = [tr("Dom"), tr("Seg"), tr("Ter"), tr("Qua"), tr("Qui"), tr("Sex"), tr("Sáb")];
 
 const TTL_OPTS: { key: string; label: string }[] = [
   { key: "1", label: "1 hora" },
   { key: "12", label: "12 horas" },
   { key: "24", label: "24 horas" },
   { key: "168", label: "7 dias" },
-  { key: "view_once", label: "Ao abrir (visualização única)" },
+  { key: "view_once", label: tr("Ao abrir (visualização única)") },
 ];
 
 const REASONING_OPTS: { key: string; label: string }[] = [
-  { key: "", label: "Padrão do modelo" },
-  { key: "off", label: "Desligado" },
-  { key: "low", label: "Baixo" },
-  { key: "medium", label: "Médio" },
-  { key: "high", label: "Alto" },
+  { key: "", label: tr("Padrão do modelo") },
+  { key: "off", label: tr("Desligado") },
+  { key: "low", label: tr("Baixo") },
+  { key: "medium", label: tr("Médio") },
+  { key: "high", label: tr("Alto") },
 ];
 
 const WATCHERS: { key: string; label: string }[] = [
-  { key: "page", label: "Mudança em página" },
-  { key: "web_search", label: "Busca na web + condição" },
-  { key: "price", label: "Preço de ativo" },
-  { key: "rss", label: "RSS / notícias" },
+  { key: "page", label: tr("Mudança em página") },
+  { key: "web_search", label: tr("Busca na web + condição") },
+  { key: "price", label: tr("Preço de ativo") },
+  { key: "rss", label: tr("RSS / notícias") },
 ];
 
 function blank(): Draft {
@@ -113,42 +114,42 @@ function WhatsAppDelivery({ value, connections, onChange }: {
     <div className="space-y-2 rounded-xl border border-border bg-surface px-3 py-2.5">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm text-ink">Enviar para o WhatsApp</p>
-          <p className="text-xs text-muted">Entrega o resultado por um número conectado</p>
+          <p className="text-sm text-ink">{tr("Enviar para o WhatsApp")}</p>
+          <p className="text-xs text-muted">{tr("Entrega o resultado por um número conectado")}</p>
         </div>
         <Toggle on={on} onClick={() => set({ enabled: !on })} />
       </div>
       {on && (
         <div className="space-y-2 border-t border-border pt-2.5">
           {connections.length === 0 ? (
-            <p className="text-xs text-amber-400/80">Nenhum número conectado. Conecte em Configurações → Integrações → WhatsApp.</p>
+            <p className="text-xs text-amber-400/80">{tr("Nenhum número conectado. Conecte em Configurações → Integrações → WhatsApp.")}</p>
           ) : (
             <>
               <label className="block text-sm">
-                <span className="text-xs text-muted">Número que envia (conexão)</span>
+                <span className="text-xs text-muted">{tr("Número que envia (conexão)")}</span>
                 <Select value={v.connection_id ?? ""} onChange={(e) => set({ connection_id: e.target.value || null })} className={WA_INPUT}>
-                  <option value="">Selecione…</option>
+                  <option value="">{tr("Selecione…")}</option>
                   {connections.map((c) => (
-                    <option key={c.id} value={c.id}>{c.label || c.phone || "Sem nome"}{c.phone ? ` (+${c.phone})` : ""}</option>
+                    <option key={c.id} value={c.id}>{c.label || c.phone || tr("Sem nome")}{c.phone ? ` (+${c.phone})` : ""}</option>
                   ))}
                 </Select>
               </label>
               <label className="block text-sm">
-                <span className="text-xs text-muted">Enviar para</span>
+                <span className="text-xs text-muted">{tr("Enviar para")}</span>
                 <Select value={to} onChange={(e) => set({ to: e.target.value as WaDelivery["to"] })} className={WA_INPUT}>
-                  <option value="number">Um número específico</option>
-                  <option value="contacts">Todos os contatos cadastrados{conn ? ` (${conn.contacts?.length ?? 0})` : ""}</option>
-                  <option value="threads">Todas as conversas existentes{conn ? ` (${conn.threads ?? 0})` : ""}</option>
+                  <option value="number">{tr("Um número específico")}</option>
+                  <option value="contacts">{tr("Todos os contatos cadastrados")}{conn ? ` (${conn.contacts?.length ?? 0})` : ""}</option>
+                  <option value="threads">{tr("Todas as conversas existentes")}{conn ? ` (${conn.threads ?? 0})` : ""}</option>
                 </Select>
               </label>
               {to === "number" && (
                 <label className="block text-sm">
-                  <span className="text-xs text-muted">Número (com DDI + DDD)</span>
+                  <span className="text-xs text-muted">{tr("Número (com DDI + DDD)")}</span>
                   <input value={v.number ?? ""} onChange={(e) => set({ number: e.target.value })} placeholder="5583999999999" className={`${WA_INPUT} font-mono text-xs`} />
                 </label>
               )}
               {to === "threads" && (
-                <p className="text-[11px] leading-4 text-amber-400/70">Envia a MESMA mensagem a todos que já conversaram com esse número. Use com cuidado (evite spam/bloqueio).</p>
+                <p className="text-[11px] leading-4 text-amber-400/70">{tr("Envia a MESMA mensagem a todos que já conversaram com esse número. Use com cuidado (evite spam/bloqueio).")}</p>
               )}
             </>
           )}
@@ -176,36 +177,36 @@ function TelegramDelivery({ value, connections, onChange }: {
     <div className="space-y-2 rounded-xl border border-border bg-surface px-3 py-2.5">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-sm text-ink">Enviar para o Telegram</p>
-          <p className="text-xs text-muted">Entrega o resultado por um bot conectado</p>
+          <p className="text-sm text-ink">{tr("Enviar para o Telegram")}</p>
+          <p className="text-xs text-muted">{tr("Entrega o resultado por um bot conectado")}</p>
         </div>
         <Toggle on={on} onClick={() => set({ enabled: !on })} />
       </div>
       {on && (
         <div className="space-y-2 border-t border-border pt-2.5">
           {connections.length === 0 ? (
-            <p className="text-xs text-amber-400/80">Nenhum bot conectado. Conecte em Configurações → Integrações → Telegram.</p>
+            <p className="text-xs text-amber-400/80">{tr("Nenhum bot conectado. Conecte em Configurações → Integrações → Telegram.")}</p>
           ) : (
             <>
               <label className="block text-sm">
-                <span className="text-xs text-muted">Bot que envia</span>
+                <span className="text-xs text-muted">{tr("Bot que envia")}</span>
                 <Select value={v.connection_id ?? ""} onChange={(e) => set({ connection_id: e.target.value || null })} className={WA_INPUT}>
-                  <option value="">Selecione…</option>
+                  <option value="">{tr("Selecione…")}</option>
                   {connections.map((c) => (
                     <option key={c.id} value={c.id}>{c.label || `@${c.bot_username}`}</option>
                   ))}
                 </Select>
               </label>
               <label className="block text-sm">
-                <span className="text-xs text-muted">Enviar para</span>
+                <span className="text-xs text-muted">{tr("Enviar para")}</span>
                 <Select value={mode} onChange={(e) => set({ mode: e.target.value as TgDelivery["mode"] })} className={WA_INPUT}>
-                  <option value="threads">Todas as conversas do bot{conn ? ` (${conn.threads ?? 0})` : ""}</option>
-                  <option value="chat">Um chat específico (id)</option>
+                  <option value="threads">{tr("Todas as conversas do bot")}{conn ? ` (${conn.threads ?? 0})` : ""}</option>
+                  <option value="chat">{tr("Um chat específico (id)")}</option>
                 </Select>
               </label>
               {mode === "chat" && (
                 <label className="block text-sm">
-                  <span className="text-xs text-muted">chat_id do Telegram</span>
+                  <span className="text-xs text-muted">{tr("chat_id do Telegram")}</span>
                   <input value={v.chat_id ?? ""} onChange={(e) => set({ chat_id: e.target.value })} placeholder="123456789" className={`${WA_INPUT} font-mono text-xs`} />
                 </label>
               )}
@@ -291,8 +292,8 @@ export default function AutomationEditor({
 
   const transferItems: TransferItem[] = useMemo(
     () => [
-      ...systemTools.map((st) => ({ key: `builtin:${st.path}`, label: st.name, sublabel: st.description, group: "Sistema", system: true })),
-      ...tools.map((t) => ({ key: t.id, label: t.name || t.path, sublabel: t.path, group: "Usuário" })),
+      ...systemTools.map((st) => ({ key: `builtin:${st.path}`, label: st.name, sublabel: st.description, group: tr("Sistema"), system: true })),
+      ...tools.map((t) => ({ key: t.id, label: t.name || t.path, sublabel: t.path, group: tr("Usuário") })),
     ],
     [systemTools, tools],
   );
@@ -313,7 +314,7 @@ export default function AutomationEditor({
 
   function validateMonitor(): string | null {
     const c = d.watcher_config ?? {};
-    if (d.watcher_type === "price" && !(c.symbol || "").trim()) return "Informe o ticker do ativo";
+    if (d.watcher_type === "price" && !(c.symbol || "").trim()) return tr("Informe o ticker do ativo");
     if (d.watcher_type === "web_search" && !(c.query || "").trim()) return "Informe a busca";
     if ((d.watcher_type === "page" || d.watcher_type === "rss") && !(c.url || "").trim()) return "Informe a URL";
     return null;
@@ -321,15 +322,15 @@ export default function AutomationEditor({
 
   async function save() {
     setErr(null);
-    if (!isMonitor && !d.model_config_id && !d.model) return setErr("Selecione um modelo");
-    if (!isMonitor && !d.instructions.trim()) return setErr("Escreva a instrução da automação");
+    if (!isMonitor && !d.model_config_id && !d.model) return setErr(tr("Selecione um modelo"));
+    if (!isMonitor && !d.instructions.trim()) return setErr(tr("Escreva a instrução da automação"));
     if (isMonitor) {
       const v = validateMonitor();
       if (v) return setErr(v);
     }
     const mode = d.schedule.mode ?? "interval";
     if (!isMonitor && mode === "weekly" && !(d.schedule.days ?? []).length)
-      return setErr("Escolha ao menos um dia da semana");
+      return setErr(tr("Escolha ao menos um dia da semana"));
     // fuso do navegador acompanha o horário escolhido (o servidor converte p/ UTC)
     const schedule = mode === "interval"
       ? { mode, every: d.schedule.every ?? 1, unit: d.schedule.unit ?? "hours" }
@@ -342,7 +343,7 @@ export default function AutomationEditor({
         }
       : { ...d.schedule, mode, time: d.schedule.time || "09:00", tz_offset: new Date().getTimezoneOffset(), tz: Intl.DateTimeFormat().resolvedOptions().timeZone };
     const body = {
-      title: d.title || (isMonitor ? "Novo monitor" : "Nova automação"),
+      title: d.title || (isMonitor ? tr("Novo monitor") : tr("Nova automação")),
       kind: d.kind,
       model_config_id: d.model_config_id,
       model: d.model,
@@ -362,7 +363,7 @@ export default function AutomationEditor({
       else await api.patch(`/automations/${automation!.id}`, body);
       onSaved();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao salvar");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao salvar"));
     } finally {
       setSaving(false);
     }
@@ -378,21 +379,21 @@ export default function AutomationEditor({
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div className="flex max-h-[88vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-border bg-bg shadow-menu" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-5 py-3">
-          <p className="text-sm font-semibold text-ink">{isNew ? "Nova automação" : "Editar automação"}</p>
+          <p className="text-sm font-semibold text-ink">{isNew ? tr("Nova automação") : tr("Editar automação")}</p>
           <button onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={18} /></button>
         </div>
 
         <div className="space-y-4 overflow-y-auto px-5 py-4">
           <div className="space-y-1">
-            <p className="text-xs text-muted">Título</p>
-            <input value={d.title} onChange={(e) => set("title", e.target.value)} placeholder={isMonitor ? "Ex.: PETR4 acima de R$40" : "Ex.: Resumo diário de notícias"} className={inputCls} />
+            <p className="text-xs text-muted">{tr("Título")}</p>
+            <input value={d.title} onChange={(e) => set("title", e.target.value)} placeholder={isMonitor ? tr("Ex.: PETR4 acima de R$40") : tr("Ex.: Resumo diário de notícias")} className={inputCls} />
           </div>
 
           {/* tipo */}
           <div className="grid grid-cols-2 gap-2">
             {[
-              { k: "scheduled", label: "Agendada (por tempo)" },
-              { k: "monitor", label: "Monitor (por evento)" },
+              { k: "scheduled", label: tr("Agendada (por tempo)") },
+              { k: "monitor", label: tr("Monitor (por evento)") },
             ].map((o) => (
               <button
                 key={o.k}
@@ -406,25 +407,25 @@ export default function AutomationEditor({
 
           {/* modelo (obrigatório p/ agendada; opcional p/ monitor — só redige o aviso) */}
           <div className="space-y-1">
-            <p className="text-xs text-muted">Modelo{isMonitor ? " (opcional — redige o aviso)" : ""}</p>
+            <p className="text-xs text-muted">{tr("Modelo")}{isMonitor ? " (opcional — redige o aviso)" : ""}</p>
             <ModelField
               models={extModels}
               custom={models}
               includeCustom
               value={modelValue}
               onChange={pickModel}
-              placeholder={isMonitor ? "Nenhum (mensagem direta)" : "Selecionar modelo"}
+              placeholder={isMonitor ? tr("Nenhum (mensagem direta)") : tr("Selecionar modelo")}
             />
           </div>
 
           {/* instrução */}
           <div className="space-y-1">
-            <p className="text-xs text-muted">{isMonitor ? "Instrução para o aviso (opcional)" : "Instruções"}</p>
+            <p className="text-xs text-muted">{isMonitor ? tr("Instrução para o aviso (opcional)") : tr("Instruções")}</p>
             <textarea
               rows={isMonitor ? 2 : 4}
               value={d.instructions}
               onChange={(e) => set("instructions", e.target.value)}
-              placeholder={isMonitor ? "Ex.: Me avise de forma curta e direta." : "O que o modelo deve fazer a cada disparo. Ex.: Pesquise as principais notícias de tecnologia de hoje e resuma em tópicos."}
+              placeholder={isMonitor ? tr("Ex.: Me avise de forma curta e direta.") : tr("O que o modelo deve fazer a cada disparo. Ex.: Pesquise as principais notícias de tecnologia de hoje e resuma em tópicos.")}
               className={`${inputCls} resize-y`}
             />
           </div>
@@ -433,7 +434,7 @@ export default function AutomationEditor({
           {!isMonitor && (
             <>
               <div className="space-y-1">
-                <p className="text-xs text-muted">Raciocínio (thinking)</p>
+                <p className="text-xs text-muted">{tr("Raciocínio (thinking)")}</p>
                 <Select
                   value={d.options?.reasoning ?? ""}
                   onChange={(e) => setOpt("reasoning", e.target.value || null)}
@@ -445,9 +446,9 @@ export default function AutomationEditor({
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs text-muted">Ferramentas (opcional — vazio usa as do modelo)</p>
+                  <p className="text-xs text-muted">{tr("Ferramentas (opcional — vazio usa as do modelo)")}</p>
                   <button onClick={() => setToolsModal(true)} className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-ink transition-colors hover:bg-hover">
-                    <Wrench size={13} /> Gerenciar
+                    <Wrench size={13} />  {tr("Gerenciar")}
                   </button>
                 </div>
                 {d.tool_ids.length > 0 && (
@@ -458,7 +459,7 @@ export default function AutomationEditor({
                         <button
                           key={tid}
                           onClick={() => set("pinned_tool_ids", pinned ? d.pinned_tool_ids.filter((x) => x !== tid) : [...d.pinned_tool_ids, tid])}
-                          title={pinned ? "Fixada (clique para soltar)" : "Clique para fixar (pin)"}
+                          title={pinned ? tr("Fixada (clique para soltar)") : tr("Clique para fixar (pin)")}
                           className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${pinned ? "border-accent/60 bg-accent/15 text-accent-hover" : "border-border text-muted hover:text-ink"}`}
                         >
                           {pinned ? "📌 " : ""}{toolLabel(tid)}
@@ -471,8 +472,8 @@ export default function AutomationEditor({
 
               <div className="space-y-1.5">
                 <div className="flex items-center gap-1.5">
-                  <p className="text-xs text-muted">Pode agir sem perguntar</p>
-                  <InfoDot text="Ninguém está olhando quando a automação roda. Ela só executa as ações marcadas aqui; as outras são recusadas e aparecem no resultado. Um e-mail ou página lidos pela automação podem trazer instruções plantadas, então marque só o que ela precisa." />
+                  <p className="text-xs text-muted">{tr("Pode agir sem perguntar")}</p>
+                  <InfoDot text={tr("Ninguém está olhando quando a automação roda. Ela só executa as ações marcadas aqui; as outras são recusadas e aparecem no resultado. Um e-mail ou página lidos pela automação podem trazer instruções plantadas, então marque só o que ela precisa.")} />
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {ACTION_CATEGORIES.map((c) => {
@@ -496,7 +497,7 @@ export default function AutomationEditor({
               </div>
 
               <div className="space-y-1.5">
-                <p className="text-xs text-muted">Frequência</p>
+                <p className="text-xs text-muted">{tr("Frequência")}</p>
                 <Select value={freqMode} onChange={(e) => sched({ mode: e.target.value })} className={inputCls}>
                   {FREQ_MODES.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
                 </Select>
@@ -514,7 +515,7 @@ export default function AutomationEditor({
                 {freqMode === "between" && (
                   <>
                     <div className="flex flex-wrap items-center gap-2 pt-1">
-                      <span className="text-sm text-ink-soft">Entre</span>
+                      <span className="text-sm text-ink-soft">{tr("Entre")}</span>
                       <input type="number" min={1} value={d.schedule.min ?? 1} onChange={(e) => sched({ min: Math.max(1, Number(e.target.value) || 1) })} className="w-20 rounded-lg border border-border bg-surface2 px-3 py-1.5 text-right text-sm text-ink outline-none focus:border-accent" />
                       <span className="text-sm text-ink-soft">e</span>
                       <input type="number" min={1} value={d.schedule.max ?? 6} onChange={(e) => sched({ max: Math.max(1, Number(e.target.value) || 1) })} className="w-20 rounded-lg border border-border bg-surface2 px-3 py-1.5 text-right text-sm text-ink outline-none focus:border-accent" />
@@ -522,7 +523,7 @@ export default function AutomationEditor({
                         {UNITS.map((u) => <option key={u.key} value={u.key}>{u.label}</option>)}
                       </Select>
                     </div>
-                    <p className="text-xs text-muted">A cada disparo sorteia um novo intervalo aleatório nessa faixa.</p>
+                    <p className="text-xs text-muted">{tr("A cada disparo sorteia um novo intervalo aleatório nessa faixa.")}</p>
                   </>
                 )}
 
@@ -546,17 +547,17 @@ export default function AutomationEditor({
 
                 {freqMode === "monthly" && (
                   <div className="flex items-center gap-2 pt-1">
-                    <span className="text-sm text-ink-soft">Dia</span>
+                    <span className="text-sm text-ink-soft">{tr("Dia")}</span>
                     <input type="number" min={1} max={31} value={d.schedule.day ?? 1} onChange={(e) => sched({ day: Math.max(1, Math.min(31, Number(e.target.value) || 1)) })} className="w-20 rounded-lg border border-border bg-surface2 px-3 py-1.5 text-right text-sm text-ink outline-none focus:border-accent" />
-                    <span className="text-xs text-muted">do mês (29-31 caem no último dia em meses curtos)</span>
+                    <span className="text-xs text-muted">{tr("do mês (29-31 caem no último dia em meses curtos)")}</span>
                   </div>
                 )}
 
                 {freqMode !== "interval" && (
                   <div className="flex items-center gap-2 pt-1">
-                    <span className="text-sm text-ink-soft">às</span>
+                    <span className="text-sm text-ink-soft">{tr("às")}</span>
                     <input type="time" value={d.schedule.time ?? "09:00"} onChange={(e) => sched({ time: e.target.value })} className="rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent" />
-                    <span className="text-xs text-muted">no seu fuso horário</span>
+                    <span className="text-xs text-muted">{tr("no seu fuso horário")}</span>
                   </div>
                 )}
               </div>
@@ -567,7 +568,7 @@ export default function AutomationEditor({
           {isMonitor && (
             <>
               <div className="space-y-1">
-                <p className="text-xs text-muted">Tipo de monitor</p>
+                <p className="text-xs text-muted">{tr("Tipo de monitor")}</p>
                 <Select value={d.watcher_type ?? "page"} onChange={(e) => { set("watcher_type", e.target.value); set("watcher_config", {}); }} className={inputCls}>
                   {WATCHERS.map((w) => <option key={w.key} value={w.key}>{w.label}</option>)}
                 </Select>
@@ -575,29 +576,29 @@ export default function AutomationEditor({
 
               {d.watcher_type === "page" && (
                 <>
-                  <div className="space-y-1"><p className="text-xs text-muted">URL da página</p>
+                  <div className="space-y-1"><p className="text-xs text-muted">{tr("URL da página")}</p>
                     <input value={c.url ?? ""} onChange={(e) => wc("url", e.target.value)} placeholder="https://exemplo.com/inscricoes" className={inputCls} /></div>
-                  <div className="space-y-1"><p className="text-xs text-muted">Texto-chave (opcional — dispara quando aparece/some)</p>
-                    <input value={c.contains ?? ""} onChange={(e) => wc("contains", e.target.value)} placeholder='ex.: "inscrições abertas"' className={inputCls} /></div>
+                  <div className="space-y-1"><p className="text-xs text-muted">{tr("Texto-chave (opcional — dispara quando aparece/some)")}</p>
+                    <input value={c.contains ?? ""} onChange={(e) => wc("contains", e.target.value)} placeholder={tr("ex.: \"inscrições abertas\"")} className={inputCls} /></div>
                 </>
               )}
               {d.watcher_type === "web_search" && (
                 <>
-                  <div className="space-y-1"><p className="text-xs text-muted">Busca</p>
-                    <input value={c.query ?? ""} onChange={(e) => wc("query", e.target.value)} placeholder="ex.: placar Brasil jogo hoje" className={inputCls} /></div>
-                  <div className="space-y-1"><p className="text-xs text-muted">Condição (opcional — a IA confirma antes de avisar)</p>
-                    <input value={c.condition ?? ""} onChange={(e) => wc("condition", e.target.value)} placeholder="ex.: o jogo terminou / saiu o placar final" className={inputCls} /></div>
+                  <div className="space-y-1"><p className="text-xs text-muted">{tr("Busca")}</p>
+                    <input value={c.query ?? ""} onChange={(e) => wc("query", e.target.value)} placeholder={tr("ex.: placar Brasil jogo hoje")} className={inputCls} /></div>
+                  <div className="space-y-1"><p className="text-xs text-muted">{tr("Condição (opcional — a IA confirma antes de avisar)")}</p>
+                    <input value={c.condition ?? ""} onChange={(e) => wc("condition", e.target.value)} placeholder={tr("ex.: o jogo terminou / saiu o placar final")} className={inputCls} /></div>
                 </>
               )}
               {d.watcher_type === "price" && (
                 <>
-                  <div className="space-y-1"><p className="text-xs text-muted">Ativo (ticker Yahoo)</p>
+                  <div className="space-y-1"><p className="text-xs text-muted">{tr("Ativo (ticker Yahoo)")}</p>
                     <input value={c.symbol ?? ""} onChange={(e) => wc("symbol", e.target.value)} placeholder="ex.: PETR4.SA, AAPL, BTC-USD" className={inputCls} /></div>
                   <div className="flex items-center gap-2">
                     <Select value={c.op ?? "above"} onChange={(e) => wc("op", e.target.value)} className="rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent">
-                      <option value="above">Preço acima de</option>
-                      <option value="below">Preço abaixo de</option>
-                      <option value="pct">Variação % (±) de</option>
+                      <option value="above">{tr("Preço acima de")}</option>
+                      <option value="below">{tr("Preço abaixo de")}</option>
+                      <option value="pct">{tr("Variação % (±) de")}</option>
                     </Select>
                     <input type="number" value={c.value ?? ""} onChange={(e) => wc("value", Number(e.target.value))} placeholder="valor" className="w-32 rounded-lg border border-border bg-surface2 px-3 py-2 text-right text-sm text-ink outline-none focus:border-accent" />
                   </div>
@@ -605,13 +606,13 @@ export default function AutomationEditor({
               )}
               {d.watcher_type === "rss" && (
                 <>
-                  <div className="space-y-1"><p className="text-xs text-muted">URL do feed (RSS/Atom)</p>
+                  <div className="space-y-1"><p className="text-xs text-muted">{tr("URL do feed (RSS/Atom)")}</p>
                     <input value={c.url ?? ""} onChange={(e) => wc("url", e.target.value)} placeholder="https://exemplo.com/feed.xml" className={inputCls} /></div>
-                  <div className="space-y-1"><p className="text-xs text-muted">Palavras-chave (opcional, separadas por vírgula)</p>
+                  <div className="space-y-1"><p className="text-xs text-muted">{tr("Palavras-chave (opcional, separadas por vírgula)")}</p>
                     <input
                       value={(c.keywords ?? []).join(", ")}
                       onChange={(e) => wc("keywords", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))}
-                      placeholder="ex.: python, inteligência artificial"
+                      placeholder={tr("ex.: python, inteligência artificial")}
                       className={inputCls}
                     /></div>
                 </>
@@ -635,19 +636,19 @@ export default function AutomationEditor({
 
           {/* local de resposta */}
           <div className="space-y-1">
-            <p className="text-xs text-muted">Local de Resposta</p>
+            <p className="text-xs text-muted">{tr("Local de Resposta")}</p>
             <Select
               value={d.target.mode ?? "reuse"}
               onChange={(e) => set("target", { ...d.target, mode: e.target.value as any })}
               className={inputCls}
             >
-              <option value="reuse">Sempre no mesmo chat (criado uma vez)</option>
-              <option value="new_each">Um chat novo a cada disparo</option>
-              <option value="existing">Em um chat existente</option>
+              <option value="reuse">{tr("Sempre no mesmo chat (criado uma vez)")}</option>
+              <option value="new_each">{tr("Um chat novo a cada disparo")}</option>
+              <option value="existing">{tr("Em um chat existente")}</option>
             </Select>
             {d.target.mode === "existing" && (
               <Select value={d.target.chat_id ?? ""} onChange={(e) => set("target", { ...d.target, chat_id: e.target.value || null })} className={inputCls}>
-                <option value="">Selecione um chat…</option>
+                <option value="">{tr("Selecione um chat…")}</option>
                 {chats.map((ch) => <option key={ch.id} value={ch.id}>{ch.title}</option>)}
               </Select>
             )}
@@ -671,8 +672,8 @@ export default function AutomationEditor({
           <div className="space-y-2.5 rounded-xl border border-border bg-surface px-3 py-2.5">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm text-ink">Contexto</p>
-                <p className="text-xs text-muted">O modelo vê as últimas mensagens do chat (disparos anteriores)</p>
+                <p className="text-sm text-ink">{tr("Contexto")}</p>
+                <p className="text-xs text-muted">{tr("O modelo vê as últimas mensagens do chat (disparos anteriores)")}</p>
               </div>
               <Toggle on={!!d.options?.use_context} onClick={() => setOpt("use_context", !d.options?.use_context)} />
             </div>
@@ -680,8 +681,8 @@ export default function AutomationEditor({
               <div className="border-t border-border pt-2.5">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm text-ink">Duração do Chat</p>
-                    <p className="text-xs text-muted">Apaga o chat da automação após o tempo escolhido</p>
+                    <p className="text-sm text-ink">{tr("Duração do Chat")}</p>
+                    <p className="text-xs text-muted">{tr("Apaga o chat da automação após o tempo escolhido")}</p>
                   </div>
                   <Toggle on={ttlOn} onClick={() => setOpt("chat_ttl", ttlOn ? null : 24)} />
                 </div>
@@ -702,9 +703,9 @@ export default function AutomationEditor({
         </div>
 
         <div className="flex items-center justify-end gap-3 border-t border-border px-5 py-3">
-          <button onClick={onClose} className="rounded-full border border-border px-4 py-2 text-sm text-muted hover:text-ink">Cancelar</button>
+          <button onClick={onClose} className="rounded-full border border-border px-4 py-2 text-sm text-muted hover:text-ink">{tr("Cancelar")}</button>
           <button onClick={save} disabled={saving} className="rounded-full bg-accent px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-            {saving ? "…" : "Salvar"}
+            {saving ? "…" : tr("Salvar")}
           </button>
         </div>
       </div>
@@ -714,17 +715,17 @@ export default function AutomationEditor({
       {toolsModal && (
         <div onClick={(e) => e.stopPropagation()}>
           <TransferModal
-            title="Ferramentas da automação"
+            title={tr("Ferramentas da automação")}
             items={transferItems}
             selected={d.tool_ids}
             onChange={(ids) => set("tool_ids", ids)}
             onClose={() => setToolsModal(false)}
-            availableLabel="Disponíveis"
-            selectedLabel="Ativadas"
-            searchPlaceholder="Buscar ferramentas…"
+            availableLabel={tr("Disponíveis")}
+            selectedLabel={tr("Ativadas")}
+            searchPlaceholder={tr("Buscar ferramentas…")}
             pinnedKeys={d.pinned_tool_ids}
             onTogglePin={(tid) => set("pinned_tool_ids", d.pinned_tool_ids.includes(tid) ? d.pinned_tool_ids.filter((x) => x !== tid) : [...d.pinned_tool_ids, tid])}
-            pinHint="Fixar: vira ferramenta de 1ª classe (o modelo chama direto), dando mais assertividade à automação."
+            pinHint={tr("Fixar: vira ferramenta de 1ª classe (o modelo chama direto), dando mais assertividade à automação.")}
           />
         </div>
       )}

@@ -6,6 +6,7 @@ import { Check, Loader2, Package, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ImaginaiInventory, ImaginaiSystemDefinition } from "../types";
 import { ImaginaiFeatureStatus, ImaginaiToolbar } from "../shared";
+import { dateLocale, tr } from "@/lib/i18n";
 
 export function ImaginaiInventoryPanel({ campaignId, ownerId, system }: { campaignId: string; ownerId: string | null; system: ImaginaiSystemDefinition | null }) {
   const [inventory, setInventory] = useState<ImaginaiInventory | null>(null);
@@ -18,22 +19,22 @@ export function ImaginaiInventoryPanel({ campaignId, ownerId, system }: { campai
     try {
       setInventory(await api.get<ImaginaiInventory>(`/mini-apps/imaginai/campaigns/${campaignId}/inventory`));
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Não foi possível abrir o inventário");
+      setError(loadError instanceof Error ? loadError.message : tr("Não foi possível abrir o inventário"));
     } finally {
       setLoading(false);
     }
   }, [campaignId]);
   useEffect(() => { setLoading(true); void load(); }, [load]);
   if (loading) return <ImaginaiFeatureStatus><Loader2 size={17} className="animate-spin" /></ImaginaiFeatureStatus>;
-  if (error || !inventory) return <ImaginaiFeatureStatus error>{error ?? "Inventário indisponível"}</ImaginaiFeatureStatus>;
+  if (error || !inventory) return <ImaginaiFeatureStatus error>{error ?? tr("Inventário indisponível")}</ImaginaiFeatureStatus>;
   const currencies = system?.inventory.currencies ?? Object.keys(inventory.currencies).map((key) => ({ key, label: key.toUpperCase(), name: key, weight: 0 }));
   const wanted = query.trim().toLocaleLowerCase("pt-BR");
   const items = inventory.items.filter((item) => item.name.toLocaleLowerCase("pt-BR").includes(wanted));
   const unit = system?.inventory.weight.unit ?? inventory.weight?.unit ?? "lb";
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ImaginaiToolbar value={query} onChange={setQuery} placeholder="Buscar item" onAdd={ownerId ? () => setAdding(true) : undefined} addLabel="Adicionar item" />
-      <div className="mt-2.5 grid shrink-0 grid-cols-5 gap-1" aria-label="Moedas">
+      <ImaginaiToolbar value={query} onChange={setQuery} placeholder={tr("Buscar item")} onAdd={ownerId ? () => setAdding(true) : undefined} addLabel={tr("Adicionar item")} />
+      <div className="mt-2.5 grid shrink-0 grid-cols-5 gap-1" aria-label={tr("Moedas")}>
         {currencies.map((currency) => (
           <div key={currency.key} title={`${currency.name}${inventory.weight?.currency_enabled ? ` · ${currency.weight} ${unit} cada` : ""}`} className="min-w-0 rounded-lg border border-border px-1 py-1.5 text-center">
             <span className="block truncate text-[9px] font-semibold text-amber-300">{currency.label}</span>
@@ -41,16 +42,16 @@ export function ImaginaiInventoryPanel({ campaignId, ownerId, system }: { campai
           </div>
         ))}
       </div>
-      {inventory.weight?.enabled ? <p className="mt-1.5 shrink-0 text-right text-[10px] text-muted">Carga {inventory.weight.total.toLocaleString("pt-BR")} {inventory.weight.unit}</p> : null}
+      {inventory.weight?.enabled ? <p className="mt-1.5 shrink-0 text-right text-[10px] text-muted">{tr("Carga")} {inventory.weight.total.toLocaleString(dateLocale())} {inventory.weight.unit}</p> : null}
       <div className="imaginai-feature-scroll mt-1.5">
-        {items.length === 0 ? <ImaginaiFeatureStatus>{wanted ? "Nada encontrado." : "Nenhum item."}</ImaginaiFeatureStatus> : (
+        {items.length === 0 ? <ImaginaiFeatureStatus>{wanted ? tr("Nada encontrado.") : tr("Nenhum item.")}</ImaginaiFeatureStatus> : (
           <div className="space-y-0.5">
             {items.map((item) => (
               <div key={item.id} className="imaginai-list-row" title={item.description || undefined}>
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300"><Package size={13} /></span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-medium text-ink">{item.name}</span>
-                  <span className="block truncate text-[10px] text-muted">{item.equipped ? `Equipado${item.slot ? ` · ${item.slot.replaceAll("_", " ")}` : ""}` : item.container ? `Em ${item.container}` : "Carregado"}{system?.inventory.weight.supported && item.weight > 0 ? ` · ${item.weight} ${unit}` : ""}</span>
+                  <span className="block truncate text-[10px] text-muted">{item.equipped ? `Equipado${item.slot ? ` · ${item.slot.replaceAll("_", " ")}` : ""}` : item.container ? `Em ${item.container}` : tr("Carregado")}{system?.inventory.weight.supported && item.weight > 0 ? ` · ${item.weight} ${unit}` : ""}</span>
                 </span>
                 {item.quantity > 1 ? <span className="shrink-0 font-mono text-[10px] text-ink-soft">×{item.quantity}</span> : null}
               </div>
@@ -101,7 +102,7 @@ function AddItemDialog({ campaignId, ownerId, unit, onClose, onAdded }: {
       });
       onAdded();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Não foi possível adicionar o item");
+      setError(saveError instanceof Error ? saveError.message : tr("Não foi possível adicionar o item"));
       setSaving(false);
     }
   }
@@ -111,19 +112,19 @@ function AddItemDialog({ campaignId, ownerId, unit, onClose, onAdded }: {
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm" onMouseDown={onClose}>
       <form role="dialog" aria-modal="true" aria-labelledby="imaginai-add-item-title" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()} className="w-full max-w-md rounded-2xl border border-border bg-surface p-5 shadow-menu">
         <div className="flex items-center justify-between gap-3">
-          <h2 id="imaginai-add-item-title" className="text-base font-semibold text-ink">Adicionar item</h2>
-          <button type="button" onClick={onClose} aria-label="Fechar" className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition-colors hover:bg-hover hover:text-ink"><X size={16} /></button>
+          <h2 id="imaginai-add-item-title" className="text-base font-semibold text-ink">{tr("Adicionar item")}</h2>
+          <button type="button" onClick={onClose} aria-label={tr("Fechar")} className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition-colors hover:bg-hover hover:text-ink"><X size={16} /></button>
         </div>
         <div className="mt-4 grid grid-cols-4 gap-3">
-          <label className="col-span-4 text-xs font-medium text-ink-soft">Nome<input autoFocus required maxLength={255} value={name} onChange={(event) => setName(event.target.value)} placeholder="Corda de cânhamo" className={field} /></label>
-          <label className="col-span-2 text-xs font-medium text-ink-soft">Quantidade<input type="number" min="1" max="9999" value={quantity} onChange={(event) => setQuantity(event.target.value)} className={field} /></label>
+          <label className="col-span-4 text-xs font-medium text-ink-soft">{tr("Nome")}<input autoFocus required maxLength={255} value={name} onChange={(event) => setName(event.target.value)} placeholder={tr("Corda de cânhamo")} className={field} /></label>
+          <label className="col-span-2 text-xs font-medium text-ink-soft">{tr("Quantidade")}<input type="number" min="1" max="9999" value={quantity} onChange={(event) => setQuantity(event.target.value)} className={field} /></label>
           <label className="col-span-2 text-xs font-medium text-ink-soft">Peso ({unit})<input inputMode="decimal" value={weight} onChange={(event) => setWeight(event.target.value)} placeholder="0" className={field} /></label>
-          <label className="col-span-4 text-xs font-medium text-ink-soft">Descrição<textarea rows={3} maxLength={2000} value={description} onChange={(event) => setDescription(event.target.value)} className={`${field} resize-y leading-5`} /></label>
+          <label className="col-span-4 text-xs font-medium text-ink-soft">{tr("Descrição")}<textarea rows={3} maxLength={2000} value={description} onChange={(event) => setDescription(event.target.value)} className={`${field} resize-y leading-5`} /></label>
         </div>
         {error ? <p className="mt-3 text-xs text-rose-400">{error}</p> : null}
         <div className="mt-5 flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="min-h-10 rounded-xl px-3 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">Cancelar</button>
-          <button type="submit" disabled={saving || !name.trim()} className="flex min-h-10 items-center gap-2 rounded-xl bg-violet-500 px-4 text-sm font-medium text-white transition-colors hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50">{saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}Adicionar</button>
+          <button type="button" onClick={onClose} className="min-h-10 rounded-xl px-3 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">{tr("Cancelar")}</button>
+          <button type="submit" disabled={saving || !name.trim()} className="flex min-h-10 items-center gap-2 rounded-xl bg-violet-500 px-4 text-sm font-medium text-white transition-colors hover:bg-violet-400 disabled:cursor-not-allowed disabled:opacity-50">{saving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}{tr("Adicionar")}</button>
         </div>
       </form>
     </div>,

@@ -13,18 +13,19 @@ import HealthView from "@/components/HealthView";
 import SyncAdmin from "@/components/SyncAdmin";
 import { InfoDot, Toggle } from "@/components/ui";
 import { checkDesktopUpdate, installDesktopUpdate, isDesktop } from "@/lib/desktop";
+import { tr } from "@/lib/i18n";
 
 /* ------------------------------- navegação por cards ------------------------ */
 type AdminSection = "users" | "network" | "update" | "backup" | "sync" | "observability" | "health";
 
 const ADMIN_CARDS: { key: AdminSection; name: string; desc: string; icon: ReactNode }[] = [
-  { key: "users", name: "Usuários", desc: "Aprovar, remover e cadastros", icon: <Users size={22} /> },
-  { key: "health", name: "Saúde", desc: "Estado das capacidades do sistema", icon: <HeartPulse size={22} /> },
-  { key: "observability", name: "Observabilidade", desc: "Inspecione cada chamada", icon: <Gauge size={22} /> },
-  { key: "network", name: "Rede", desc: "IPs permitidos, host e porta", icon: <Network size={22} /> },
-  { key: "update", name: "Atualização", desc: "Verificar novas versões", icon: <RefreshCw size={22} /> },
-  { key: "backup", name: "Backup e migração", desc: "Exportar/importar o sistema", icon: <DatabaseBackup size={22} /> },
-  { key: "sync", name: "Sincronização", desc: "Mesmos dados no servidor e no desktop", icon: <ArrowLeftRight size={22} /> },
+  { key: "users", name: tr("Usuários"), desc: "Aprovar, remover e cadastros", icon: <Users size={22} /> },
+  { key: "health", name: tr("Saúde"), desc: tr("Estado das capacidades do sistema"), icon: <HeartPulse size={22} /> },
+  { key: "observability", name: tr("Observabilidade"), desc: tr("Inspecione cada chamada"), icon: <Gauge size={22} /> },
+  { key: "network", name: tr("Rede"), desc: tr("IPs permitidos, host e porta"), icon: <Network size={22} /> },
+  { key: "update", name: tr("Atualização"), desc: tr("Verificar novas versões"), icon: <RefreshCw size={22} /> },
+  { key: "backup", name: tr("Backup e migração"), desc: "Exportar/importar o sistema", icon: <DatabaseBackup size={22} /> },
+  { key: "sync", name: tr("Sincronização"), desc: tr("Mesmos dados no servidor e no desktop"), icon: <ArrowLeftRight size={22} /> },
 ];
 
 /* card quadrado da grade (mesmo visual do Espaço de Trabalho) */
@@ -122,8 +123,8 @@ export default function AdminPage() {
   if (denied) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 text-muted">
-        <p>Acesso negado — apenas admin.</p>
-        <button onClick={() => router.push("/chat")} className="text-accent">← Voltar ao chat</button>
+        <p>{tr("Acesso negado — apenas admin.")}</p>
+        <button onClick={() => router.push("/chat")} className="text-accent">{tr("← Voltar ao chat")}</button>
       </div>
     );
   }
@@ -142,8 +143,8 @@ export default function AdminPage() {
               {section ? (
                 <button
                   onClick={() => setSection(null)}
-                  title="Painel do Admin"
-                  aria-label="Voltar ao Painel do Admin"
+                  title={tr("Painel do Admin")}
+                  aria-label={tr("Voltar ao Painel do Admin")}
                   className="flex h-8 w-8 flex-none items-center justify-center rounded-xl border border-transparent bg-surface text-ink-soft transition-colors hover:border-border hover:bg-surface2 hover:text-ink"
                 >
                   <ChevronLeft size={18} />
@@ -155,20 +156,20 @@ export default function AdminPage() {
               )}
               <div>
                 <h1 className="text-xl font-bold tracking-tight text-ink">
-                  {section ? curCard?.name ?? "Painel do Admin" : "Painel do Admin"}
+                  {section ? curCard?.name ?? tr("Painel do Admin") : tr("Painel do Admin")}
                 </h1>
                 <p className="text-xs text-muted">
-                  {section ? curCard?.desc : "Usuários, observabilidade, rede, atualização e backup"}
+                  {section ? curCard?.desc : tr("Usuários, observabilidade, rede, atualização e backup")}
                 </p>
               </div>
             </div>
             {!section && (
               <div className="flex items-center gap-2">
                 <button onClick={() => router.push("/debug")} className="flex items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">
-                  <Bug size={15} /> Debug
+                  <Bug size={15} />  {tr("Debug")}
                 </button>
                 <button onClick={() => router.push("/chat")} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">
-                  <ArrowLeft size={16} /> Voltar ao chat
+                  <ArrowLeft size={16} />  {tr("Voltar ao chat")}
                 </button>
               </div>
             )}
@@ -193,27 +194,28 @@ export default function AdminPage() {
 
         {/* SEÇÃO: Observabilidade */}
         {section === "health" && (
-          <AdminShell title="Saúde" onBack={() => setSection(null)}>
+          <AdminShell title={tr("Saúde")} onBack={() => setSection(null)}>
             <HealthView />
           </AdminShell>
         )}
 
         {section === "observability" && (
-          <AdminShell title="Observabilidade" onBack={() => setSection(null)}>
+          <AdminShell title={tr("Observabilidade")} onBack={() => setSection(null)}>
             <ObservabilityView />
           </AdminShell>
         )}
 
         {/* SEÇÃO: Usuários (cadastros + pendências + tabela) */}
         {section === "users" && (
-        <AdminShell title="Usuários" onBack={() => setSection(null)}>
+        <AdminShell title={tr("Usuários")} onBack={() => setSection(null)}>
         <div className="space-y-5">
         {/* config de cadastro */}
         <div className="flex items-center justify-between rounded-xl border border-border bg-surface p-4">
           <div>
-            <p className="text-sm font-medium text-ink">Permitir novos cadastros</p>
+            <p className="text-sm font-medium text-ink">{tr("Permitir novos cadastros")}</p>
             <p className="text-xs text-muted">
-              Quando ligado, a opção &quot;Cadastrar&quot; aparece na tela de login. Novos usuários ficam pendentes até você aprovar.
+              
+              {tr("Quando ligado, a opção \"Cadastrar\" aparece na tela de login. Novos usuários ficam pendentes até você aprovar.")}
             </p>
           </div>
           <button
@@ -225,7 +227,7 @@ export default function AdminPage() {
         </div>
 
         {pending.length > 0 && (
-          <p className="text-sm text-amber-400">{pending.length} usuário(s) aguardando aprovação.</p>
+          <p className="text-sm text-amber-400">{pending.length}  {tr("usuário(s) aguardando aprovação.")}</p>
         )}
 
         {/* tabela de usuários */}
@@ -233,10 +235,10 @@ export default function AdminPage() {
           <table className="w-full min-w-[480px] text-left text-sm">
             <thead className="bg-surface text-muted">
               <tr>
-                <th className="px-4 py-3 font-medium">Email</th>
-                <th className="px-4 py-3 font-medium">Papel</th>
-                <th className="px-4 py-3 font-medium">Status</th>
-                <th className="px-4 py-3 text-right font-medium">Ações</th>
+                <th className="px-4 py-3 font-medium">{tr("Email")}</th>
+                <th className="px-4 py-3 font-medium">{tr("Papel")}</th>
+                <th className="px-4 py-3 font-medium">{tr("Status")}</th>
+                <th className="px-4 py-3 text-right font-medium">{tr("Ações")}</th>
               </tr>
             </thead>
             <tbody>
@@ -252,17 +254,17 @@ export default function AdminPage() {
                   <td className="px-4 py-3">
                     <div className="flex justify-end gap-1">
                       {u.status !== "active" && (
-                        <button onClick={() => approve(u.id)} title="Aprovar" className="rounded-md p-1.5 text-green-400 hover:bg-surface2">
+                        <button onClick={() => approve(u.id)} title={tr("Aprovar")} className="rounded-md p-1.5 text-green-400 hover:bg-surface2">
                           <Check size={16} />
                         </button>
                       )}
                       {u.status !== "rejected" && u.role !== "admin" && (
-                        <button onClick={() => reject(u.id)} title="Rejeitar" className="rounded-md p-1.5 text-amber-400 hover:bg-surface2">
+                        <button onClick={() => reject(u.id)} title={tr("Rejeitar")} className="rounded-md p-1.5 text-amber-400 hover:bg-surface2">
                           <X size={16} />
                         </button>
                       )}
                       {u.role !== "admin" && (
-                        <button onClick={() => remove(u.id)} title="Excluir" className="rounded-md p-1.5 text-red-400 hover:bg-surface2">
+                        <button onClick={() => remove(u.id)} title={tr("Excluir")} className="rounded-md p-1.5 text-red-400 hover:bg-surface2">
                           <Trash2 size={16} />
                         </button>
                       )}
@@ -279,70 +281,71 @@ export default function AdminPage() {
 
         {/* SEÇÃO: Rede */}
         {section === "network" && (
-        <AdminShell title="Rede" onBack={() => setSection(null)}>
+        <AdminShell title={tr("Rede")} onBack={() => setSection(null)}>
         {net ? (
           <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
-            <p className="flex items-center gap-2 text-sm font-semibold text-ink"><Network size={16} /> Rede</p>
+            <p className="flex items-center gap-2 text-sm font-semibold text-ink"><Network size={16} />  {tr("Rede")}</p>
 
             <div>
-              <p className="text-sm text-ink-soft">IPs permitidos</p>
-              <p className="mb-1.5 text-xs text-muted">Um IP ou faixa CIDR por linha (ex.: 203.0.113.4 ou 10.0.0.0/24). <span className="text-ink-soft">Vazio = libera todos.</span> Aplicado imediatamente.</p>
+              <p className="text-sm text-ink-soft">{tr("IPs permitidos")}</p>
+              <p className="mb-1.5 text-xs text-muted">{tr("Um IP ou faixa CIDR por linha (ex.: 203.0.113.4 ou 10.0.0.0/24).")} <span className="text-ink-soft">{tr("Vazio = libera todos.")}</span>  {tr("Aplicado imediatamente.")}</p>
               <textarea
                 rows={3}
                 value={ipsText}
                 onChange={(e) => setIpsText(e.target.value)}
-                placeholder="(vazio = todos os IPs)"
+                placeholder={tr("(vazio = todos os IPs)")}
                 className="w-full resize-y rounded-lg border border-border bg-surface2 px-3 py-2 font-mono text-xs text-ink outline-none focus:border-accent placeholder:text-muted"
               />
               {net.trust_proxy === false && (
-                <p className="mt-1 text-xs text-amber-400/80">Atrás de um proxy reverso? Ligue TRUST_PROXY=1 no .env para o IP real ser lido do X-Forwarded-For.</p>
+                <p className="mt-1 text-xs text-amber-400/80">{tr("Atrás de um proxy reverso? Ligue TRUST_PROXY=1 no .env para o IP real ser lido do X-Forwarded-For.")}</p>
               )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <label className="text-sm">
-                <span className="text-ink-soft">Host (bind IP)</span>
+                <span className="text-ink-soft">{tr("Host (bind IP)")}</span>
                 <input value={net.host} onChange={(e) => setNet({ ...net, host: e.target.value })} placeholder="0.0.0.0"
                   className="mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-sm text-ink outline-none focus:border-accent" />
               </label>
               <label className="text-sm">
-                <span className="text-ink-soft">Porta</span>
+                <span className="text-ink-soft">{tr("Porta")}</span>
                 <input type="number" value={net.port} onChange={(e) => setNet({ ...net, port: Number(e.target.value) })} placeholder="8000"
                   className="mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-sm text-ink outline-none focus:border-accent" />
               </label>
             </div>
             <p className="rounded-lg bg-surface2 px-3 py-2 text-xs leading-5 text-muted">
-              Host/porta são aplicados no próximo deploy. Ponha no seu <span className="font-mono text-ink-soft">.env</span>:
+              
+              {tr("Host/porta são aplicados no próximo deploy. Ponha no seu")} <span className="font-mono text-ink-soft">.env</span>:
               <span className="mt-1 block font-mono text-ink-soft">SERVER_BIND={net.host}  ·  SERVER_PORT={net.port}</span>
-              e rode <span className="font-mono text-ink-soft">./update.sh</span> (ou <span className="font-mono">docker compose up -d</span>).
+              e rode <span className="font-mono text-ink-soft">./update.sh</span> (ou <span className="font-mono">{tr("docker compose up -d")}</span>).
             </p>
 
             <div className="flex items-center gap-3">
-              <button onClick={saveNet} className="rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover">Salvar rede</button>
+              <button onClick={saveNet} className="rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover">{tr("Salvar rede")}</button>
               {netSaved && <span className="text-xs text-green-400">Salvo ✓</span>}
             </div>
           </div>
-        ) : <p className="text-sm text-muted">Carregando…</p>}
+        ) : <p className="text-sm text-muted">{tr("Carregando…")}</p>}
         </AdminShell>
         )}
 
         {/* SEÇÃO: Atualização — compara com o repositório do projeto e atualiza */}
         {section === "update" && (
-          <AdminShell title="Atualização" onBack={() => setSection(null)}>
+          <AdminShell title={tr("Atualização")} onBack={() => setSection(null)}>
             <UpdateSection />
           </AdminShell>
         )}
 
         {/* SEÇÃO: Sincronização entre instâncias */}
         {section === "sync" && (
-          <AdminShell title="Sincronização" onBack={() => setSection(null)}>
+          <AdminShell title={tr("Sincronização")} onBack={() => setSection(null)}>
             <SyncAdmin />
           </AdminShell>
         )}
 
         {/* SEÇÃO: Backup e migração */}
         {section === "backup" && (
-          <AdminShell title="Backup e migração" onBack={() => setSection(null)}>
+          <AdminShell title={tr("Backup e migração")} onBack={() => setSection(null)}>
             <BackupCard />
           </AdminShell>
         )}
@@ -379,7 +382,7 @@ function UpdateSection() {
       setInfo(i);
       setDesktop(d);
     } catch (e) {
-      setMsg({ ok: false, text: e instanceof Error ? e.message : "Falha ao verificar." });
+      setMsg({ ok: false, text: e instanceof Error ? e.message : tr("Falha ao verificar.") });
     } finally {
       setChecking(false);
     }
@@ -399,7 +402,7 @@ function UpdateSection() {
     try {
       await api.post("/admin/update");
     } catch (e) {
-      setMsg({ ok: false, text: e instanceof Error ? e.message : "Não foi possível pedir a atualização." });
+      setMsg({ ok: false, text: e instanceof Error ? e.message : tr("Não foi possível pedir a atualização.") });
       setUpdating(false);
       return;
     }
@@ -416,8 +419,8 @@ function UpdateSection() {
         if (visto && (st === "done" || st === "failed")) {
           setInfo(i);
           setMsg(st === "done"
-            ? { ok: true, text: `Atualizado para a versão ${i.current_version}.` }
-            : { ok: false, text: "A atualização falhou no servidor." });
+            ? { ok: true, text: tr("Atualizado para a versão {current_version}.", { current_version: i.current_version }) }
+            : { ok: false, text: tr("A atualização falhou no servidor.") });
           break;
         }
       } catch {
@@ -435,35 +438,37 @@ function UpdateSection() {
   return (
     <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
       {!info && !msg ? (
-        <p className="flex items-center gap-2 text-sm text-muted"><Loader2 size={15} className="animate-spin" /> Verificando…</p>
+        <p className="flex items-center gap-2 text-sm text-muted"><Loader2 size={15} className="animate-spin" />  {tr("Verificando…")}</p>
       ) : (
         <>
           {info && (
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-sm text-ink">
-                  Versão instalada: <span className="font-mono">{info.current_version}</span>
+                  
+                  {tr("Versão instalada:")} <span className="font-mono">{info.current_version}</span>
                 </p>
                 {info.error ? (
                   <p className="mt-0.5 text-xs text-red-400">{info.error}</p>
                 ) : disponivel ? (
                   <p className="mt-0.5 text-xs text-amber-300">
-                    Nova versão disponível{nova ? <>: <span className="font-mono">{nova}</span></> : ""}
+                    
+                    {tr("Nova versão disponível")}{nova ? <>: <span className="font-mono">{nova}</span></> : ""}
                   </p>
                 ) : (
-                  <p className="mt-0.5 flex items-center gap-1 text-xs text-green-400"><Check size={13} /> Você está na versão mais recente</p>
+                  <p className="mt-0.5 flex items-center gap-1 text-xs text-green-400"><Check size={13} />  {tr("Você está na versão mais recente")}</p>
                 )}
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={check} disabled={checking || updating}
                   className="flex items-center gap-1.5 rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover disabled:opacity-50">
-                  <RefreshCw size={14} className={checking ? "animate-spin" : ""} /> Verificar
+                  <RefreshCw size={14} className={checking ? "animate-spin" : ""} />  {tr("Verificar")}
                 </button>
                 {disponivel && podeAtualizar && (
                   <button onClick={updateNow} disabled={updating}
                     className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
                     {updating ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                    {updating ? "Atualizando…" : "Atualizar agora"}
+                    {updating ? tr("Atualizando…") : tr("Atualizar agora")}
                   </button>
                 )}
               </div>
@@ -471,15 +476,16 @@ function UpdateSection() {
           )}
           {disponivel && !podeAtualizar && (
             <p className="text-xs text-muted">
-              Para atualizar por aqui, suba o atualizador no servidor:{" "}
-              <span className="font-mono text-ink-soft">docker compose up -d updater</span>
+              
+              {tr("Para atualizar por aqui, suba o atualizador no servidor:")}{" "}
+              <span className="font-mono text-ink-soft">{tr("docker compose up -d updater")}</span>
             </p>
           )}
           {msg && <p className={`text-sm ${msg.ok ? "text-green-400" : "text-red-400"}`}>{msg.text}</p>}
           {log && msg && !msg.ok && (
             <div>
               <button onClick={() => setShowLog((v) => !v)} className="text-xs text-muted hover:text-ink">
-                {showLog ? "Ocultar log" : "Ver log"}
+                {showLog ? tr("Ocultar log") : tr("Ver log")}
               </button>
               {showLog && (
                 <pre className="mt-1.5 max-h-60 overflow-auto rounded-lg bg-surface2 p-3 font-mono text-[11px] text-ink-soft">{log}</pre>
@@ -568,9 +574,9 @@ function BackupCard() {
       setWithPass(false);
       setExportPass("");
       setExportPass2("");
-      setResult({ ok: true, text: withPass ? "Backup exportado com senha." : "Backup exportado." });
+      setResult({ ok: true, text: withPass ? tr("Backup exportado com senha.") : tr("Backup exportado.") });
     } catch (e) {
-      setResult({ ok: false, text: e instanceof Error ? e.message : "Falha ao exportar" });
+      setResult({ ok: false, text: e instanceof Error ? e.message : tr("Falha ao exportar") });
     } finally {
       setBusy(false);
     }
@@ -595,9 +601,9 @@ function BackupCard() {
       }
       clearImport();
       setPanel(null);
-      setResult({ ok: true, text: data?.note ?? "Backup importado." });
+      setResult({ ok: true, text: data?.note ?? tr("Backup importado.") });
     } catch (e) {
-      setResult({ ok: false, text: e instanceof Error ? e.message : "Falha ao importar" });
+      setResult({ ok: false, text: e instanceof Error ? e.message : tr("Falha ao importar") });
     } finally {
       setBusy(false);
     }
@@ -611,7 +617,7 @@ function BackupCard() {
       // banco vazio: a sessão não existe mais → volta ao primeiro uso
       window.location.href = "/setup";
     } catch (e) {
-      setResult({ ok: false, text: e instanceof Error ? e.message : "Falha ao resetar" });
+      setResult({ ok: false, text: e instanceof Error ? e.message : tr("Falha ao resetar") });
       setBusy(false);
     }
   }
@@ -623,15 +629,15 @@ function BackupCard() {
     <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
       <div className="flex flex-wrap items-center gap-2.5">
         <button onClick={() => fileRef.current?.click()} disabled={busy} className={btn("import", "border-accent/60 bg-accent/10 text-ink")}>
-          <Upload size={14} /> Importar
+          <Upload size={14} />  {tr("Importar")}
         </button>
         <input ref={fileRef} type="file" accept=".backup,.dump" className="hidden"
           onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickFile(f); }} />
         <button onClick={() => open("export")} disabled={busy} className={btn("export", "border-accent/60 bg-accent/10 text-ink")}>
-          <Download size={14} /> Exportar
+          <Download size={14} />  {tr("Exportar")}
         </button>
         <button onClick={() => open("reset")} disabled={busy} className={`${btn("reset", "border-red-500/60 bg-red-500/10 text-red-300")} ml-auto`}>
-          <Trash2 size={14} /> Resetar
+          <Trash2 size={14} />  {tr("Resetar")}
         </button>
       </div>
 
@@ -639,26 +645,27 @@ function BackupCard() {
         <div className="space-y-2.5 rounded-lg border border-border bg-surface2/40 p-3">
           <label className="flex items-center justify-between gap-3 text-sm text-ink">
             <span className="flex items-center gap-1.5">
-              Proteger com senha
-              <InfoDot text="Com senha, o backup pode ser importado em outra instalação (outro servidor ou o app desktop). Sem senha, só nesta." />
+              
+              {tr("Proteger com senha")}
+              <InfoDot text={tr("Com senha, o backup pode ser importado em outra instalação (outro servidor ou o app desktop). Sem senha, só nesta.")} />
             </span>
             <Toggle on={withPass} onChange={setWithPass} />
           </label>
           {withPass && (
             <div className="grid gap-2 sm:grid-cols-2">
               <input type="password" value={exportPass} onChange={(e) => setExportPass(e.target.value)}
-                placeholder="Senha (mín. 8 caracteres)" autoComplete="new-password" className={inputCls} />
+                placeholder={tr("Senha (mín. 8 caracteres)")} autoComplete="new-password" className={inputCls} />
               <input type="password" value={exportPass2} onChange={(e) => setExportPass2(e.target.value)}
                 placeholder="Repita a senha" autoComplete="new-password" className={inputCls} />
               {exportPass2 && exportPass !== exportPass2 && (
-                <p className="text-xs text-red-400 sm:col-span-2">As senhas não conferem.</p>
+                <p className="text-xs text-red-400 sm:col-span-2">{tr("As senhas não conferem.")}</p>
               )}
             </div>
           )}
           <div className="flex justify-end">
             <button onClick={exportBackup} disabled={busy || !exportPassOk}
               className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} Baixar backup
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}  {tr("Baixar backup")}
             </button>
           </div>
         </div>
@@ -667,21 +674,23 @@ function BackupCard() {
       {panel === "import" && file && (
         <div className="space-y-2.5 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm">
           <p className="text-ink">
-            Importar <span className="font-mono text-xs">{file.name}</span>?{" "}
-            <span className="text-red-300">Substitui todos os dados atuais</span> (usuários, chats, tudo).
+            
+            {tr("Importar")} <span className="font-mono text-xs">{file.name}</span>?{" "}
+            <span className="text-red-300">{tr("Substitui todos os dados atuais")}</span>  {tr("(usuários, chats, tudo).")}
           </p>
           {needsPass && (
             <input type="password" value={importPass} onChange={(e) => setImportPass(e.target.value)}
-              placeholder="Senha do backup" autoComplete="off" autoFocus className={inputCls} />
+              placeholder={tr("Senha do backup")} autoComplete="off" autoFocus className={inputCls} />
           )}
           {showLegacy && (
             <input type="password" value={legacySecret} onChange={(e) => setLegacySecret(e.target.value)}
-              placeholder="APP_SECRET da instalação de origem" autoComplete="off"
+              placeholder={tr("APP_SECRET da instalação de origem")} autoComplete="off"
               className={`${inputCls} font-mono placeholder:font-sans`} />
           )}
           <div className="flex items-center justify-end gap-2">
             <button onClick={() => { clearImport(); setPanel(null); }} className="rounded-full border border-border px-4 py-1.5 text-xs text-muted hover:text-ink">
-              Cancelar
+              
+              {tr("Cancelar")}
             </button>
             <button onClick={importBackup} disabled={busy || (needsPass && !importPass) || (showLegacy && !legacySecret)}
               className="flex items-center gap-1.5 rounded-full bg-red-500/90 px-4 py-1.5 text-xs font-medium text-white hover:bg-red-500 disabled:opacity-60">
@@ -694,22 +703,22 @@ function BackupCard() {
       {panel === "reset" && (
         <div className="space-y-2.5 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm">
           <p className="text-ink">
-            <span className="font-medium text-red-300">Apaga tudo</span> — usuários, chats, modelos, memórias,
-            conexões, anexos e projetos — e volta a instalação ao primeiro uso. Não tem volta.
+            <span className="font-medium text-red-300">{tr("Apaga tudo")}</span>  {tr("— usuários, chats, modelos, memórias, conexões, anexos e projetos — e volta a instalação ao primeiro uso. Não tem volta.")}
           </p>
           <div className="grid gap-2 sm:grid-cols-2">
             <input type="password" value={resetPass} onChange={(e) => setResetPass(e.target.value)}
-              placeholder="Sua senha" autoComplete="current-password" autoFocus className={inputCls} />
+              placeholder={tr("Sua senha")} autoComplete="current-password" autoFocus className={inputCls} />
             <input value={resetWord} onChange={(e) => setResetWord(e.target.value)}
-              placeholder='Digite "APAGAR" para confirmar' autoComplete="off" className={inputCls} />
+              placeholder={tr("Digite \"APAGAR\" para confirmar")} autoComplete="off" className={inputCls} />
           </div>
           <div className="flex items-center justify-end gap-2">
             <button onClick={() => { setPanel(null); setResetPass(""); setResetWord(""); }} className="rounded-full border border-border px-4 py-1.5 text-xs text-muted hover:text-ink">
-              Cancelar
+              
+              {tr("Cancelar")}
             </button>
             <button onClick={resetAll} disabled={busy || !resetPass || resetWord.trim().toUpperCase() !== "APAGAR"}
               className="flex items-center gap-1.5 rounded-full bg-red-500/90 px-4 py-1.5 text-xs font-medium text-white hover:bg-red-500 disabled:opacity-60">
-              {busy ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />} Apagar tudo
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}  {tr("Apagar tudo")}
             </button>
           </div>
         </div>

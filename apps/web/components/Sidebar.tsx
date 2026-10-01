@@ -25,6 +25,7 @@ import { api } from "@/lib/api";
 import { SHORTCUTS, resolveBinding, prettyCombo, type ShortcutMap } from "@/lib/shortcuts";
 import ChatItem, { ChatActions, ProjectNamesContext } from "./ChatItem";
 import UserMenu from "./UserMenu";
+import { tr } from "@/lib/i18n";
 
 // ordem PADRÃO da composição da barra (deve casar com SIDEBAR_ITEMS do
 // SettingsModal). A ordem/visibilidade efetiva vem de profile.interface.
@@ -61,7 +62,7 @@ function groupByDate(chats: Chat[]): { label: string; chats: Chat[] }[] {
     else groups["Anteriores"].push(c);
   }
   const out: { label: string; chats: Chat[] }[] = [];
-  if (pinned.length) out.push({ label: "Fixados", chats: pinned });
+  if (pinned.length) out.push({ label: tr("Fixados"), chats: pinned });
   for (const [label, cs] of Object.entries(groups)) if (cs.length) out.push({ label, chats: cs });
   return out;
 }
@@ -272,31 +273,31 @@ export default function Sidebar({
   if (collapsed) {
     return (
       <aside className="flex w-14 shrink-0 flex-col items-center gap-1 overflow-hidden border-r border-transparent bg-sidebar py-3 transition-[width] duration-300 ease-in-out hover:border-border">
-        <button onClick={onToggleCollapse} title="Expandir" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
+        <button onClick={onToggleCollapse} title={tr("Expandir")} className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
           <PanelLeftOpen size={18} />
         </button>
-        <button onClick={onNewChat} title="Novo Chat" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
+        <button onClick={onNewChat} title={tr("Novo Chat")} className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
           <SquarePen size={18} />
         </button>
-        <button onClick={onOpenConversations} title="Conversas" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
+        <button onClick={onOpenConversations} title={tr("Conversas")} className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
           <MessagesSquare size={18} />
         </button>
-        <button onClick={onSearch} title="Pesquisar" className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
+        <button onClick={onSearch} title={tr("Pesquisar")} className="rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink">
           <Search size={18} />
         </button>
         {show("sb_automations") && (
-          <button onClick={onOpenAutomations} title="Automações" aria-current={activeView === "automations" ? "page" : undefined} className={`relative rounded-lg p-2 transition-colors ${activeView === "automations" ? "bg-surface2 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}>
+          <button onClick={onOpenAutomations} title={tr("Automações")} aria-current={activeView === "automations" ? "page" : undefined} className={`relative rounded-lg p-2 transition-colors ${activeView === "automations" ? "bg-surface2 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}>
             <CalendarClock size={18} />
             {unread > 0 && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-accent" />}
           </button>
         )}
         {show("sb_codespace") && (
-          <button onClick={onOpenCodespace} title="Codespace" aria-current={activeView === "codespace" ? "page" : undefined} className={`rounded-lg p-2 transition-colors ${activeView === "codespace" ? "bg-surface2 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}>
+          <button onClick={onOpenCodespace} title={tr("Codespace")} aria-current={activeView === "codespace" ? "page" : undefined} className={`rounded-lg p-2 transition-colors ${activeView === "codespace" ? "bg-surface2 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}>
             <Code2 size={18} />
           </button>
         )}
         {show("sb_workspace") && (
-          <button onClick={onOpenWorkspace} title="Espaço de Trabalho" aria-current={activeView === "workspace" ? "page" : undefined} className={`rounded-lg p-2 transition-colors ${activeView === "workspace" ? "bg-surface2 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}>
+          <button onClick={onOpenWorkspace} title={tr("Espaço de Trabalho")} aria-current={activeView === "workspace" ? "page" : undefined} className={`rounded-lg p-2 transition-colors ${activeView === "workspace" ? "bg-surface2 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}>
             <LayoutGrid size={18} />
           </button>
         )}
@@ -320,9 +321,9 @@ export default function Sidebar({
     if (!show(key)) return null;
     switch (key) {
       case "sb_new_chat":
-        return <NavButton key={key} icon={<SquarePen size={17} />} label="Novo Chat" collapsed={false} onClick={onNewChat} trailing={newChatCombo ? <Kbd combo={newChatCombo} /> : undefined} />;
+        return <NavButton key={key} icon={<SquarePen size={17} />} label={tr("Novo Chat")} collapsed={false} onClick={onNewChat} trailing={newChatCombo ? <Kbd combo={newChatCombo} /> : undefined} />;
       case "sb_conversations":
-        return <NavButton key={key} icon={<MessagesSquare size={17} />} label="Conversas" collapsed={false} onClick={onOpenConversations} />;
+        return <NavButton key={key} icon={<MessagesSquare size={17} />} label={tr("Conversas")} collapsed={false} onClick={onOpenConversations} />;
       case "sb_automations":
         return (
           <button
@@ -332,25 +333,25 @@ export default function Sidebar({
             className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-sm font-medium transition-colors ${activeView === "automations" ? "bg-surface2 text-ink" : "text-ink hover:bg-hover"}`}
           >
             <span className={`shrink-0 ${activeView === "automations" ? "text-accent-hover" : "text-ink-soft"}`}><CalendarClock size={17} /></span>
-            <span className="truncate">Automações</span>
+            <span className="truncate">{tr("Automações")}</span>
             {unread > 0 && <span className="ml-auto rounded-full bg-accent px-1.5 text-[11px] font-medium text-white">{unread}</span>}
           </button>
         );
       case "sb_codespace":
-        return <NavButton key={key} icon={<Code2 size={17} />} label="Codespace" collapsed={false} onClick={onOpenCodespace} active={activeView === "codespace"} />;
+        return <NavButton key={key} icon={<Code2 size={17} />} label={tr("Codespace")} collapsed={false} onClick={onOpenCodespace} active={activeView === "codespace"} />;
       case "sb_workspace":
-        return <NavButton key={key} icon={<LayoutGrid size={17} />} label="Espaço de Trabalho" collapsed={false} onClick={onOpenWorkspace} active={activeView === "workspace"} />;
+        return <NavButton key={key} icon={<LayoutGrid size={17} />} label={tr("Espaço de Trabalho")} collapsed={false} onClick={onOpenWorkspace} active={activeView === "workspace"} />;
       case "sb_library":
-        return <p key={key} className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted/70">Biblioteca</p>;
+        return <p key={key} className="px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted/70">{tr("Biblioteca")}</p>;
       case "sb_models":
         return (
           <div key={key}>
             <SectionHeader
-              label="Modelos"
+              label={tr("Modelos")}
               icon={<LayoutGrid size={16} />}
               onToggle={() => toggle("models")}
               action={
-                <button onClick={onOpenWorkspace} title="Gerenciar" className="text-muted transition-colors hover:text-ink-soft">
+                <button onClick={onOpenWorkspace} title={tr("Gerenciar")} className="text-muted transition-colors hover:text-ink-soft">
                   <Wrench size={14} />
                 </button>
               }
@@ -380,11 +381,11 @@ export default function Sidebar({
         return (
           <div key={key}>
             <SectionHeader
-              label="Pastas"
+              label={tr("Pastas")}
               icon={<FolderIcon size={16} />}
               onToggle={() => toggle("folders")}
               action={
-                <button onClick={onCreateFolder} title="Nova pasta" className="text-muted transition-colors hover:text-ink-soft">
+                <button onClick={onCreateFolder} title={tr("Nova pasta")} className="text-muted transition-colors hover:text-ink-soft">
                   <FolderPlus size={14} />
                 </button>
               }
@@ -413,7 +414,7 @@ export default function Sidebar({
       case "sb_chats":
         return (
           <div key={key}>
-            <SectionHeader label="Chats" icon={<FileText size={16} />} onToggle={() => toggle("chats")} />
+            <SectionHeader label={tr("Chats")} icon={<FileText size={16} />} onToggle={() => toggle("chats")} />
             {sections.chats && (
               <div
                 className="mt-1"
@@ -450,14 +451,15 @@ export default function Sidebar({
       <div className="flex items-center justify-between px-3 py-3 max-md:px-4 max-md:py-2.5">
         <span className="flex items-center gap-2.5 font-semibold tracking-tight text-ink max-md:text-[19px]">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="AI Workspace" className="h-6 w-6 shrink-0 rounded-md" />
-          AI Workspace
+          <img src="/logo.png" alt={tr("AI Workspace")} className="h-6 w-6 shrink-0 rounded-md" />
+          
+          {tr("AI Workspace")}
         </span>
         <div className="flex items-center gap-0.5">
-          <button onClick={onSearch} title="Pesquisar" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink max-md:rounded-full max-md:p-2.5 max-md:text-ink max-md:[&_svg]:size-[22px]">
+          <button onClick={onSearch} title={tr("Pesquisar")} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink max-md:rounded-full max-md:p-2.5 max-md:text-ink max-md:[&_svg]:size-[22px]">
             <Search size={18} />
           </button>
-          <button onClick={onToggleCollapse} title="Colapsar" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink max-md:rounded-full max-md:p-2.5 max-md:text-ink max-md:[&_svg]:size-[22px]">
+          <button onClick={onToggleCollapse} title={tr("Colapsar")} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink max-md:rounded-full max-md:p-2.5 max-md:text-ink max-md:[&_svg]:size-[22px]">
             <PanelLeftClose size={18} />
           </button>
         </div>

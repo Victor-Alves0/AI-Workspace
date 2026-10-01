@@ -3,6 +3,7 @@
 // Requer contexto seguro (HTTPS ou localhost) — navegadores bloqueiam SW em HTTP.
 
 import { api } from "@/lib/api";
+import { tr } from "@/lib/i18n";
 
 export function pushSupported(): boolean {
   return (
@@ -52,25 +53,25 @@ async function isBrave(): Promise<boolean> {
 async function subscribeFailure(e: unknown): Promise<Error> {
   const name = e instanceof DOMException ? e.name : "";
   if (name === "NotAllowedError") {
-    return new Error("Permissão de notificação negada — libere-a no cadeado da barra de endereço.");
+    return new Error(tr("Permissão de notificação negada — libere-a no cadeado da barra de endereço."));
   }
   if (await isBrave()) {
     return new Error(
-      "O Brave bloqueia o serviço de push por padrão. Abra brave://settings/privacy, ligue "
-      + "“Usar serviços do Google para mensagens push” e reinicie o navegador.",
+      tr("O Brave bloqueia o serviço de push por padrão. Abra brave://settings/privacy, ligue ")
+      + tr("“Usar serviços do Google para mensagens push” e reinicie o navegador."),
     );
   }
   return new Error(
-    "O navegador não conseguiu falar com o serviço de push. Uma extensão, firewall ou proxy "
-    + "pode estar bloqueando — verifique e tente de novo.",
+    tr("O navegador não conseguiu falar com o serviço de push. Uma extensão, firewall ou proxy ")
+    + tr("pode estar bloqueando — verifique e tente de novo."),
   );
 }
 
 /** Pede permissão, registra o SW e inscreve; sincroniza com o servidor. */
 export async function enablePush(): Promise<void> {
-  if (!pushSupported()) throw new Error("Notificações não são suportadas neste navegador (precisa de HTTPS).");
+  if (!pushSupported()) throw new Error(tr("Notificações não são suportadas neste navegador (precisa de HTTPS)."));
   const perm = await Notification.requestPermission();
-  if (perm !== "granted") throw new Error("Permissão de notificação negada.");
+  if (perm !== "granted") throw new Error(tr("Permissão de notificação negada."));
   const reg = await navigator.serviceWorker.register("/sw.js");
   await navigator.serviceWorker.ready;
   const { public_key } = await api.get<{ public_key: string }>("/push/vapid");

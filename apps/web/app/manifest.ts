@@ -1,4 +1,5 @@
 import type { MetadataRoute } from "next";
+import { tr } from "@/lib/i18n";
 
 // gerado no build (o export estático do desktop exige rota estática explícita)
 export const dynamic = "force-static";
@@ -7,8 +8,8 @@ export const dynamic = "force-static";
 // janela própria (standalone), sem a barra do navegador — cara de app nativo.
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "AI Workspace",
-    short_name: "AI Workspace",
+    name: tr("AI Workspace"),
+    short_name: tr("AI Workspace"),
     description: "Seu workspace de IA local-first",
     start_url: "/",
     display: "standalone",

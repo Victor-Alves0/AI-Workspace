@@ -6,20 +6,21 @@ import { Check, Globe, Loader2, Monitor, X } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Model } from "@/lib/types";
 import ModelField from "./ModelField";
+import { tr } from "@/lib/i18n";
 
 /* Botão "Testar conexão": chama um endpoint e mostra ok/erro inline. */
 type TestResult = { ok: boolean; error?: string | null; count?: number };
-function TestButton({ run, label = "Testar conexão" }: { run: () => Promise<TestResult>; label?: string }) {
+function TestButton({ run, label = tr("Testar conexão") }: { run: () => Promise<TestResult>; label?: string }) {
   const [state, setState] = useState<"idle" | "busy" | "ok" | "fail">("idle");
   const [msg, setMsg] = useState("");
   async function go() {
     setState("busy"); setMsg("");
     try {
       const r = await run();
-      if (r.ok) { setState("ok"); setMsg(typeof r.count === "number" ? `${r.count} resultado(s)` : "Conectado"); }
-      else { setState("fail"); setMsg(r.error || "Falhou"); }
+      if (r.ok) { setState("ok"); setMsg(typeof r.count === "number" ? `${r.count} resultado(s)` : tr("Conectado")); }
+      else { setState("fail"); setMsg(r.error || tr("Falhou")); }
     } catch (e: any) {
-      setState("fail"); setMsg(e?.message || "Falhou");
+      setState("fail"); setMsg(e?.message || tr("Falhou"));
     }
   }
   return (
@@ -87,7 +88,7 @@ function KeyStatus({ label, configured, hint }: { label: string; configured: boo
         {configured ? (
           <span className="shrink-0 text-xs text-green-400">configurada ✓</span>
         ) : (
-          <span className="shrink-0 text-xs text-amber-400">defina em Conexões → APIs</span>
+          <span className="shrink-0 text-xs text-amber-400">{tr("defina em Conexões → APIs")}</span>
         )}
       </div>
       {hint && <p className="text-xs text-muted">{hint}</p>}
@@ -97,18 +98,18 @@ function KeyStatus({ label, configured, hint }: { label: string; configured: boo
 
 /* ----------------------------- Pesquisa na Web ---------------------------- */
 const ENGINES: { key: string; label: string; keyed: boolean; note: string }[] = [
-  { key: "metasearch", label: "Metabusca", keyed: false, note: "Vários motores · sem chave" },
-  { key: "tavily", label: "Tavily", keyed: true, note: "Requer chave" },
-  { key: "brave", label: "Brave Search", keyed: true, note: "Requer chave" },
+  { key: "metasearch", label: tr("Metabusca"), keyed: false, note: tr("Vários motores · sem chave") },
+  { key: "tavily", label: tr("Tavily"), keyed: true, note: tr("Requer chave") },
+  { key: "brave", label: tr("Brave Search"), keyed: true, note: tr("Requer chave") },
 ];
 // motores da metabusca (lib ddgs, roda no próprio servidor); nenhum marcado = todos
 const META_ENGINES: [string, string][] = [
-  ["bing", "Bing"], ["brave", "Brave"], ["duckduckgo", "DuckDuckGo"], ["google", "Google"],
-  ["mojeek", "Mojeek"], ["startpage", "Startpage"], ["yahoo", "Yahoo"], ["yandex", "Yandex"],
-  ["wikipedia", "Wikipedia"],
+  ["bing", tr("Bing")], ["brave", tr("Brave")], ["duckduckgo", "DuckDuckGo"], ["google", tr("Google")],
+  ["mojeek", tr("Mojeek")], ["startpage", tr("Startpage")], ["yahoo", tr("Yahoo")], ["yandex", tr("Yandex")],
+  ["wikipedia", tr("Wikipedia")],
 ];
 const REGIONS: [string, string][] = [
-  ["wt-wt", "Global"], ["br-pt", "Brasil"], ["pt-pt", "Portugal"], ["us-en", "Estados Unidos"],
+  ["wt-wt", tr("Global")], ["br-pt", tr("Brasil")], ["pt-pt", tr("Portugal")], ["us-en", tr("Estados Unidos")],
 ];
 // preferências antigas (DuckDuckGo / SearXNG) = a metabusca
 const normEngine = (k: string) => (k === "duckduckgo" || k === "searxng" ? "metasearch" : k);
@@ -130,17 +131,17 @@ export function WebSearchPanel({ value, onChange, status, scope = "model" }: Pan
   return (
     <div>
       {scope !== "user" && (
-        <p className="text-xs leading-5 text-muted">Mecanismo que este modelo usa na busca. Configure a chave (quando exigida) e filtros.</p>
+        <p className="text-xs leading-5 text-muted">{tr("Mecanismo que este modelo usa na busca. Configure a chave (quando exigida) e filtros.")}</p>
       )}
-      <Heading>Mecanismo</Heading>
+      <Heading>{tr("Mecanismo")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3">
-        <Row label="Mecanismo principal">
+        <Row label={tr("Mecanismo principal")}>
           <Select value={primary} onChange={(e) => wsSet("primary", e.target.value)} className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
             {ENGINES.map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}
           </Select>
         </Row>
         <div className="border-t border-border">
-          <Row label="Permitir múltiplos mecanismos" sub="Consulta vários e mescla (dedup por URL)">
+          <Row label={tr("Permitir múltiplos mecanismos")} sub={tr("Consulta vários e mescla (dedup por URL)")}>
             <Toggle on={multi} onClick={() => wsSet("multi", !multi)} />
           </Row>
         </div>
@@ -157,9 +158,9 @@ export function WebSearchPanel({ value, onChange, status, scope = "model" }: Pan
         )}
       </div>
 
-      <Heading>Configuração dos mecanismos</Heading>
+      <Heading>{tr("Configuração dos mecanismos")}</Heading>
       <div className="space-y-2">
-        {active.length === 0 && <p className="text-xs text-muted">Selecione ao menos um mecanismo acima.</p>}
+        {active.length === 0 && <p className="text-xs text-muted">{tr("Selecione ao menos um mecanismo acima.")}</p>}
         {active.map((e) => (
           <div key={e.key} className="rounded-xl border border-border bg-surface px-3.5 py-2.5">
             <div className="flex items-center justify-between">
@@ -169,14 +170,14 @@ export function WebSearchPanel({ value, onChange, status, scope = "model" }: Pan
             {e.key === "metasearch" && (
               <div className="space-y-2.5 pt-2.5">
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-xs text-muted">Região</p>
+                  <p className="text-xs text-muted">{tr("Região")}</p>
                   <Select value={ws.region ?? "wt-wt"} onChange={(ev) => wsSet("region", ev.target.value)}
                     className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
                     {REGIONS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
                   </Select>
                 </div>
                 <div>
-                  <p className="mb-1.5 text-xs text-muted">Motores {motores.length === 0 && <span className="text-ink-soft">· todos</span>}</p>
+                  <p className="mb-1.5 text-xs text-muted">{tr("Motores")} {motores.length === 0 && <span className="text-ink-soft">· todos</span>}</p>
                   <div className="flex flex-wrap gap-1.5">
                     {META_ENGINES.map(([k, l]) => {
                       const sel = motores.includes(k);
@@ -189,8 +190,8 @@ export function WebSearchPanel({ value, onChange, status, scope = "model" }: Pan
                 </div>
               </div>
             )}
-            {e.key === "tavily" && <KeyStatus label="Chave Tavily" configured={status?.tavily ?? false} />}
-            {e.key === "brave" && <KeyStatus label="Chave Brave Search" configured={status?.brave ?? false} />}
+            {e.key === "tavily" && <KeyStatus label={tr("Chave Tavily")} configured={status?.tavily ?? false} />}
+            {e.key === "brave" && <KeyStatus label={tr("Chave Brave Search")} configured={status?.brave ?? false} />}
             <div className="pt-2">
               <TestButton run={() => api.post<TestResult>("/settings/test/web", { provider: e.key, engines: ws.engines ?? "", region: ws.region ?? "" })} />
             </div>
@@ -198,11 +199,11 @@ export function WebSearchPanel({ value, onChange, status, scope = "model" }: Pan
         ))}
       </div>
 
-      <Heading>Filtros</Heading>
+      <Heading>{tr("Filtros")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <NumberField label="Resultados por busca" value={maxResults} onChange={(v) => wsSet("max_results", v)} suffix="itens" />
+        <NumberField label={tr("Resultados por busca")} value={maxResults} onChange={(v) => wsSet("max_results", v)} suffix="itens" />
         <div className="py-2">
-          <p className="mb-1 text-sm text-ink-soft">Excluir domínios</p>
+          <p className="mb-1 text-sm text-ink-soft">{tr("Excluir domínios")}</p>
           <input value={ws.domain_filter ?? ""} onChange={(e) => wsSet("domain_filter", e.target.value)} placeholder="ex.: pinterest.com, exemplo.org"
             className="w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent" />
         </div>
@@ -220,17 +221,16 @@ export function BrowserPanel({ value, onChange }: { value: Record<string, any>; 
     <div className="mt-6">
       <Heading>Navegador (Browser)</Heading>
       <p className="mb-2 text-xs leading-5 text-muted">
-        Um Chromium headless que a IA controla (navega com JS, clica, digita, tira screenshot).
-        Requer o serviço <code className="rounded bg-surface2 px-1">browser</code> (browserless).
-        Deixe a URL em branco para usar a configuração do servidor (BROWSER_WS_URL).
+        
+        {tr("Um Chromium headless que a IA controla (navega com JS, clica, digita, tira screenshot). Requer o serviço")} <code className="rounded bg-surface2 px-1">browser</code>  {tr("(browserless). Deixe a URL em branco para usar a configuração do servidor (BROWSER_WS_URL).")}
       </p>
       <div className="rounded-xl border border-border bg-surface px-3">
-        <Row label="Ativado" sub="Desligue para bloquear a ferramenta do navegador">
+        <Row label={tr("Ativado")} sub={tr("Desligue para bloquear a ferramenta do navegador")}>
           <Toggle on={enabled} onClick={() => set("enabled", !enabled)} />
         </Row>
         <div className="border-t border-border py-2.5">
-          <div className="flex items-center gap-2 text-sm font-medium text-ink"><Monitor size={14} className="text-accent-hover" /> Endpoint CDP</div>
-          <p className="mb-1 mt-2 text-xs text-muted">URL WebSocket (ws://host:porta)</p>
+          <div className="flex items-center gap-2 text-sm font-medium text-ink"><Monitor size={14} className="text-accent-hover" />  {tr("Endpoint CDP")}</div>
+          <p className="mb-1 mt-2 text-xs text-muted">{tr("URL WebSocket (ws://host:porta)")}</p>
           <input value={b.ws_url ?? ""} onChange={(e) => set("ws_url", e.target.value)} placeholder="ws://browser:3000 ou local"
             className="w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-xs text-ink outline-none focus:border-accent" />
           <p className="mb-1 mt-2 text-xs text-muted">Token (opcional — protege o endpoint)</p>
@@ -247,10 +247,10 @@ export function BrowserPanel({ value, onChange }: { value: Record<string, any>; 
 
 /* -------------------------------- Finanças -------------------------------- */
 const FIN_PROVIDERS = [
-  { key: "yahoo", label: "Yahoo Finance", note: "Sem chave · preço + gráfico" },
-  { key: "finnhub", label: "Finnhub", note: "Requer chave · preço" },
-  { key: "alphavantage", label: "Alpha Vantage", note: "Requer chave · limite baixo" },
-  { key: "web", label: "Pesquisa na Web", note: "Fallback · sem gráfico" },
+  { key: "yahoo", label: tr("Yahoo Finance"), note: tr("Sem chave · preço + gráfico") },
+  { key: "finnhub", label: tr("Finnhub"), note: tr("Requer chave · preço") },
+  { key: "alphavantage", label: tr("Alpha Vantage"), note: tr("Requer chave · limite baixo") },
+  { key: "web", label: tr("Pesquisa na Web"), note: tr("Fallback · sem gráfico") },
 ];
 const FIN_CANON = ["yahoo", "finnhub", "alphavantage", "web"];
 
@@ -265,32 +265,32 @@ export function FinancePanel({ value, onChange, status }: PanelProps) {
   };
   return (
     <div>
-      <p className="text-xs leading-5 text-muted">Fonte das cotações. Tentados nesta ordem até um responder. Yahoo funciona sem chave.</p>
-      <Heading>Modo do card</Heading>
+      <p className="text-xs leading-5 text-muted">{tr("Fonte das cotações. Tentados nesta ordem até um responder. Yahoo funciona sem chave.")}</p>
+      <Heading>{tr("Modo do card")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3">
-        <Row label="Card visual (mini-gráfico)" sub="Quando o modelo não especifica">
+        <Row label={tr("Card visual (mini-gráfico)")} sub={tr("Quando o modelo não especifica")}>
           <Select value={fin.card_mode ?? "on_request"} onChange={(e) => onChange({ ...fin, card_mode: e.target.value })}
             className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
-            <option value="on_request">Só quando pedido</option>
-            <option value="always">Sempre mostrar</option>
+            <option value="on_request">{tr("Só quando pedido")}</option>
+            <option value="always">{tr("Sempre mostrar")}</option>
           </Select>
         </Row>
       </div>
-      <Heading>Provedores</Heading>
+      <Heading>{tr("Provedores")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3">
         {FIN_PROVIDERS.map((p, i) => (
           <div key={p.key} className={i > 0 ? "border-t border-border" : ""}>
             <Row label={p.label} sub={p.note}><Toggle on={enabled.has(p.key)} onClick={() => toggle(p.key)} /></Row>
             {enabled.has(p.key) && p.key === "finnhub" && (
-              <div className="pb-2"><KeyStatus label="Chave Finnhub" configured={status?.finnhub ?? false} hint="finnhub.io — free tier." /></div>
+              <div className="pb-2"><KeyStatus label={tr("Chave Finnhub")} configured={status?.finnhub ?? false} hint={tr("finnhub.io — free tier.")} /></div>
             )}
             {enabled.has(p.key) && p.key === "alphavantage" && (
-              <div className="pb-2"><KeyStatus label="Chave Alpha Vantage" configured={status?.alphavantage ?? false} hint="alphavantage.co — 25 req/dia." /></div>
+              <div className="pb-2"><KeyStatus label={tr("Chave Alpha Vantage")} configured={status?.alphavantage ?? false} hint="alphavantage.co — 25 req/dia." /></div>
             )}
           </div>
         ))}
       </div>
-      <p className="mt-2 text-xs text-muted">Sem nenhum marcado, usa o Yahoo.</p>
+      <p className="mt-2 text-xs text-muted">{tr("Sem nenhum marcado, usa o Yahoo.")}</p>
     </div>
   );
 }
@@ -298,11 +298,11 @@ export function FinancePanel({ value, onChange, status }: PanelProps) {
 /* ----------------------------- Extração de Texto -------------------------- */
 const EX_FORMATS = [
   { key: "pdf", label: "PDF", desc: "Documentos .pdf" },
-  { key: "docx", label: "Word", desc: "Documentos .docx" },
-  { key: "xlsx", label: "Excel", desc: "Planilhas .xlsx/.xlsm" },
-  { key: "pptx", label: "PowerPoint", desc: "Apresentações .pptx" },
+  { key: "docx", label: tr("Word"), desc: "Documentos .docx" },
+  { key: "xlsx", label: tr("Excel"), desc: "Planilhas .xlsx/.xlsm" },
+  { key: "pptx", label: "PowerPoint", desc: tr("Apresentações .pptx") },
   { key: "csv", label: "CSV", desc: "Tabelas .csv" },
-  { key: "text", label: "Texto puro", desc: "Markdown, JSON/YAML, logs, código e texto colado" },
+  { key: "text", label: tr("Texto puro"), desc: tr("Markdown, JSON/YAML, logs, código e texto colado") },
 ];
 
 export function TextExtractionPanel({ value, onChange }: PanelProps) {
@@ -312,8 +312,8 @@ export function TextExtractionPanel({ value, onChange }: PanelProps) {
   const num = (k: string, d: number): number | "" => (te[k] === "" ? "" : te[k] == null ? d : te[k]);
   return (
     <div>
-      <p className="text-xs leading-5 text-muted">Lê o texto de documentos anexados (só o texto vai ao modelo, já enxugado). Limites controlam o consumo de tokens.</p>
-      <Heading>Formatos</Heading>
+      <p className="text-xs leading-5 text-muted">{tr("Lê o texto de documentos anexados (só o texto vai ao modelo, já enxugado). Limites controlam o consumo de tokens.")}</p>
+      <Heading>{tr("Formatos")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3">
         {EX_FORMATS.map((f, i) => (
           <div key={f.key} className={i > 0 ? "border-t border-border" : ""}>
@@ -321,35 +321,35 @@ export function TextExtractionPanel({ value, onChange }: PanelProps) {
           </div>
         ))}
       </div>
-      <Heading>Filtros (economia de tokens)</Heading>
+      <Heading>{tr("Filtros (economia de tokens)")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <NumberField label="Máx. de caracteres" value={num("max_chars", 20000)} onChange={(v) => teSet("max_chars", v)} suffix="chars" />
-        <NumberField label="Máx. de páginas (PDF)" value={num("pdf_max_pages", 30)} onChange={(v) => teSet("pdf_max_pages", v)} suffix="págs" />
-        <NumberField label="Máx. de linhas (Excel/CSV)" value={num("xlsx_max_rows", 200)} onChange={(v) => teSet("xlsx_max_rows", v)} suffix="linhas" />
-        <Row label="Colapsar espaços em branco"><Toggle on={te.collapse_whitespace !== false} onClick={() => teSet("collapse_whitespace", te.collapse_whitespace === false)} /></Row>
+        <NumberField label={tr("Máx. de caracteres")} value={num("max_chars", 20000)} onChange={(v) => teSet("max_chars", v)} suffix="chars" />
+        <NumberField label={tr("Máx. de páginas (PDF)")} value={num("pdf_max_pages", 30)} onChange={(v) => teSet("pdf_max_pages", v)} suffix={tr("págs")} />
+        <NumberField label={tr("Máx. de linhas (Excel/CSV)")} value={num("xlsx_max_rows", 200)} onChange={(v) => teSet("xlsx_max_rows", v)} suffix="linhas" />
+        <Row label={tr("Colapsar espaços em branco")}><Toggle on={te.collapse_whitespace !== false} onClick={() => teSet("collapse_whitespace", te.collapse_whitespace === false)} /></Row>
       </div>
-      <Heading>OCR (imagens e PDFs escaneados)</Heading>
+      <Heading>{tr("OCR (imagens e PDFs escaneados)")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <Row label="Ativar OCR" sub="Lê texto de imagens e PDFs sem texto"><Toggle on={on("ocr")} onClick={() => teSet("ocr", !on("ocr"))} /></Row>
+        <Row label={tr("Ativar OCR")} sub={tr("Lê texto de imagens e PDFs sem texto")}><Toggle on={on("ocr")} onClick={() => teSet("ocr", !on("ocr"))} /></Row>
         {on("ocr") && (
           <>
             <div className="border-t border-border">
-              <Row label="Motor" sub="Tesseract é local/grátis; Visão usa o Roteador de Visão">
+              <Row label={tr("Motor")} sub={tr("Tesseract é local/grátis; Visão usa o Roteador de Visão")}>
                 <Select value={te.ocr_engine ?? "tesseract"} onChange={(e) => teSet("ocr_engine", e.target.value)} className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
                   <option value="tesseract">Tesseract (local)</option>
-                  <option value="vision">Modelo de visão</option>
+                  <option value="vision">{tr("Modelo de visão")}</option>
                 </Select>
               </Row>
             </div>
             {(te.ocr_engine ?? "tesseract") === "tesseract" && (
               <>
                 <div className="flex items-center justify-between gap-4 border-t border-border py-2 text-sm">
-                  <span className="text-ink-soft">Idiomas</span>
+                  <span className="text-ink-soft">{tr("Idiomas")}</span>
                   <input value={te.ocr_lang ?? "por+eng"} onChange={(e) => teSet("ocr_lang", e.target.value)} placeholder="por+eng"
                     className="w-40 rounded-lg border border-border bg-surface2 px-3 py-1.5 text-right font-mono text-xs text-ink outline-none focus:border-accent" />
                 </div>
                 <div className="border-t border-border">
-                  <NumberField label="Máx. de páginas p/ OCR (PDF)" value={num("ocr_max_pages", 10)} onChange={(v) => teSet("ocr_max_pages", v)} suffix="págs" />
+                  <NumberField label={tr("Máx. de páginas p/ OCR (PDF)")} value={num("ocr_max_pages", 10)} onChange={(v) => teSet("ocr_max_pages", v)} suffix={tr("págs")} />
                 </div>
               </>
             )}
@@ -368,25 +368,25 @@ export function DeepSearchPanel({ value, onChange, models = [] }: PanelProps) {
   const readPages = ds.read_pages !== false;
   return (
     <div>
-      <p className="text-xs leading-5 text-muted">Pesquisa profunda: planeja, busca, lê, resume e cita fontes. O modelo só usa quando você pede uma pesquisa profunda.</p>
-      <Heading>Modelo interno</Heading>
+      <p className="text-xs leading-5 text-muted">{tr("Pesquisa profunda: planeja, busca, lê, resume e cita fontes. O modelo só usa quando você pede uma pesquisa profunda.")}</p>
+      <Heading>{tr("Modelo interno")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-2">
-        <ModelField models={models} value={ds.model ?? ""} onChange={(v) => dsSet("model", v)} placeholder="Modelo padrão (barato)" />
-        <p className="mt-1 text-xs text-muted">Modelo do OpenRouter que planeja e resume (use um barato). Vazio = padrão.</p>
+        <ModelField models={models} value={ds.model ?? ""} onChange={(v) => dsSet("model", v)} placeholder={tr("Modelo padrão (barato)")} />
+        <p className="mt-1 text-xs text-muted">{tr("Modelo do OpenRouter que planeja e resume (use um barato). Vazio = padrão.")}</p>
       </div>
       <Heading>Amplitude e profundidade</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <NumberField label="Sub-perguntas por rodada" value={num("max_subqueries", 3)} onChange={(v) => dsSet("max_subqueries", v)} suffix="máx." />
-        <NumberField label="Rodadas (iterações)" value={num("max_rounds", 2)} onChange={(v) => dsSet("max_rounds", v)} suffix="máx." />
-        <NumberField label="Resultados por busca" value={num("max_results_per_query", 4)} onChange={(v) => dsSet("max_results_per_query", v)} suffix="itens" />
+        <NumberField label={tr("Sub-perguntas por rodada")} value={num("max_subqueries", 3)} onChange={(v) => dsSet("max_subqueries", v)} suffix={tr("máx.")} />
+        <NumberField label={tr("Rodadas (iterações)")} value={num("max_rounds", 2)} onChange={(v) => dsSet("max_rounds", v)} suffix={tr("máx.")} />
+        <NumberField label={tr("Resultados por busca")} value={num("max_results_per_query", 4)} onChange={(v) => dsSet("max_results_per_query", v)} suffix="itens" />
       </div>
-      <Heading>Leitura de páginas</Heading>
+      <Heading>{tr("Leitura de páginas")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <Row label="Ler o conteúdo das páginas" sub="Mais completo; desligado usa só os trechos"><Toggle on={readPages} onClick={() => dsSet("read_pages", !readPages)} /></Row>
+        <Row label={tr("Ler o conteúdo das páginas")} sub={tr("Mais completo; desligado usa só os trechos")}><Toggle on={readPages} onClick={() => dsSet("read_pages", !readPages)} /></Row>
         {readPages && (
           <>
-            <div className="border-t border-border"><NumberField label="Páginas por rodada" value={num("max_pages", 4)} onChange={(v) => dsSet("max_pages", v)} suffix="máx." /></div>
-            <div className="border-t border-border"><NumberField label="Caracteres por página" value={num("max_page_chars", 4000)} onChange={(v) => dsSet("max_page_chars", v)} suffix="chars" /></div>
+            <div className="border-t border-border"><NumberField label={tr("Páginas por rodada")} value={num("max_pages", 4)} onChange={(v) => dsSet("max_pages", v)} suffix={tr("máx.")} /></div>
+            <div className="border-t border-border"><NumberField label={tr("Caracteres por página")} value={num("max_page_chars", 4000)} onChange={(v) => dsSet("max_page_chars", v)} suffix="chars" /></div>
           </>
         )}
       </div>
@@ -422,10 +422,10 @@ export function GooglePanel({ value, onChange }: PanelProps) {
 
   return (
     <div>
-      <Heading>Contas liberadas</Heading>
+      <Heading>{tr("Contas liberadas")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
         {accounts.length === 0 ? (
-          <p className="py-2 text-xs text-muted">Nenhuma conta. Conecte em Integrações → Google Workspace.</p>
+          <p className="py-2 text-xs text-muted">{tr("Nenhuma conta. Conecte em Integrações → Google Workspace.")}</p>
         ) : (
           <>
             {accounts.map((a, i) => (
@@ -433,29 +433,29 @@ export function GooglePanel({ value, onChange }: PanelProps) {
                 <input type="checkbox" checked={effective.includes(a.id)} onChange={() => toggleAccount(a.id)}
                   className="h-4 w-4 shrink-0 accent-accent" />
                 <span className="min-w-0 flex-1 truncate text-ink">{a.email}</span>
-                {a.primary && <span className="shrink-0 text-[10px] text-muted">Principal</span>}
+                {a.primary && <span className="shrink-0 text-[10px] text-muted">{tr("Principal")}</span>}
               </label>
             ))}
           </>
         )}
       </div>
-      <Heading>Ativação — Gmail</Heading>
+      <Heading>{tr("Ativação — Gmail")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
         <Row label="Buscar e ler"><Toggle on={opOn("gmail_search")} onClick={() => toggleOp("gmail_search")} /></Row>
         <div className="border-t border-border"><Row label="Enviar e-mails"><Toggle on={opOn("gmail_send")} onClick={() => toggleOp("gmail_send")} /></Row></div>
-        <div className="border-t border-border"><Row label="Organizar" sub="Arquivar, lixeira, marcar lido/não lido"><Toggle on={opOn("gmail_organize")} onClick={() => toggleOp("gmail_organize")} /></Row></div>
+        <div className="border-t border-border"><Row label={tr("Organizar")} sub={tr("Arquivar, lixeira, marcar lido/não lido")}><Toggle on={opOn("gmail_organize")} onClick={() => toggleOp("gmail_organize")} /></Row></div>
       </div>
-      <Heading>Ativação — Agenda</Heading>
+      <Heading>{tr("Ativação — Agenda")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
         <Row label="Ver e buscar"><Toggle on={opOn("cal_view")} onClick={() => toggleOp("cal_view")} /></Row>
         <div className="border-t border-border"><Row label="Criar e editar"><Toggle on={opOn("cal_create")} onClick={() => toggleOp("cal_create")} /></Row></div>
-        <div className="border-t border-border"><Row label="Excluir eventos"><Toggle on={opOn("cal_delete")} onClick={() => toggleOp("cal_delete")} /></Row></div>
+        <div className="border-t border-border"><Row label={tr("Excluir eventos")}><Toggle on={opOn("cal_delete")} onClick={() => toggleOp("cal_delete")} /></Row></div>
       </div>
-      <Heading>Limites</Heading>
+      <Heading>{tr("Limites")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <NumberField label="Máx. de resultados" value={max} onChange={(v) => gSet("max_results", v)} suffix="itens" />
+        <NumberField label={tr("Máx. de resultados")} value={max} onChange={(v) => gSet("max_results", v)} suffix="itens" />
         <label className="flex items-center justify-between gap-4 border-t border-border py-2 text-sm">
-          <span className="text-ink-soft">Agenda padrão</span>
+          <span className="text-ink-soft">{tr("Agenda padrão")}</span>
           <input value={g.default_calendar ?? ""} onChange={(e) => gSet("default_calendar", e.target.value)} placeholder="primary"
             className="w-40 rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent" />
         </label>
@@ -491,13 +491,13 @@ export function TuyaToolPanel({ value, onChange }: PanelProps) {
 
   return (
     <div>
-      <p className="text-xs leading-5 text-muted">Dispositivos e ações que este modelo pode controlar na sua casa. A conexão Tuya e o catálogo ficam em Configurações → Integrações.</p>
-      <Heading>Dispositivos liberados</Heading>
+      <p className="text-xs leading-5 text-muted">{tr("Dispositivos e ações que este modelo pode controlar na sua casa. A conexão Tuya e o catálogo ficam em Configurações → Integrações.")}</p>
+      <Heading>{tr("Dispositivos liberados")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
         {!st?.configured ? (
-          <p className="py-2 text-xs text-muted">Tuya não conectado. Configure em Configurações → Integrações → Tuya Smart Home.</p>
+          <p className="py-2 text-xs text-muted">{tr("Tuya não conectado. Configure em Configurações → Integrações → Tuya Smart Home.")}</p>
         ) : deviceNames.length === 0 ? (
-          <p className="py-2 text-xs text-muted">Nenhum dispositivo no catálogo. Adicione dispositivos na integração Tuya.</p>
+          <p className="py-2 text-xs text-muted">{tr("Nenhum dispositivo no catálogo. Adicione dispositivos na integração Tuya.")}</p>
         ) : (
           <>
             {deviceNames.map((name, i) => (
@@ -507,16 +507,16 @@ export function TuyaToolPanel({ value, onChange }: PanelProps) {
                 <span className="min-w-0 flex-1 truncate text-ink">{name}</span>
               </label>
             ))}
-            <p className="border-t border-border py-2 text-xs text-muted">Todos marcados = este modelo pode usar qualquer dispositivo.</p>
+            <p className="border-t border-border py-2 text-xs text-muted">{tr("Todos marcados = este modelo pode usar qualquer dispositivo.")}</p>
           </>
         )}
       </div>
-      <Heading>Ações permitidas</Heading>
+      <Heading>{tr("Ações permitidas")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <Row label="Consultar" sub="Listar dispositivos e ver status/códigos"><Toggle on={opOn("tuya_query")} onClick={() => toggleOp("tuya_query")} /></Row>
+        <Row label={tr("Consultar")} sub={tr("Listar dispositivos e ver status/códigos")}><Toggle on={opOn("tuya_query")} onClick={() => toggleOp("tuya_query")} /></Row>
         <div className="border-t border-border"><Row label="Ligar / desligar" sub="Luzes, tomadas, interruptores"><Toggle on={opOn("tuya_switch")} onClick={() => toggleOp("tuya_switch")} /></Row></div>
-        <div className="border-t border-border"><Row label="Ar-condicionado" sub="Ligar e ajustar temperatura/modo"><Toggle on={opOn("tuya_ac")} onClick={() => toggleOp("tuya_ac")} /></Row></div>
-        <div className="border-t border-border"><Row label="Disparar cenas" sub="Tap-to-run configuradas"><Toggle on={opOn("tuya_scene")} onClick={() => toggleOp("tuya_scene")} /></Row></div>
+        <div className="border-t border-border"><Row label="Ar-condicionado" sub={tr("Ligar e ajustar temperatura/modo")}><Toggle on={opOn("tuya_ac")} onClick={() => toggleOp("tuya_ac")} /></Row></div>
+        <div className="border-t border-border"><Row label={tr("Disparar cenas")} sub={tr("Tap-to-run configuradas")}><Toggle on={opOn("tuya_scene")} onClick={() => toggleOp("tuya_scene")} /></Row></div>
       </div>
     </div>
   );
@@ -547,11 +547,11 @@ export function GithubToolPanel({ value, onChange }: PanelProps) {
 
   return (
     <div>
-      <p className="text-xs leading-5 text-muted">Contas e ações deste modelo no GitHub. A conexão das contas fica em Configurações → Integrações.</p>
-      <Heading>Contas liberadas</Heading>
+      <p className="text-xs leading-5 text-muted">{tr("Contas e ações deste modelo no GitHub. A conexão das contas fica em Configurações → Integrações.")}</p>
+      <Heading>{tr("Contas liberadas")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
         {accounts.length === 0 ? (
-          <p className="py-2 text-xs text-muted">Nenhuma conta conectada. Conecte em Configurações → Integrações → GitHub.</p>
+          <p className="py-2 text-xs text-muted">{tr("Nenhuma conta conectada. Conecte em Configurações → Integrações → GitHub.")}</p>
         ) : (
           <>
             {accounts.map((a, i) => (
@@ -561,20 +561,20 @@ export function GithubToolPanel({ value, onChange }: PanelProps) {
                 <span className="min-w-0 flex-1 truncate text-ink">{a.login}</span>
               </label>
             ))}
-            <p className="border-t border-border py-2 text-xs text-muted">Todas marcadas = este modelo pode usar qualquer conta.</p>
+            <p className="border-t border-border py-2 text-xs text-muted">{tr("Todas marcadas = este modelo pode usar qualquer conta.")}</p>
           </>
         )}
       </div>
-      <Heading>Leitura</Heading>
+      <Heading>{tr("Leitura")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <Row label="Ler repos, arquivos, issues e PRs" sub="Listar repositórios, ler arquivos, buscar código, ver issues/PRs"><Toggle on={opOn("gh_read")} onClick={() => toggleOp("gh_read")} /></Row>
+        <Row label={tr("Ler repos, arquivos, issues e PRs")} sub={tr("Listar repositórios, ler arquivos, buscar código, ver issues/PRs")}><Toggle on={opOn("gh_read")} onClick={() => toggleOp("gh_read")} /></Row>
       </div>
-      <Heading>Escrita</Heading>
+      <Heading>{tr("Escrita")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <Row label="Criar issues"><Toggle on={opOn("gh_issue")} onClick={() => toggleOp("gh_issue")} /></Row>
-        <div className="border-t border-border"><Row label="Comentar em issues/PRs"><Toggle on={opOn("gh_comment")} onClick={() => toggleOp("gh_comment")} /></Row></div>
-        <div className="border-t border-border"><Row label="Abrir pull requests"><Toggle on={opOn("gh_pr")} onClick={() => toggleOp("gh_pr")} /></Row></div>
-        <div className="border-t border-border"><Row label="Commitar arquivos" sub="Criar/atualizar arquivos (commit direto)"><Toggle on={opOn("gh_commit")} onClick={() => toggleOp("gh_commit")} /></Row></div>
+        <Row label={tr("Criar issues")}><Toggle on={opOn("gh_issue")} onClick={() => toggleOp("gh_issue")} /></Row>
+        <div className="border-t border-border"><Row label={tr("Comentar em issues/PRs")}><Toggle on={opOn("gh_comment")} onClick={() => toggleOp("gh_comment")} /></Row></div>
+        <div className="border-t border-border"><Row label={tr("Abrir pull requests")}><Toggle on={opOn("gh_pr")} onClick={() => toggleOp("gh_pr")} /></Row></div>
+        <div className="border-t border-border"><Row label={tr("Commitar arquivos")} sub={tr("Criar/atualizar arquivos (commit direto)")}><Toggle on={opOn("gh_commit")} onClick={() => toggleOp("gh_commit")} /></Row></div>
       </div>
     </div>
   );
@@ -606,12 +606,12 @@ export function MessagingToolPanel({ value, onChange }: PanelProps) {
 
   return (
     <div>
-      <p className="text-xs leading-5 text-muted">A IA age nas suas conexões de chat a seu pedido (responder, avisar em grupo, ver o que disseram). Conecte-as em Configurações → Integrações.</p>
-      <p className="mt-1 text-xs leading-5 text-muted">Limites por rede: <span className="text-ink-soft">WhatsApp</span> age como você (ler/enviar completo). <span className="text-ink-soft">Telegram/Discord</span> agem como o bot — só as conversas onde o bot está; o Telegram-bot não lê histórico.</p>
-      <Heading>Conexões liberadas</Heading>
+      <p className="text-xs leading-5 text-muted">{tr("A IA age nas suas conexões de chat a seu pedido (responder, avisar em grupo, ver o que disseram). Conecte-as em Configurações → Integrações.")}</p>
+      <p className="mt-1 text-xs leading-5 text-muted">{tr("Limites por rede:")} <span className="text-ink-soft">WhatsApp</span>  {tr("age como você (ler/enviar completo).")} <span className="text-ink-soft">Telegram/Discord</span>  {tr("agem como o bot — só as conversas onde o bot está; o Telegram-bot não lê histórico.")}</p>
+      <Heading>{tr("Conexões liberadas")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
         {accounts.length === 0 ? (
-          <p className="py-2 text-xs text-muted">Nenhuma conexão ativa. Conecte um WhatsApp, Telegram ou Discord em Configurações → Integrações.</p>
+          <p className="py-2 text-xs text-muted">{tr("Nenhuma conexão ativa. Conecte um WhatsApp, Telegram ou Discord em Configurações → Integrações.")}</p>
         ) : (
           <>
             {accounts.map((a, i) => (
@@ -622,15 +622,15 @@ export function MessagingToolPanel({ value, onChange }: PanelProps) {
                 <span className="shrink-0 text-xs text-muted">{MSG_PLAT_PT[a.platform] || a.platform}</span>
               </label>
             ))}
-            <p className="border-t border-border py-2 text-xs text-muted">Todas marcadas = este modelo pode agir por qualquer conexão.</p>
+            <p className="border-t border-border py-2 text-xs text-muted">{tr("Todas marcadas = este modelo pode agir por qualquer conexão.")}</p>
           </>
         )}
       </div>
-      <Heading>Ações</Heading>
+      <Heading>{tr("Ações")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <Row label="Listar conversas" sub="Encontrar contatos e grupos"><Toggle on={opOn("msg_list")} onClick={() => toggleOp("msg_list")} /></Row>
-        <div className="border-t border-border"><Row label="Ler mensagens" sub="Ver o histórico de uma conversa (WhatsApp/Discord)"><Toggle on={opOn("msg_read")} onClick={() => toggleOp("msg_read")} /></Row></div>
-        <div className="border-t border-border"><Row label="Enviar mensagens" sub="Mandar mensagem por você"><Toggle on={opOn("msg_send")} onClick={() => toggleOp("msg_send")} /></Row></div>
+        <Row label={tr("Listar conversas")} sub={tr("Encontrar contatos e grupos")}><Toggle on={opOn("msg_list")} onClick={() => toggleOp("msg_list")} /></Row>
+        <div className="border-t border-border"><Row label={tr("Ler mensagens")} sub={tr("Ver o histórico de uma conversa (WhatsApp/Discord)")}><Toggle on={opOn("msg_read")} onClick={() => toggleOp("msg_read")} /></Row></div>
+        <div className="border-t border-border"><Row label={tr("Enviar mensagens")} sub={tr("Mandar mensagem por você")}><Toggle on={opOn("msg_send")} onClick={() => toggleOp("msg_send")} /></Row></div>
       </div>
     </div>
   );
@@ -664,14 +664,13 @@ export function RemoteTerminalToolPanel({ value, onChange }: PanelProps) {
   return (
     <div>
       <p className="text-xs leading-5 text-muted">
-        Este modelo roda comandos no terminal das suas máquinas remotas. Não é o sandbox do servidor: é a
-        máquina de verdade, com a rede dela. Conecte e configure a saída de rede em Configurações →
-        Integrações → Remote Terminal.
+        
+        {tr("Este modelo roda comandos no terminal das suas máquinas remotas. Não é o sandbox do servidor: é a máquina de verdade, com a rede dela. Conecte e configure a saída de rede em Configurações → Integrações → Remote Terminal.")}
       </p>
-      <Heading>Máquinas liberadas</Heading>
+      <Heading>{tr("Máquinas liberadas")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
         {hosts.length === 0 ? (
-          <p className="py-2 text-xs text-muted">Nenhuma máquina conectada. Adicione uma em Configurações → Integrações → Remote Terminal.</p>
+          <p className="py-2 text-xs text-muted">{tr("Nenhuma máquina conectada. Adicione uma em Configurações → Integrações → Remote Terminal.")}</p>
         ) : (
           <>
             {hosts.map((h, i) => (
@@ -682,15 +681,15 @@ export function RemoteTerminalToolPanel({ value, onChange }: PanelProps) {
                 <span className={`shrink-0 text-xs ${h.status === "online" ? "text-green-400" : h.status === "blocked" ? "text-amber-400" : "text-muted"}`}>{h.status}</span>
               </label>
             ))}
-            <p className="border-t border-border py-2 text-xs text-muted">Todas marcadas = este modelo pode usar qualquer máquina.</p>
+            <p className="border-t border-border py-2 text-xs text-muted">{tr("Todas marcadas = este modelo pode usar qualquer máquina.")}</p>
           </>
         )}
       </div>
-      <Heading>Ações</Heading>
+      <Heading>{tr("Ações")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <Row label="Rodar comandos" sub="Executar e esperar a saída"><Toggle on={opOn("run")} onClick={() => toggleOp("run")} /></Row>
-        <div className="border-t border-border"><Row label="Comandos em segundo plano" sub="Instalações e builds longos (job_id)"><Toggle on={opOn("start")} onClick={() => toggleOp("start")} /></Row></div>
-        <div className="border-t border-border"><Row label="Consultar jobs e política de rede" sub="Status de jobs, matar job e teste de vazamento"><Toggle on={opOn("manage")} onClick={() => toggleOp("manage")} /></Row></div>
+        <Row label={tr("Rodar comandos")} sub={tr("Executar e esperar a saída")}><Toggle on={opOn("run")} onClick={() => toggleOp("run")} /></Row>
+        <div className="border-t border-border"><Row label={tr("Comandos em segundo plano")} sub={tr("Instalações e builds longos (job_id)")}><Toggle on={opOn("start")} onClick={() => toggleOp("start")} /></Row></div>
+        <div className="border-t border-border"><Row label={tr("Consultar jobs e política de rede")} sub={tr("Status de jobs, matar job e teste de vazamento")}><Toggle on={opOn("manage")} onClick={() => toggleOp("manage")} /></Row></div>
       </div>
     </div>
   );

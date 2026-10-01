@@ -2,6 +2,7 @@
 
 import { Dices, Trash2 } from "lucide-react";
 import type { Message } from "@/lib/types";
+import { tr } from "@/lib/i18n";
 
 export interface DiceRoll {
   expression: string;
@@ -61,7 +62,7 @@ export default function DiceRollCard({ roll, onDelete }: { roll: DiceRoll; onDel
         {onDelete && (
           <button
             onClick={onDelete}
-            title="Excluir rolagem"
+            title={tr("Excluir rolagem")}
             className="absolute -right-8 rounded p-1 text-muted touch-reveal opacity-0 transition-opacity hover:text-red-300 group-hover:opacity-100"
           >
             <Trash2 size={13} />

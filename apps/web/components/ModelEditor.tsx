@@ -11,6 +11,7 @@ import { toolCategoryIcon, toolCategoryTitle } from "./toolCategory";
 import ModelField from "./ModelField";
 import { AnchoredMenu, finePointer, Toggle, Select } from "./ui";
 import { WebSearchPanel, FinancePanel, TextExtractionPanel, DeepSearchPanel, GooglePanel, TuyaToolPanel, GithubToolPanel, MessagingToolPanel, RemoteTerminalToolPanel } from "./toolPanels";
+import { tr } from "@/lib/i18n";
 
 // ferramentas internas com painel de config (engrenagem em "Ferramentas Ativas")
 const TOOL_CFG: Record<string, { key: string; Panel: (p: any) => React.JSX.Element; needsStatus: boolean }> = {
@@ -35,12 +36,12 @@ function systemToolCapabilityGroup(tool: SystemTool): string {
   if (path.startsWith("web.") || path.startsWith("research.") || path.startsWith("security.") || path.startsWith("finance.")) {
     return "Web e pesquisa";
   }
-  if (path.startsWith("code.") || path.startsWith("http.")) return "Projeto e código";
-  if (path.startsWith("investigation.")) return "Investigação";
+  if (path.startsWith("code.") || path.startsWith("http.")) return tr("Projeto e código");
+  if (path.startsWith("investigation.")) return tr("Investigação");
   if (path.startsWith("media.") || path.startsWith("diagram.") || path.startsWith("chart.") || path.startsWith("higgsfield.") || path.startsWith("elevenlabs.")) {
-    return "Criação e mídia";
+    return tr("Criação e mídia");
   }
-  if (tool.category === "integration") return "Integrações";
+  if (tool.category === "integration") return tr("Integrações");
   return "Produtividade e contexto";
 }
 
@@ -52,28 +53,28 @@ type ToolCapabilityItem = TransferItem & { members: string[]; defaultMembers: st
 function systemToolCapability(tool: SystemTool): Pick<ToolCapabilityItem, "key" | "label" | "sublabel" | "group"> {
   const path = tool.path;
   if (path.startsWith("web.")) {
-    return { key: "cap:web", label: "Web", sublabel: "Pesquisar, ler fontes e navegar páginas", group: "Web e pesquisa" };
+    return { key: "cap:web", label: tr("Web"), sublabel: tr("Pesquisar, ler fontes e navegar páginas"), group: "Web e pesquisa" };
   }
   if (path.startsWith("github.")) {
-    return { key: "cap:github", label: "GitHub", sublabel: "Pesquisa pública e repositórios conectados", group: "Integrações" };
+    return { key: "cap:github", label: "GitHub", sublabel: tr("Pesquisa pública e repositórios conectados"), group: tr("Integrações") };
   }
   if (path.startsWith("google.")) {
-    return { key: "cap:google", label: "Google Workspace", sublabel: "Gmail e Google Agenda", group: "Integrações" };
+    return { key: "cap:google", label: tr("Google Workspace"), sublabel: tr("Gmail e Google Agenda"), group: tr("Integrações") };
   }
   if (path.startsWith("code.")) {
-    return { key: "cap:workspace", label: "Workspace de código", sublabel: "Ler, editar, executar, pré-visualizar e gerenciar tarefas", group: "Projeto e código" };
+    return { key: "cap:workspace", label: tr("Workspace de código"), sublabel: tr("Ler, editar, executar, pré-visualizar e gerenciar tarefas"), group: tr("Projeto e código") };
   }
   if (path.startsWith("automation.")) {
-    return { key: "cap:automation", label: "Automações", sublabel: "Monitores e lembretes", group: "Produtividade e contexto" };
+    return { key: "cap:automation", label: tr("Automações"), sublabel: "Monitores e lembretes", group: "Produtividade e contexto" };
   }
   if (path.startsWith("skills.") || path.startsWith("prompts.")) {
-    return { key: "cap:libraries", label: "Bibliotecas", sublabel: "Skills e prompts reutilizáveis", group: "Produtividade e contexto" };
+    return { key: "cap:libraries", label: tr("Bibliotecas"), sublabel: tr("Skills e prompts reutilizáveis"), group: "Produtividade e contexto" };
   }
   if (path.startsWith("utils.")) {
-    return { key: "cap:utilities", label: "Utilitários", sublabel: "Data, hora e cálculos", group: "Produtividade e contexto" };
+    return { key: "cap:utilities", label: tr("Utilitários"), sublabel: tr("Data, hora e cálculos"), group: "Produtividade e contexto" };
   }
   if (path.startsWith("security.")) {
-    return { key: "cap:security", label: "Segurança", sublabel: "CVEs e Exploit-DB", group: "Web e pesquisa" };
+    return { key: "cap:security", label: tr("Segurança"), sublabel: "CVEs e Exploit-DB", group: "Web e pesquisa" };
   }
   return {
     key: `builtin:${path}`,
@@ -160,7 +161,7 @@ type Guard = {
 
 function newGuard(): Guard {
   const rid = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
-  return { id: rid, name: "Guarda de Saída", enabled: true, detect: "refusal", action: "reinforce", inject_text: "", max_retries: 1 };
+  return { id: rid, name: tr("Guarda de Saída"), enabled: true, detect: "refusal", action: "reinforce", inject_text: "", max_retries: 1 };
 }
 
 const selCls = "w-full rounded-lg border border-border bg-surface2 px-2 py-1.5 text-sm text-ink outline-none transition-colors focus:border-accent";
@@ -227,23 +228,23 @@ type ModelVoiceConfig = {
 };
 
 const API_TTS_MODELS: AudioChoice[] = [
-  { id: "gpt-4o-mini-tts", name: "GPT-4o mini TTS", provider: "API de voz" },
+  { id: "gpt-4o-mini-tts", name: tr("GPT-4o mini TTS"), provider: "API de voz" },
   { id: "tts-1", name: "TTS-1", provider: "API de voz" },
   { id: "tts-1-hd", name: "TTS-1 HD", provider: "API de voz" },
 ];
 const API_STT_MODELS: AudioChoice[] = [
-  { id: "whisper-1", name: "Whisper", provider: "API de voz" },
+  { id: "whisper-1", name: tr("Whisper"), provider: "API de voz" },
   { id: "gpt-4o-transcribe", name: "GPT-4o Transcribe", provider: "API de voz" },
-  { id: "gpt-4o-mini-transcribe", name: "GPT-4o mini Transcribe", provider: "API de voz" },
+  { id: "gpt-4o-mini-transcribe", name: tr("GPT-4o mini Transcribe"), provider: "API de voz" },
 ];
 const OPENROUTER_STT_FALLBACK: AudioChoice = {
   id: "openai/whisper-large-v3-turbo",
-  name: "OpenAI: Whisper Large V3 Turbo",
+  name: tr("OpenAI: Whisper Large V3 Turbo"),
   provider: "OpenRouter",
 };
 
 function SearchChoice({
-  label, value, options, placeholder, onChange, searchPlaceholder = "Buscar por nome, ID ou provedor",
+  label, value, options, placeholder, onChange, searchPlaceholder = tr("Buscar por nome, ID ou provedor"),
 }: {
   label: string;
   value: string;
@@ -294,7 +295,8 @@ function SearchChoice({
           </div>
           <div className="max-h-[min(19rem,55dvh)] overflow-y-auto p-1.5">
             <button type="button" onClick={() => { onChange(""); setOpen(false); setQ(""); }} className="w-full rounded-xl px-3 py-2 text-left text-xs text-muted hover:bg-hover">
-              Usar padrão
+              
+              {tr("Usar padrão")}
             </button>
             {shown.map((item) => (
               <button
@@ -320,10 +322,10 @@ function SearchChoice({
                 onClick={() => { onChange(q.trim()); setOpen(false); setQ(""); }}
                 className="mt-1 flex w-full items-center gap-2 rounded-xl border border-dashed border-border px-3 py-2 text-left text-xs text-ink-soft transition-colors hover:border-accent/50 hover:bg-hover"
               >
-                <Plus size={14} className="text-accent-hover" /> Usar <span className="min-w-0 truncate font-mono text-ink">{q.trim()}</span> como ID personalizado
+                <Plus size={14} className="text-accent-hover" />  {tr("Usar")} <span className="min-w-0 truncate font-mono text-ink">{q.trim()}</span>  {tr("como ID personalizado")}
               </button>
             )}
-            {!shown.length && !canUseCustom && <p className="px-3 py-6 text-center text-sm text-muted">Nenhum modelo encontrado.</p>}
+            {!shown.length && !canUseCustom && <p className="px-3 py-6 text-center text-sm text-muted">{tr("Nenhum modelo encontrado.")}</p>}
           </div>
         </AnchoredMenu>
       )}
@@ -340,15 +342,15 @@ function ProviderPicker({
   onChange: (provider: VoiceProvider) => void;
 }) {
   const entries: { id: VoiceProvider; label: string }[] = [
-    { id: "auto", label: "Automático" },
+    { id: "auto", label: tr("Automático") },
     { id: "openrouter", label: "OpenRouter" },
-    { id: "api", label: "API de voz" },
-    { id: "local", label: "Local" },
-    ...(kind === "tts" ? [{ id: "builtin" as VoiceProvider, label: "Embutida" }] : []),
+    { id: "api", label: tr("API de voz") },
+    { id: "local", label: tr("Local") },
+    ...(kind === "tts" ? [{ id: "builtin" as VoiceProvider, label: tr("Embutida") }] : []),
   ];
   return (
     <div>
-      <p className="mb-1.5 text-xs font-medium text-muted">Origem do {kind === "tts" ? "áudio" : "transcrito"}</p>
+      <p className="mb-1.5 text-xs font-medium text-muted">{tr("Origem do")} {kind === "tts" ? tr("áudio") : "transcrito"}</p>
       <div className={`grid grid-cols-2 gap-1 rounded-xl border border-border bg-bg p-1 ${entries.length > 4 ? "sm:grid-cols-5" : "sm:grid-cols-4"}`}>
         {entries.map((entry) => {
           const ready = entry.id === "auto" || catalog?.providers[entry.id]?.configured;
@@ -357,7 +359,7 @@ function ProviderPicker({
               key={entry.id}
               type="button"
               onClick={() => onChange(entry.id)}
-              title={ready ? entry.label : `${entry.label} ainda não está configurado`}
+              title={ready ? entry.label : tr("{label} ainda não está configurado", { label: entry.label })}
               className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-medium transition-colors ${value === entry.id ? "bg-accent text-white" : "text-ink-soft hover:bg-hover"}`}
             >
               {entry.id !== "auto" && <span className={`h-1.5 w-1.5 rounded-full ${ready ? "bg-emerald-400" : "bg-muted"}`} />}
@@ -398,7 +400,7 @@ function VoiceStudio({
   const sttOptions = unique([
     ...(sttProvider === "openrouter" || sttProvider === "auto" ? [OPENROUTER_STT_FALLBACK, ...(catalog?.stt_models ?? [])] : []),
     ...(sttProvider === "api" || sttProvider === "auto" ? API_STT_MODELS : []),
-    ...(sttProvider === "local" || sttProvider === "auto" ? [{ id: "whisper-large-v3-turbo", name: "Whisper Large V3 Turbo", provider: "Local" }] : []),
+    ...(sttProvider === "local" || sttProvider === "auto" ? [{ id: "whisper-large-v3-turbo", name: tr("Whisper Large V3 Turbo"), provider: "Local" }] : []),
   ]);
   // Modelo de fala do OpenRouter em uso (o escolhido ou o padrão do catálogo): cada um
   // aceita só as PRÓPRIAS vozes — a lista de vozes passa a ser a dele.
@@ -408,7 +410,7 @@ function VoiceStudio({
   const voiceOptions: AudioChoice[] = orModel
     ? (orModel.voices?.length
         ? orModel.voices.map((v) => ({ id: v, name: v, provider: orModel.name }))
-        : [{ id: "", name: "Voz padrão do modelo", provider: orModel.name }])
+        : [{ id: "", name: tr("Voz padrão do modelo"), provider: orModel.name }])
     : (catalog?.voices ?? []).filter((v) => !PROVIDER_OF_VOICE[ttsProvider] || v.provider === PROVIDER_OF_VOICE[ttsProvider]);
   // trocou de modelo e a voz atual não existe nele: passa para a primeira que ele aceita
   useEffect(() => {
@@ -452,7 +454,7 @@ function VoiceStudio({
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          text: "Olá! Esta é uma prévia da voz deste modelo.",
+          text: tr("Olá! Esta é uma prévia da voz deste modelo."),
           voice: voice || undefined,
           provider: ttsProvider,
           model: config.tts_model || undefined,
@@ -460,7 +462,7 @@ function VoiceStudio({
       });
       if (!response.ok) {
         const detail = await response.json().catch(() => ({}));
-        throw new Error(detail.detail || "Não foi possível gerar a prévia");
+        throw new Error(detail.detail || tr("Não foi possível gerar a prévia"));
       }
       const blob = await response.blob();
       if (previewRequestRef.current !== request || request.signal.aborted) return;
@@ -469,14 +471,14 @@ function VoiceStudio({
       const audio = new Audio(url);
       audioRef.current = audio;
       audio.onended = stopPreview;
-      audio.onerror = () => { setPreviewError("O áudio retornado não pôde ser reproduzido."); stopPreview(); };
+      audio.onerror = () => { setPreviewError(tr("O áudio retornado não pôde ser reproduzido.")); stopPreview(); };
       await audio.play();
       if (previewRequestRef.current !== request) return;
       setPreview("playing");
     } catch (error) {
       if (previewRequestRef.current !== request || request.signal.aborted) return;
       stopPreview();
-      setPreviewError(error instanceof Error ? error.message : "Falha ao testar a voz");
+      setPreviewError(error instanceof Error ? error.message : tr("Falha ao testar a voz"));
     }
   }
 
@@ -488,19 +490,19 @@ function VoiceStudio({
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent-hover"><Volume2 size={16} /></span>
             <span>
               <span className="block text-sm font-semibold text-ink">Fala · TTS</span>
-              <span className="block text-[11px] text-muted">Transforma a resposta do modelo em áudio.</span>
+              <span className="block text-[11px] text-muted">{tr("Transforma a resposta do modelo em áudio.")}</span>
             </span>
           </div>
           <ProviderPicker kind="tts" value={ttsProvider} catalog={catalog} onChange={(value) => onConfigChange({ tts_provider: value, tts_model: "" })} />
-          <SearchChoice label="Modelo de voz" value={config.tts_model ?? ""} options={ttsOptions} placeholder={ttsProvider === "openrouter" && catalog?.tts_default ? `Padrão: ${catalog.tts_default}` : "Usar modelo padrão do provedor"} onChange={(value, choice) => onConfigChange({ tts_model: value, tts_provider: ttsProvider === "auto" ? choiceProvider(choice) : ttsProvider })} />
-          <SearchChoice label="Voz" value={voice} options={voiceOptions} placeholder="Escolher uma voz" onChange={onVoiceChange} searchPlaceholder="Buscar ou misturar: builtin:pf_dora(2)+pm_alex(1)" />
+          <SearchChoice label={tr("Modelo de voz")} value={config.tts_model ?? ""} options={ttsOptions} placeholder={ttsProvider === "openrouter" && catalog?.tts_default ? tr("Padrão: {tts_default}", { tts_default: catalog.tts_default }) : tr("Usar modelo padrão do provedor")} onChange={(value, choice) => onConfigChange({ tts_model: value, tts_provider: ttsProvider === "auto" ? choiceProvider(choice) : ttsProvider })} />
+          <SearchChoice label={tr("Voz")} value={voice} options={voiceOptions} placeholder={tr("Escolher uma voz")} onChange={onVoiceChange} searchPlaceholder={tr("Buscar ou misturar: builtin:pf_dora(2)+pm_alex(1)")} />
           <button
             type="button"
             onClick={testVoice}
             className="flex w-full items-center justify-center gap-2 rounded-xl border border-accent/30 bg-accent/10 px-3 py-2 text-sm font-medium text-accent-hover transition-colors hover:bg-accent/15 disabled:cursor-wait disabled:opacity-70"
           >
             {preview === "loading" ? <Loader2 size={15} className="animate-spin" /> : preview === "playing" ? <Square size={14} fill="currentColor" /> : <Play size={15} fill="currentColor" />}
-            {preview === "loading" ? "Cancelar geração da prévia" : preview === "playing" ? "Parar teste" : "Testar voz"}
+            {preview === "loading" ? tr("Cancelar geração da prévia") : preview === "playing" ? tr("Parar teste") : tr("Testar voz")}
           </button>
           {previewError && <p role="alert" className="text-xs text-red-400">{previewError}</p>}
         </div>
@@ -510,13 +512,14 @@ function VoiceStudio({
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-surface2 text-ink-soft"><Mic2 size={16} /></span>
             <span>
               <span className="block text-sm font-semibold text-ink">Escuta · STT</span>
-              <span className="block text-[11px] text-muted">Transcreve o microfone antes de enviar a mensagem.</span>
+              <span className="block text-[11px] text-muted">{tr("Transcreve o microfone antes de enviar a mensagem.")}</span>
             </span>
           </div>
           <ProviderPicker kind="stt" value={sttProvider} catalog={catalog} onChange={(value) => onConfigChange({ stt_provider: value, stt_model: "" })} />
-          <SearchChoice label="Modelo de transcrição" value={config.stt_model ?? ""} options={sttOptions} placeholder="Usar modelo padrão do provedor" onChange={(value, choice) => onConfigChange({ stt_model: value, stt_provider: sttProvider === "auto" ? choiceProvider(choice) : sttProvider })} />
+          <SearchChoice label={tr("Modelo de transcrição")} value={config.stt_model ?? ""} options={sttOptions} placeholder={tr("Usar modelo padrão do provedor")} onChange={(value, choice) => onConfigChange({ stt_model: value, stt_provider: sttProvider === "auto" ? choiceProvider(choice) : sttProvider })} />
           <div className="rounded-xl border border-border bg-bg px-3 py-2.5 text-xs leading-5 text-muted">
-            Com OpenRouter, o áudio vai ao endpoint de transcrição usando a mesma chave do chat. O modelo escolhido aqui vale para o microfone e para o modo voz deste modelo.
+            
+            {tr("Com OpenRouter, o áudio vai ao endpoint de transcrição usando a mesma chave do chat. O modelo escolhido aqui vale para o microfone e para o modo voz deste modelo.")}
           </div>
         </div>
       )}
@@ -532,8 +535,8 @@ function OutputGuards({ value, onChange, baseModels }: { value: any; onChange: (
   return (
     <div className="space-y-2">
       <p className="text-xs text-muted">
-        Inspeciona a resposta e, se ela casar com uma condição (recusa, vazia, ou um padrão), <span className="text-ink-soft">reage</span>:
-        reforça o system prompt e refaz, ou cai para outro modelo. Dá para ter vários, um para cada caso.
+        
+        {tr("Inspeciona a resposta e, se ela casar com uma condição (recusa, vazia, ou um padrão),")} <span className="text-ink-soft">reage</span>{tr(": reforça o system prompt e refaz, ou cai para outro modelo. Dá para ter vários, um para cada caso.")}
       </p>
       {guards.map((g) => (
         <div key={g.id} className="space-y-2 rounded-lg border border-border bg-surface p-2.5">
@@ -542,27 +545,27 @@ function OutputGuards({ value, onChange, baseModels }: { value: any; onChange: (
             <input
               value={g.name}
               onChange={(e) => update(g.id, { name: e.target.value })}
-              placeholder="Nome (para você identificar)"
+              placeholder={tr("Nome (para você identificar)")}
               className="min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1 py-0.5 text-sm font-medium text-ink outline-none hover:border-border focus:border-accent"
             />
             <Toggle on={g.enabled} onChange={(v) => update(g.id, { enabled: v })} />
-            <button onClick={() => remove(g.id)} title="Remover guarda" className="rounded-md p-1 text-muted transition-colors hover:text-red-300">
+            <button onClick={() => remove(g.id)} title={tr("Remover guarda")} className="rounded-md p-1 text-muted transition-colors hover:text-red-300">
               <Trash2 size={13} />
             </button>
           </div>
 
           <div className="grid grid-cols-[1fr_auto] gap-2">
             <label className="space-y-1">
-              <span className="text-[11px] text-muted">Quando</span>
+              <span className="text-[11px] text-muted">{tr("Quando")}</span>
               <Select value={g.detect} onChange={(e) => update(g.id, { detect: e.target.value as Guard["detect"] })} className={selCls}>
-                <option value="refusal">O modelo recusar</option>
-                <option value="empty">Resposta vazia</option>
-                <option value="regex">Casar um padrão (regex)</option>
+                <option value="refusal">{tr("O modelo recusar")}</option>
+                <option value="empty">{tr("Resposta vazia")}</option>
+                <option value="regex">{tr("Casar um padrão (regex)")}</option>
                 <option value="judge">Juiz (LLM) avaliar</option>
               </Select>
             </label>
             <label className="space-y-1">
-              <span className="text-[11px] text-muted">Tentativas</span>
+              <span className="text-[11px] text-muted">{tr("Tentativas")}</span>
               <input
                 type="number" min={1} max={3} value={g.max_retries}
                 onChange={(e) => update(g.id, { max_retries: Math.max(1, Math.min(3, Number(e.target.value) || 1)) })}
@@ -571,53 +574,53 @@ function OutputGuards({ value, onChange, baseModels }: { value: any; onChange: (
             </label>
           </div>
           {g.detect === "regex" && (
-            <input value={g.pattern || ""} onChange={(e) => update(g.id, { pattern: e.target.value })} placeholder="expressão regular (ex.: não posso|i can't)" className={inpCls} />
+            <input value={g.pattern || ""} onChange={(e) => update(g.id, { pattern: e.target.value })} placeholder={tr("expressão regular (ex.: não posso|i can't)")} className={inpCls} />
           )}
           {g.detect === "empty" && (
-            <input type="number" min={0} value={g.min_len ?? 0} onChange={(e) => update(g.id, { min_len: Math.max(0, Number(e.target.value) || 0) })} placeholder="tamanho mínimo (0 = qualquer resposta vazia)" className={inpCls} />
+            <input type="number" min={0} value={g.min_len ?? 0} onChange={(e) => update(g.id, { min_len: Math.max(0, Number(e.target.value) || 0) })} placeholder={tr("tamanho mínimo (0 = qualquer resposta vazia)")} className={inpCls} />
           )}
           {g.detect === "judge" && (
             <div className="space-y-1.5">
-              <ModelField models={baseModels} value={g.judge_model || ""} onChange={(v) => update(g.id, { judge_model: v })} placeholder="Modelo que avalia (juiz)…" />
+              <ModelField models={baseModels} value={g.judge_model || ""} onChange={(v) => update(g.id, { judge_model: v })} placeholder={tr("Modelo que avalia (juiz)…")} />
               <textarea
                 value={g.criterion || ""}
                 onChange={(e) => update(g.id, { criterion: e.target.value })}
                 placeholder={g.include_ledger
-                  ? "Critério (opcional): em branco usa o padrão de fundamentação — desvio de objetivo, conclusão sem evidência e achado refutado que volta."
-                  : "Critério: descreva quando o guarda deve agir (ex.: 'se a resposta recusar, fugir do tema, ou vier em outro idioma'). O juiz responde SIM/NÃO."}
+                  ? tr("Critério (opcional): em branco usa o padrão de fundamentação — desvio de objetivo, conclusão sem evidência e achado refutado que volta.")
+                  : tr("Critério: descreva quando o guarda deve agir (ex.: 'se a resposta recusar, fugir do tema, ou vier em outro idioma'). O juiz responde SIM/NÃO.")}
                 rows={2}
                 className="w-full resize-y rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
               />
               <label className="flex items-start gap-2 text-[12px] text-ink">
                 <input type="checkbox" checked={!!g.include_ledger} onChange={(e) => update(g.id, { include_ledger: e.target.checked })} className="mt-0.5" />
-                <span>Fundamentação: o juiz enxerga o <b>Ledger da tarefa</b> (objetivo, plano, achados) e barra deriva de objetivo, conclusão sem evidência ou achado já refutado. Em branco, o critério acima usa o padrão.</span>
+                <span>{tr("Fundamentação: o juiz enxerga o")} <b>{tr("Ledger da tarefa")}</b>  {tr("(objetivo, plano, achados) e barra deriva de objetivo, conclusão sem evidência ou achado já refutado. Em branco, o critério acima usa o padrão.")}</span>
               </label>
-              <p className="text-[11px] text-muted">O juiz é um modelo chamado a cada resposta — mais robusto, mas gasta tokens e adiciona latência.</p>
+              <p className="text-[11px] text-muted">{tr("O juiz é um modelo chamado a cada resposta — mais robusto, mas gasta tokens e adiciona latência.")}</p>
             </div>
           )}
 
           <label className="block space-y-1">
-            <span className="text-[11px] text-muted">Reação</span>
+            <span className="text-[11px] text-muted">{tr("Reação")}</span>
             <Select value={g.action} onChange={(e) => update(g.id, { action: e.target.value as Guard["action"] })} className={selCls}>
-              <option value="reinforce">Reforçar o system prompt e refazer</option>
-              <option value="fallback_model">Trocar para outro modelo</option>
+              <option value="reinforce">{tr("Reforçar o system prompt e refazer")}</option>
+              <option value="fallback_model">{tr("Trocar para outro modelo")}</option>
             </Select>
           </label>
           {g.action === "reinforce" ? (
             <textarea
               value={g.inject_text || ""}
               onChange={(e) => update(g.id, { inject_text: e.target.value })}
-              placeholder="Texto injetado no fim do system prompt na re-tentativa (ex.: instruções/permissões que reforcem o comportamento desejado)"
+              placeholder={tr("Texto injetado no fim do system prompt na re-tentativa (ex.: instruções/permissões que reforcem o comportamento desejado)")}
               rows={2}
               className="w-full resize-y rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
             />
           ) : (
-            <ModelField models={baseModels} value={g.fallback_model || ""} onChange={(v) => update(g.id, { fallback_model: v })} placeholder="Modelo de fallback…" />
+            <ModelField models={baseModels} value={g.fallback_model || ""} onChange={(v) => update(g.id, { fallback_model: v })} placeholder={tr("Modelo de fallback…")} />
           )}
         </div>
       ))}
       <button onClick={() => onChange([...guards, newGuard()])} className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border py-2 text-xs text-muted transition-colors hover:border-accent/40 hover:text-ink">
-        <Plus size={13} /> Adicionar guarda
+        <Plus size={13} />  {tr("Adicionar guarda")}
       </button>
     </div>
   );
@@ -633,29 +636,29 @@ const DEFAULT_TOOL_PROMPT =
 
 // filtros disponíveis (espelham as caixas do OpenWebUI). Mais podem ser adicionados.
 const FILTERS: { key: string; label: string }[] = [
-  { key: "vision_router", label: "Roteador de Visão" },
-  { key: "audio_router", label: "Roteador de Áudio" },
-  { key: "genimage_router", label: "Roteador de Geração de Imagens" },
-  { key: "output_guard", label: "Guarda de Saída" },
+  { key: "vision_router", label: tr("Roteador de Visão") },
+  { key: "audio_router", label: tr("Roteador de Áudio") },
+  { key: "genimage_router", label: tr("Roteador de Geração de Imagens") },
+  { key: "output_guard", label: tr("Guarda de Saída") },
 ];
 
 // Capacidades = o que o PRÓPRIO modelo sabe fazer. Recursos = o que o app injeta
 // quando ativados (custam tokens/round-trips). Os dois vivem em `capabilities`.
 const CAPS: { key: string; label: string }[] = [
-  { key: "vision", label: "Visão" },
-  { key: "audio", label: "Áudio" },
-  { key: "file_upload", label: "Arquivos" },
-  { key: "image_generation", label: "Geração de Imagens" },
-  { key: "chat_context", label: "Contexto" },
+  { key: "vision", label: tr("Visão") },
+  { key: "audio", label: tr("Áudio") },
+  { key: "file_upload", label: tr("Arquivos") },
+  { key: "image_generation", label: tr("Geração de Imagens") },
+  { key: "chat_context", label: tr("Contexto") },
 ];
 const RESOURCES: { key: string; label: string }[] = [
   // pasta + shell + análise de código num chat comum (sem projeto), criados no 1º uso
-  { key: "workspace", label: "Espaço de trabalho" },
-  { key: "realtime_datetime", label: "Data e Hora em Tempo Real" },
+  { key: "workspace", label: tr("Espaço de trabalho") },
+  { key: "realtime_datetime", label: tr("Data e Hora em Tempo Real") },
   // marcadores [[som: ...]] na resposta — precisa da ElevenLabs ligada para tocar
-  { key: "sound_effects", label: "Efeitos Sonoros" },
-  { key: "artifacts", label: "Artefatos" },
-  { key: "skill_learning", label: "Aprender Skills" },
+  { key: "sound_effects", label: tr("Efeitos Sonoros") },
+  { key: "artifacts", label: tr("Artefatos") },
+  { key: "skill_learning", label: tr("Aprender Skills") },
 ];
 const ALL_CAPS = [...CAPS, ...RESOURCES];
 
@@ -670,15 +673,15 @@ const CAPS_DEFAULT_ON = new Set<string>(["chat_context", "skill_learning", "real
 // modelo mesmo que o padrão do perfil esteja desligado).
 type MemoryCfg = { enabled?: boolean; write?: string; read?: { global?: boolean; model?: boolean; chat?: boolean }; banks?: string[] };
 const MEM_WRITE_OPTS = [
-  { value: "global", label: "Global" },
-  { value: "model", label: "Do modelo" },
-  { value: "chat", label: "Só o chat" },
-  { value: "off", label: "Não salvar" },
+  { value: "global", label: tr("Global") },
+  { value: "model", label: tr("Do modelo") },
+  { value: "chat", label: tr("Só o chat") },
+  { value: "off", label: tr("Não salvar") },
 ];
 const MEM_READ_OPTS: { key: "global" | "model" | "chat"; label: string }[] = [
-  { key: "global", label: "Global" },
-  { key: "model", label: "Modelo" },
-  { key: "chat", label: "Chat" },
+  { key: "global", label: tr("Global") },
+  { key: "model", label: tr("Modelo") },
+  { key: "chat", label: tr("Chat") },
 ];
 const MEM_CFG_DEFAULT: Required<MemoryCfg> = {
   enabled: true, write: "global", read: { global: true, model: true, chat: true }, banks: [],
@@ -737,7 +740,7 @@ function ActiveListField({
           onClick={onManage}
           className="flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink"
         >
-          {manageIcon} Gerenciar
+          {manageIcon}  {tr("Gerenciar")}
         </button>
       </div>
       {items.length === 0 ? (
@@ -764,16 +767,16 @@ function ActiveListField({
                   <span className="shrink-0 rounded-full bg-accent/15 px-1.5 text-[10px] font-medium text-accent-hover">{badgeOf(k)}</span>
                 )}
                 {hasConfig?.(k) && onConfig && (
-                  <button onClick={() => onConfig(k)} title="Configurar" className="rounded-md p-1 text-muted transition-colors hover:text-ink">
+                  <button onClick={() => onConfig(k)} title={tr("Configurar")} className="rounded-md p-1 text-muted transition-colors hover:text-ink">
                     <Settings size={14} />
                   </button>
                 )}
-                <button onClick={() => onRemove(k)} title="Remover" className="rounded-md p-1 text-muted transition-colors hover:text-ink">
+                <button onClick={() => onRemove(k)} title={tr("Remover")} className="rounded-md p-1 text-muted transition-colors hover:text-ink">
                   <X size={14} />
                 </button>
               </div>
             ))}
-            {shown.length === 0 && <p className="px-1 py-2 text-xs text-muted">Nada corresponde à busca.</p>}
+            {shown.length === 0 && <p className="px-1 py-2 text-xs text-muted">{tr("Nada corresponde à busca.")}</p>}
           </div>
         </div>
       )}
@@ -1016,7 +1019,7 @@ export default function ModelEditor({
       setParamsStr(JSON.stringify(next, null, 2));
       setErr(null);
     } catch {
-      setErr("Corrija o JSON dos parâmetros antes de alterar o roteamento");
+      setErr(tr("Corrija o JSON dos parâmetros antes de alterar o roteamento"));
     }
   }
 
@@ -1028,7 +1031,7 @@ export default function ModelEditor({
     try {
       setAvatarUrl(await fileToAvatarDataUrl(file, 320));
     } catch (err) {
-      setAvatarErr(err instanceof Error ? err.message : "Falha ao carregar imagem");
+      setAvatarErr(err instanceof Error ? err.message : tr("Falha ao carregar imagem"));
     }
   }
 
@@ -1079,7 +1082,7 @@ export default function ModelEditor({
         key: t.id,
         label: t.name || t.path,
         sublabel: t.path,
-        group: "Ferramentas personalizadas",
+        group: tr("Ferramentas personalizadas"),
       })),
     ],
     [systemTools, tools],
@@ -1109,7 +1112,7 @@ export default function ModelEditor({
         key: `custom:${tool.id}`,
         label: tool.name || tool.path,
         sublabel: tool.path,
-        group: "Ferramentas personalizadas",
+        group: tr("Ferramentas personalizadas"),
         members: [tool.id],
         defaultMembers: [tool.id],
       });
@@ -1220,14 +1223,14 @@ export default function ModelEditor({
   async function save() {
     setErr(null);
     if (!baseModel) {
-      setErr("Selecione um modelo base");
+      setErr(tr("Selecione um modelo base"));
       return;
     }
     let params: unknown;
     try {
       params = JSON.parse(paramsStr || "{}");
     } catch {
-      setErr("Parâmetros avançados devem ser JSON válido");
+      setErr(tr("Parâmetros avançados devem ser JSON válido"));
       return;
     }
     // junta capacidades reais + filtros (como chaves "filter:<key>") em um só dict
@@ -1365,7 +1368,7 @@ export default function ModelEditor({
       else await api.patch(`/models/${model!.id}`, body);
       onSaved();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao salvar");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao salvar"));
     } finally {
       setSaving(false);
     }
@@ -1383,9 +1386,9 @@ export default function ModelEditor({
           onClick={onClose}
           className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm text-muted transition-colors hover:bg-hover hover:text-ink"
         >
-          <ArrowLeft size={17} /> Voltar
+          <ArrowLeft size={17} />  {tr("Voltar")}
         </button>
-        <span className="text-sm font-medium text-ink">{isNew ? "Novo modelo" : "Editar modelo"}</span>
+        <span className="text-sm font-medium text-ink">{isNew ? tr("Novo modelo") : tr("Editar modelo")}</span>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-5 md:px-6 md:py-6">
@@ -1396,7 +1399,7 @@ export default function ModelEditor({
               <input ref={avatarFileRef} type="file" accept="image/*" className="hidden" onChange={pickAvatar} />
               <button
                 onClick={() => avatarFileRef.current?.click()}
-                title="Enviar uma imagem"
+                title={tr("Enviar uma imagem")}
                 className="group relative flex h-28 w-28 items-center justify-center overflow-hidden rounded-2xl bg-surface2"
               >
                 {avatarUrl ? (
@@ -1411,7 +1414,8 @@ export default function ModelEditor({
               </button>
               {avatarUrl && (
                 <button onClick={() => setAvatarUrl("")} className="text-xs text-muted transition-colors hover:text-ink">
-                  Remover imagem
+                  
+                  {tr("Remover imagem")}
                 </button>
               )}
               {avatarErr && <p className="max-w-28 text-center text-[11px] text-red-400">{avatarErr}</p>}
@@ -1419,21 +1423,22 @@ export default function ModelEditor({
 
             <div className="min-w-0 flex-1 space-y-3">
               <div className="space-y-1">
-                <Label>Nome do modelo</Label>
+                <Label>{tr("Nome do modelo")}</Label>
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="ex.: Mario Assistente"
+                  placeholder={tr("ex.: Mario Assistente")}
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-xl font-semibold text-ink outline-none transition-colors focus:border-accent placeholder:font-normal placeholder:text-muted"
                 />
               </div>
 
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <Label>ID do modelo</Label>
+                  <Label>{tr("ID do modelo")}</Label>
                   {slugEdited && (
-                    <button onClick={() => { setSlug(""); setSlugEdited(false); }} title="Voltar a derivar do nome" className="text-[11px] text-muted transition-colors hover:text-ink">
-                      derivar do nome
+                    <button onClick={() => { setSlug(""); setSlugEdited(false); }} title={tr("Voltar a derivar do nome")} className="text-[11px] text-muted transition-colors hover:text-ink">
+                      
+                      {tr("derivar do nome")}
                     </button>
                   )}
                 </div>
@@ -1449,22 +1454,22 @@ export default function ModelEditor({
               </div>
 
               <div className="space-y-1">
-                <Label>Modelo base</Label>
+                <Label>{tr("Modelo base")}</Label>
                 <ModelField
                   models={baseModels}
                   value={baseModel}
                   onChange={setBaseModel}
-                  placeholder="Selecione um modelo base"
+                  placeholder={tr("Selecione um modelo base")}
                   className="flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none transition-colors hover:border-accent/60"
                 />
               </div>
 
               <div className="space-y-1">
-                <Label>Descrição</Label>
+                <Label>{tr("Descrição")}</Label>
                 <input
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Uma frase curta sobre o que este modelo faz"
+                  placeholder={tr("Uma frase curta sobre o que este modelo faz")}
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink-soft outline-none transition-colors focus:border-accent placeholder:text-muted"
                 />
               </div>
@@ -1473,44 +1478,45 @@ export default function ModelEditor({
 
           {/* Comportamento: system prompt + parâmetros de geração */}
           <Section
-            title="Comportamento"
+            title={tr("Comportamento")}
             icon={<Sliders size={15} />}
-            hint="Prompt do sistema e parâmetros de geração (temperature, top_p, max_tokens…) aplicados a este modelo em todos os chats."
+            hint={tr("Prompt do sistema e parâmetros de geração (temperature, top_p, max_tokens…) aplicados a este modelo em todos os chats.")}
           >
             <div className="space-y-2">
-              <Label>Prompt do sistema</Label>
+              <Label>{tr("Prompt do sistema")}</Label>
               <textarea
                 rows={4}
                 value={systemPrompt}
                 onChange={(e) => setSystemPrompt(e.target.value)}
-                placeholder="Como este modelo deve se comportar.&#10;ex.: Você é o Mario do Super Mario Bros e atua como assistente."
+                placeholder={tr("Como este modelo deve se comportar.&#10;ex.: Você é o Mario do Super Mario Bros e atua como assistente.")}
                 className="h-[128px] w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-accent placeholder:text-muted"
               />
               <button onClick={() => setShowAdvanced((v) => !v)} className="flex items-center gap-1 pt-1 text-sm text-muted transition-colors hover:text-ink">
-                {showAdvanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Parâmetros de geração (JSON)
+                {showAdvanced ? <ChevronDown size={14} /> : <ChevronRight size={14} />}  {tr("Parâmetros de geração (JSON)")}
               </button>
               {showAdvanced && (
                 <div className="space-y-3">
                   <div className="rounded-lg border border-border bg-surface/50 p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div>
-                        <p className="text-sm font-medium text-ink">Roteamento OpenRouter</p>
-                        <p className="text-xs text-muted">Escolha consistência ou priorize velocidade. Não é enviado a modelos locais.</p>
+                        <p className="text-sm font-medium text-ink">{tr("Roteamento OpenRouter")}</p>
+                        <p className="text-xs text-muted">{tr("Escolha consistência ou priorize velocidade. Não é enviado a modelos locais.")}</p>
                       </div>
                       <Select
                         value={providerSort}
                         onChange={(e) => updateProviderPrefs({ sort: e.target.value || undefined })}
                         className="rounded-md border border-border bg-bg px-2 py-1.5 text-xs text-ink outline-none focus:border-accent"
-                        aria-label="Prioridade de roteamento do OpenRouter"
+                        aria-label={tr("Prioridade de roteamento do OpenRouter")}
                       >
-                        <option value="">Padrão balanceado</option>
-                        <option value="latency">Menor latência</option>
-                        <option value="throughput">Maior vazão</option>
-                        <option value="price">Menor preço</option>
+                        <option value="">{tr("Padrão balanceado")}</option>
+                        <option value="latency">{tr("Menor latência")}</option>
+                        <option value="throughput">{tr("Maior vazão")}</option>
+                        <option value="price">{tr("Menor preço")}</option>
                       </Select>
                     </div>
                     <label className="mt-3 block text-xs text-muted">
-                      Ordem de provedores (slugs separados por vírgula)
+                      
+                      {tr("Ordem de provedores (slugs separados por vírgula)")}
                       <input
                         value={providerOrder}
                         onChange={(e) => {
@@ -1528,7 +1534,8 @@ export default function ModelEditor({
                         onChange={(e) => updateProviderPrefs({ allow_fallbacks: e.target.checked ? undefined : false })}
                         className="accent-accent"
                       />
-                      Permitir fallback se o provedor preferido estiver indisponível
+                      
+                      {tr("Permitir fallback se o provedor preferido estiver indisponível")}
                     </label>
                   </div>
                   <textarea
@@ -1547,21 +1554,22 @@ export default function ModelEditor({
           <div className="mt-8 space-y-3 border-t border-border pt-7">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
               <span className="text-muted"><Volume2 size={15} /></span>
-              Voz
-              <InfoHint text="Ative separadamente a fala (TTS) e a escuta (STT). A engrenagem abre o provedor, modelo, voz e teste de cada recurso." />
+              
+              {tr("Voz")}
+              <InfoHint text={tr("Ative separadamente a fala (TTS) e a escuta (STT). A engrenagem abre o provedor, modelo, voz e teste de cada recurso.")} />
             </h2>
 
             <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
               <span className="min-w-0">
                 <span className="block text-sm font-medium text-ink">Fala · TTS</span>
-                <span className="block text-xs text-muted">Transforma respostas do modelo em áudio.</span>
+                <span className="block text-xs text-muted">{tr("Transforma respostas do modelo em áudio.")}</span>
               </span>
               <div className="flex shrink-0 items-center gap-1.5">
                 {voiceCfg.tts_enabled !== false && (
                   <button
                     type="button"
                     onClick={() => setOpenVoiceConfig((current) => current === "tts" ? null : "tts")}
-                    title="Configurar fala"
+                    title={tr("Configurar fala")}
                     aria-expanded={openVoiceConfig === "tts"}
                     className={`rounded-lg p-1.5 transition-colors ${openVoiceConfig === "tts" ? "bg-hover text-ink" : "text-muted hover:bg-hover hover:text-ink"}`}
                   >
@@ -1591,14 +1599,14 @@ export default function ModelEditor({
             <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
               <span className="min-w-0">
                 <span className="block text-sm font-medium text-ink">Escuta · STT</span>
-                <span className="block text-xs text-muted">Transcreve o microfone antes de enviar a mensagem.</span>
+                <span className="block text-xs text-muted">{tr("Transcreve o microfone antes de enviar a mensagem.")}</span>
               </span>
               <div className="flex shrink-0 items-center gap-1.5">
                 {voiceCfg.stt_enabled !== false && (
                   <button
                     type="button"
                     onClick={() => setOpenVoiceConfig((current) => current === "stt" ? null : "stt")}
-                    title="Configurar escuta"
+                    title={tr("Configurar escuta")}
                     aria-expanded={openVoiceConfig === "stt"}
                     className={`rounded-lg p-1.5 transition-colors ${openVoiceConfig === "stt" ? "bg-hover text-ink" : "text-muted hover:bg-hover hover:text-ink"}`}
                   >
@@ -1630,23 +1638,25 @@ export default function ModelEditor({
           <div className="mt-8 space-y-3 border-t border-border pt-7">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
               <span className="text-muted"><Ear size={15} /></span>
-              Assistente
-              <InfoHint text="Fale com este modelo e ouça a resposta — pelo botão 🎙️/atalho no chat, ou por wake word (&quot;hey nome&quot;) sempre-ativa." />
+              
+              {tr("Assistente")}
+              <InfoHint text={tr("Fale com este modelo e ouça a resposta — pelo botão 🎙️/atalho no chat, ou por wake word (&quot;hey nome&quot;) sempre-ativa.")} />
             </h2>
 
             {/* Card: o toggle liga; a engrenagem revela as opções (padrão do SIFT) */}
             <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
               <span>
-                <span className="block text-sm font-medium text-ink">Chamar modelo por voz</span>
+                <span className="block text-sm font-medium text-ink">{tr("Chamar modelo por voz")}</span>
                 <span className="block text-xs text-muted">
-                  Modo voz (🎙️ no chat ou {"Ctrl/⌘+Shift+V"}): você fala, a IA responde falando. Opcional: wake word.
+                  
+                  {tr("Modo voz (🎙️ no chat ou")} {"Ctrl/⌘+Shift+V"}{tr("): você fala, a IA responde falando. Opcional: wake word.")}
                 </span>
               </span>
               <div className="flex shrink-0 items-center gap-1.5">
                 {listenCfg.enabled && (
                   <button
                     onClick={() => setVoiceOpen((v) => !v)}
-                    title="Opções do assistente de voz"
+                    title={tr("Opções do assistente de voz")}
                     className={`rounded-lg p-1.5 transition-colors ${voiceOpen ? "bg-hover text-ink" : "text-muted hover:bg-hover hover:text-ink"}`}
                   >
                     <Settings size={16} />
@@ -1659,19 +1669,19 @@ export default function ModelEditor({
             {listenCfg.enabled && voiceOpen && (
               <div className="space-y-3 rounded-xl border border-border bg-surface2/40 p-3">
                 <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-muted">Palavra de ativação</span>
+                  <span className="mb-1 block text-xs font-medium text-muted">{tr("Palavra de ativação")}</span>
                   <input
                     value={listenCfg.call_name ?? ""}
                     onChange={(e) => setListenCfg({ call_name: e.target.value })}
                     placeholder="ex.: Max"
                     className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent"
                   />
-                  <span className="mt-1 block text-[11px] text-muted">O que você diz para chamar. Com <strong>Vosk</strong> já ativa direto; com <strong>Porcupine</strong>, escolha a palavra na seção Wake word.</span>
+                  <span className="mt-1 block text-[11px] text-muted">{tr("O que você diz para chamar. Com")} <strong>{tr("Vosk")}</strong>  {tr("já ativa direto; com")} <strong>{"Porcupine"}</strong>{tr(", escolha a palavra na seção Wake word.")}</span>
                 </label>
                 <div>
-                  <span className="mb-1 block text-xs font-medium text-muted">Chat do modo voz</span>
+                  <span className="mb-1 block text-xs font-medium text-muted">{tr("Chat do modo voz")}</span>
                   <div className="flex rounded-lg border border-border bg-surface2 p-0.5">
-                    {([["fixed", "Chat fixo (pasta)"], ["new", "Novo chat"]] as [string, string][]).map(([val, lbl]) => (
+                    {([["fixed", tr("Chat fixo (pasta)")], ["new", tr("Novo chat")]] as [string, string][]).map(([val, lbl]) => (
                       <button
                         key={val}
                         onClick={() => setListenCfg({ chat_mode: val })}
@@ -1682,7 +1692,7 @@ export default function ModelEditor({
                     ))}
                   </div>
                   {(listenCfg.chat_mode ?? "fixed") === "fixed" && (
-                    <span className="mt-1 block text-[11px] text-muted">O chat fixo fica na pasta <span className="font-mono text-ink-soft">Assistente</span> com o nome do modelo (<span className="font-mono text-ink-soft">{name || "modelo"}</span>).</span>
+                    <span className="mt-1 block text-[11px] text-muted">{tr("O chat fixo fica na pasta")} <span className="font-mono text-ink-soft">{tr("Assistente")}</span>  {tr("com o nome do modelo (")}<span className="font-mono text-ink-soft">{name || "modelo"}</span>).</span>
                   )}
                 </div>
                 <div className="flex items-center justify-between gap-3">
@@ -1691,28 +1701,28 @@ export default function ModelEditor({
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm text-ink">Transcrever no navegador (Whisper)</p>
-                    <p className="text-[11px] text-muted">STT offline, sem provedor de voz. Usa o modelo Whisper (~150MB, baixado 1x). Bom p/ nomes.</p>
+                    <p className="text-sm text-ink">{tr("Transcrever no navegador (Whisper)")}</p>
+                    <p className="text-[11px] text-muted">{tr("STT offline, sem provedor de voz. Usa o modelo Whisper (~150MB, baixado 1x). Bom p/ nomes.")}</p>
                   </div>
                   <Toggle on={!!listenCfg.stt_local} onChange={(v) => setListenCfg({ stt_local: v })} />
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm text-ink">Modo conversa (hands-free)</p>
-                    <p className="text-[11px] text-muted">Depois de responder, volta a ouvir sozinho até você encerrar.</p>
+                    <p className="text-sm text-ink">{tr("Modo conversa (hands-free)")}</p>
+                    <p className="text-[11px] text-muted">{tr("Depois de responder, volta a ouvir sozinho até você encerrar.")}</p>
                   </div>
                   <Toggle on={!!listenCfg.hands_free} onChange={(v) => setListenCfg({ hands_free: v })} />
                 </div>
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-sm text-ink">Conversa contínua</p>
-                    <p className="text-[11px] text-muted">Após responder, reabre a escuta por uns segundos para você continuar sem repetir a palavra; se ficar em silêncio, encerra sozinho.</p>
+                    <p className="text-sm text-ink">{tr("Conversa contínua")}</p>
+                    <p className="text-[11px] text-muted">{tr("Após responder, reabre a escuta por uns segundos para você continuar sem repetir a palavra; se ficar em silêncio, encerra sozinho.")}</p>
                   </div>
                   <Toggle on={!!listenCfg.continuous} onChange={(v) => setListenCfg({ continuous: v })} />
                 </div>
                 {listenCfg.continuous && (
                   <label className="block">
-                    <span className="mb-1 block text-xs font-medium text-muted">Janela de resposta (segundos)</span>
+                    <span className="mb-1 block text-xs font-medium text-muted">{tr("Janela de resposta (segundos)")}</span>
                     <input
                       type="number"
                       min={2}
@@ -1721,7 +1731,7 @@ export default function ModelEditor({
                       onChange={(e) => setListenCfg({ follow_up_secs: Math.max(2, Math.min(30, Number(e.target.value) || 8)) })}
                       className="w-24 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent"
                     />
-                    <span className="mt-1 block text-[11px] text-muted">Silêncio por esse tempo encerra a conversa.</span>
+                    <span className="mt-1 block text-[11px] text-muted">{tr("Silêncio por esse tempo encerra a conversa.")}</span>
                   </label>
                 )}
 
@@ -1729,7 +1739,7 @@ export default function ModelEditor({
                 <div className="space-y-3 border-t border-border pt-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-sm text-ink">Wake word (&quot;hey nome&quot;)</p>
+                      <p className="text-sm text-ink">{tr("Wake word (\"hey nome\")")}</p>
                       <p className="text-[11px] text-muted">Escuta sempre-ativa (on-device) que abre o modo voz ao ouvir a palavra. O mic fica ligado enquanto ativado no chat.</p>
                     </div>
                     <Toggle on={!!listenCfg.wake_enabled} onChange={(v) => setListenCfg({ wake_enabled: v })} />
@@ -1737,9 +1747,9 @@ export default function ModelEditor({
                   {listenCfg.wake_enabled && (
                     <div className="space-y-3 rounded-lg border border-border bg-bg/40 p-3">
                       <div>
-                        <span className="mb-1 block text-xs font-medium text-muted">Provedor</span>
+                        <span className="mb-1 block text-xs font-medium text-muted">{tr("Provedor")}</span>
                         <div className="flex rounded-lg border border-border bg-surface2 p-0.5">
-                          {([["porcupine", "Porcupine"], ["whisper", "Whisper"], ["vosk", "Vosk"], ["openwakeword", "OpenWakeWord"]] as [string, string][]).map(([val, lbl]) => (
+                          {([["porcupine", "Porcupine"], ["whisper", tr("Whisper")], ["vosk", tr("Vosk")], ["openwakeword", "OpenWakeWord"]] as [string, string][]).map(([val, lbl]) => (
                             <button
                               key={val}
                               onClick={() => setListenCfg({ wake_engine: val })}
@@ -1752,7 +1762,7 @@ export default function ModelEditor({
                       </div>
                       {(listenCfg.wake_engine ?? "porcupine") === "porcupine" ? (
                         <label className="block">
-                          <span className="mb-1 block text-xs font-medium text-muted">Palavra</span>
+                          <span className="mb-1 block text-xs font-medium text-muted">{tr("Palavra")}</span>
                           <Select
                             value={listenCfg.porcupine_keyword ?? "Jarvis"}
                             onChange={(e) => setListenCfg({ porcupine_keyword: e.target.value })}
@@ -1761,15 +1771,15 @@ export default function ModelEditor({
                             {PORCUPINE_WORDS.map((w) => (
                               <option key={w} value={w}>{w}</option>
                             ))}
-                            <option value="__custom__">Personalizada (.ppn nas Conexões)</option>
+                            <option value="__custom__">{tr("Personalizada (.ppn nas Conexões)")}</option>
                           </Select>
-                          <span className="mt-1 block text-[11px] text-muted">Embutidas grátis (precisam da AccessKey). Para &quot;hey &lt;nome&gt;&quot;, use &quot;Personalizada&quot; e cadastre o .ppn nas Conexões.</span>
+                          <span className="mt-1 block text-[11px] text-muted">{tr("Embutidas grátis (precisam da AccessKey). Para \"hey <nome>\", use \"Personalizada\" e cadastre o .ppn nas Conexões.")}</span>
                         </label>
                       ) : (listenCfg.wake_engine ?? "porcupine") === "whisper" ? (
-                        <p className="text-[11px] text-muted">Reconhece a <strong>Palavra de ativação</strong> acima — inclusive nomes (&quot;akeno&quot;). On-device, sem chave; o modelo (~150MB) baixa na 1ª vez e fica em cache. Confirme/baixe em Conexões → Assistente de voz.</p>
+                        <p className="text-[11px] text-muted">Reconhece a <strong>{tr("Palavra de ativação")}</strong>  {tr("acima — inclusive nomes (\"akeno\"). On-device, sem chave; o modelo (~150MB) baixa na 1ª vez e fica em cache. Confirme/baixe em Conexões → Assistente de voz.")}</p>
                       ) : (listenCfg.wake_engine ?? "porcupine") === "openwakeword" ? (
                         <>
-                          <p className="text-[11px] text-muted">Modelo que <strong>você treina</strong> (Colab do openWakeWord) para uma palavra/nome próprio, rodando on-device (ONNX). Cadastre a URL do seu <span className="text-ink-soft">.onnx</span> em Conexões → Assistente. Não usa a &quot;Palavra de ativação&quot; acima.</p>
+                          <p className="text-[11px] text-muted">{tr("Modelo que")} <strong>{tr("você treina")}</strong>  {tr("(Colab do openWakeWord) para uma palavra/nome próprio, rodando on-device (ONNX). Cadastre a URL do seu")} <span className="text-ink-soft">.onnx</span>  {tr("em Conexões → Assistente. Não usa a \"Palavra de ativação\" acima.")}</p>
                           <label className="block">
                             <span className="mb-1 block text-xs font-medium text-muted">Sensibilidade (limiar {(listenCfg.oww_threshold ?? 0.5).toFixed(2)})</span>
                             <input
@@ -1781,18 +1791,18 @@ export default function ModelEditor({
                               onChange={(e) => setListenCfg({ oww_threshold: Number(e.target.value) })}
                               className="w-full accent-accent"
                             />
-                            <span className="mt-1 block text-[11px] text-muted">Menor = dispara mais fácil (mais falsos positivos); maior = mais exigente. Calibre no teste em Conexões.</span>
+                            <span className="mt-1 block text-[11px] text-muted">{tr("Menor = dispara mais fácil (mais falsos positivos); maior = mais exigente. Calibre no teste em Conexões.")}</span>
                           </label>
                         </>
                       ) : (
-                        <p className="text-[11px] text-muted">O Vosk reconhece a <strong>Palavra de ativação</strong> acima. Offline, sem chave — ruim com nomes; para nomes prefira Whisper. URL do modelo nas Conexões (ou o padrão).</p>
+                        <p className="text-[11px] text-muted">{tr("O Vosk reconhece a")} <strong>{tr("Palavra de ativação")}</strong>  {tr("acima. Offline, sem chave — ruim com nomes; para nomes prefira Whisper. URL do modelo nas Conexões (ou o padrão).")}</p>
                       )}
                       <button
                         type="button"
                         onClick={openWakeSettings}
                         className="flex items-center gap-1.5 text-[11px] font-medium text-accent hover:underline"
                       >
-                        <Settings size={13} /> Chaves e modelos em Conexões → Assistente
+                        <Settings size={13} />  {tr("Chaves e modelos em Conexões → Assistente")}
                       </button>
                     </div>
                   )}
@@ -1805,8 +1815,9 @@ export default function ModelEditor({
           <div className="mt-8 space-y-3 border-t border-border pt-7">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
               <span className="text-muted"><Wrench size={15} /></span>
-              Ferramentas
-              <InfoHint text="O SIFT mantém o catálogo longo sob descoberta, poupando contexto. Capacidades frequentes no contexto certo — como Web e as ferramentas de um projeto — entram como chamadas diretas e tipadas." />
+              
+              {tr("Ferramentas")}
+              <InfoHint text={tr("O SIFT mantém o catálogo longo sob descoberta, poupando contexto. Capacidades frequentes no contexto certo — como Web e as ferramentas de um projeto — entram como chamadas diretas e tipadas.")} />
             </h2>
 
             {/* SIFT: chave-mestra. Sem ela, o modelo não usa nenhuma ferramenta. */}
@@ -1814,14 +1825,15 @@ export default function ModelEditor({
               <span>
                 <span className="block text-sm font-medium text-ink">SIFT</span>
                   <span className="block text-xs text-muted">
-                  Permite que este modelo utilize ferramentas através de descoberta dinâmica.
+                  
+                  {tr("Permite que este modelo utilize ferramentas através de descoberta dinâmica.")}
                 </span>
               </span>
               <div className="flex shrink-0 items-center gap-1.5">
                 {toolsEnabled && (
                   <button
                     onClick={() => setShowSiftConfig((v) => !v)}
-                    title="Configurar como o SIFT é usado"
+                    title={tr("Configurar como o SIFT é usado")}
                     className={`rounded-lg p-1.5 transition-colors ${showSiftConfig ? "bg-hover text-ink" : "text-muted hover:bg-hover hover:text-ink"}`}
                   >
                     <Settings size={16} />
@@ -1836,35 +1848,37 @@ export default function ModelEditor({
                 {/* Configuração de como o SIFT é apresentado ao modelo (engrenagem) */}
                 {showSiftConfig && (
                   <div className="space-y-3 rounded-xl border border-border bg-surface px-4 py-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-muted">Como o SIFT é usado</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-muted">{tr("Como o SIFT é usado")}</p>
                     <p className="text-xs text-muted">
-                      O SIFT resolve <span className="text-ink-soft">como</span> usar (descoberta via
-                      meta-tools). Aqui você define <span className="text-ink-soft">quando</span> usar.
+                      
+                      {tr("O SIFT resolve")} <span className="text-ink-soft">como</span>  {tr("usar (descoberta via meta-tools). Aqui você define")} <span className="text-ink-soft">quando</span> usar.
                     </p>
                     <div className="space-y-2.5">
                       <label className="flex cursor-pointer items-start gap-2.5">
                         <input type="radio" name="siftmode" checked={siftMode === "prompt"} onChange={() => setSiftMode("prompt")} className="mt-0.5 accent-accent" />
                         <span>
                           <span className="block text-sm text-ink">
-                            Prompt de ferramentas (quando usar) <span className="text-accent-hover">· recomendado</span>
+                            
+                            {tr("Prompt de ferramentas (quando usar)")} <span className="text-accent-hover">· recomendado</span>
                           </span>
-                          <span className="block text-xs text-muted">Injeta uma instrução curta de quando recorrer a ferramentas — barato.</span>
+                          <span className="block text-xs text-muted">{tr("Injeta uma instrução curta de quando recorrer a ferramentas — barato.")}</span>
                         </span>
                       </label>
                       <label className="flex cursor-pointer items-start gap-2.5">
                         <input type="radio" name="siftmode" checked={siftMode === "list"} onChange={() => setSiftMode("list")} className="mt-0.5 accent-accent" />
                         <span>
-                          <span className="block text-sm text-ink">Injetar lista de ferramentas</span>
-                          <span className="block text-xs text-muted">Coloca nomes/descrições das tools no prompt — explícito, porém mais caro.</span>
+                          <span className="block text-sm text-ink">{tr("Injetar lista de ferramentas")}</span>
+                          <span className="block text-xs text-muted">{tr("Coloca nomes/descrições das tools no prompt — explícito, porém mais caro.")}</span>
                         </span>
                       </label>
                     </div>
                     {siftMode === "prompt" && (
                       <div className="space-y-1">
                         <div className="flex items-center justify-between">
-                          <p className="text-xs text-muted">Prompt &quot;quando usar&quot;</p>
+                          <p className="text-xs text-muted">{tr("Prompt \"quando usar\"")}</p>
                           <button onClick={() => setSiftPrompt(DEFAULT_TOOL_PROMPT)} className="text-xs text-muted transition-colors hover:text-ink">
-                            Restaurar padrão
+                            
+                            {tr("Restaurar padrão")}
                           </button>
                         </div>
                         <textarea
@@ -1881,10 +1895,10 @@ export default function ModelEditor({
                 {/* Code mode: o modelo orquestra as ferramentas escrevendo Python */}
                 <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
                   <span>
-                    <span className="block text-sm font-medium text-ink">Modo Código</span>
+                    <span className="block text-sm font-medium text-ink">{tr("Modo Código")}</span>
                     <span className="block text-xs text-muted">
-                      Permite o modelo orquestrar várias ferramentas em uma única chamada
-                      (sandbox). Ideal p/ modelos fortes em código.
+                      
+                      {tr("Permite o modelo orquestrar várias ferramentas em uma única chamada (sandbox). Ideal p/ modelos fortes em código.")}
                     </span>
                   </span>
                   <Toggle on={codeMode} onChange={setCodeMode} />
@@ -1895,14 +1909,15 @@ export default function ModelEditor({
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted">
-                      Ferramentas ativas
-                      <InfoHint text="Ferramentas que este modelo pode usar, organizadas por capacidade. Dentro de “Gerenciar”, fixe (pin) as mais quentes para virarem chamadas diretas, sem round-trip de descoberta." />
+                      
+                      {tr("Ferramentas ativas")}
+                      <InfoHint text={tr("Ferramentas que este modelo pode usar, organizadas por capacidade. Dentro de “Gerenciar”, fixe (pin) as mais quentes para virarem chamadas diretas, sem round-trip de descoberta.")} />
                     </p>
                     <button
                       onClick={() => setToolsModal(true)}
                       className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-ink transition-colors hover:bg-hover"
                     >
-                      <Wrench size={13} /> Gerenciar
+                      <Wrench size={13} />  {tr("Gerenciar")}
                     </button>
                   </div>
                   {selectedCapabilityKeys.length === 0 ? null : (
@@ -1913,7 +1928,7 @@ export default function ModelEditor({
                           <input
                             value={toolSearch}
                             onChange={(e) => setToolSearch(e.target.value)}
-                            placeholder="Buscar ferramentas ativas…"
+                            placeholder={tr("Buscar ferramentas ativas…")}
                             className="w-full rounded-lg border border-border bg-surface py-1.5 pl-8 pr-3 text-xs text-ink outline-none focus:border-accent placeholder:text-muted"
                           />
                         </div>
@@ -1931,12 +1946,12 @@ export default function ModelEditor({
                           return (
                             <div key={capability.key} className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5">
                               {capability.system && (
-                                <span title={capability.iconTitle ?? "AI Workspace"} className="flex shrink-0 items-center text-muted">
+                                <span title={capability.iconTitle ?? tr("AI Workspace")} className="flex shrink-0 items-center text-muted">
                                   {capability.icon ?? <Wrench size={13} />}
                                 </span>
                               )}
                               {pinnedCount > 0 && (
-                                <span title={`${pinnedCount} operação(ões) fixada(s)`} className="flex shrink-0 items-center text-accent-hover">
+                                <span title={tr("{pinnedCount} operação(ões) fixada(s)", { pinnedCount: pinnedCount })} className="flex shrink-0 items-center text-accent-hover">
                                   <Pin size={12} className="fill-accent-hover" />
                                 </span>
                               )}
@@ -1945,21 +1960,22 @@ export default function ModelEditor({
                                 {enabledMembers.length > 1 && <span className="ml-1 text-muted">({enabledMembers.length})</span>}
                               </span>
                               {contextDirect && (
-                                <span title="A cadeia Web é chamada diretamente: pesquisar e ler a página não exigem uma rodada de descoberta." className="shrink-0 rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-hover">
-                                  Direta
+                                <span title={tr("A cadeia Web é chamada diretamente: pesquisar e ler a página não exigem uma rodada de descoberta.")} className="shrink-0 rounded-full bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-hover">
+                                  
+                                  {tr("Direta")}
                                 </span>
                               )}
-                              <button onClick={() => setOpenToolCapability(capability.key)} title="Configurar operações" className="rounded-md p-1 text-muted transition-colors hover:text-ink">
+                              <button onClick={() => setOpenToolCapability(capability.key)} title={tr("Configurar operações")} className="rounded-md p-1 text-muted transition-colors hover:text-ink">
                                 <Settings size={14} />
                               </button>
-                              <button onClick={() => setSelectedCapabilities(selectedCapabilityKeys.filter((key) => key !== capability.key))} title="Remover capacidade" className="rounded-md p-1 text-muted transition-colors hover:text-ink">
+                              <button onClick={() => setSelectedCapabilities(selectedCapabilityKeys.filter((key) => key !== capability.key))} title={tr("Remover capacidade")} className="rounded-md p-1 text-muted transition-colors hover:text-ink">
                                 <X size={14} />
                               </button>
                             </div>
                           );
                         })}
                         {shownToolCapabilities.length === 0 && (
-                          <p className="px-1 py-2 text-xs text-muted">Nenhuma capacidade corresponde à busca.</p>
+                          <p className="px-1 py-2 text-xs text-muted">{tr("Nenhuma capacidade corresponde à busca.")}</p>
                         )}
                       </div>
                     </div>
@@ -1971,10 +1987,10 @@ export default function ModelEditor({
 
           {/* Skills — equipadas neste modelo (carregadas sob demanda via view_skill) */}
           <Section
-            title="Skills"
+            title={tr("Skills")}
             icon={<Sparkles size={15} />}
-            hint="O modelo vê só nome + descrição de cada skill; quando precisa, chama view_skill e carrega o conteúdo completo. Também dá para invocá-las com $ no chat. Equipar muitas não encarece os turnos em que não são usadas."
-            right={<ManageBtn icon={<Sparkles size={13} />} label="Gerenciar" onClick={() => setSkillsModal(true)} />}
+            hint={tr("O modelo vê só nome + descrição de cada skill; quando precisa, chama view_skill e carrega o conteúdo completo. Também dá para invocá-las com $ no chat. Equipar muitas não encarece os turnos em que não são usadas.")}
+            right={<ManageBtn icon={<Sparkles size={13} />} label={tr("Gerenciar")} onClick={() => setSkillsModal(true)} />}
           >
             {skillIds.length === 0 ? null : (
               <div className="space-y-1.5">
@@ -1984,7 +2000,7 @@ export default function ModelEditor({
                     <input
                       value={skillSearch}
                       onChange={(e) => setSkillSearch(e.target.value)}
-                      placeholder="Buscar skills equipadas…"
+                      placeholder={tr("Buscar skills equipadas…")}
                       className="w-full rounded-lg border border-border bg-surface py-1.5 pl-8 pr-3 text-xs text-ink outline-none transition-colors focus:border-accent placeholder:text-muted"
                     />
                   </div>
@@ -1994,13 +2010,13 @@ export default function ModelEditor({
                     <div key={sid} className="flex items-center gap-2 rounded-lg border border-border bg-surface px-3 py-1.5">
                       <Sparkles size={13} className="shrink-0 text-accent-hover" />
                       <span className="flex-1 truncate text-sm text-ink">{skillLabel(sid)}</span>
-                      <button onClick={() => setSkillIds((ids) => ids.filter((x) => x !== sid))} title="Remover" className="rounded-md p-1 text-muted transition-colors hover:text-ink">
+                      <button onClick={() => setSkillIds((ids) => ids.filter((x) => x !== sid))} title={tr("Remover")} className="rounded-md p-1 text-muted transition-colors hover:text-ink">
                         <X size={14} />
                       </button>
                     </div>
                   ))}
                   {shownSkillIds.length === 0 && (
-                    <p className="px-1 py-2 text-xs text-muted">Nenhuma skill corresponde à busca.</p>
+                    <p className="px-1 py-2 text-xs text-muted">{tr("Nenhuma skill corresponde à busca.")}</p>
                   )}
                 </div>
               </div>
@@ -2010,30 +2026,30 @@ export default function ModelEditor({
           {/* Capacidades — o que o próprio modelo sabe fazer */}
           <div className="mt-8 border-t border-border pt-7">
             <ActiveListField
-              label="Capacidades"
+              label={tr("Capacidades")}
               icon={<Sparkles size={15} />}
               manageIcon={<Sparkles size={13} />}
               items={capOnly}
               labelOf={(k) => ALL_CAPS.find((c) => c.key === k)?.label ?? k}
               onRemove={(k) => setCapSelected(capSelected.filter((x) => x !== k))}
               onManage={() => setCapsModal(true)}
-              searchPlaceholder="Buscar capacidades…"
-              hint="O que o próprio modelo sabe fazer: ver imagens, ouvir áudio, ler arquivos."
+              searchPlaceholder={tr("Buscar capacidades…")}
+              hint={tr("O que o próprio modelo sabe fazer: ver imagens, ouvir áudio, ler arquivos.")}
             />
           </div>
 
           {/* Recursos — o que o app acrescenta ao modelo */}
           <div className="mt-8 border-t border-border pt-7">
             <ActiveListField
-              label="Recursos do modelo"
+              label={tr("Recursos do modelo")}
               icon={<Box size={15} />}
               manageIcon={<Box size={13} />}
               items={resOnly}
               labelOf={(k) => ALL_CAPS.find((c) => c.key === k)?.label ?? k}
               onRemove={(k) => setCapSelected(capSelected.filter((x) => x !== k))}
               onManage={() => setResModal(true)}
-              searchPlaceholder="Buscar recursos…"
-              hint="Recursos que o app acrescenta ao modelo. Espaço de trabalho: pasta e terminal próprios do chat para baixar, rodar e analisar programas."
+              searchPlaceholder={tr("Buscar recursos…")}
+              hint={tr("Recursos que o app acrescenta ao modelo. Espaço de trabalho: pasta e terminal próprios do chat para baixar, rodar e analisar programas.")}
             />
           </div>
 
@@ -2043,12 +2059,13 @@ export default function ModelEditor({
             <div className="flex items-center justify-between gap-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
                 <span className="text-muted"><Brain size={15} /></span>
-                Memória
-                <InfoHint text="O modelo lembra de fatos das conversas. A engrenagem define onde salvar e de onde ler." />
+                
+                {tr("Memória")}
+                <InfoHint text={tr("O modelo lembra de fatos das conversas. A engrenagem define onde salvar e de onde ler.")} />
               </h2>
               <div className="flex items-center gap-2">
                 {memOn && (
-                  <button onClick={() => { if (!mem) setMem({ ...MEM_CFG_DEFAULT }); setMemModal(true); }} title="Configurar memória" className="rounded-md p-1 text-muted transition-colors hover:text-ink">
+                  <button onClick={() => { if (!mem) setMem({ ...MEM_CFG_DEFAULT }); setMemModal(true); }} title={tr("Configurar memória")} className="rounded-md p-1 text-muted transition-colors hover:text-ink">
                     <Settings size={15} />
                   </button>
                 )}
@@ -2061,7 +2078,7 @@ export default function ModelEditor({
               no estilo "Ferramentas Ativas": engrenagem por base = o MODO daquela base. */}
           <div className="mt-8 border-t border-border pt-7">
             <ActiveListField
-              label="Conhecimento"
+              label={tr("Conhecimento")}
               icon={<BookOpen size={15} />}
               manageIcon={<BookOpen size={13} />}
               items={kbAttached}
@@ -2072,16 +2089,16 @@ export default function ModelEditor({
               onConfig={(id) => setKbCfgBase(id)}
               onRemove={(id) => setKbBasesSel(kbAttached.filter((x) => x !== id))}
               onManage={() => setKbModal(true)}
-              searchPlaceholder="Buscar bases acopladas…"
+              searchPlaceholder={tr("Buscar bases acopladas…")}
               searchFrom={2}
-              hint="Documentos que este modelo consulta. A engrenagem de cada base define como ela é usada."
+              hint={tr("Documentos que este modelo consulta. A engrenagem de cada base define como ela é usada.")}
             />
           </div>
 
           {/* Cérebro — notas [[interligadas]] que este modelo lê/escreve */}
           <div className="mt-8 border-t border-border pt-7">
             <ActiveListField
-              label="Cérebro"
+              label={tr("Cérebro")}
               icon={<Brain size={15} />}
               manageIcon={<Brain size={13} />}
               items={(brainCfg.brains ?? []).filter((id) => brainBases.length === 0 || brainBases.some((b) => b.id === id))}
@@ -2089,14 +2106,15 @@ export default function ModelEditor({
               leadingOf={() => <Brain size={13} className="shrink-0 text-accent-hover" />}
               onRemove={(id) => setBrainCfg({ ...brainCfg, brains: (brainCfg.brains ?? []).filter((x) => x !== id) })}
               onManage={() => setBrainModal(true)}
-              searchPlaceholder="Buscar cérebros…"
+              searchPlaceholder={tr("Buscar cérebros…")}
               searchFrom={2}
-              hint="Notas interligadas que o modelo lê e, com a escrita ligada, atualiza sozinho."
+              hint={tr("Notas interligadas que o modelo lê e, com a escrita ligada, atualiza sozinho.")}
             />
             {(brainCfg.brains ?? []).length > 0 && (
               <div className="mt-3 flex items-center justify-between gap-3">
                 <span className="flex items-center gap-1.5 text-sm text-ink">
-                  Escrita pela IA <InfoHint text="A IA cria e atualiza notas. Desligada, o cérebro é só leitura." />
+                  
+                  {tr("Escrita pela IA")} <InfoHint text={tr("A IA cria e atualiza notas. Desligada, o cérebro é só leitura.")} />
                 </span>
                 <Toggle on={brainCfg.write !== false} onChange={(v) => setBrainCfg({ ...brainCfg, write: v })} />
               </div>
@@ -2108,12 +2126,13 @@ export default function ModelEditor({
             <div className="flex items-center justify-between gap-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
                 <span className="text-muted"><Users size={15} /></span>
-                Subagentes
-                <InfoHint text="Este modelo delega tarefas a outros agentes. No chat, chame um agente com @." />
+                
+                {tr("Subagentes")}
+                <InfoHint text={tr("Este modelo delega tarefas a outros agentes. No chat, chame um agente com @.")} />
               </h2>
               <div className="flex items-center gap-2">
                 {subOn && (
-                  <button onClick={() => setSubModal(true)} title="Configurar subagentes" className="rounded-md p-1 text-muted transition-colors hover:text-ink">
+                  <button onClick={() => setSubModal(true)} title={tr("Configurar subagentes")} className="rounded-md p-1 text-muted transition-colors hover:text-ink">
                     <Settings size={15} />
                   </button>
                 )}
@@ -2128,10 +2147,11 @@ export default function ModelEditor({
               <div className="flex items-center justify-between gap-3">
                 <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
                   <span className="text-muted"><FileText size={15} /></span>
-                  Extração de texto
-                  <InfoHint text="Como este modelo lê documentos anexados (PDF/Word/Excel/PPT/CSV) e faz OCR. É configuração deste modelo." />
+                  
+                  {tr("Extração de texto")}
+                  <InfoHint text={tr("Como este modelo lê documentos anexados (PDF/Word/Excel/PPT/CSV) e faz OCR. É configuração deste modelo.")} />
                 </h2>
-                <ManageBtn icon={<Settings size={13} />} label="Configurar" onClick={() => setOpenExtraction(true)} />
+                <ManageBtn icon={<Settings size={13} />} label={tr("Configurar")} onClick={() => setOpenExtraction(true)} />
               </div>
             </div>
           )}
@@ -2141,10 +2161,11 @@ export default function ModelEditor({
             <div className="mb-3 flex items-center justify-between gap-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-ink">
                 <span className="text-muted"><Sliders size={15} /></span>
-                Filtros
-                <InfoHint text="Processam a mensagem antes ou depois do modelo: descrevem imagens, transcrevem áudio, geram imagens e revisam a resposta." />
+                
+                {tr("Filtros")}
+                <InfoHint text={tr("Processam a mensagem antes ou depois do modelo: descrevem imagens, transcrevem áudio, geram imagens e revisam a resposta.")} />
               </h2>
-              <ManageBtn icon={<Sliders size={13} />} label="Gerenciar" onClick={() => setFiltersModal(true)} />
+              <ManageBtn icon={<Sliders size={13} />} label={tr("Gerenciar")} onClick={() => setFiltersModal(true)} />
             </div>
             {filters.length === 0 ? null : (
               <div className="space-y-1.5">
@@ -2156,7 +2177,7 @@ export default function ModelEditor({
                     <input
                       value={filterQ}
                       onChange={(e) => setFilterQ(e.target.value)}
-                      placeholder="Buscar filtros ativos…"
+                      placeholder={tr("Buscar filtros ativos…")}
                       className="w-full rounded-lg border border-border bg-surface py-1.5 pl-8 pr-3 text-xs text-ink outline-none focus:border-accent placeholder:text-muted"
                     />
                   </div>
@@ -2165,7 +2186,7 @@ export default function ModelEditor({
                     teto a seção empurrava o resto do editor para fora da tela */}
                 <div className="max-h-[420px] space-y-1.5 overflow-y-auto pr-1">
                 {filtersShown.length === 0 && (
-                  <p className="px-1 py-2 text-xs text-muted">Nada corresponde à busca.</p>
+                  <p className="px-1 py-2 text-xs text-muted">{tr("Nada corresponde à busca.")}</p>
                 )}
                 {filtersShown.map((f) => {
                   const cfgOpen = openFilterCfg === f;
@@ -2196,45 +2217,45 @@ export default function ModelEditor({
                         {hasCfg && (
                           <button
                             onClick={() => setOpenFilterCfg(cfgOpen ? null : f)}
-                            title="Configurar"
+                            title={tr("Configurar")}
                             className={`rounded-md p-1 transition-colors ${cfgOpen ? "bg-hover text-ink" : "text-muted hover:text-ink"}`}
                           >
                             <Settings size={14} />
                           </button>
                         )}
-                        <button onClick={() => { setFilters(filters.filter((x) => x !== f)); setOpenFilterCfg((o) => (o === f ? null : o)); }} title="Remover" className="rounded-md p-1 text-muted transition-colors hover:text-ink">
+                        <button onClick={() => { setFilters(filters.filter((x) => x !== f)); setOpenFilterCfg((o) => (o === f ? null : o)); }} title={tr("Remover")} className="rounded-md p-1 text-muted transition-colors hover:text-ink">
                           <X size={14} />
                         </button>
                       </div>
                       {isVisionRouter && cfgOpen && (
                         <div className="space-y-1.5 border-t border-border px-3 py-2.5">
                           <p className="text-xs text-muted">
-                            Modelo de visão que vai <span className="text-ink-soft">enxergar as imagens</span> e descrevê-las para
-                            o modelo em uso (útil quando o modelo base não tem visão).
+                            
+                            {tr("Modelo de visão que vai")} <span className="text-ink-soft">enxergar as imagens</span>  {tr("e descrevê-las para o modelo em uso (útil quando o modelo base não tem visão).")}
                           </p>
                           <ModelField
                             models={baseModels}
                             value={target}
                             onChange={(v) => setCfg({ model: v })}
-                            placeholder="Selecione um modelo com visão…"
+                            placeholder={tr("Selecione um modelo com visão…")}
                           />
                         </div>
                       )}
                       {isAudioRouter && cfgOpen && (
                         <div className="space-y-2 border-t border-border px-3 py-2.5">
                           <p className="text-xs text-muted">
-                            Transcreve os <span className="text-ink-soft">áudios enviados</span> (chat, WhatsApp, Telegram) para o
-                            modelo em uso &quot;ouvir&quot; em texto.
+                            
+                            {tr("Transcreve os")} <span className="text-ink-soft">{tr("áudios enviados")}</span>  {tr("(chat, WhatsApp, Telegram) para o modelo em uso \"ouvir\" em texto.")}
                           </p>
                           <div className="flex items-center gap-2 text-sm">
-                            <span className="shrink-0 text-ink-soft">Motor</span>
+                            <span className="shrink-0 text-ink-soft">{tr("Motor")}</span>
                             <Select
                               value={fc.engine || "stt"}
                               onChange={(e) => setCfg({ engine: e.target.value })}
                               className="rounded-lg border border-border bg-surface2 px-2 py-1 text-sm text-ink outline-none focus:border-accent"
                             >
-                              <option value="stt">Provedor de voz (Whisper)</option>
-                              <option value="model">Modelo multimodal (OpenRouter)</option>
+                              <option value="stt">{tr("Provedor de voz (Whisper)")}</option>
+                              <option value="model">{tr("Modelo multimodal (OpenRouter)")}</option>
                             </Select>
                           </div>
                           {(fc.engine || "stt") === "model" ? (
@@ -2242,28 +2263,28 @@ export default function ModelEditor({
                               models={baseModels}
                               value={target}
                               onChange={(v) => setCfg({ model: v })}
-                              placeholder="Modelo que aceita áudio (ex.: gemini-2.5-flash)…"
+                              placeholder={tr("Modelo que aceita áudio (ex.: gemini-2.5-flash)…")}
                             />
                           ) : (
-                            <p className="text-[11px] text-muted">Usa a chave do provedor de voz (Configurações → Conexões).</p>
+                            <p className="text-[11px] text-muted">{tr("Usa a chave do provedor de voz (Configurações → Conexões).")}</p>
                           )}
                         </div>
                       )}
                       {isGenImage && cfgOpen && (
                         <div className="space-y-2 border-t border-border px-3 py-2.5">
                           <p className="text-xs text-muted">
-                            Modelo que <span className="text-ink-soft">gera as imagens</span> quando o usuário pedir — o modelo em uso
-                            delega a geração para ele.
+                            
+                            {tr("Modelo que")} <span className="text-ink-soft">gera as imagens</span>  {tr("quando o usuário pedir — o modelo em uso delega a geração para ele.")}
                           </p>
                           <div className="flex items-center gap-2 text-sm">
-                            <span className="shrink-0 text-ink-soft">Provedor</span>
+                            <span className="shrink-0 text-ink-soft">{tr("Provedor")}</span>
                             <Select
                               value={provider}
                               onChange={(e) => setCfg({ provider: e.target.value })}
                               className="rounded-lg border border-border bg-surface2 px-2 py-1 text-sm text-ink outline-none focus:border-accent"
                             >
                               <option value="openrouter">OpenRouter</option>
-                              <option value="openai_compat">Compatível OpenAI</option>
+                              <option value="openai_compat">{tr("Compatível OpenAI")}</option>
                             </Select>
                           </div>
                           {provider === "openrouter" ? (
@@ -2271,23 +2292,23 @@ export default function ModelEditor({
                               models={baseModels}
                               value={target}
                               onChange={(v) => setCfg({ model: v })}
-                              placeholder="Modelo de imagem do OpenRouter…"
+                              placeholder={tr("Modelo de imagem do OpenRouter…")}
                             />
                           ) : (
                             <>
                               <input
                                 value={fc.base_url || ""}
                                 onChange={(e) => setCfg({ base_url: e.target.value })}
-                                placeholder="Base URL (ex.: https://api.openai.com/v1)"
+                                placeholder={tr("Base URL (ex.: https://api.openai.com/v1)")}
                                 className="w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
                               />
                               <input
                                 value={target}
                                 onChange={(e) => setCfg({ model: e.target.value })}
-                                placeholder="ID do modelo (ex.: dall-e-3)"
+                                placeholder={tr("ID do modelo (ex.: dall-e-3)")}
                                 className="w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
                               />
-                              <p className="text-[11px] text-muted">A chave do provedor fica em Conexões → APIs.</p>
+                              <p className="text-[11px] text-muted">{tr("A chave do provedor fica em Conexões → APIs.")}</p>
                             </>
                           )}
                         </div>
@@ -2321,14 +2342,14 @@ export default function ModelEditor({
 
       {toolsModal && (
         <TransferModal
-          title="Ferramentas do modelo"
+          title={tr("Ferramentas do modelo")}
           items={toolCapabilities}
           selected={selectedCapabilityKeys}
           onChange={setSelectedCapabilities}
           onClose={() => setToolsModal(false)}
-          availableLabel="Disponíveis"
-          selectedLabel="Ativadas"
-          searchPlaceholder="Buscar ferramentas…"
+          availableLabel={tr("Disponíveis")}
+          selectedLabel={tr("Ativadas")}
+          searchPlaceholder={tr("Buscar ferramentas…")}
           hasConfig={() => true}
           onConfig={setOpenToolCapability}
           childOpen={!!openToolCapability}
@@ -2336,56 +2357,57 @@ export default function ModelEditor({
       )}
       {skillsModal && (
         <TransferModal
-          title="Skills do modelo"
+          title={tr("Skills do modelo")}
           items={skillItems}
           selected={skillIds}
           onChange={setSkillIds}
           onClose={() => setSkillsModal(false)}
-          availableLabel="Disponíveis"
-          selectedLabel="Ativadas"
-          searchPlaceholder="Buscar skills…"
+          availableLabel={tr("Disponíveis")}
+          selectedLabel={tr("Ativadas")}
+          searchPlaceholder={tr("Buscar skills…")}
         />
       )}
       {capsModal && (
         <TransferModal
-          title="Capacidades do modelo"
+          title={tr("Capacidades do modelo")}
           items={capItems}
           selected={capOnly}
           onChange={(keys) => setCapSelected([...keys, ...resOnly])}
           onClose={() => setCapsModal(false)}
-          availableLabel="Disponíveis"
-          selectedLabel="Ativadas"
+          availableLabel={tr("Disponíveis")}
+          selectedLabel={tr("Ativadas")}
         />
       )}
       {resModal && (
         <TransferModal
-          title="Recursos do modelo"
+          title={tr("Recursos do modelo")}
           items={resItems}
           selected={resOnly}
           onChange={(keys) => setCapSelected([...capOnly, ...keys])}
           onClose={() => setResModal(false)}
-          availableLabel="Disponíveis"
-          selectedLabel="Ativados"
+          availableLabel={tr("Disponíveis")}
+          selectedLabel={tr("Ativados")}
         />
       )}
       {brainModal && (
         <TransferModal
-          title="Cérebros do modelo"
+          title={tr("Cérebros do modelo")}
           items={brainBases.map((b) => ({ key: b.id, label: b.name }))}
           selected={brainCfg.brains ?? []}
           onChange={(ids) => setBrainCfg({ ...brainCfg, brains: ids })}
           onClose={() => setBrainModal(false)}
-          availableLabel="Disponíveis"
-          selectedLabel="Acoplados"
-          searchPlaceholder="Buscar cérebros…"
+          availableLabel={tr("Disponíveis")}
+          selectedLabel={tr("Acoplados")}
+          searchPlaceholder={tr("Buscar cérebros…")}
         />
       )}
       {memModal && mem && (
-        <CfgModal title="Memória" onClose={() => setMemModal(false)}>
+        <CfgModal title={tr("Memória")} onClose={() => setMemModal(false)}>
           <div className="space-y-5">
             <div>
               <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">
-                Salvar em <InfoHint text="Onde as memórias novas deste modelo ficam guardadas." />
+                
+                {tr("Salvar em")} <InfoHint text={tr("Onde as memórias novas deste modelo ficam guardadas.")} />
               </p>
               <Select
                 value={mem.write ?? "global"}
@@ -2394,15 +2416,16 @@ export default function ModelEditor({
               >
                 {MEM_WRITE_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                 {memBanks.length > 0 && (
-                  <optgroup label="Bancos">
-                    {memBanks.map((b) => <option key={b.id} value={`bank:${b.id}`}>Banco: {b.name}</option>)}
+                  <optgroup label={tr("Bancos")}>
+                    {memBanks.map((b) => <option key={b.id} value={`bank:${b.id}`}>{tr("Banco:")} {b.name}</option>)}
                   </optgroup>
                 )}
               </Select>
             </div>
             <div>
               <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">
-                Ler de <InfoHint text="De onde o modelo lê memórias (junta todas as marcadas)." />
+                
+                {tr("Ler de")} <InfoHint text={tr("De onde o modelo lê memórias (junta todas as marcadas).")} />
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {MEM_READ_OPTS.map((r) => {
@@ -2422,7 +2445,8 @@ export default function ModelEditor({
             {memBanks.length > 0 && (
               <div>
                 <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">
-                  Bancos acoplados <InfoHint text="Memória compartilhada entre modelos. Este modelo lê dos bancos marcados." />
+                  
+                  {tr("Bancos acoplados")} <InfoHint text={tr("Memória compartilhada entre modelos. Este modelo lê dos bancos marcados.")} />
                 </p>
                 <div className="flex flex-wrap gap-1.5">
                   {memBanks.map((b) => {
@@ -2445,7 +2469,8 @@ export default function ModelEditor({
             )}
             <div className="border-t border-border pt-4">
               <button onClick={() => { setMem(null); setMemModal(false); }} className="text-xs text-muted transition-colors hover:text-ink">
-                Usar o padrão do perfil
+                
+                {tr("Usar o padrão do perfil")}
               </button>
             </div>
           </div>
@@ -2453,35 +2478,35 @@ export default function ModelEditor({
       )}
       {filtersModal && (
         <TransferModal
-          title="Filtros do modelo"
+          title={tr("Filtros do modelo")}
           items={filterItems}
           selected={filters}
           onChange={setFilters}
           onClose={() => setFiltersModal(false)}
-          availableLabel="Disponíveis"
-          selectedLabel="Ativados"
+          availableLabel={tr("Disponíveis")}
+          selectedLabel={tr("Ativados")}
         />
       )}
       {kbModal && (
         <TransferModal
-          title="Bases de Conhecimento do modelo"
+          title={tr("Bases de Conhecimento do modelo")}
           items={kbItems}
           selected={kbAttached}
           onChange={setKbBasesSel}
           onClose={() => setKbModal(false)}
-          availableLabel="Disponíveis"
-          selectedLabel="Acopladas"
-          searchPlaceholder="Buscar bases…"
+          availableLabel={tr("Disponíveis")}
+          selectedLabel={tr("Acopladas")}
+          searchPlaceholder={tr("Buscar bases…")}
         />
       )}
       {kbCfgBase && (
         <CfgModal title={`Configurar — ${kbNameOf(kbCfgBase)}`} onClose={() => setKbCfgBase(null)}>
-          <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted">Modo</p>
-          <p className="mb-3 text-xs text-muted">Como esta base é consultada nas conversas deste modelo.</p>
+          <p className="mb-2 text-xs font-medium uppercase tracking-wider text-muted">{tr("Modo")}</p>
+          <p className="mb-3 text-xs text-muted">{tr("Como esta base é consultada nas conversas deste modelo.")}</p>
           <div className="space-y-2">
             {([
-              ["auto", "Automático", "A cada mensagem eu busco os trechos relevantes e injeto no contexto, com citações."],
-              ["tool", "Ferramenta", "A IA decide quando buscar (chama search_knowledge). Bom p/ bases grandes ou de uso pontual."],
+              ["auto", tr("Automático"), tr("A cada mensagem eu busco os trechos relevantes e injeto no contexto, com citações.")],
+              ["tool", tr("Ferramenta"), tr("A IA decide quando buscar (chama search_knowledge). Bom p/ bases grandes ou de uso pontual.")],
             ] as const).map(([val, title, desc]) => {
               const on = kbModeOf(kbCfgBase) === val;
               return (
@@ -2503,8 +2528,8 @@ export default function ModelEditor({
           <div className="mt-5 border-t border-border pt-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-medium text-ink">Trechos por busca</p>
-                <p className="text-[11px] text-muted">Quantos trechos relevantes desta base cada consulta traz.</p>
+                <p className="text-sm font-medium text-ink">{tr("Trechos por busca")}</p>
+                <p className="text-[11px] text-muted">{tr("Quantos trechos relevantes desta base cada consulta traz.")}</p>
               </div>
               <input
                 type="number" min={1} max={20} value={kbKOf(kbCfgBase)}
@@ -2516,20 +2541,21 @@ export default function ModelEditor({
         </CfgModal>
       )}
       {subModal && (
-        <CfgModal title="Subagentes" onClose={() => setSubModal(false)}>
+        <CfgModal title={tr("Subagentes")} onClose={() => setSubModal(false)}>
           <div className="space-y-5">
             <div className="space-y-2">
               <div className="flex items-center justify-between gap-3">
                 <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">
-                  Seus agentes
-                  <InfoHint text="Seus modelos que a IA pode chamar. Ela escolhe o melhor para cada tarefa." />
+                  
+                  {tr("Seus agentes")}
+                  <InfoHint text={tr("Seus modelos que a IA pode chamar. Ela escolhe o melhor para cada tarefa.")} />
                 </p>
                 <button
                   onClick={() => setTeamModal(true)}
                   disabled={teamCandidates.length === 0}
                   className="flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-50"
                 >
-                  <Users size={13} /> Selecionar
+                  <Users size={13} />  {tr("Selecionar")}
                 </button>
               </div>
               {team.length === 0 ? null : (
@@ -2541,7 +2567,7 @@ export default function ModelEditor({
                       {worktreeOn && (
                         <button
                           onClick={() => toggleIsolate(tid)}
-                          title={isolate.includes(tid) ? "Trabalha num worktree próprio" : "Trabalha direto no projeto"}
+                          title={isolate.includes(tid) ? tr("Trabalha num worktree próprio") : tr("Trabalha direto no projeto")}
                           className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[10px] font-medium transition-colors ${isolate.includes(tid) ? "bg-accent/15 text-accent-hover" : "text-muted hover:text-ink"}`}
                         >
                           <GitBranch size={12} /> worktree
@@ -2549,7 +2575,7 @@ export default function ModelEditor({
                       )}
                       <button
                         onClick={() => setSubCfg({ team: team.filter((x) => x !== tid), isolate: isolate.filter((x) => x !== tid) })}
-                        title="Remover"
+                        title={tr("Remover")}
                         className="rounded-md p-1 text-muted transition-colors hover:text-red-300"
                       >
                         <X size={14} />
@@ -2562,16 +2588,16 @@ export default function ModelEditor({
 
             <div className="space-y-2 border-t border-border pt-4">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-1.5 text-sm text-ink">Agentes criados pela IA <InfoHint text="A IA cria agentes e equipes sob medida para a tarefa, com as ferramentas deste modelo." /></span>
+                  <span className="flex items-center gap-1.5 text-sm text-ink">{tr("Agentes criados pela IA")} <InfoHint text={tr("A IA cria agentes e equipes sob medida para a tarefa, com as ferramentas deste modelo.")} /></span>
                   <Toggle on={adhocOn} onChange={(v) => setSubCfg({ adhoc: v })} />
                 </div>
               {adhocOn && (
                 <div className="flex items-center gap-2">
                   <div className="min-w-0 flex-1">
-                    <ModelField models={baseModels} value={subCfg.adhoc_model || ""} onChange={(v) => setSubCfg({ adhoc_model: v })} placeholder="Mesmo modelo deste" />
+                    <ModelField models={baseModels} value={subCfg.adhoc_model || ""} onChange={(v) => setSubCfg({ adhoc_model: v })} placeholder={tr("Mesmo modelo deste")} />
                   </div>
                   {subCfg.adhoc_model && (
-                    <button onClick={() => setSubCfg({ adhoc_model: "" })} title="Usar o mesmo modelo deste" className="rounded-md p-1 text-muted transition-colors hover:text-ink">
+                    <button onClick={() => setSubCfg({ adhoc_model: "" })} title={tr("Usar o mesmo modelo deste")} className="rounded-md p-1 text-muted transition-colors hover:text-ink">
                       <X size={14} />
                     </button>
                   )}
@@ -2581,37 +2607,37 @@ export default function ModelEditor({
 
             <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
               <label className="space-y-1">
-                <span className="flex items-center gap-1.5 text-[11px] text-muted">Execução <InfoHint text="Paralela: vários ao mesmo tempo. Sequencial: um por vez." /></span>
+                <span className="flex items-center gap-1.5 text-[11px] text-muted">{tr("Execução")} <InfoHint text={tr("Paralela: vários ao mesmo tempo. Sequencial: um por vez.")} /></span>
                 <Select value={subCfg.execution === "sequential" ? "sequential" : "parallel"} onChange={(e) => setSubCfg({ execution: e.target.value })} className={selCls}>
-                  <option value="parallel">Paralela</option>
-                  <option value="sequential">Sequencial</option>
+                  <option value="parallel">{tr("Paralela")}</option>
+                  <option value="sequential">{tr("Sequencial")}</option>
                 </Select>
               </label>
               <label className="space-y-1">
-                <span className="flex items-center gap-1.5 text-[11px] text-muted">Máx. de agentes <InfoHint text="Total de agentes por resposta (até 1000). Cada agente consome tokens." /></span>
+                <span className="flex items-center gap-1.5 text-[11px] text-muted">{tr("Máx. de agentes")} <InfoHint text={tr("Total de agentes por resposta (até 1000). Cada agente consome tokens.")} /></span>
                 <input type="number" min={1} max={1000} value={subCfg.max_calls ?? 4} onChange={(e) => setSubCfg({ max_calls: Math.max(1, Math.min(1000, Number(e.target.value) || 4)) })} className={inpCls} />
               </label>
               {subCfg.execution !== "sequential" && <label className="space-y-1">
-                <span className="flex items-center gap-1.5 text-[11px] text-muted">Simultâneos <InfoHint text="Quantos rodam ao mesmo tempo; o resto espera na fila." /></span>
+                <span className="flex items-center gap-1.5 text-[11px] text-muted">{tr("Simultâneos")} <InfoHint text={tr("Quantos rodam ao mesmo tempo; o resto espera na fila.")} /></span>
                 <input type="number" min={1} max={64} value={subCfg.concurrency ?? 8} onChange={(e) => setSubCfg({ concurrency: Math.max(1, Math.min(64, Number(e.target.value) || 8)) })} className={inpCls} />
               </label>}
               <label className="space-y-1">
-                <span className="flex items-center gap-1.5 text-[11px] text-muted">Profundidade <InfoHint text="Quantos níveis de agente chamando agente." /></span>
+                <span className="flex items-center gap-1.5 text-[11px] text-muted">{tr("Profundidade")} <InfoHint text={tr("Quantos níveis de agente chamando agente.")} /></span>
                 <input type="number" min={1} max={3} value={subCfg.max_depth ?? 2} onChange={(e) => setSubCfg({ max_depth: Math.max(1, Math.min(3, Number(e.target.value) || 2)) })} className={inpCls} />
               </label>
             </div>
 
             <div className="space-y-3 border-t border-border pt-4">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-1.5 text-sm text-ink">Contexto da conversa <InfoHint text="Os agentes recebem o histórico da conversa." /></span>
+                  <span className="flex items-center gap-1.5 text-sm text-ink">{tr("Contexto da conversa")} <InfoHint text={tr("Os agentes recebem o histórico da conversa.")} /></span>
                   <Toggle on={!!subCfg.pass_context} onChange={(v) => setSubCfg({ pass_context: v })} />
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-1.5 text-sm text-ink">Memória própria <InfoHint text="Seus agentes usam a memória do próprio modelo." /></span>
+                  <span className="flex items-center gap-1.5 text-sm text-ink">{tr("Memória própria")} <InfoHint text={tr("Seus agentes usam a memória do próprio modelo.")} /></span>
                   <Toggle on={!!subCfg.worker_memory} onChange={(v) => setSubCfg({ worker_memory: v })} />
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="flex items-center gap-1.5 text-sm text-ink">Worktree isolado <InfoHint text="No Codespace, cada agente trabalha numa branch própria; o resultado vira uma tarefa para revisar." /></span>
+                  <span className="flex items-center gap-1.5 text-sm text-ink">{tr("Worktree isolado")} <InfoHint text={tr("No Codespace, cada agente trabalha numa branch própria; o resultado vira uma tarefa para revisar.")} /></span>
                   <Toggle on={worktreeOn} onChange={(v) => setSubCfg({ worktree: v })} />
                 </div>
             </div>
@@ -2621,14 +2647,14 @@ export default function ModelEditor({
 
       {teamModal && (
         <TransferModal
-          title="Seus agentes"
+          title={tr("Seus agentes")}
           items={teamItems}
           selected={team}
           onChange={(ids) => setSubCfg({ team: ids })}
           onClose={() => setTeamModal(false)}
-          availableLabel="Disponíveis"
-          selectedLabel="No time"
-          searchPlaceholder="Buscar modelos…"
+          availableLabel={tr("Disponíveis")}
+          selectedLabel={tr("No time")}
+          searchPlaceholder={tr("Buscar modelos…")}
         />
       )}
 
@@ -2661,17 +2687,17 @@ export default function ModelEditor({
                             onClick={() => setOpenToolCfg(member)}
                             className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink"
                           >
-                            <Settings size={13} /> Opções
+                            <Settings size={13} />  {tr("Opções")}
                           </button>
                         )}
                         {!codeMode && (
                           <button
                             onClick={() => togglePin(member)}
-                            title="Fixar expõe esta operação como chamada direta, sem uma rodada de descoberta."
+                            title={tr("Fixar expõe esta operação como chamada direta, sem uma rodada de descoberta.")}
                             className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-colors ${pinned ? "border-accent/40 bg-accent/10 text-accent-hover" : "border-border text-muted hover:bg-hover hover:text-ink"}`}
                           >
                             <Pin size={12} className={pinned ? "fill-accent-hover" : ""} />
-                            {pinned ? "Direta" : "Fixar"}
+                            {pinned ? tr("Direta") : tr("Fixar")}
                           </button>
                         )}
                       </div>
@@ -2682,7 +2708,8 @@ export default function ModelEditor({
             </div>
             {capability.key === "cap:web" && toolIds.includes("builtin:web.search.query") && (
               <p className="mt-4 rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-xs leading-5 text-ink-soft">
-                Com Pesquisa na Web ativa, Pesquisa e Ler Página são promovidas automaticamente como chamadas diretas.
+                
+                {tr("Com Pesquisa na Web ativa, Pesquisa e Ler Página são promovidas automaticamente como chamadas diretas.")}
               </p>
             )}
           </CfgModal>
@@ -2708,7 +2735,7 @@ export default function ModelEditor({
 
       {/* Config da extração de texto em janela */}
       {openExtraction && (
-        <CfgModal title="Extração de texto" onClose={() => setOpenExtraction(false)}>
+        <CfgModal title={tr("Extração de texto")} onClose={() => setOpenExtraction(false)}>
           <TextExtractionPanel value={toolsCfg.text_extraction ?? {}} onChange={(v) => setToolCfg("text_extraction", v)} />
         </CfgModal>
       )}

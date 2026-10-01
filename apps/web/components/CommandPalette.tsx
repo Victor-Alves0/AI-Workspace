@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CornerDownLeft, Search, X } from "lucide-react";
 import { useClickOutside } from "./ui";
+import { tr } from "@/lib/i18n";
 
 export interface PaletteItem {
   id: string;
@@ -71,11 +72,11 @@ export default function CommandPalette({ items, onClose }: {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Busque um chat, modelo, ação ou configuração…"
+            placeholder={tr("Busque um chat, modelo, ação ou configuração…")}
             className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
           />
-          <kbd className="hidden shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted sm:block">Esc</kbd>
-          <button onClick={onClose} title="Fechar" className="shrink-0 rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink sm:hidden"><X size={18} /></button>
+          <kbd className="hidden shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted sm:block">{tr("Esc")}</kbd>
+          <button onClick={onClose} title={tr("Fechar")} className="shrink-0 rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink sm:hidden"><X size={18} /></button>
         </div>
 
         <div ref={rowsRef} className="min-h-0 flex-1 overflow-y-auto p-1.5">
@@ -103,7 +104,7 @@ export default function CommandPalette({ items, onClose }: {
               </div>
             );
           })}
-          {flat.length === 0 && <p className="px-3 py-8 text-center text-sm text-muted">Nada encontrado.</p>}
+          {flat.length === 0 && <p className="px-3 py-8 text-center text-sm text-muted">{tr("Nada encontrado.")}</p>}
         </div>
       </div>
     </div>

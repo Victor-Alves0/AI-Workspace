@@ -25,6 +25,7 @@ import InvestigationPanel from "./InvestigationPanel";
 import ApiView from "./ApiView";
 import AutomationsView from "./AutomationsView";
 import PlaygroundView from "./PlaygroundView";
+import { tr } from "@/lib/i18n";
 
 export type Section =
   | "Modelos" | "Conhecimento" | "Cerebros" | "Prompts" | "Skills"
@@ -34,20 +35,20 @@ export type Section =
 // meta dos cards da grade inicial (a contagem é injetada em runtime).
 // `admin: true` só aparece para administradores (filtrado em runtime).
 const CARD_META: { key: Section; name: string; desc: string; icon: ReactNode; live: boolean; admin?: boolean }[] = [
-  { key: "Modelos", name: "Modelos", desc: "Seus modelos e presets de IA", icon: <Box size={22} />, live: true },
-  { key: "Ferramentas", name: "Ferramentas", desc: "Tools e integrações MCP", icon: <Wrench size={22} />, live: true },
-  { key: "Prompts", name: "Prompts", desc: "Atalhos de comando reutilizáveis", icon: <FileText size={22} />, live: true },
-  { key: "Skills", name: "Skills", desc: "Habilidades do agente", icon: <Sparkles size={22} />, live: true },
-  { key: "Conhecimento", name: "Conhecimento", desc: "Banco de dados organizados", icon: <BookOpen size={22} />, live: true },
-  { key: "Cerebros", name: "Cérebros", desc: "Notas interligadas da IA", icon: <Waypoints size={22} />, live: true },
-  { key: "Apps", name: "Apps", desc: "Mini-aplicações e automações", icon: <LayoutGrid size={22} />, live: false },
-  { key: "Codespace", name: "Codespace", desc: "Programe com IA", icon: <Code2 size={22} />, live: true },
-  { key: "Investigacoes", name: "Grafaria", desc: "Dados estruturados em grafo", icon: <Radar size={22} />, live: true },
-  { key: "Automacoes", name: "Automações", desc: "Tarefas agendadas e monitores", icon: <CalendarClock size={22} />, live: true },
-  { key: "Playground", name: "Playground", desc: "Benchmarks, comparações e debug", icon: <FlaskConical size={22} />, live: true },
-  { key: "Memoria", name: "Memória", desc: "O que a IA lembra de você", icon: <Brain size={22} />, live: true },
-  { key: "Analítica", name: "Analítica", desc: "Uso, custos e desempenho", icon: <BarChart3 size={22} />, live: true },
-  { key: "API", name: "API", desc: "Use modelos em qualquer app", icon: <Terminal size={22} />, live: true },
+  { key: "Modelos", name: tr("Modelos"), desc: tr("Seus modelos e presets de IA"), icon: <Box size={22} />, live: true },
+  { key: "Ferramentas", name: tr("Ferramentas"), desc: tr("Tools e integrações MCP"), icon: <Wrench size={22} />, live: true },
+  { key: "Prompts", name: tr("Prompts"), desc: tr("Atalhos de comando reutilizáveis"), icon: <FileText size={22} />, live: true },
+  { key: "Skills", name: tr("Skills"), desc: tr("Habilidades do agente"), icon: <Sparkles size={22} />, live: true },
+  { key: "Conhecimento", name: tr("Conhecimento"), desc: tr("Banco de dados organizados"), icon: <BookOpen size={22} />, live: true },
+  { key: "Cerebros", name: tr("Cérebros"), desc: tr("Notas interligadas da IA"), icon: <Waypoints size={22} />, live: true },
+  { key: "Apps", name: tr("Apps"), desc: tr("Mini-aplicações e automações"), icon: <LayoutGrid size={22} />, live: false },
+  { key: "Codespace", name: tr("Codespace"), desc: tr("Programe com IA"), icon: <Code2 size={22} />, live: true },
+  { key: "Investigacoes", name: tr("Grafaria"), desc: tr("Dados estruturados em grafo"), icon: <Radar size={22} />, live: true },
+  { key: "Automacoes", name: tr("Automações"), desc: tr("Tarefas agendadas e monitores"), icon: <CalendarClock size={22} />, live: true },
+  { key: "Playground", name: tr("Playground"), desc: tr("Benchmarks, comparações e debug"), icon: <FlaskConical size={22} />, live: true },
+  { key: "Memoria", name: tr("Memória"), desc: tr("O que a IA lembra de você"), icon: <Brain size={22} />, live: true },
+  { key: "Analítica", name: tr("Analítica"), desc: "Uso, custos e desempenho", icon: <BarChart3 size={22} />, live: true },
+  { key: "API", name: "API", desc: tr("Use modelos em qualquer app"), icon: <Terminal size={22} />, live: true },
 ];
 
 function Toggle({ on, onClick }: { on: boolean; onClick: () => void }) {
@@ -98,7 +99,7 @@ function LibraryCard({ icon, name, desc, count, live, onClick }: {
         <span className="block truncate text-xs text-muted">{desc}</span>
       </span>
       {!live ? (
-        <span className="shrink-0 rounded-full border border-border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted">Em breve</span>
+        <span className="shrink-0 rounded-full border border-border px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted">{tr("Em breve")}</span>
       ) : count !== undefined ? (
         <span className="shrink-0 font-mono text-sm tabular-nums text-ink-soft">{count}</span>
       ) : null}
@@ -114,7 +115,7 @@ const BACK_BTN = "flex h-8 w-8 flex-none items-center justify-center rounded-xl 
 
 function BackToWorkspace({ onClick }: { onClick: () => void }) {
   return (
-    <button onClick={onClick} title="Espaço de Trabalho" aria-label="Voltar ao Espaço de Trabalho" className={BACK_BTN}>
+    <button onClick={onClick} title={tr("Espaço de Trabalho")} aria-label={tr("Voltar ao Espaço de Trabalho")} className={BACK_BTN}>
       <ChevronLeft size={18} />
     </button>
   );
@@ -193,7 +194,7 @@ function ComingSoon({ icon, title, desc }: { icon: ReactNode; title: string; des
       <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-surface2 text-accent-hover">{icon}</span>
       <h2 className="text-lg font-semibold text-ink">{title}</h2>
       <p className="mt-1.5 max-w-sm text-sm leading-5 text-muted">{desc}</p>
-      <span className="mt-5 rounded-full bg-surface2 px-3 py-1 text-xs text-muted">Em breve</span>
+      <span className="mt-5 rounded-full bg-surface2 px-3 py-1 text-xs text-muted">{tr("Em breve")}</span>
     </div>
   );
 }
@@ -219,17 +220,17 @@ function SuggestionsModal({ proposals, onApprove, onDismiss, onOpenChat, onClose
       <div className="w-full max-w-2xl rounded-2xl border border-border bg-bg shadow-menu" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 border-b border-border px-5 py-4">
           <Sparkles size={18} className="text-accent-hover" />
-          <h2 className="text-base font-semibold text-ink">Sugestões da IA</h2>
+          <h2 className="text-base font-semibold text-ink">{tr("Sugestões da IA")}</h2>
           {proposals.length > 0 && <span className="rounded-full bg-accent/20 px-2 py-0.5 text-xs text-accent-hover">{proposals.length}</span>}
           <button onClick={onClose} className="ml-auto rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink"><X size={18} /></button>
         </div>
         <div className="max-h-[70vh] space-y-3 overflow-y-auto p-5">
-          <p className="text-xs text-muted">O Aprendizado Proativo notou estes padrões nas suas conversas e propôs skills. Reveja o motivo e a origem antes de aprovar.</p>
+          <p className="text-xs text-muted">{tr("O Aprendizado Proativo notou estes padrões nas suas conversas e propôs skills. Reveja o motivo e a origem antes de aprovar.")}</p>
           {proposals.length === 0 ? (
             <div className="flex flex-col items-center gap-2 py-12 text-center">
               <Sparkles size={26} className="text-muted" />
-              <p className="text-sm text-muted">Nenhuma sugestão no momento.</p>
-              <p className="max-w-xs text-xs text-muted">Quando a IA identificar um fluxo reutilizável nas conversas, ele aparece aqui para sua aprovação.</p>
+              <p className="text-sm text-muted">{tr("Nenhuma sugestão no momento.")}</p>
+              <p className="max-w-xs text-xs text-muted">{tr("Quando a IA identificar um fluxo reutilizável nas conversas, ele aparece aqui para sua aprovação.")}</p>
             </div>
           ) : proposals.map((p) => (
             <div key={p.id} className="rounded-xl border border-border bg-surface p-4">
@@ -245,14 +246,14 @@ function SuggestionsModal({ proposals, onApprove, onDismiss, onOpenChat, onClose
               {/* por que a IA sugeriu */}
               {p.rationale && (
                 <div className="mt-3 rounded-lg border border-accent/25 bg-accent/5 px-3 py-2">
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-accent-hover">Por que sugeriu</p>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-accent-hover">{tr("Por que sugeriu")}</p>
                   <p className="mt-0.5 text-xs text-ink-soft">{p.rationale}</p>
                 </div>
               )}
 
               {/* conteúdo proposto (a "cara" da skill) */}
               <details className="mt-3 text-xs">
-                <summary className="cursor-pointer text-muted hover:text-ink-soft">Ver conteúdo proposto</summary>
+                <summary className="cursor-pointer text-muted hover:text-ink-soft">{tr("Ver conteúdo proposto")}</summary>
                 <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-bg p-3 font-mono text-[11px] leading-relaxed text-ink-soft">{p.content || "(vazio)"}</pre>
               </details>
 
@@ -261,17 +262,17 @@ function SuggestionsModal({ proposals, onApprove, onDismiss, onOpenChat, onClose
                   <button
                     onClick={() => onOpenChat?.(p.chat_id as string)}
                     className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-muted transition-colors hover:text-ink"
-                    title="Abrir a conversa que originou esta sugestão"
+                    title={tr("Abrir a conversa que originou esta sugestão")}
                   >
-                    <MessageSquare size={13} /> {p.chat_title ? `De: ${p.chat_title}` : "Ver conversa de origem"}
+                    <MessageSquare size={13} /> {p.chat_title ? `De: ${p.chat_title}` : tr("Ver conversa de origem")}
                   </button>
                 )}
                 <div className="ml-auto flex items-center gap-2">
                   <button onClick={() => onDismiss(p.id)} className="flex items-center gap-1 rounded-full border border-border px-3 py-1 text-xs text-muted transition-colors hover:text-ink">
-                    <X size={13} /> Descartar
+                    <X size={13} />  {tr("Descartar")}
                   </button>
                   <button onClick={() => onApprove(p.id)} className="flex items-center gap-1 rounded-full bg-accent px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-accent-hover">
-                    <Check size={13} /> Aprovar
+                    <Check size={13} />  {tr("Aprovar")}
                   </button>
                 </div>
               </div>
@@ -399,7 +400,7 @@ export default function WorkspaceView({
       : value && typeof value === "object" && Array.isArray((value as { items?: unknown }).items)
         ? (value as { items: unknown[] }).items
         : null;
-    if (!list) throw new Error("Escolha um arquivo de exportação válido.");
+    if (!list) throw new Error(tr("Escolha um arquivo de exportação válido."));
     return list.filter((item): item is Record<string, unknown> => !!item && typeof item === "object");
   }
 
@@ -466,7 +467,7 @@ export default function WorkspaceView({
   async function cloneTool(t: Tool) {
     await api.post("/tools", {
       path: `${t.path}_copia`,
-      name: `${t.name || t.path} (cópia)`,
+      name: tr("{0} (cópia)", { "0": t.name || t.path }),
       description: t.description,
       params: t.params,
       returns: t.returns,
@@ -508,7 +509,7 @@ export default function WorkspaceView({
 
   async function cloneModel(m: ModelConfig) {
     await api.post("/models", {
-      base_model: m.base_model, name: `${m.name} (cópia)`, slug: null,
+      base_model: m.base_model, name: tr("{name} (cópia)", { name: m.name }), slug: null,
       description: m.description, avatar_url: m.avatar_url, system_prompt: m.system_prompt,
       params: m.params, capabilities: m.capabilities, filter_config: m.filter_config ?? {},
       tools_enabled: m.tools_enabled, tool_ids: m.tool_ids, code_mode: m.code_mode,
@@ -516,7 +517,7 @@ export default function WorkspaceView({
       prompt_suggestions: m.prompt_suggestions, tts_voice: m.tts_voice, enabled: m.enabled,
     });
     await loadModels();
-    setToast("Modelo clonado.");
+    setToast(tr("Modelo clonado."));
   }
 
   async function importModelFile(files: FileList | null) {
@@ -545,9 +546,9 @@ export default function WorkspaceView({
         } catch { failed += 1; }
       }
       await loadModels();
-      setToast(failed ? `${imported} modelo(s) importado(s); ${failed} não puderam ser importados.` : `${imported} modelo(s) importado(s).`);
+      setToast(failed ? tr("{imported} modelo(s) importado(s); {failed} não puderam ser importados.", { imported: imported, failed: failed }) : `${imported} modelo(s) importado(s).`);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Não foi possível ler o arquivo.");
+      setToast(error instanceof Error ? error.message : tr("Não foi possível ler o arquivo."));
     } finally {
       if (modelFileRef.current) modelFileRef.current.value = "";
     }
@@ -560,9 +561,9 @@ export default function WorkspaceView({
 
   async function clonePrompt(p: Prompt) {
     const command = uniquePromptCommand(p.command, new Set(prompts.map((prompt) => prompt.command)));
-    await api.post("/prompts", { command, title: `${p.title} (cópia)`, content: p.content, enabled: p.enabled });
+    await api.post("/prompts", { command, title: tr("{title} (cópia)", { title: p.title }), content: p.content, enabled: p.enabled });
     await loadPrompts();
-    setToast("Prompt clonado.");
+    setToast(tr("Prompt clonado."));
   }
 
   async function deleteSkill(id: string) {
@@ -576,7 +577,7 @@ export default function WorkspaceView({
   async function cloneSkill(s: Skill) {
     await api.post("/skills", {
       slug: `${s.slug}_copia`,
-      name: `${s.name} (cópia)`,
+      name: tr("{name} (cópia)", { name: s.name }),
       description: s.description,
       content: s.content,
       tags: s.tags ?? [],
@@ -616,7 +617,7 @@ export default function WorkspaceView({
     }
     if (skillFileRef.current) skillFileRef.current.value = "";
     loadSkills();
-    setToast(failed ? `Importação falhou: ${failed}` : `${ok} skill${ok === 1 ? "" : "s"} importada${ok === 1 ? "" : "s"}.`);
+    setToast(failed ? tr("Importação falhou: {failed}", { failed: failed }) : tr("{ok} skill{1} importada{2}.", { ok: ok, "1": ok === 1 ? "" : "s", "2": ok === 1 ? "" : "s" }));
   }
   function exportPrompts() {
     downloadJson("prompts.json", {
@@ -644,9 +645,9 @@ export default function WorkspaceView({
         } catch { failed += 1; }
       }
       await loadPrompts();
-      setToast(failed ? `${imported} prompt(s) importado(s); ${failed} não puderam ser importados.` : `${imported} prompt(s) importado(s).`);
+      setToast(failed ? tr("{imported} prompt(s) importado(s); {failed} não puderam ser importados.", { imported: imported, failed: failed }) : `${imported} prompt(s) importado(s).`);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : "Não foi possível ler o arquivo.");
+      setToast(error instanceof Error ? error.message : tr("Não foi possível ler o arquivo."));
     } finally {
       if (promptFileRef.current) promptFileRef.current.value = "";
     }
@@ -740,8 +741,8 @@ export default function WorkspaceView({
         <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
-              <h1 className="text-2xl font-bold text-ink">Espaço de Trabalho</h1>
-              <p className="mt-1 text-sm text-muted">Tudo que você precisa, num só lugar.</p>
+              <h1 className="text-2xl font-bold text-ink">{tr("Espaço de Trabalho")}</h1>
+              <p className="mt-1 text-sm text-muted">{tr("Tudo que você precisa, num só lugar.")}</p>
             </div>
             <div className="flex items-center gap-2">
               <div className="relative">
@@ -749,19 +750,19 @@ export default function WorkspaceView({
                 <input
                   value={homeQ}
                   onChange={(e) => setHomeQ(e.target.value)}
-                  placeholder="Filtrar…"
+                  placeholder={tr("Filtrar…")}
                   className="w-56 rounded-full border border-border bg-surface py-1.5 pl-9 pr-3 text-sm text-ink outline-none transition-[border-color] focus:border-accent/50 placeholder:text-muted"
                 />
               </div>
               <button onClick={onClose} className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-border px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-hover hover:text-ink">
-                <ArrowLeft size={16} /> Voltar ao chat
+                <ArrowLeft size={16} />  {tr("Voltar ao chat")}
               </button>
             </div>
           </div>
 
           {featured.length > 0 && (
             <>
-              <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.14em] text-muted/70">Atalhos</p>
+              <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.14em] text-muted/70">{tr("Atalhos")}</p>
               <div className="mb-7 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {featured.map((c) => (
                   <FeatureCard
@@ -780,7 +781,7 @@ export default function WorkspaceView({
 
           {library.length > 0 && (
             <>
-              <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.14em] text-muted/70">Biblioteca</p>
+              <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.14em] text-muted/70">{tr("Biblioteca")}</p>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {library.map((c) => (
                   <LibraryCard
@@ -798,7 +799,7 @@ export default function WorkspaceView({
           )}
 
           {featured.length === 0 && library.length === 0 && (
-            <p className="py-16 text-center text-sm text-muted">Nada encontrado para “{homeQ}”.</p>
+            <p className="py-16 text-center text-sm text-muted">{tr("Nada encontrado para “")}{homeQ}”.</p>
           )}
         </div>
       )}
@@ -806,16 +807,16 @@ export default function WorkspaceView({
       {/* --------------------------------- Modelos -------------------------------- */}
       {section === "Modelos" && (
         <SectionShell
-          title="Modelos"
+          title={tr("Modelos")}
           count={models.length}
           onBack={backHome}
-          filter={<FilterPill value={q} onChange={setQ} placeholder="Filtrar modelos…" />}
+          filter={<FilterPill value={q} onChange={setQ} placeholder={tr("Filtrar modelos…")} />}
           actions={
             <>
               <input ref={modelFileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => void importModelFile(e.target.files)} />
-              <button className={BTN_GHOST} onClick={() => modelFileRef.current?.click()}><Upload size={14} className="mr-1.5 inline" />Importar</button>
-              <button className={BTN_GHOST} onClick={exportModels}><Download size={14} className="mr-1.5 inline" />Exportar</button>
-              <button className={BTN_PRIMARY} onClick={() => setEditingModel(null)}><Plus size={15} />Novo Modelo</button>
+              <button className={BTN_GHOST} onClick={() => modelFileRef.current?.click()}><Upload size={14} className="mr-1.5 inline" />{tr("Importar")}</button>
+              <button className={BTN_GHOST} onClick={exportModels}><Download size={14} className="mr-1.5 inline" />{tr("Exportar")}</button>
+              <button className={BTN_PRIMARY} onClick={() => setEditingModel(null)}><Plus size={15} />{tr("Novo Modelo")}</button>
             </>
           }
         >
@@ -840,10 +841,10 @@ export default function WorkspaceView({
                   </button>
                   {menu === m.id && (
                     <AnchoredMenu anchorRef={menuBtnRef} onClose={() => setMenu(null)} align="left">
-                      <MenuItem icon={<Pencil size={15} />} onClick={() => { setEditingModel(m); setMenu(null); }}>Editar</MenuItem>
-                      <MenuItem icon={<Copy size={15} />} onClick={() => { void cloneModel(m); setMenu(null); }}>Clonar</MenuItem>
-                      <MenuItem icon={<Download size={15} />} onClick={() => { downloadJson(`${m.slug || m.name || "modelo"}.json`, { format: "ai-workspace/models", version: 1, items: [{ base_model: m.base_model, name: m.name, slug: m.slug, description: m.description, avatar_url: m.avatar_url, system_prompt: m.system_prompt, params: m.params, capabilities: m.capabilities, filter_config: m.filter_config ?? {}, tools_enabled: m.tools_enabled, tool_ids: m.tool_ids, code_mode: m.code_mode, sift_config: m.sift_config ?? {}, skill_ids: m.skill_ids, prompt_suggestions: m.prompt_suggestions, tts_voice: m.tts_voice, enabled: m.enabled }] }); setMenu(null); }}>Exportar</MenuItem>
-                      <MenuItem danger icon={<Trash2 size={15} />} onClick={() => { deleteModel(m.id); setMenu(null); }}>Excluir</MenuItem>
+                      <MenuItem icon={<Pencil size={15} />} onClick={() => { setEditingModel(m); setMenu(null); }}>{tr("Editar")}</MenuItem>
+                      <MenuItem icon={<Copy size={15} />} onClick={() => { void cloneModel(m); setMenu(null); }}>{tr("Clonar")}</MenuItem>
+                      <MenuItem icon={<Download size={15} />} onClick={() => { downloadJson(`${m.slug || m.name || "modelo"}.json`, { format: "ai-workspace/models", version: 1, items: [{ base_model: m.base_model, name: m.name, slug: m.slug, description: m.description, avatar_url: m.avatar_url, system_prompt: m.system_prompt, params: m.params, capabilities: m.capabilities, filter_config: m.filter_config ?? {}, tools_enabled: m.tools_enabled, tool_ids: m.tool_ids, code_mode: m.code_mode, sift_config: m.sift_config ?? {}, skill_ids: m.skill_ids, prompt_suggestions: m.prompt_suggestions, tts_voice: m.tts_voice, enabled: m.enabled }] }); setMenu(null); }}>{tr("Exportar")}</MenuItem>
+                      <MenuItem danger icon={<Trash2 size={15} />} onClick={() => { deleteModel(m.id); setMenu(null); }}>{tr("Excluir")}</MenuItem>
                     </AnchoredMenu>
                   )}
                 </div>
@@ -851,19 +852,19 @@ export default function WorkspaceView({
               </div>
             ))}
           </div>
-          {filteredModels.length === 0 && <EmptyState text={q ? "Nenhum modelo encontrado." : "Nenhum modelo ainda. Clique em “Novo Modelo”."} />}
+          {filteredModels.length === 0 && <EmptyState text={q ? tr("Nenhum modelo encontrado.") : tr("Nenhum modelo ainda. Clique em “Novo Modelo”.")} />}
         </SectionShell>
       )}
 
       {/* ------------------------------- Ferramentas ------------------------------ */}
       {section === "Ferramentas" && (
         <SectionShell
-          title="Ferramentas"
+          title={tr("Ferramentas")}
           count={tools.length}
           onBack={backHome}
-          actions={<button className={BTN_PRIMARY} onClick={() => setEditingTool(null)}><Plus size={15} />Nova Ferramenta</button>}
+          actions={<button className={BTN_PRIMARY} onClick={() => setEditingTool(null)}><Plus size={15} />{tr("Nova Ferramenta")}</button>}
         >
-          <SearchBar value={q} onChange={setQ} placeholder="Pesquisar ferramentas" />
+          <SearchBar value={q} onChange={setQ} placeholder={tr("Pesquisar ferramentas")} />
 
           {/* filtros por tag */}
           {(allTags.length > 0 || hasUntagged) && (
@@ -872,7 +873,8 @@ export default function WorkspaceView({
                 onClick={() => setTagFilter(null)}
                 className={`rounded-full px-3 py-1 text-xs transition-colors ${tagFilter === null ? "bg-accent/15 font-medium text-accent-hover" : "border border-border text-muted hover:text-ink"}`}
               >
-                Todas
+                
+                {tr("Todas")}
               </button>
               {allTags.map((tag) => (
                 <button
@@ -888,7 +890,8 @@ export default function WorkspaceView({
                   onClick={() => setTagFilter(tagFilter === "__none__" ? null : "__none__")}
                   className={`rounded-full px-3 py-1 text-xs transition-colors ${tagFilter === "__none__" ? "bg-accent/15 font-medium text-accent-hover" : "border border-border text-muted hover:text-ink"}`}
                 >
-                  Sem tags
+                  
+                  {tr("Sem tags")}
                 </button>
               )}
             </div>
@@ -898,7 +901,7 @@ export default function WorkspaceView({
             {filteredTools.map((t) => (
               <div key={t.id} className={CARD_ROW}>
                 <span
-                  title={t.tool_type === "mcp" ? "Integração (MCP)" : "Código"}
+                  title={t.tool_type === "mcp" ? tr("Integração (MCP)") : tr("Código")}
                   className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${t.tool_type === "mcp" ? "bg-accent/15 text-accent-hover" : "bg-surface2 text-ink-soft"}`}
                 >
                   {t.tool_type === "mcp" ? <Plug size={17} /> : <Code2 size={17} />}
@@ -910,9 +913,9 @@ export default function WorkspaceView({
                       <span key={tag} className="shrink-0 rounded-full bg-surface2 px-2 py-0.5 text-[10px] font-normal text-muted">{tag}</span>
                     ))}
                   </p>
-                  <p className="truncate font-mono text-xs text-muted">Por {author} • {t.path}</p>
+                  <p className="truncate font-mono text-xs text-muted">{tr("Por")} {author} • {t.path}</p>
                 </button>
-                <button onClick={() => setValvesTool(t)} title="Configurações" className="rounded p-1 text-muted touch-reveal opacity-0 hover:text-ink group-hover:opacity-100">
+                <button onClick={() => setValvesTool(t)} title={tr("Configurações")} className="rounded p-1 text-muted touch-reveal opacity-0 hover:text-ink group-hover:opacity-100">
                   <Settings size={17} />
                 </button>
                 <div className="relative">
@@ -921,10 +924,10 @@ export default function WorkspaceView({
                   </button>
                   {menu === t.id && (
                     <AnchoredMenu anchorRef={menuBtnRef} onClose={() => setMenu(null)} align="left">
-                      <MenuItem icon={<Pencil size={15} />} onClick={() => { setEditingTool(t); setMenu(null); }}>Editar</MenuItem>
-                      <MenuItem icon={<Copy size={15} />} onClick={() => { cloneTool(t); setMenu(null); }}>Clonar</MenuItem>
-                      <MenuItem icon={<Download size={15} />} onClick={() => { exportTool(t); setMenu(null); }}>Exportar</MenuItem>
-                      <MenuItem danger icon={<Trash2 size={15} />} onClick={() => { deleteTool(t.id); setMenu(null); }}>Excluir</MenuItem>
+                      <MenuItem icon={<Pencil size={15} />} onClick={() => { setEditingTool(t); setMenu(null); }}>{tr("Editar")}</MenuItem>
+                      <MenuItem icon={<Copy size={15} />} onClick={() => { cloneTool(t); setMenu(null); }}>{tr("Clonar")}</MenuItem>
+                      <MenuItem icon={<Download size={15} />} onClick={() => { exportTool(t); setMenu(null); }}>{tr("Exportar")}</MenuItem>
+                      <MenuItem danger icon={<Trash2 size={15} />} onClick={() => { deleteTool(t.id); setMenu(null); }}>{tr("Excluir")}</MenuItem>
                     </AnchoredMenu>
                   )}
                 </div>
@@ -932,26 +935,26 @@ export default function WorkspaceView({
               </div>
             ))}
           </div>
-          {filteredTools.length === 0 && <EmptyState text={q ? "Nenhuma ferramenta encontrada." : "Nenhuma ferramenta ainda. Clique em “Nova Ferramenta”."} />}
+          {filteredTools.length === 0 && <EmptyState text={q ? tr("Nenhuma ferramenta encontrada.") : tr("Nenhuma ferramenta ainda. Clique em “Nova Ferramenta”.")} />}
         </SectionShell>
       )}
 
       {/* --------------------------------- Prompts -------------------------------- */}
       {section === "Prompts" && (
         <SectionShell
-          title="Prompts"
+          title={tr("Prompts")}
           count={prompts.length}
           onBack={backHome}
           actions={
             <>
               <input ref={promptFileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => void importPromptFile(e.target.files)} />
-              <button className={BTN_GHOST} onClick={() => promptFileRef.current?.click()}><Upload size={14} className="mr-1.5 inline" />Importar</button>
-              <button className={BTN_GHOST} onClick={exportPrompts}><Download size={14} className="mr-1.5 inline" />Exportar</button>
-              <button className={BTN_PRIMARY} onClick={() => setEditingPrompt(null)}><Plus size={15} />Novo Prompt</button>
+              <button className={BTN_GHOST} onClick={() => promptFileRef.current?.click()}><Upload size={14} className="mr-1.5 inline" />{tr("Importar")}</button>
+              <button className={BTN_GHOST} onClick={exportPrompts}><Download size={14} className="mr-1.5 inline" />{tr("Exportar")}</button>
+              <button className={BTN_PRIMARY} onClick={() => setEditingPrompt(null)}><Plus size={15} />{tr("Novo Prompt")}</button>
             </>
           }
         >
-          <SearchBar value={q} onChange={setQ} placeholder="Pesquisar prompts" />
+          <SearchBar value={q} onChange={setQ} placeholder={tr("Pesquisar prompts")} />
           <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
             {filteredPrompts.map((p) => (
               <div key={p.id} className={CARD_ROW}>
@@ -960,11 +963,11 @@ export default function WorkspaceView({
                   <p className="truncate text-sm font-medium text-ink">
                     {p.title} <span className="font-mono text-xs text-muted">/{p.command}</span>
                   </p>
-                  <p className="truncate text-xs text-muted">Por {author} • {p.content}</p>
+                  <p className="truncate text-xs text-muted">{tr("Por")} {author} • {p.content}</p>
                 </button>
                 <button
                   onClick={() => void copyText(p.content)}
-                  title="Copiar conteúdo"
+                  title={tr("Copiar conteúdo")}
                   className="rounded p-1 text-muted touch-reveal opacity-0 hover:text-ink group-hover:opacity-100"
                 >
                   <Copy size={16} />
@@ -975,24 +978,24 @@ export default function WorkspaceView({
                   </button>
                   {menu === p.id && (
                     <AnchoredMenu anchorRef={menuBtnRef} onClose={() => setMenu(null)} align="left">
-                      <MenuItem icon={<Pencil size={15} />} onClick={() => { setEditingPrompt(p); setMenu(null); }}>Editar</MenuItem>
-                      <MenuItem icon={<Copy size={15} />} onClick={() => { void clonePrompt(p); setMenu(null); }}>Clonar</MenuItem>
-                      <MenuItem icon={<Download size={15} />} onClick={() => { downloadJson(`${p.command || "prompt"}.json`, { format: "ai-workspace/prompts", version: 1, items: [{ command: p.command, title: p.title, content: p.content, enabled: p.enabled }] }); setMenu(null); }}>Exportar</MenuItem>
-                      <MenuItem danger icon={<Trash2 size={15} />} onClick={() => { deletePrompt(p.id); setMenu(null); }}>Excluir</MenuItem>
+                      <MenuItem icon={<Pencil size={15} />} onClick={() => { setEditingPrompt(p); setMenu(null); }}>{tr("Editar")}</MenuItem>
+                      <MenuItem icon={<Copy size={15} />} onClick={() => { void clonePrompt(p); setMenu(null); }}>{tr("Clonar")}</MenuItem>
+                      <MenuItem icon={<Download size={15} />} onClick={() => { downloadJson(`${p.command || "prompt"}.json`, { format: "ai-workspace/prompts", version: 1, items: [{ command: p.command, title: p.title, content: p.content, enabled: p.enabled }] }); setMenu(null); }}>{tr("Exportar")}</MenuItem>
+                      <MenuItem danger icon={<Trash2 size={15} />} onClick={() => { deletePrompt(p.id); setMenu(null); }}>{tr("Excluir")}</MenuItem>
                     </AnchoredMenu>
                   )}
                 </div>
               </div>
             ))}
           </div>
-          {filteredPrompts.length === 0 && <EmptyState text={q ? "Nenhum prompt encontrado." : "Nenhum prompt ainda. Clique em “Novo Prompt”."} />}
+          {filteredPrompts.length === 0 && <EmptyState text={q ? tr("Nenhum prompt encontrado.") : tr("Nenhum prompt ainda. Clique em “Novo Prompt”.")} />}
         </SectionShell>
       )}
 
       {/* ---------------------------------- Skills -------------------------------- */}
       {section === "Skills" && (
         <SectionShell
-          title="Skills"
+          title={tr("Skills")}
           count={skills.length}
           onBack={backHome}
           actions={
@@ -1005,19 +1008,19 @@ export default function WorkspaceView({
                 className="hidden"
                 onChange={(e) => importSkillFile(e.target.files)}
               />
-              <button className={BTN_GHOST} onClick={() => skillFileRef.current?.click()}><Upload size={14} className="mr-1.5 inline" />Importar</button>
-              <button className={BTN_GHOST} onClick={exportSkills}><Download size={14} className="mr-1.5 inline" />Exportar</button>
+              <button className={BTN_GHOST} onClick={() => skillFileRef.current?.click()}><Upload size={14} className="mr-1.5 inline" />{tr("Importar")}</button>
+              <button className={BTN_GHOST} onClick={exportSkills}><Download size={14} className="mr-1.5 inline" />{tr("Exportar")}</button>
               <button className={`${BTN_GHOST} relative`} onClick={() => setSuggestOpen(true)}>
-                <Sparkles size={14} className="mr-1.5 inline" />Sugestões
+                <Sparkles size={14} className="mr-1.5 inline" />{tr("Sugestões")}
                 {proposals.length > 0 && (
                   <span className="ml-1.5 rounded-full bg-accent/20 px-1.5 py-0.5 text-[10px] font-semibold text-accent-hover">{proposals.length}</span>
                 )}
               </button>
-              <button className={BTN_PRIMARY} onClick={() => setEditingSkill(null)}><Plus size={15} />Nova Skill</button>
+              <button className={BTN_PRIMARY} onClick={() => setEditingSkill(null)}><Plus size={15} />{tr("Nova Skill")}</button>
             </>
           }
         >
-          <SearchBar value={q} onChange={setQ} placeholder="Pesquisar skills" />
+          <SearchBar value={q} onChange={setQ} placeholder={tr("Pesquisar skills")} />
           <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
             {filteredSkills.map((s) => (
               <div key={s.id} className={CARD_ROW}>
@@ -1032,7 +1035,7 @@ export default function WorkspaceView({
                       <span key={tag} className="shrink-0 rounded-full bg-surface2 px-2 py-0.5 text-[10px] font-normal text-muted">{tag}</span>
                     ))}
                   </p>
-                  <p className="truncate text-xs text-muted">{s.description || "Sem descrição"}</p>
+                  <p className="truncate text-xs text-muted">{s.description || tr("Sem descrição")}</p>
                 </button>
                 <div className="relative">
                   <button ref={menu === s.id ? menuBtnRef : undefined} onClick={() => setMenu(menu === s.id ? null : s.id)} className={`rounded p-1 text-muted hover:text-ink ${menu === s.id ? "opacity-100" : "touch-reveal opacity-0 group-hover:opacity-100"}`}>
@@ -1040,9 +1043,9 @@ export default function WorkspaceView({
                   </button>
                   {menu === s.id && (
                     <AnchoredMenu anchorRef={menuBtnRef} onClose={() => setMenu(null)} align="left">
-                      <MenuItem icon={<Pencil size={15} />} onClick={() => { setEditingSkill(s); setMenu(null); }}>Editar</MenuItem>
-                      <MenuItem icon={<Copy size={15} />} onClick={() => { cloneSkill(s); setMenu(null); }}>Clonar</MenuItem>
-                      <MenuItem danger icon={<Trash2 size={15} />} onClick={() => { deleteSkill(s.id); setMenu(null); }}>Excluir</MenuItem>
+                      <MenuItem icon={<Pencil size={15} />} onClick={() => { setEditingSkill(s); setMenu(null); }}>{tr("Editar")}</MenuItem>
+                      <MenuItem icon={<Copy size={15} />} onClick={() => { cloneSkill(s); setMenu(null); }}>{tr("Clonar")}</MenuItem>
+                      <MenuItem danger icon={<Trash2 size={15} />} onClick={() => { deleteSkill(s.id); setMenu(null); }}>{tr("Excluir")}</MenuItem>
                     </AnchoredMenu>
                   )}
                 </div>
@@ -1050,33 +1053,33 @@ export default function WorkspaceView({
               </div>
             ))}
           </div>
-          {filteredSkills.length === 0 && <EmptyState text={q ? "Nenhuma skill encontrada." : "Nenhuma skill ainda. Clique em “Nova Skill”."} />}
+          {filteredSkills.length === 0 && <EmptyState text={q ? tr("Nenhuma skill encontrada.") : tr("Nenhuma skill ainda. Clique em “Nova Skill”.")} />}
         </SectionShell>
       )}
 
       {/* --------------------------- seções ainda por vir ------------------------- */}
       {section === "Conhecimento" && (
-        <SectionShell title="Conhecimento" onBack={backHome} actions={kbAction}
-          hint="Organize documentos em pastas e acople as bases a um modelo ou chat para a IA responder com citações.">
+        <SectionShell title={tr("Conhecimento")} onBack={backHome} actions={kbAction}
+          hint={tr("Organize documentos em pastas e acople as bases a um modelo ou chat para a IA responder com citações.")}>
           <KnowledgeView setHeaderAction={setKbAction} />
         </SectionShell>
       )}
       {section === "Cerebros" && (
-        <SectionShell title="Cérebros" onBack={backHome} actions={kbAction}
-          hint="Notas interligadas que a IA lê e escreve. Acople um cérebro a um modelo ou chat e ele passa a anotar e consultar o que aprende.">
+        <SectionShell title={tr("Cérebros")} onBack={backHome} actions={kbAction}
+          hint={tr("Notas interligadas que a IA lê e escreve. Acople um cérebro a um modelo ou chat e ele passa a anotar e consultar o que aprende.")}>
           <KnowledgeView kind="brain" setHeaderAction={setKbAction} />
         </SectionShell>
       )}
       {section === "Apps" && (
-        <SectionShell title="Apps" onBack={backHome}>
-          <ComingSoon icon={<LayoutGrid size={26} />} title="Apps" desc="Mini-aplicações e fluxos prontos para instalar no seu workspace." />
+        <SectionShell title={tr("Apps")} onBack={backHome}>
+          <ComingSoon icon={<LayoutGrid size={26} />} title={tr("Apps")} desc={tr("Mini-aplicações e fluxos prontos para instalar no seu workspace.")} />
         </SectionShell>
       )}
       {section === "Codespace" && (
         <CodespacePanel onBack={backHome} onOpenChat={(chatId, prefill) => { onOpenChat?.(chatId, prefill); onClose(); }} />
       )}
       {section === "Investigacoes" && (
-        <SectionShell title="Grafaria" onBack={backHome}>
+        <SectionShell title={tr("Grafaria")} onBack={backHome}>
           <InvestigationPanel />
         </SectionShell>
       )}
@@ -1087,12 +1090,12 @@ export default function WorkspaceView({
         <PlaygroundView onClose={backHome} />
       )}
       {section === "Memoria" && (
-        <SectionShell title="Memória" onBack={backHome} actions={<MemoryStatusPill />}>
+        <SectionShell title={tr("Memória")} onBack={backHome} actions={<MemoryStatusPill />}>
           <MemoryView />
         </SectionShell>
       )}
       {section === "Analítica" && (
-        <SectionShell title="Analítica" onBack={backHome}>
+        <SectionShell title={tr("Analítica")} onBack={backHome}>
           <AnalyticsView />
         </SectionShell>
       )}

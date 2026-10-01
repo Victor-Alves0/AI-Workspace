@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { ImaginaiSnapshot } from "./types";
+import { tr } from "@/lib/i18n";
 
 /**
  * Estado da campanha do chat aberto. Ativar o mini app materializa um World Kernel:
@@ -34,16 +35,16 @@ export function useImaginaiCampaign(
     setError(null);
     api.post<ImaginaiSnapshot>("/mini-apps/imaginai/campaigns", {
       chat_id: chatId,
-      name: "Nome da Campanha",
+      name: tr("Nome da Campanha"),
       system_key: "dnd5e",
       system_version: "5e",
-      character_name: "Nome do personagem",
+      character_name: tr("Nome do personagem"),
     }).then((fresh) => {
       if (!cancelled) setSnapshot(fresh);
     }).catch((loadError: unknown) => {
       if (cancelled) return;
       setSnapshot(null);
-      setError(loadError instanceof Error ? loadError.message : "Não foi possível abrir a campanha");
+      setError(loadError instanceof Error ? loadError.message : tr("Não foi possível abrir a campanha"));
     }).finally(() => {
       if (!cancelled) setLoading(false);
     });

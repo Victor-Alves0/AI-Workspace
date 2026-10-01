@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronLeft, Loader2, LogIn, Plus, RefreshCw, Server, Trash2, TriangleAlert } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { isDesktop, openExternal } from "@/lib/desktop";
+import { tr } from "@/lib/i18n";
 
 interface Provider {
   slug: string;
@@ -67,7 +68,7 @@ export default function ProvidersPanel({ onBack, onChanged }: { onBack: () => vo
   return (
     <div className="pt-1">
       <button onClick={onBack} className="mb-3 flex items-center gap-1 text-sm text-muted transition-colors hover:text-ink">
-        <ChevronLeft size={16} /> Voltar
+        <ChevronLeft size={16} />  {tr("Voltar")}
       </button>
 
       <div className="flex items-center gap-2.5">
@@ -75,8 +76,8 @@ export default function ProvidersPanel({ onBack, onChanged }: { onBack: () => vo
           <Server size={18} />
         </span>
         <div>
-          <p className="text-sm font-semibold text-ink">Provedores</p>
-          <p className="text-xs text-muted">Provedores de LLMs</p>
+          <p className="text-sm font-semibold text-ink">{tr("Provedores")}</p>
+          <p className="text-xs text-muted">{tr("Provedores de LLMs")}</p>
         </div>
       </div>
 
@@ -104,7 +105,7 @@ export default function ProvidersPanel({ onBack, onChanged }: { onBack: () => vo
               <button onClick={() => setEditingOpenrouter(true)} className="min-w-0 flex-1 text-left">
                 <p className="truncate text-sm text-ink">OpenRouter</p>
                 <p className="truncate text-xs text-muted">
-                  {orKey ? "chave configurada" : "sem chave · necessária para conversar"}
+                  {orKey ? "chave configurada" : tr("sem chave · necessária para conversar")}
                 </p>
               </button>
             </li>
@@ -113,7 +114,7 @@ export default function ProvidersPanel({ onBack, onChanged }: { onBack: () => vo
                 <span className={`h-2 w-2 shrink-0 rounded-full ${p.enabled && p.has_key ? "bg-green-400" : "bg-surface2"}`} />
                 <button onClick={() => setEditing({ ...p, api_key: "" })} className="min-w-0 flex-1 text-left">
                   <p className="truncate text-sm text-ink">{p.name}</p>
-                  <p className="truncate text-xs text-muted">{p.base_url || "sem URL"}{p.has_key ? "" : " · sem chave"}</p>
+                  <p className="truncate text-xs text-muted">{p.base_url || tr("sem URL")}{p.has_key ? "" : tr(" · sem chave")}</p>
                 </button>
                 <Trash2
                   size={15}
@@ -128,7 +129,7 @@ export default function ProvidersPanel({ onBack, onChanged }: { onBack: () => vo
             onClick={() => setChoosing(true)}
             className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
           >
-            <Plus size={15} /> Adicionar provedor
+            <Plus size={15} />  {tr("Adicionar provedor")}
           </button>
         </div>
       )}
@@ -160,18 +161,18 @@ function AddProviderChooser({
   return (
     <div className="space-y-2 pt-4">
       <button onClick={onCancel} className="mb-1 flex items-center gap-1 text-sm text-muted transition-colors hover:text-ink">
-        <ChevronLeft size={16} /> Adicionar provedor
+        <ChevronLeft size={16} />  {tr("Adicionar provedor")}
       </button>
-      <Card title="OpenRouter" desc="Centenas de modelos com uma só chave. Só cole a chave." onClick={onOpenrouter} />
+      <Card title="OpenRouter" desc={tr("Centenas de modelos com uma só chave. Só cole a chave.")} onClick={onOpenrouter} />
       {presets.map(([slug, pr]) => (
         <Card
           key={slug}
           title={pr.name}
-          desc={`Endpoint compatível com OpenAI · ${pr.base_url}`}
+          desc={tr("Endpoint compatível com OpenAI · {base_url}", { base_url: pr.base_url })}
           onClick={() => onPreset(slug, pr)}
         />
       ))}
-      <Card title="Personalizado" desc="Qualquer endpoint compatível com OpenAI: nome, URL e chave." onClick={onCustom} />
+      <Card title={tr("Personalizado")} desc={tr("Qualquer endpoint compatível com OpenAI: nome, URL e chave.")} onClick={onCustom} />
     </div>
   );
 }
@@ -203,10 +204,10 @@ function OpenrouterForm({ configured, onCancel, onSaved }: {
     try {
       const { url } = await api.get<{ url: string }>("/integrations/providers/openrouter/connect-url");
       if (aba) { aba.opener = null; aba.location.href = url; }
-      else if (!(await openExternal(url))) { setErr("Não consegui abrir o navegador."); return; }
+      else if (!(await openExternal(url))) { setErr(tr("Não consegui abrir o navegador.")); return; }
     } catch (e) {
       aba?.close();
-      setErr(e instanceof ApiError ? e.message : "Falha ao iniciar a conexão.");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao iniciar a conexão."));
       return;
     }
     if (configured) return; // reconexão: a chave nova substitui a atual quando chegar
@@ -228,7 +229,7 @@ function OpenrouterForm({ configured, onCancel, onSaved }: {
       await api.put("/settings/secrets/openrouter", { api_key: key.trim() });
       onSaved();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao salvar.");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao salvar."));
     } finally { setBusy(false); }
   }
 
@@ -240,7 +241,7 @@ function OpenrouterForm({ configured, onCancel, onSaved }: {
 
       {configured && (
         <p className="flex items-center gap-1.5 text-sm text-green-400">
-          <Check size={15} className="shrink-0" /> Conectado.
+          <Check size={15} className="shrink-0" />  {tr("Conectado.")}
         </p>
       )}
 
@@ -251,30 +252,32 @@ function OpenrouterForm({ configured, onCancel, onSaved }: {
           className="flex items-center gap-2 rounded-full bg-accent px-5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-70"
         >
           {waiting ? <Loader2 size={15} className="animate-spin" /> : <LogIn size={15} />}
-          {waiting ? "Aguardando a autorização no navegador…" : configured ? "Reconectar com OpenRouter" : "Conectar com OpenRouter"}
+          {waiting ? tr("Aguardando a autorização no navegador…") : configured ? tr("Reconectar com OpenRouter") : tr("Conectar com OpenRouter")}
         </button>
         <p className="text-xs text-muted">
-          Você autoriza no site do OpenRouter e a chave volta pronta — não precisa procurar nem colar nada.
+          
+          {tr("Você autoriza no site do OpenRouter e a chave volta pronta — não precisa procurar nem colar nada.")}
         </p>
       </div>
 
       {!manual ? (
         <button onClick={() => setManual(true)} className="text-xs text-muted underline transition-colors hover:text-ink">
-          Prefiro colar a chave manualmente
+          
+          {tr("Prefiro colar a chave manualmente")}
         </button>
       ) : (
         <div className="space-y-3 border-t border-border pt-4">
           <div className="space-y-1.5">
-            <label className="text-sm text-ink-soft">Chave de API</label>
+            <label className="text-sm text-ink-soft">{tr("Chave de API")}</label>
             <input
               type="password" value={key} onChange={(e) => setKey(e.target.value)}
-              placeholder={configured ? "•••••••• (guardada — cole outra para trocar)" : "cole a chave do OpenRouter"}
+              placeholder={configured ? tr("•••••••• (guardada — cole outra para trocar)") : tr("cole a chave do OpenRouter")}
               className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
             />
-            <p className="text-xs text-muted">Pegue em openrouter.ai/keys.</p>
+            <p className="text-xs text-muted">{tr("Pegue em openrouter.ai/keys.")}</p>
           </div>
           <button onClick={save} disabled={busy} className="rounded-full border border-border px-5 py-1.5 text-sm font-medium text-ink transition-colors hover:bg-hover disabled:opacity-50">
-            {busy ? "Salvando…" : "Salvar"}
+            {busy ? tr("Salvando…") : tr("Salvar")}
           </button>
         </div>
       )}
@@ -307,22 +310,22 @@ function ProviderForm({
 
   async function runTest() {
     setBusy("test"); setTest(null); setErr("");
-    if (!key.trim() && !draft.has_key) { setErr("Informe a chave para testar."); setBusy(null); return; }
+    if (!key.trim() && !draft.has_key) { setErr(tr("Informe a chave para testar.")); setBusy(null); return; }
     try {
       const r = await api.post<{ ok: boolean; count?: number; error?: string }>(
         "/integrations/providers/test", { base_url: baseUrl, api_key: key.trim() || "test", models: modelList },
       );
       setTest(r);
     } catch (e) {
-      setTest({ ok: false, error: e instanceof ApiError ? e.message : "Falha na conexão" });
+      setTest({ ok: false, error: e instanceof ApiError ? e.message : tr("Falha na conexão") });
     } finally { setBusy(null); }
   }
 
   async function save() {
-    if (!name.trim()) { setErr("Dê um nome ao provedor."); return; }
-    if (!baseUrl.trim()) { setErr("Informe a base URL."); return; }
-    if (pathModel && modelList.length === 0) { setErr("Provedores com {model} na URL precisam de ao menos um modelo."); return; }
-    if (isNew && !key.trim()) { setErr("Informe a chave de API."); return; }
+    if (!name.trim()) { setErr(tr("Dê um nome ao provedor.")); return; }
+    if (!baseUrl.trim()) { setErr(tr("Informe a base URL.")); return; }
+    if (pathModel && modelList.length === 0) { setErr(tr("Provedores com {model} na URL precisam de ao menos um modelo.")); return; }
+    if (isNew && !key.trim()) { setErr(tr("Informe a chave de API.")); return; }
     setBusy("save"); setErr("");
     try {
       await api.put(`/integrations/providers/${slug || "provedor"}`, {
@@ -334,18 +337,18 @@ function ProviderForm({
       });
       onSaved();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao salvar.");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao salvar."));
     } finally { setBusy(null); }
   }
 
   return (
     <div className="space-y-4 pt-4">
       <button onClick={onCancel} className="flex items-center gap-1 text-sm text-muted transition-colors hover:text-ink">
-        <ChevronLeft size={16} /> {isNew ? "Novo provedor" : name || draft.slug}
+        <ChevronLeft size={16} /> {isNew ? tr("Novo provedor") : name || draft.slug}
       </button>
 
       <div className="space-y-1.5">
-        <label className="text-sm text-ink-soft">Nome</label>
+        <label className="text-sm text-ink-soft">{tr("Nome")}</label>
         <input
           value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Kie.ai"
           className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
@@ -353,63 +356,65 @@ function ProviderForm({
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-sm text-ink-soft">Base URL (compatível com OpenAI)</label>
+        <label className="text-sm text-ink-soft">{tr("Base URL (compatível com OpenAI)")}</label>
         <input
           value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://localhost:4000/v1"
           className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 font-mono text-sm text-ink outline-none focus:border-accent"
         />
         <p className="text-xs text-muted">
-          A raiz onde bate <span className="font-mono">/chat/completions</span> (geralmente termina em <span className="font-mono">/v1</span>).
-          Use <span className="font-mono">{"{model}"}</span> na URL se o provedor põe o modelo no caminho (em vez do corpo).
+          
+          {tr("A raiz onde bate")} <span className="font-mono">/chat/completions</span>  {tr("(geralmente termina em")} <span className="font-mono">/v1</span>).
+          Use <span className="font-mono">{"{model}"}</span>  {tr("na URL se o provedor põe o modelo no caminho (em vez do corpo).")}
         </p>
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-sm text-ink-soft">Modelos {pathModel && <span className="text-muted">(obrigatório)</span>}</label>
+        <label className="text-sm text-ink-soft">{tr("Modelos")} {pathModel && <span className="text-muted">{tr("(obrigatório)")}</span>}</label>
         <textarea
           value={modelsText} onChange={(e) => setModelsText(e.target.value)} rows={3}
           placeholder={"gpt-5-2\ngemini-3-pro"}
           className="w-full resize-y rounded-lg border border-border bg-surface2 px-3 py-2 font-mono text-sm text-ink outline-none focus:border-accent"
         />
         <p className="text-xs text-muted">
-          Um id por linha (ou separados por vírgula). {pathModel
-            ? "Este provedor não tem lista automática — informe os ids que quer usar."
-            : "Deixe vazio para descobrir automaticamente via /models."}
+          
+          {tr("Um id por linha (ou separados por vírgula).")} {pathModel
+            ? tr("Este provedor não tem lista automática — informe os ids que quer usar.")
+            : tr("Deixe vazio para descobrir automaticamente via /models.")}
         </p>
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-sm text-ink-soft">Chave de API</label>
+        <label className="text-sm text-ink-soft">{tr("Chave de API")}</label>
         <input
           type="password" value={key} onChange={(e) => setKey(e.target.value)}
-          placeholder={draft.has_key ? "•••••••• (guardada — deixe em branco para manter)" : "cole a chave do provedor"}
+          placeholder={draft.has_key ? tr("•••••••• (guardada — deixe em branco para manter)") : tr("cole a chave do provedor")}
           className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
         />
       </div>
 
       <div className="flex items-center justify-between rounded-xl border border-border bg-surface px-3 py-2.5">
         <div>
-          <p className="text-sm text-ink">Ativado</p>
-          <p className="text-xs text-muted">Quando ligado, os modelos deste provedor aparecem nos seletores.</p>
+          <p className="text-sm text-ink">{tr("Ativado")}</p>
+          <p className="text-xs text-muted">{tr("Quando ligado, os modelos deste provedor aparecem nos seletores.")}</p>
         </div>
         <Toggle on={enabled} onClick={() => setEnabled((v) => !v)} />
       </div>
 
       <div className="flex items-center gap-2">
         <button onClick={runTest} disabled={!!busy} className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-4 py-1.5 text-sm text-ink-soft transition-colors hover:bg-surface2 disabled:opacity-50">
-          {busy === "test" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Testar conexão
+          {busy === "test" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}  {tr("Testar conexão")}
         </button>
         <button onClick={save} disabled={!!busy} className="rounded-full bg-accent px-5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50">
-          {busy === "save" ? "Salvando…" : "Salvar"}
+          {busy === "save" ? tr("Salvando…") : tr("Salvar")}
         </button>
       </div>
 
       {err && <p className="flex items-start gap-1.5 text-sm text-red-400"><TriangleAlert size={15} className="mt-0.5 shrink-0" /> {err}</p>}
       {test && (
         test.ok ? (
-          <p className="flex items-center gap-1.5 text-sm text-green-400"><Check size={15} /> Conectado — {test.count ?? 0} modelo(s) disponíveis.</p>
+          <p className="flex items-center gap-1.5 text-sm text-green-400"><Check size={15} /> Conectado — {test.count ?? 0}  {tr("modelo(s) disponíveis.")}</p>
         ) : (
-          <p className="flex items-start gap-1.5 text-sm text-red-400"><TriangleAlert size={15} className="mt-0.5 shrink-0" /> {test.error || "Não foi possível conectar."}</p>
+          <p className="flex items-start gap-1.5 text-sm text-red-400"><TriangleAlert size={15} className="mt-0.5 shrink-0" /> {test.error || tr("Não foi possível conectar.")}</p>
         )
       )}
     </div>

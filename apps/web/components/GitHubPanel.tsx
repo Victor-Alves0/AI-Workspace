@@ -7,6 +7,7 @@ import { copyText } from "@/lib/clipboard";
 import { openExternal } from "@/lib/desktop";
 import { useConfirm } from "./ConfirmDialog";
 import { toast } from "@/components/Toaster";
+import { tr } from "@/lib/i18n";
 
 interface Account {
   id: string;
@@ -59,7 +60,7 @@ export default function GitHubPanel({ onBack }: { onBack: () => void }) {
   return (
     <div className="pt-1">
       <button onClick={onBack} className="mb-3 flex items-center gap-1 text-sm text-muted transition-colors hover:text-ink">
-        <ChevronLeft size={16} /> Voltar
+        <ChevronLeft size={16} />  {tr("Voltar")}
       </button>
 
       <div className="flex items-center gap-2.5">
@@ -68,7 +69,7 @@ export default function GitHubPanel({ onBack }: { onBack: () => void }) {
         </span>
         <div>
           <p className="text-sm font-semibold text-ink">GitHub</p>
-          <p className="text-xs text-muted">Repos, arquivos, issues e PRs para os modelos usarem</p>
+          <p className="text-xs text-muted">{tr("Repos, arquivos, issues e PRs para os modelos usarem")}</p>
         </div>
       </div>
 
@@ -82,10 +83,10 @@ export default function GitHubPanel({ onBack }: { onBack: () => void }) {
 
           {st.is_admin && <OAuthAppConfig st={st} reload={load} />}
 
-          <p className="mb-1 mt-6 text-xs font-semibold text-ink">Contas conectadas</p>
+          <p className="mb-1 mt-6 text-xs font-semibold text-ink">{tr("Contas conectadas")}</p>
           <div className="rounded-xl border border-border bg-surface">
             {st.accounts.length === 0 ? (
-              <p className="px-3 py-3 text-xs text-muted">Nenhuma conta conectada ainda.</p>
+              <p className="px-3 py-3 text-xs text-muted">{tr("Nenhuma conta conectada ainda.")}</p>
             ) : (
               st.accounts.map((a, i) => (
                 <div key={a.id} className={`flex items-center gap-3 px-3 py-2.5 ${i > 0 ? "border-t border-border" : ""}`}>
@@ -98,13 +99,13 @@ export default function GitHubPanel({ onBack }: { onBack: () => void }) {
                     </span>
                   )}
                   <span className="min-w-0 flex-1 truncate text-sm text-ink">
-                    {a.login || "(conta GitHub)"}
+                    {a.login || tr("(conta GitHub)")}
                     <span className="ml-1.5 rounded-full bg-surface2 px-1.5 py-0.5 text-[10px] uppercase text-muted">{a.auth_type}</span>
                   </span>
                   <button
                     onClick={() => testAccount(a.id)}
                     disabled={test[a.id] === "loading"}
-                    title="Testar conexão"
+                    title={tr("Testar conexão")}
                     className={`flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors ${
                       test[a.id] === "ok" ? "text-green-500"
                       : test[a.id] === "fail" ? "text-red-400"
@@ -115,15 +116,15 @@ export default function GitHubPanel({ onBack }: { onBack: () => void }) {
                       : test[a.id] === "ok" ? <Check size={13} />
                       : test[a.id] === "fail" ? <TriangleAlert size={13} />
                       : <Wifi size={13} />}
-                    {test[a.id] === "ok" ? "OK" : test[a.id] === "fail" ? "Falhou" : "Testar"}
+                    {test[a.id] === "ok" ? "OK" : test[a.id] === "fail" ? tr("Falhou") : tr("Testar")}
                   </button>
                   <button
                     onClick={async () => {
-                      if (!(await confirm({ title: "Remover esta conta?", body: <>Os modelos deixarão de acessar <span className="font-medium text-ink">{a.login}</span>.</>, confirmLabel: "Remover", danger: true }))) return;
+                      if (!(await confirm({ title: tr("Remover esta conta?"), body: <>{tr("Os modelos deixarão de acessar")} <span className="font-medium text-ink">{a.login}</span>.</>, confirmLabel: tr("Remover"), danger: true }))) return;
                       try { await api.del(`/integrations/github/accounts/${a.id}`); await load(); }
-                      catch (e) { toast(e instanceof ApiError ? e.message : "Falha ao remover"); }
+                      catch (e) { toast(e instanceof ApiError ? e.message : tr("Falha ao remover")); }
                     }}
-                    title="Remover conta"
+                    title={tr("Remover conta")}
                     className="shrink-0 rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-red-400"
                   >
                     <Trash2 size={15} />
@@ -137,7 +138,7 @@ export default function GitHubPanel({ onBack }: { onBack: () => void }) {
                   onClick={() => { window.location.href = `${API_URL}/integrations/github/connect`; }}
                   className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border py-2 text-sm text-ink-soft transition-colors hover:border-accent/50 hover:text-ink"
                 >
-                  <Plus size={15} /> Conectar com OAuth
+                  <Plus size={15} />  {tr("Conectar com OAuth")}
                 </button>
               </div>
             )}
@@ -188,7 +189,7 @@ function DeviceConnect({ reload }: { reload: () => Promise<void> }) {
       copyText(r.user_code).then((ok) => setCopied(ok));
       schedule(r.handle, r.interval);
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao iniciar o login");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao iniciar o login"));
     } finally { setBusy(false); }
   }
 
@@ -202,7 +203,7 @@ function DeviceConnect({ reload }: { reload: () => Promise<void> }) {
     try {
       r = await api.post<PollOut>("/integrations/github/device/poll", { handle });
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao concluir o login");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao concluir o login"));
       setFlow(null);
       return;
     }
@@ -212,7 +213,7 @@ function DeviceConnect({ reload }: { reload: () => Promise<void> }) {
       return;
     }
     if (r.status === "error") {
-      setErr(r.error === "expired" ? "O código expirou. Comece de novo." : r.error);
+      setErr(r.error === "expired" ? tr("O código expirou. Comece de novo.") : r.error);
       setFlow(null);
       return;
     }
@@ -227,16 +228,16 @@ function DeviceConnect({ reload }: { reload: () => Promise<void> }) {
 
   return (
     <div className="mt-4">
-      <p className="mb-1 text-xs font-semibold text-ink">Entrar com GitHub</p>
+      <p className="mb-1 text-xs font-semibold text-ink">{tr("Entrar com GitHub")}</p>
       <div className="space-y-2 rounded-xl border border-border bg-surface p-3">
         {flow == null ? (
           <>
             <button onClick={start} disabled={busy}
               className="flex items-center gap-2 rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
               {busy ? <Loader2 size={13} className="animate-spin" /> : <Github size={13} />}
-              {busy ? "Abrindo…" : "Entrar com GitHub"}
+              {busy ? tr("Abrindo…") : tr("Entrar com GitHub")}
             </button>
-            <p className="text-[11px] text-muted">Autorize com um código curto — sem criar nem colar token.</p>
+            <p className="text-[11px] text-muted">{tr("Autorize com um código curto — sem criar nem colar token.")}</p>
           </>
         ) : (
           <>
@@ -247,7 +248,7 @@ function DeviceConnect({ reload }: { reload: () => Promise<void> }) {
               <button onClick={() => openExternal(flow.verification_uri)} className="text-accent-hover underline">
                 {flow.verification_uri}
               </button>
-              {" "}2. digite o código abaixo. Esta tela conclui sozinha.
+              {" "}{tr("2. digite o código abaixo. Esta tela conclui sozinha.")}
             </p>
             <div className="flex items-center gap-2">
               <code className="flex-1 rounded-lg border border-border bg-surface2 px-3 py-2 text-center font-mono text-lg tracking-[0.3em] text-ink">
@@ -256,14 +257,14 @@ function DeviceConnect({ reload }: { reload: () => Promise<void> }) {
               <button
                 onClick={async () => setCopied(await copyText(flow.user_code))}
                 className="shrink-0 rounded-lg p-2 text-muted transition-colors hover:bg-hover hover:text-ink"
-                title="Copiar código"
+                title={tr("Copiar código")}
               >
                 {copied ? <Check size={15} className="text-green-500" /> : <Copy size={15} />}
               </button>
             </div>
             <div className="flex items-center gap-2 text-[11px] text-muted">
-              <Loader2 size={12} className="animate-spin" /> Esperando você autorizar…
-              <button onClick={cancel} className="ml-auto underline transition-colors hover:text-ink">Cancelar</button>
+              <Loader2 size={12} className="animate-spin" />  {tr("Esperando você autorizar…")}
+              <button onClick={cancel} className="ml-auto underline transition-colors hover:text-ink">{tr("Cancelar")}</button>
             </div>
           </>
         )}
@@ -288,7 +289,7 @@ function PatConnect({ reload, startOpen }: { reload: () => Promise<void>; startO
       setToken("");
       await reload();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao conectar");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao conectar"));
     } finally {
       setBusy(false);
     }
@@ -297,26 +298,27 @@ function PatConnect({ reload, startOpen }: { reload: () => Promise<void>; startO
   if (!open) {
     return (
       <button onClick={() => setOpen(true)} className="mt-3 text-[11px] text-muted underline transition-colors hover:text-ink">
-        Prefiro colar um Personal Access Token
+        
+        {tr("Prefiro colar um Personal Access Token")}
       </button>
     );
   }
 
   return (
     <div className="mt-4">
-      <p className="mb-1 text-xs font-semibold text-ink">Conectar com token</p>
+      <p className="mb-1 text-xs font-semibold text-ink">{tr("Conectar com token")}</p>
       <div className="space-y-2 rounded-xl border border-border bg-surface p-3">
         <input
           type="password" value={token} onChange={(e) => setToken(e.target.value)}
-          placeholder="ghp_… ou github_pat_…"
+          placeholder={tr("ghp_… ou github_pat_…")}
           className="w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
         />
         <div className="flex items-center justify-between gap-2">
           {err ? <p className="min-w-0 flex-1 truncate text-[11px] text-red-400">{err}</p>
-               : <p className="min-w-0 flex-1 text-[11px] text-muted">Crie um Personal Access Token (fine-grained) com acesso aos repos e permissões desejadas.</p>}
+               : <p className="min-w-0 flex-1 text-[11px] text-muted">{tr("Crie um Personal Access Token (fine-grained) com acesso aos repos e permissões desejadas.")}</p>}
           <button onClick={connect} disabled={busy || !token.trim()}
             className="shrink-0 rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-            {busy ? "…" : "Conectar"}
+            {busy ? "…" : tr("Conectar")}
           </button>
         </div>
       </div>
@@ -341,7 +343,7 @@ function OAuthAppConfig({ st, reload }: { st: GithubStatus; reload: () => Promis
       setTimeout(() => setSaved(false), 1500);
       await reload();
     } catch (e) {
-      toast(e instanceof ApiError ? e.message : "Falha ao salvar");
+      toast(e instanceof ApiError ? e.message : tr("Falha ao salvar"));
     } finally {
       setSaving(false);
     }
@@ -350,35 +352,38 @@ function OAuthAppConfig({ st, reload }: { st: GithubStatus; reload: () => Promis
   return (
     <div className="mt-4">
       <button onClick={() => setOpen((v) => !v)} className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-ink">
-        App OAuth (opcional)
+        
+        {tr("App OAuth (opcional)")}
         {st.oauth_configured && <span className="inline-flex items-center gap-0.5 text-[10px] font-normal text-green-500"><Check size={11} /> configurado</span>}
       </button>
       {open && (
         <>
           <div className="space-y-2 rounded-xl border border-border bg-surface p-3">
             <label className="block text-sm">
-              <span className="text-ink-soft">Client ID</span>
+              <span className="text-ink-soft">{tr("Client ID")}</span>
               <input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="Iv1.…"
                 className="mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent" />
             </label>
             <label className="block text-sm">
-              <span className="text-ink-soft">Client Secret</span>
+              <span className="text-ink-soft">{tr("Client Secret")}</span>
               <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)}
-                placeholder={st.oauth_configured ? "•••••••• (deixe em branco p/ manter)" : "client secret"}
+                placeholder={st.oauth_configured ? tr("•••••••• (deixe em branco p/ manter)") : "client secret"}
                 className="mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent" />
             </label>
             <div className="flex items-center justify-between gap-2 pt-0.5">
               <p className="min-w-0 flex-1 truncate text-[11px] text-muted">
-                Callback: <span className="text-ink-soft">{st.redirect_uri}</span>
+                
+                {tr("Callback:")} <span className="text-ink-soft">{st.redirect_uri}</span>
               </p>
               <button onClick={save} disabled={saving || !clientId.trim()}
                 className="shrink-0 rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-                {saving ? "…" : saved ? "Salvo ✓" : "Salvar"}
+                {saving ? "…" : saved ? "Salvo ✓" : tr("Salvar")}
               </button>
             </div>
           </div>
           <p className="mt-1 text-[11px] leading-4 text-muted">
-            Crie um OAuth App no GitHub, registre a Callback acima. O PAT acima é mais simples e não precisa disto.
+            
+            {tr("Crie um OAuth App no GitHub, registre a Callback acima. O PAT acima é mais simples e não precisa disto.")}
           </p>
         </>
       )}

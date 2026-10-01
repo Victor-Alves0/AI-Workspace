@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Lock, MessageSquare } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import Markdown from "@/components/Markdown";
+import { tr } from "@/lib/i18n";
 
 type SharedMessage = { role: string; content: string; created_at: string };
 type SharedChat = { title: string; model: string; messages: SharedMessage[]; created_at: string };
@@ -34,7 +35,7 @@ function SharedChat() {
 
   const load = useCallback(async (password?: string) => {
     if (!id) {
-      setErr("Link de compartilhamento incompleto.");
+      setErr(tr("Link de compartilhamento incompleto."));
       setLoading(false);
       return;
     }
@@ -51,11 +52,11 @@ function SharedChat() {
         setNeedPw(true);
         if (password) setPwErr(true); // tinha senha e errou
       } else if (e instanceof ApiError && e.status === 410) {
-        setErr("Este link de compartilhamento expirou.");
+        setErr(tr("Este link de compartilhamento expirou."));
       } else if (e instanceof ApiError && e.status === 404) {
-        setErr("Esta conversa não existe ou não está mais compartilhada.");
+        setErr(tr("Esta conversa não existe ou não está mais compartilhada."));
       } else {
-        setErr("Não foi possível carregar a conversa.");
+        setErr(tr("Não foi possível carregar a conversa."));
       }
     } finally {
       setLoading(false);
@@ -71,10 +72,10 @@ function SharedChat() {
         <div className="mx-auto flex max-w-3xl items-center gap-2">
           <MessageSquare size={18} className="text-accent-hover" />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold">{chat?.title ?? "Conversa compartilhada"}</p>
+            <p className="truncate text-sm font-semibold">{chat?.title ?? tr("Conversa compartilhada")}</p>
             {chat?.model && <p className="truncate text-xs text-muted">{chat.model}</p>}
           </div>
-          <span className="shrink-0 rounded-full bg-surface2 px-2.5 py-0.5 text-[11px] text-muted">Somente leitura</span>
+          <span className="shrink-0 rounded-full bg-surface2 px-2.5 py-0.5 text-[11px] text-muted">{tr("Somente leitura")}</span>
         </div>
       </header>
 
@@ -82,24 +83,24 @@ function SharedChat() {
         {needPw ? (
           <div className="mx-auto mt-16 flex max-w-sm flex-col items-center gap-3 rounded-2xl border border-border bg-surface p-6 text-center">
             <Lock size={26} className="text-accent-hover" />
-            <p className="text-sm font-medium text-ink">Conversa protegida</p>
-            <p className="text-xs text-muted">Digite a senha para visualizar.</p>
+            <p className="text-sm font-medium text-ink">{tr("Conversa protegida")}</p>
+            <p className="text-xs text-muted">{tr("Digite a senha para visualizar.")}</p>
             <input
               type="password"
               autoFocus
               value={pw}
               onChange={(e) => setPw(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && pw.trim()) load(pw.trim()); }}
-              placeholder="Senha"
+              placeholder={tr("Senha")}
               className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
             />
-            {pwErr && <p className="text-xs text-red-400">Senha incorreta.</p>}
+            {pwErr && <p className="text-xs text-red-400">{tr("Senha incorreta.")}</p>}
             <button
               onClick={() => pw.trim() && load(pw.trim())}
               disabled={!pw.trim() || loading}
               className="w-full rounded-full bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
             >
-              {loading ? "…" : "Ver conversa"}
+              {loading ? "…" : tr("Ver conversa")}
             </button>
           </div>
         ) : err ? (
@@ -108,9 +109,9 @@ function SharedChat() {
             <p className="text-sm text-muted">{err}</p>
           </div>
         ) : !chat ? (
-          <p className="py-20 text-center text-sm text-muted">Carregando…</p>
+          <p className="py-20 text-center text-sm text-muted">{tr("Carregando…")}</p>
         ) : chat.messages.length === 0 ? (
-          <p className="py-20 text-center text-sm text-muted">Esta conversa ainda não tem mensagens.</p>
+          <p className="py-20 text-center text-sm text-muted">{tr("Esta conversa ainda não tem mensagens.")}</p>
         ) : (
           <div className="space-y-5">
             {chat.messages.map((m, i) => (
@@ -127,8 +128,9 @@ function SharedChat() {
           </div>
         )}
         <p className="mt-10 text-center text-xs text-muted">
-          Compartilhado via{" "}
-          <a href="/" className="underline decoration-border underline-offset-2 transition-colors hover:text-ink">AI Workspace</a>
+          
+          {tr("Compartilhado via")}{" "}
+          <a href="/" className="underline decoration-border underline-offset-2 transition-colors hover:text-ink">{tr("AI Workspace")}</a>
         </p>
       </main>
     </div>

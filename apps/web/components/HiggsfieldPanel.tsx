@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Check, ChevronLeft, Clapperboard, Loader2, Trash2, TriangleAlert, Wifi } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
+import { tr } from "@/lib/i18n";
 
 interface HiggsfieldStatus {
   connected: boolean;
@@ -27,7 +28,7 @@ export default function HiggsfieldPanel({ onBack }: { onBack: () => void }) {
   return (
     <div className="pt-1">
       <button onClick={onBack} className="mb-3 flex items-center gap-1 text-sm text-muted transition-colors hover:text-ink">
-        <ChevronLeft size={16} /> Voltar
+        <ChevronLeft size={16} />  {tr("Voltar")}
       </button>
 
       <div className="flex items-center gap-2.5">
@@ -35,8 +36,8 @@ export default function HiggsfieldPanel({ onBack }: { onBack: () => void }) {
           <Clapperboard size={17} />
         </span>
         <div>
-          <p className="text-sm font-semibold text-ink">Higgsfield</p>
-          <p className="text-xs text-muted">Geração de imagem (Soul, Seedream, FLUX) e vídeo (DoP, Kling)</p>
+          <p className="text-sm font-semibold text-ink">{tr("Higgsfield")}</p>
+          <p className="text-xs text-muted">{tr("Geração de imagem (Soul, Seedream, FLUX) e vídeo (DoP, Kling)")}</p>
         </div>
       </div>
 
@@ -72,7 +73,7 @@ function HiggsfieldBody({ st, reload }: { st: HiggsfieldStatus; reload: () => Pr
       setTimeout(() => setSaved(false), 1500);
       await reload();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao salvar");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao salvar"));
     } finally {
       setSaving(false);
     }
@@ -98,7 +99,7 @@ function HiggsfieldBody({ st, reload }: { st: HiggsfieldStatus; reload: () => Pr
       setTest("idle");
       await reload();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao desconectar");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao desconectar"));
     }
   }
 
@@ -106,7 +107,8 @@ function HiggsfieldBody({ st, reload }: { st: HiggsfieldStatus; reload: () => Pr
     <div className="mt-4 space-y-4">
       <div className="space-y-2 rounded-xl border border-border bg-surface p-3">
         <p className="flex items-center gap-1.5 text-xs font-semibold text-ink">
-          Conexão
+          
+          {tr("Conexão")}
           {st.connected && (
             <span className="inline-flex items-center gap-0.5 text-[10px] font-normal text-green-500">
               <Check size={11} /> conectada {st.api_key_masked && <span className="font-mono text-muted">({st.api_key_masked})</span>}
@@ -114,39 +116,40 @@ function HiggsfieldBody({ st, reload }: { st: HiggsfieldStatus; reload: () => Pr
           )}
         </p>
         <p className="text-xs text-muted">
-          Crie a chave em <span className="font-mono text-ink-soft">cloud.higgsfield.ai</span> → API Keys.
+          
+          {tr("Crie a chave em")} <span className="font-mono text-ink-soft">cloud.higgsfield.ai</span>  {tr("→ API Keys.")}
         </p>
         <label className="block text-sm">
-          <span className="text-ink-soft">API Key</span>
+          <span className="text-ink-soft">{tr("API Key")}</span>
           <input value={apiKey} onChange={(e) => setApiKey(e.target.value)}
             placeholder={st.connected ? "•••••••• (preencha p/ trocar)" : "hf_..."}
             className="mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-xs text-ink outline-none focus:border-accent" />
         </label>
         <label className="block text-sm">
-          <span className="text-ink-soft">API Secret</span>
+          <span className="text-ink-soft">{tr("API Secret")}</span>
           <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)}
-            placeholder={st.connected ? "•••••••• (deixe em branco p/ manter)" : "secret da chave"}
+            placeholder={st.connected ? tr("•••••••• (deixe em branco p/ manter)") : tr("secret da chave")}
             className="mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-xs text-ink outline-none focus:border-accent" />
         </label>
         <div className="flex flex-wrap items-center gap-2 pt-0.5">
           <button onClick={save} disabled={saving || !apiKey.trim()}
             className="rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-            {saving ? "…" : saved ? "Salvo ✓" : "Salvar"}
+            {saving ? "…" : saved ? "Salvo ✓" : tr("Salvar")}
           </button>
           <button onClick={testConn} disabled={test === "loading" || !st.connected}
-            title={st.connected ? "Testar conexão" : "Salve as credenciais primeiro"}
+            title={st.connected ? tr("Testar conexão") : tr("Salve as credenciais primeiro")}
             className={`flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs transition-colors disabled:opacity-50 ${
               test === "ok" ? "text-green-500" : test === "fail" ? "text-red-400" : "text-ink-soft hover:bg-hover hover:text-ink"
             }`}>
             {test === "loading" ? <Loader2 size={13} className="animate-spin" />
               : test === "ok" ? <Check size={13} />
               : test === "fail" ? <TriangleAlert size={13} /> : <Wifi size={13} />}
-            {test === "ok" ? "Conectada" : test === "fail" ? "Falhou" : "Testar"}
+            {test === "ok" ? tr("Conectada") : test === "fail" ? tr("Falhou") : tr("Testar")}
           </button>
           {st.connected && (
-            <button onClick={disconnect} title="Desconectar (apaga as credenciais)"
+            <button onClick={disconnect} title={tr("Desconectar (apaga as credenciais)")}
               className="ml-auto flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:bg-hover hover:text-red-400">
-              <Trash2 size={13} /> Desconectar
+              <Trash2 size={13} />  {tr("Desconectar")}
             </button>
           )}
         </div>
@@ -156,8 +159,8 @@ function HiggsfieldBody({ st, reload }: { st: HiggsfieldStatus; reload: () => Pr
       {err && <p className="flex items-center gap-1.5 text-xs text-red-400"><TriangleAlert size={13} /> {err}</p>}
 
       <p className="text-[11px] leading-4 text-muted">
-        Depois de conectar, ative a ferramenta <span className="text-ink-soft">Higgsfield (Imagem/Vídeo)</span> nos
-        modelos que devem gerar mídia (editor do modelo → Ferramentas).
+        
+        {tr("Depois de conectar, ative a ferramenta")} <span className="text-ink-soft">{tr("Higgsfield (Imagem/Vídeo)")}</span>  {tr("nos modelos que devem gerar mídia (editor do modelo → Ferramentas).")}
       </p>
     </div>
   );

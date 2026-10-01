@@ -1,5 +1,6 @@
 import { API_URL } from "./api";
 import { recordingBlob, recordingFilename } from "./audioFormat";
+import { tr } from "@/lib/i18n";
 
 export interface SpeechProgress {
   phase: "idle" | "loading" | "playing" | "paused";
@@ -43,7 +44,7 @@ export async function transcribe(blob: Blob, modelConfigId?: string | null): Pro
     credentials: "include",
     body: fd,
   });
-  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? "STT falhou");
+  if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? tr("STT falhou"));
   return (await res.json()).text ?? "";
 }
 
@@ -52,7 +53,7 @@ export async function transcribe(blob: Blob, modelConfigId?: string | null): Pro
 // conexão local) — antes o botão falhava em silêncio.
 function browserSpeak(text: string): Promise<void> {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) {
-    throw new Error("Nenhum provedor de voz disponível");
+    throw new Error(tr("Nenhum provedor de voz disponível"));
   }
   window.speechSynthesis.cancel(); // clique novo cancela a fala anterior
   const u = new SpeechSynthesisUtterance(text);
@@ -195,7 +196,7 @@ export async function speak(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, voice: modelConfigId ? undefined : voice, model_config_id: modelConfigId || undefined }),
     });
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? "TTS falhou");
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail ?? tr("TTS falhou"));
     // Aguarda o arquivo inteiro antes de criar o player. Assim duração e seek
     // estão disponíveis desde o primeiro play, sem reproduzir um stream parcial.
     const blob = await res.blob();
@@ -221,7 +222,7 @@ export async function speak(
       audio.onplay = () => publishAudioProgress(audio);
       audio.onpause = () => publishAudioProgress(audio);
       audio.onended = () => finish();
-      audio.onerror = () => finish(new Error("Falha ao reproduzir o áudio"));
+      audio.onerror = () => finish(new Error(tr("Falha ao reproduzir o áudio")));
       _progressTimer = setInterval(() => publishAudioProgress(audio), 250);
       audio.play().catch(finish);
     });
@@ -289,7 +290,7 @@ export async function startRecording(): Promise<{ stop: () => Promise<Blob>; str
     void done.catch(() => {});
     rec.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
     rec.onstop = () => { cleanup(); resolve(recordingBlob(chunks, rec.mimeType)); };
-    rec.onerror = () => { cleanup(); reject(new Error("Falha ao gravar o microfone")); };
+    rec.onerror = () => { cleanup(); reject(new Error(tr("Falha ao gravar o microfone"))); };
     rec.start();
     return { stream, stop: () => {
       if (rec.state !== "inactive") rec.stop();

@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Info, X } from "lucide-react";
+import { tr } from "@/lib/i18n";
 
 export type ToastKind = "error" | "success" | "info";
 interface Item { id: number; text: string; kind: ToastKind }
@@ -18,7 +19,7 @@ let seq = 0;
 
 /** Mostra um aviso. Padrão: erro (é o uso mais comum). */
 export function toast(text: string, kind: ToastKind = "error") {
-  const item = { id: ++seq, text: String(text || "").trim() || "Algo deu errado.", kind };
+  const item = { id: ++seq, text: String(text || "").trim() || tr("Algo deu errado."), kind };
   listeners.forEach((l) => l(item));
 }
 
@@ -48,7 +49,7 @@ export function Toaster() {
           <span className="mt-px">{ICON[t.kind]}</span>
           <span className="min-w-0 flex-1 whitespace-pre-line break-words">{t.text}</span>
           <button type="button" onClick={() => setItems((xs) => xs.filter((x) => x.id !== t.id))}
-            aria-label="Fechar aviso" className="-mr-1 rounded-md p-0.5 text-muted transition-colors hover:bg-hover hover:text-ink">
+            aria-label={tr("Fechar aviso")} className="-mr-1 rounded-md p-0.5 text-muted transition-colors hover:bg-hover hover:text-ink">
             <X size={14} />
           </button>
         </div>

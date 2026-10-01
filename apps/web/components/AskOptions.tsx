@@ -2,6 +2,7 @@
 
 import { X } from "lucide-react";
 import type { AskSpec } from "@/lib/types";
+import { tr } from "@/lib/i18n";
 
 /** Seletor de opções (primitiva "kind:ask") — flutua ACIMA da promptbox, SEM card:
  *  a pergunta e as opções (chips) ficam soltas sobre o fundo da página. Escolher
@@ -24,7 +25,7 @@ export default function AskOptions({
           {onDismiss && (
             <button
               onClick={onDismiss}
-              title="Dispensar"
+              title={tr("Dispensar")}
               className="-mr-1 shrink-0 rounded-lg p-0.5 text-muted transition-colors hover:bg-hover hover:text-ink"
             >
               <X size={14} />

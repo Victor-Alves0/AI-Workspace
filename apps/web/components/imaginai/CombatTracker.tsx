@@ -2,6 +2,7 @@
 
 import { Swords } from "lucide-react";
 import type { ImaginaiEncounter } from "./types";
+import { tr } from "@/lib/i18n";
 
 type Entry = ImaginaiEncounter["order"][number];
 
@@ -27,14 +28,14 @@ function HealthChip({ entry }: { entry: Entry }) {
 /** Ordem de iniciativa do combate em andamento, com a vez atual em destaque. */
 export default function CombatTracker({ encounter }: { encounter: ImaginaiEncounter }) {
   return (
-    <section className="imaginai-dock-card animate-pop" aria-label="Combate">
+    <section className="imaginai-dock-card animate-pop" aria-label={tr("Combate")}>
       <div className="flex min-h-7 items-center justify-between gap-2">
         <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-rose-300">
-          <Swords size={12} /> Combate
+          <Swords size={12} />  {tr("Combate")}
         </p>
-        <span className="font-mono text-[10px] tabular-nums text-muted">Rodada {encounter.round}</span>
+        <span className="font-mono text-[10px] tabular-nums text-muted">{tr("Rodada")} {encounter.round}</span>
       </div>
-      <ol className="mt-1.5 space-y-1" aria-label="Ordem de iniciativa">
+      <ol className="mt-1.5 space-y-1" aria-label={tr("Ordem de iniciativa")}>
         {encounter.order.map((entry) => {
           const caido = entry.health === "caído";
           return (
@@ -53,7 +54,7 @@ export default function CombatTracker({ encounter }: { encounter: ImaginaiEncoun
                 {entry.conditions?.length ? (
                   <span className="mt-0.5 flex flex-wrap gap-1">
                     {entry.conditions.map((c) => (
-                      <span key={c.key} className="rounded bg-amber-400/10 px-1 text-[9px] leading-4 text-amber-200" title={c.rounds ? `${c.rounds} rodada(s)` : "até ser removida"}>
+                      <span key={c.key} className="rounded bg-amber-400/10 px-1 text-[9px] leading-4 text-amber-200" title={c.rounds ? `${c.rounds} rodada(s)` : tr("até ser removida")}>
                         {c.label}{c.rounds ? ` ${c.rounds}` : ""}
                       </span>
                     ))}
@@ -61,7 +62,7 @@ export default function CombatTracker({ encounter }: { encounter: ImaginaiEncoun
                 ) : null}
               </span>
               {entry.current && entry.side === "player" ? (
-                <span className="shrink-0 text-[10px] font-medium text-violet-200">Sua vez</span>
+                <span className="shrink-0 text-[10px] font-medium text-violet-200">{tr("Sua vez")}</span>
               ) : null}
               <HealthChip entry={entry} />
             </li>

@@ -5,6 +5,7 @@ import { ArrowRight, Check, KeyRound, Loader2, Sparkles, X } from "lucide-react"
 import { api, ApiError } from "@/lib/api";
 import type { Model, User } from "@/lib/types";
 import ModelField from "./ModelField";
+import { tr } from "@/lib/i18n";
 
 /* Wizard de primeiro uso, POR-USUÁRIO: como cada um usa a própria chave, todo
  * novo cadastro passa por aqui (chave do OpenRouter → modelo padrão → pronto).
@@ -49,7 +50,7 @@ export default function OnboardingModal({ user, onClose, onDone }: {
       setKeyOk(true);
       setStep(1);
     } catch (e) {
-      setKeyErr(e instanceof ApiError ? e.message : "Falha ao salvar/validar a chave");
+      setKeyErr(e instanceof ApiError ? e.message : tr("Falha ao salvar/validar a chave"));
     } finally {
       setSavingKey(false);
     }
@@ -67,7 +68,7 @@ export default function OnboardingModal({ user, onClose, onDone }: {
     }
   }
 
-  const steps = ["Boas-vindas", "Chave de API", "Modelo", "Pronto"];
+  const steps = ["Boas-vindas", tr("Chave de API"), "Modelo", "Pronto"];
   // passo visível: 0 boas-vindas, 1 chave, 2 modelo, 3 pronto — mas se a chave já
   // existe pulamos direto pro modelo. Normalizo o índice de exibição.
   const view = step === 0 ? "welcome" : !keyOk ? "key" : step >= 3 ? "done" : "model";
@@ -80,9 +81,9 @@ export default function OnboardingModal({ user, onClose, onDone }: {
       <div className="animate-pop flex w-full max-w-md flex-col rounded-2xl border border-border bg-bg shadow-modal">
         <div className="flex items-center justify-between px-5 py-3">
           <div className="flex items-center gap-2 text-sm font-medium text-ink">
-            <Sparkles size={16} className="text-accent-hover" /> Configuração inicial
+            <Sparkles size={16} className="text-accent-hover" />  {tr("Configuração inicial")}
           </div>
-          <button onClick={() => finish(true)} title="Pular" aria-label="Pular" className="rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink">
+          <button onClick={() => finish(true)} title={tr("Pular")} aria-label={tr("Pular")} className="rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink">
             <X size={18} />
           </button>
         </div>
@@ -98,24 +99,27 @@ export default function OnboardingModal({ user, onClose, onDone }: {
         <div className="px-5 pb-5">
           {view === "welcome" && (
             <div className="space-y-3 py-2">
-              <h2 className="text-xl font-semibold text-ink">Bem-vindo ao AI Workspace 👋</h2>
+              <h2 className="text-xl font-semibold text-ink">{tr("Bem-vindo ao AI Workspace 👋")}</h2>
               <p className="text-sm leading-6 text-muted">
-                É o <span className="text-ink-soft">seu</span> workspace de IA: você usa a sua própria chave de API e todas as
-                configurações ficam guardadas só na sua conta. Vamos deixar tudo pronto em menos de um minuto.
+                
+                {tr("É o")} <span className="text-ink-soft">seu</span>  {tr("workspace de IA: você usa a sua própria chave de API e todas as configurações ficam guardadas só na sua conta. Vamos deixar tudo pronto em menos de um minuto.")}
               </p>
               <button onClick={() => setStep(keyOk ? 2 : 1)} className="mt-2 flex w-full items-center justify-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover">
-                Começar <ArrowRight size={16} />
+                
+                {tr("Começar")} <ArrowRight size={16} />
               </button>
             </div>
           )}
 
           {view === "key" && (
             <div className="space-y-3 py-2">
-              <div className="flex items-center gap-2 text-ink"><KeyRound size={18} className="text-accent-hover" /><h2 className="text-lg font-semibold">Sua chave do OpenRouter</h2></div>
+              <div className="flex items-center gap-2 text-ink"><KeyRound size={18} className="text-accent-hover" /><h2 className="text-lg font-semibold">{tr("Sua chave do OpenRouter")}</h2></div>
               <p className="text-sm leading-6 text-muted">
-                O OpenRouter dá acesso a centenas de modelos com uma única chave. Crie a sua em{" "}
+                
+                {tr("O OpenRouter dá acesso a centenas de modelos com uma única chave. Crie a sua em")}{" "}
                 <a href="https://openrouter.ai/keys" target="_blank" rel="noreferrer" className="text-accent-hover underline">openrouter.ai/keys</a>{" "}
-                e cole abaixo — ela fica <span className="text-ink-soft">cifrada</span> e é só sua.
+                
+                {tr("e cole abaixo — ela fica")} <span className="text-ink-soft">cifrada</span>  {tr("e é só sua.")}
               </p>
               <input
                 type="password" autoFocus value={key}
@@ -126,7 +130,7 @@ export default function OnboardingModal({ user, onClose, onDone }: {
               />
               {keyErr && <p className="text-xs text-red-400">{keyErr}</p>}
               <div className="flex items-center justify-between gap-3">
-                <button onClick={() => finish(true)} className="text-xs text-muted transition-colors hover:text-ink">Configurar depois</button>
+                <button onClick={() => finish(true)} className="text-xs text-muted transition-colors hover:text-ink">{tr("Configurar depois")}</button>
                 <button onClick={saveKey} disabled={!key.trim() || savingKey} className="flex items-center gap-2 rounded-full bg-accent px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
                   {savingKey ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Salvar e continuar
                 </button>
@@ -136,13 +140,14 @@ export default function OnboardingModal({ user, onClose, onDone }: {
 
           {view === "model" && (
             <div className="space-y-3 py-2">
-              <h2 className="text-lg font-semibold text-ink">Escolha um modelo padrão</h2>
-              <p className="text-sm leading-6 text-muted">Ele vem selecionado ao abrir um chat novo — dá para trocar quando quiser.</p>
-              <ModelField models={models} value={model} onChange={setModel} placeholder="Buscar um modelo…" />
+              <h2 className="text-lg font-semibold text-ink">{tr("Escolha um modelo padrão")}</h2>
+              <p className="text-sm leading-6 text-muted">{tr("Ele vem selecionado ao abrir um chat novo — dá para trocar quando quiser.")}</p>
+              <ModelField models={models} value={model} onChange={setModel} placeholder={tr("Buscar um modelo…")} />
               <div className="flex items-center justify-between gap-3 pt-1">
-                <button onClick={() => setStep(3)} className="text-xs text-muted transition-colors hover:text-ink">Pular</button>
+                <button onClick={() => setStep(3)} className="text-xs text-muted transition-colors hover:text-ink">{tr("Pular")}</button>
                 <button onClick={() => setStep(3)} disabled={!model} className="flex items-center gap-2 rounded-full bg-accent px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-                  Continuar <ArrowRight size={16} />
+                  
+                  {tr("Continuar")} <ArrowRight size={16} />
                 </button>
               </div>
             </div>
@@ -151,10 +156,10 @@ export default function OnboardingModal({ user, onClose, onDone }: {
           {view === "done" && (
             <div className="space-y-3 py-2 text-center">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-500/15 text-green-400"><Check size={24} /></div>
-              <h2 className="text-lg font-semibold text-ink">Tudo pronto!</h2>
-              <p className="text-sm leading-6 text-muted">Sua conta está configurada. Faça uma pergunta e comece a explorar.</p>
+              <h2 className="text-lg font-semibold text-ink">{tr("Tudo pronto!")}</h2>
+              <p className="text-sm leading-6 text-muted">{tr("Sua conta está configurada. Faça uma pergunta e comece a explorar.")}</p>
               <button onClick={() => finish(false)} disabled={finishing} className="mt-1 flex w-full items-center justify-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-                {finishing ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={16} />} Ir para o chat
+                {finishing ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={16} />}  {tr("Ir para o chat")}
               </button>
             </div>
           )}

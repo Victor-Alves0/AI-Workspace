@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ChevronLeft, FileText, Info, Plus, Sparkles, Tag, Trash2, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { Skill, SkillFile } from "@/lib/types";
+import { tr } from "@/lib/i18n";
 
 const NEW_CONTENT = `# Título da skill
 
@@ -59,7 +60,7 @@ function TagsInput({ tags, onChange }: { tags: string[]; onChange: (t: string[])
             onChange(tags.slice(0, -1));
           }
         }}
-        placeholder={tags.length ? "" : "adicionar tag…"}
+        placeholder={tags.length ? "" : tr("adicionar tag…")}
         className="min-w-[90px] flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
       />
     </div>
@@ -106,11 +107,11 @@ export default function SkillEditor({
     setErr(null);
     const id = (slug || slugify(name)).trim();
     if (!id) {
-      setErr("Defina um identificador para a skill");
+      setErr(tr("Defina um identificador para a skill"));
       return;
     }
     if (!name.trim()) {
-      setErr("Defina um nome para a skill");
+      setErr(tr("Defina um nome para a skill"));
       return;
     }
     // arquivos válidos: nome não-vazio; dedupe fica a cargo do backend
@@ -124,7 +125,7 @@ export default function SkillEditor({
       else await api.patch(`/skills/${skill!.id}`, body);
       onSaved();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao salvar");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao salvar"));
     } finally {
       setSaving(false);
     }
@@ -146,7 +147,7 @@ export default function SkillEditor({
             setName(e.target.value);
             if (isNew && !slug) setSlug(slugify(e.target.value));
           }}
-          placeholder={isNew ? "Nova skill" : "Nome da skill"}
+          placeholder={isNew ? tr("Nova skill") : tr("Nome da skill")}
           className="min-w-0 flex-1 bg-transparent text-xl font-semibold tracking-tight text-ink outline-none placeholder:text-muted"
         />
         {err && <span className="max-w-[320px] truncate text-xs text-red-400">{err}</span>}
@@ -155,7 +156,7 @@ export default function SkillEditor({
           disabled={saving}
           className="rounded-full bg-accent px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60"
         >
-          {saving ? "…" : "Salvar"}
+          {saving ? "…" : tr("Salvar")}
         </button>
       </div>
 
@@ -171,24 +172,25 @@ export default function SkillEditor({
               className={`${inputCls} font-mono`}
             />
             <p className="mt-1.5 text-xs leading-5 text-muted">
-              Invocada no chat com <span className="font-mono text-ink-soft">${slug || "identificador"}</span>.
+              
+              {tr("Invocada no chat com")} <span className="font-mono text-ink-soft">${slug || "identificador"}</span>.
             </p>
           </div>
 
           <div>
-            <FieldLabel>Descrição (sempre visível ao modelo)</FieldLabel>
+            <FieldLabel>{tr("Descrição (sempre visível ao modelo)")}</FieldLabel>
             <textarea
               rows={4}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="O que a skill faz — o modelo usa isto para decidir quando carregá-la"
+              placeholder={tr("O que a skill faz — o modelo usa isto para decidir quando carregá-la")}
               className={`${inputCls} resize-y leading-5`}
             />
           </div>
 
           <div>
             <FieldLabel>
-              <span className="flex items-center gap-1"><Tag size={11} /> Tags</span>
+              <span className="flex items-center gap-1"><Tag size={11} />  {tr("Tags")}</span>
             </FieldLabel>
             <TagsInput tags={tags} onChange={setTags} />
           </div>
@@ -196,7 +198,7 @@ export default function SkillEditor({
           {/* arquivos de referência: o SKILL.md é o índice; estes carregam sob demanda */}
           <div>
             <div className="mb-1.5 flex items-center justify-between">
-              <FieldLabel>Arquivos de referência</FieldLabel>
+              <FieldLabel>{tr("Arquivos de referência")}</FieldLabel>
               <button
                 onClick={addFile}
                 className="flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-xs text-muted transition-colors hover:bg-hover hover:text-ink"
@@ -211,7 +213,7 @@ export default function SkillEditor({
               >
                 <FileText size={13} className="shrink-0" />
                 <span className="truncate font-medium">SKILL.md</span>
-                <span className="ml-auto shrink-0 text-[10px] text-muted">índice</span>
+                <span className="ml-auto shrink-0 text-[10px] text-muted">{tr("índice")}</span>
               </button>
               {files.map((f, i) => (
                 <div
@@ -220,12 +222,12 @@ export default function SkillEditor({
                 >
                   <FileText size={13} className="shrink-0" />
                   <button onClick={() => setActive(i)} className="min-w-0 flex-1 truncate text-left font-mono text-xs">
-                    {f.name || "sem nome"}
+                    {f.name || tr("sem nome")}
                   </button>
                   <button
                     onClick={() => removeFile(i)}
                     className="shrink-0 text-muted touch-reveal opacity-0 transition-opacity hover:text-red-400 group-hover:opacity-100"
-                    title="Remover arquivo"
+                    title={tr("Remover arquivo")}
                   >
                     <Trash2 size={12} />
                   </button>
@@ -233,7 +235,8 @@ export default function SkillEditor({
               ))}
               {files.length === 0 && (
                 <p className="px-2.5 py-1 text-xs leading-5 text-muted">
-                  Nenhum. O modelo carrega cada arquivo sob demanda via <span className="font-mono">view_skill</span>.
+                  
+                  {tr("Nenhum. O modelo carrega cada arquivo sob demanda via")} <span className="font-mono">view_skill</span>.
                 </p>
               )}
             </div>
@@ -242,10 +245,8 @@ export default function SkillEditor({
           <div className="flex items-start gap-2.5 rounded-xl border border-accent/25 bg-accent/10 px-4 py-3 text-xs leading-5 text-ink-soft">
             <Info size={14} className="mt-0.5 shrink-0 text-accent-hover" />
             <span>
-              Lazy loading: o modelo recebe só o <b>nome</b> e a <b>descrição</b>. O
-              SKILL.md é carregado quando ele chama <span className="font-mono">view_skill</span>, e
-              cada arquivo de referência só quando ele pede por nome — então detalhe e
-              anexos não encarecem os turnos em que a skill não é usada.
+              
+              {tr("Lazy loading: o modelo recebe só o")} <b>nome</b> e a <b>{tr("descrição")}</b>{tr(". O SKILL.md é carregado quando ele chama")} <span className="font-mono">view_skill</span>{tr(", e cada arquivo de referência só quando ele pede por nome — então detalhe e anexos não encarecem os turnos em que a skill não é usada.")}
             </span>
           </div>
         </aside>
@@ -254,7 +255,7 @@ export default function SkillEditor({
         <main className="flex min-h-[70dvh] min-w-0 flex-1 flex-col p-5 md:min-h-0">
           {active === -1 ? (
             <>
-              <FieldLabel>SKILL.md — conteúdo principal (carregado sob demanda)</FieldLabel>
+              <FieldLabel>{tr("SKILL.md — conteúdo principal (carregado sob demanda)")}</FieldLabel>
               <textarea
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
@@ -264,7 +265,7 @@ export default function SkillEditor({
             </>
           ) : (
             <>
-              <FieldLabel>Arquivo de referência</FieldLabel>
+              <FieldLabel>{tr("Arquivo de referência")}</FieldLabel>
               <input
                 value={files[active]?.name ?? ""}
                 onChange={(e) => updateFile(active, { name: e.target.value })}
@@ -274,7 +275,7 @@ export default function SkillEditor({
               <textarea
                 value={files[active]?.content ?? ""}
                 onChange={(e) => updateFile(active, { content: e.target.value })}
-                placeholder="Conteúdo do arquivo de referência…"
+                placeholder={tr("Conteúdo do arquivo de referência…")}
                 className="w-full flex-1 resize-none rounded-xl border border-border bg-surface px-4 py-3 font-mono text-sm leading-6 text-ink outline-none transition-colors focus:border-accent/60 placeholder:text-muted"
               />
             </>

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Markdown from "@/components/Markdown";
 import BackButton from "./BackButton";
+import { tr } from "@/lib/i18n";
 
 /** Casca das páginas jurídicas (/privacy e /terms).
  *
@@ -31,11 +32,11 @@ export default function LegalPage({ file }: { file: "privacy" | "terms" }) {
     <main className="mx-auto max-w-3xl px-5 py-10">
       <Markdown content={md} />
       <p className="mt-12 border-t border-border pt-5 text-xs text-muted">
-        <a href="/" className="transition-colors hover:text-ink">AI Workspace</a>
+        <a href="/" className="transition-colors hover:text-ink">{tr("AI Workspace")}</a>
         {" · "}
-        <a href="/privacy" className="transition-colors hover:text-ink">Privacidade</a>
+        <a href="/privacy" className="transition-colors hover:text-ink">{tr("Privacidade")}</a>
         {" · "}
-        <a href="/terms" className="transition-colors hover:text-ink">Termos</a>
+        <a href="/terms" className="transition-colors hover:text-ink">{tr("Termos")}</a>
       </p>
     </main>
     </div>

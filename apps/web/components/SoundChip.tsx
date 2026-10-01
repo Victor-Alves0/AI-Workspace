@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Loader2, Volume2, VolumeX } from "lucide-react";
 import { api, API_URL, ApiError } from "@/lib/api";
+import { tr } from "@/lib/i18n";
 
 /** true só na resposta que está sendo GERADA e com "tocar automaticamente" ligado —
  *  reabrir um chat antigo nunca dispara uma rajada de sons. */
@@ -55,13 +56,13 @@ export default function SoundChip({ prompt, label }: { prompt: string; label: st
       const audio = new Audio(src);
       current = audio;
       audio.onended = () => { if (mounted.current) setState("idle"); if (current === audio) current = null; };
-      audio.onerror = () => { if (mounted.current) { setState("error"); setError("Não foi possível tocar o som."); } };
+      audio.onerror = () => { if (mounted.current) { setState("error"); setError(tr("Não foi possível tocar o som.")); } };
       await audio.play();
       if (mounted.current) setState("playing");
     } catch (err) {
       if (!mounted.current) return;
       setState("error");
-      setError(err instanceof ApiError ? err.message : "Não foi possível gerar o som.");
+      setError(err instanceof ApiError ? err.message : tr("Não foi possível gerar o som."));
     }
   }
 
@@ -79,8 +80,8 @@ export default function SoundChip({ prompt, label }: { prompt: string; label: st
     <button
       type="button"
       onClick={() => void play()}
-      title={error ?? (state === "playing" ? "Parar som" : `Tocar: ${prompt}`)}
-      aria-label={state === "playing" ? `Parar som: ${label}` : `Tocar som: ${label}`}
+      title={error ?? (state === "playing" ? tr("Parar som") : `Tocar: ${prompt}`)}
+      aria-label={state === "playing" ? tr("Parar som: {label}", { label: label }) : tr("Tocar som: {label}", { label: label })}
       aria-pressed={state === "playing"}
       className={`mx-0.5 inline-flex max-w-[16rem] translate-y-[-1px] items-center gap-1 rounded-full border px-2 py-0.5 align-middle text-[0.8em] font-medium leading-5 transition-colors ${
         state === "error"

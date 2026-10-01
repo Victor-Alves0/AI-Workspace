@@ -1,3 +1,4 @@
+import { tr } from "@/lib/i18n";
 /** Frases do "o que a IA está fazendo agora", montadas a partir da ferramenta chamada e
  *  dos argumentos dela ("Pesquisando “preço do café”", "Editando src/app.ts",
  *  "Delegando “comparar preços” para Pesquisador"). Só "Pensando" e "Respondendo" são fixos. */
@@ -28,7 +29,7 @@ const DOCS = /(^|\/)(readme|changelog|contributing|docs?\/)|\.(md|mdx|rst|txt)$/
 const TESTS = /(^|\/)(tests?|__tests__|spec)\/|[._-](test|spec)\.[a-z]+$/i;
 
 function writing(path: string, verbo: string) {
-  if (DOCS.test(path)) return `${verbo === "Criando" ? "Escrevendo" : verbo} documentação (${base(path)})`;
+  if (DOCS.test(path)) return tr("{0} documentação ({1})", { "0": verbo === "Criando" ? "Escrevendo" : verbo, "1": base(path) });
   if (TESTS.test(path)) return `${verbo} testes (${base(path)})`;
   return `${verbo} ${cut(path, 56)}`;
 }
@@ -38,43 +39,43 @@ function describeCode(tool: string, a: Args): string | null {
   const path = str(a.path);
   switch (tool) {
     case "code.files.browse":
-      if (action === "search") return `Procurando ${q(str(a.query) || "no código")} no projeto`;
-      if (action === "log") return "Lendo o histórico de commits";
-      if (action === "diff") return path ? `Conferindo as mudanças em ${base(path)}` : "Conferindo as mudanças";
-      if (action === "list") return path ? `Explorando a pasta ${cut(path, 40)}` : "Explorando os arquivos do projeto";
-      return path ? `Lendo ${cut(path, 56)}` : "Lendo arquivos do projeto";
+      if (action === "search") return tr("Procurando {0} no projeto", { "0": q(str(a.query) || "no código") });
+      if (action === "log") return tr("Lendo o histórico de commits");
+      if (action === "diff") return path ? tr("Conferindo as mudanças em {0}", { "0": base(path) }) : tr("Conferindo as mudanças");
+      if (action === "list") return path ? `Explorando a pasta ${cut(path, 40)}` : tr("Explorando os arquivos do projeto");
+      return path ? `Lendo ${cut(path, 56)}` : tr("Lendo arquivos do projeto");
     case "code.files.write": {
-      if (action === "push") return "Enviando os commits para o repositório";
-      if (action === "delete") return path ? `Apagando ${base(path)}` : "Apagando um arquivo";
+      if (action === "push") return tr("Enviando os commits para o repositório");
+      if (action === "delete") return path ? `Apagando ${base(path)}` : tr("Apagando um arquivo");
       if (action === "patch") {
         const files = Array.isArray(a.files) ? (a.files as string[]) : diffFiles(str(a.diff));
         if (files.length === 1) return writing(files[0], "Editando");
-        if (files.length > 1) return `Editando ${files.length} arquivos`;
-        return "Editando arquivos do projeto";
+        if (files.length > 1) return tr("Editando {length} arquivos", { length: files.length });
+        return tr("Editando arquivos do projeto");
       }
-      if (!path) return "Editando arquivos do projeto";
+      if (!path) return tr("Editando arquivos do projeto");
       return writing(path, action === "write" ? "Criando" : "Editando");
     }
     case "code.exec.run": {
       const cmd = str(a.command) || str(a.cmd);
-      if (/\b(test|pytest|jest|vitest|cargo test|go test|mvn test)\b/.test(cmd)) return `Rodando os testes (${cut(cmd, 36)})`;
+      if (/\b(test|pytest|jest|vitest|cargo test|go test|mvn test)\b/.test(cmd)) return tr("Rodando os testes ({0})", { "0": cut(cmd, 36) });
       if (/\b(build|compile|tsc|gradlew|mvn package)\b/.test(cmd)) return `Compilando (${cut(cmd, 36)})`;
-      if (/\b(install|add|pip|npm i|pnpm i|yarn)\b/.test(cmd)) return `Instalando dependências (${cut(cmd, 36)})`;
-      return cmd ? `Rodando ${q(cmd, 44)}` : "Rodando um comando no projeto";
+      if (/\b(install|add|pip|npm i|pnpm i|yarn)\b/.test(cmd)) return tr("Instalando dependências ({0})", { "0": cut(cmd, 36) });
+      return cmd ? `Rodando ${q(cmd, 44)}` : tr("Rodando um comando no projeto");
     }
     case "code.exec.jobs":
-      return "Acompanhando um comando em segundo plano";
+      return tr("Acompanhando um comando em segundo plano");
     case "code.preview.serve":
-      return action === "stop" ? "Parando o preview" : action === "logs" ? "Lendo os logs do preview" : "Pondo o app no ar";
+      return action === "stop" ? "Parando o preview" : action === "logs" ? tr("Lendo os logs do preview") : tr("Pondo o app no ar");
     case "code.graph.query":
-      return a.symbol || a.query ? `Analisando ${q(str(a.symbol) || str(a.query), 40)} no grafo de código` : "Analisando o grafo de código";
+      return a.symbol || a.query ? tr("Analisando {0} no grafo de código", { "0": q(str(a.symbol) || str(a.query), 40) }) : tr("Analisando o grafo de código");
     case "code.flow.analyze":
-      return "Analisando o fluxo do código";
+      return tr("Analisando o fluxo do código");
     case "code.task.manage":
-      if (action === "open") return a.title ? `Abrindo a tarefa ${q(str(a.title), 40)}` : "Abrindo uma tarefa isolada";
+      if (action === "open") return a.title ? `Abrindo a tarefa ${q(str(a.title), 40)}` : tr("Abrindo uma tarefa isolada");
       if (action === "merge") return "Mesclando a tarefa";
-      if (action === "diff") return "Revisando o diff da tarefa";
-      return "Organizando as tarefas do projeto";
+      if (action === "diff") return tr("Revisando o diff da tarefa");
+      return tr("Organizando as tarefas do projeto");
   }
   return null;
 }
@@ -85,19 +86,19 @@ function describePath(tool: string, a: Args): string | null {
   const action = str(a.action);
   switch (tool) {
     case "web.search.query":
-      return a.query ? `Pesquisando ${q(str(a.query))}` : "Pesquisando na web";
+      return a.query ? `Pesquisando ${q(str(a.query))}` : tr("Pesquisando na web");
     case "web.page.read":
-      return a.url ? `Lendo ${host(str(a.url))}` : "Lendo uma página";
+      return a.url ? `Lendo ${host(str(a.url))}` : tr("Lendo uma página");
     case "web.browser.use":
-      if (action === "goto" && a.url) return `Abrindo ${host(str(a.url))} no navegador`;
-      if (action === "click") return a.target ? `Clicando em ${q(str(a.target), 32)}` : "Clicando na página";
-      if (action === "type") return "Preenchendo um campo";
+      if (action === "goto" && a.url) return tr("Abrindo {0} no navegador", { "0": host(str(a.url)) });
+      if (action === "click") return a.target ? tr("Clicando em {0}", { "0": q(str(a.target), 32) }) : tr("Clicando na página");
+      if (action === "type") return tr("Preenchendo um campo");
       if (action === "screenshot") return "Capturando a tela";
-      return "Navegando no navegador";
+      return tr("Navegando no navegador");
     case "research.deep.run":
-      return a.query || a.topic ? `Pesquisando a fundo ${q(str(a.query) || str(a.topic))}` : "Fazendo uma pesquisa profunda";
+      return a.query || a.topic ? `Pesquisando a fundo ${q(str(a.query) || str(a.topic))}` : tr("Fazendo uma pesquisa profunda");
     case "media.video.transcribe":
-      return a.url ? `Transcrevendo o vídeo de ${host(str(a.url))}` : "Transcrevendo o vídeo";
+      return a.url ? tr("Transcrevendo o vídeo de {0}", { "0": host(str(a.url)) }) : tr("Transcrevendo o vídeo");
   }
   return null;
 }
@@ -105,34 +106,34 @@ function describePath(tool: string, a: Args): string | null {
 /** Ferramentas sem regra própria: a ação e, quando há, o alvo da chamada. */
 const GENERIC: Record<string, string> = {
   "utils.time.now": "Conferindo a data e a hora",
-  "utils.math.eval": "Fazendo as contas",
-  "user.profile.get": "Consultando o seu perfil",
-  "github.public.search": "Pesquisando no GitHub",
-  "security.exploitdb.search": "Pesquisando no Exploit-DB",
-  "security.cve.search": "Consultando CVEs",
-  "skills.library.manage": "Organizando as skills",
-  "prompts.library.manage": "Organizando os prompts",
-  "task.ledger.track": "Atualizando o plano da tarefa",
-  "http.session.use": "Fazendo requisições HTTP",
+  "utils.math.eval": tr("Fazendo as contas"),
+  "user.profile.get": tr("Consultando o seu perfil"),
+  "github.public.search": tr("Pesquisando no GitHub"),
+  "security.exploitdb.search": tr("Pesquisando no Exploit-DB"),
+  "security.cve.search": tr("Consultando CVEs"),
+  "skills.library.manage": tr("Organizando as skills"),
+  "prompts.library.manage": tr("Organizando os prompts"),
+  "task.ledger.track": tr("Atualizando o plano da tarefa"),
+  "http.session.use": tr("Fazendo requisições HTTP"),
   "diagram.excalidraw.render": "Desenhando o diagrama",
-  "chart.render.plot": "Montando o gráfico",
-  "finance.quote.get": "Consultando a cotação",
-  "automation.monitor.create": "Criando um monitor",
-  "automation.reminder.create": "Agendando um lembrete",
+  "chart.render.plot": tr("Montando o gráfico"),
+  "finance.quote.get": tr("Consultando a cotação"),
+  "automation.monitor.create": tr("Criando um monitor"),
+  "automation.reminder.create": tr("Agendando um lembrete"),
   "google.gmail.mailbox": "Verificando o e-mail",
   "google.calendar.events": "Consultando a agenda",
   "smartlife.tuya.devices": "Controlando a casa",
-  "github.repo.manage": "Trabalhando no GitHub",
-  "notion.workspace.manage": "Trabalhando no Notion",
-  "slack.workspace.manage": "Trabalhando no Slack",
-  "messaging.chat.manage": "Cuidando das mensagens",
-  "higgsfield.media.generate": "Gerando mídia no Higgsfield",
+  "github.repo.manage": tr("Trabalhando no GitHub"),
+  "notion.workspace.manage": tr("Trabalhando no Notion"),
+  "slack.workspace.manage": tr("Trabalhando no Slack"),
+  "messaging.chat.manage": tr("Cuidando das mensagens"),
+  "higgsfield.media.generate": tr("Gerando mídia no Higgsfield"),
   "civitai.media.use": "Usando o Civitai",
-  "elevenlabs.audio.generate": "Gerando áudio",
-  "vercel.projects.manage": "Trabalhando na Vercel",
-  "spotify.music.search": "Buscando no Spotify",
-  "investigation.graph.manage": "Atualizando o grafo de investigação",
-  "remote.terminal.run": "Rodando no terminal remoto",
+  "elevenlabs.audio.generate": tr("Gerando áudio"),
+  "vercel.projects.manage": tr("Trabalhando na Vercel"),
+  "spotify.music.search": tr("Buscando no Spotify"),
+  "investigation.graph.manage": tr("Atualizando o grafo de investigação"),
+  "remote.terminal.run": tr("Rodando no terminal remoto"),
 };
 const TARGET_KEYS = ["query", "q", "title", "symbol", "ticker", "name", "command"] as const;
 
@@ -155,33 +156,33 @@ export function describeToolCall(name: string, data: unknown, extra?: { agent?: 
     case "delegate": {
       const quem = extra?.agent || str(a.name) || (str(a.agent) !== "new" ? str(a.agent) : "") || "um agente";
       const task = str(a.task);
-      return task ? `Delegando ${q(task, 44)} para ${quem}` : `Delegando uma tarefa para ${quem}`;
+      return task ? tr("Delegando {0} para {quem}", { "0": q(task, 44), quem: quem }) : tr("Delegando uma tarefa para {quem}", { quem: quem });
     }
     case "delegate_team": {
       const equipe = extra?.team || str(a.team_name) || "a equipe";
       const nome = equipe === "a equipe" ? equipe : `a equipe ${equipe}`;
-      if (extra?.size) return `Coordenando ${nome}: ${extra.done ?? 0} de ${extra.size} concluídos`;
+      if (extra?.size) return tr("Coordenando {nome}: {1} de {size} concluídos", { nome: nome, "1": extra.done ?? 0, size: extra.size });
       const n = Array.isArray(a.members) ? a.members.length : 0;
-      return n ? `Montando ${nome} com ${n} agentes` : `Coordenando ${nome}`;
+      return n ? tr("Montando {nome} com {n} agentes", { nome: nome, n: n }) : `Coordenando ${nome}`;
     }
     case "execute_tool":
       return describeStep(str(a.path) || "ferramenta", "", (a.params as Args) ?? {});
     case "search_tools":
-      return a.query ? `Procurando uma ferramenta para ${q(str(a.query), 36)}` : "Procurando a ferramenta certa";
+      return a.query ? tr("Procurando uma ferramenta para {0}", { "0": q(str(a.query), 36) }) : tr("Procurando a ferramenta certa");
     case "get_tool_schema":
-      return "Consultando como usar uma ferramenta";
+      return tr("Consultando como usar uma ferramenta");
     case "run_code":
-      return "Executando código";
+      return tr("Executando código");
     case "generate_image":
-      return a.prompt ? `Gerando a imagem ${q(str(a.prompt), 40)}` : "Gerando uma imagem";
+      return a.prompt ? `Gerando a imagem ${q(str(a.prompt), 40)}` : tr("Gerando uma imagem");
     case "search_knowledge":
-      return a.query ? `Consultando a base de conhecimento: ${q(str(a.query), 36)}` : "Consultando a base de conhecimento";
+      return a.query ? tr("Consultando a base de conhecimento: {0}", { "0": q(str(a.query), 36) }) : tr("Consultando a base de conhecimento");
     case "brain":
-      return str(a.action) === "write" || str(a.action) === "create" ? "Anotando no segundo cérebro" : "Consultando o segundo cérebro";
+      return str(a.action) === "write" || str(a.action) === "create" ? tr("Anotando no segundo cérebro") : tr("Consultando o segundo cérebro");
     case "view_skill":
-      return a.slug || a.name ? `Lendo a skill ${str(a.slug) || str(a.name)}` : "Lendo uma skill";
+      return a.slug || a.name ? `Lendo a skill ${str(a.slug) || str(a.name)}` : tr("Lendo uma skill");
     case "propose_skill":
-      return "Propondo uma nova skill";
+      return tr("Propondo uma nova skill");
   }
   return describeStep(name, "", a);
 }

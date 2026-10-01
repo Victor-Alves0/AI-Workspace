@@ -5,6 +5,7 @@ import { Check, ChevronLeft, Copy, Crown, ExternalLink, Loader2, Trash2, Triangl
 import { api, ApiError } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { openExternal } from "@/lib/desktop";
+import { tr } from "@/lib/i18n";
 
 interface ChatgptStatus {
   connected: boolean;
@@ -36,7 +37,7 @@ export default function SubscriptionsPanel({ onBack }: { onBack: () => void }) {
   return (
     <div className="pt-1">
       <button onClick={onBack} className="mb-3 flex items-center gap-1 text-sm text-muted transition-colors hover:text-ink">
-        <ChevronLeft size={16} /> Voltar
+        <ChevronLeft size={16} />  {tr("Voltar")}
       </button>
 
       <div className="flex items-center gap-2.5">
@@ -44,8 +45,8 @@ export default function SubscriptionsPanel({ onBack }: { onBack: () => void }) {
           <Crown size={17} />
         </span>
         <div>
-          <p className="text-sm font-semibold text-ink">Assinaturas</p>
-          <p className="text-xs text-muted">Use planos de IA pelo login da conta, sem chave de API</p>
+          <p className="text-sm font-semibold text-ink">{tr("Assinaturas")}</p>
+          <p className="text-xs text-muted">{tr("Use planos de IA pelo login da conta, sem chave de API")}</p>
         </div>
       </div>
 
@@ -95,7 +96,7 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
         }
       } catch (e) {
         if (authKind === "device") {
-          setErr(e instanceof ApiError ? e.message : "Falha ao consultar a autorização");
+          setErr(e instanceof ApiError ? e.message : tr("Falha ao consultar a autorização"));
           setAuthUrl(null);
           setAuthKind(null);
           setUserCode("");
@@ -129,10 +130,10 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
       setUserCode(r.user_code);
       setPollDelayMs(Math.max(1000, r.interval * 1000));
       if (!(await openExternal(r.url))) {
-        setErr("Não consegui abrir o navegador daqui — use o botão “Abrir OpenAI”.");
+        setErr(tr("Não consegui abrir o navegador daqui — use o botão “Abrir OpenAI”."));
       }
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao iniciar o login");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao iniciar o login"));
     } finally {
       setBusy(false);
     }
@@ -147,10 +148,10 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
       setAuthKind("browser");
       setUserCode("");
       if (!(await openExternal(r.url))) {
-        setErr("Não consegui abrir o navegador daqui — use “Copiar link”.");
+        setErr(tr("Não consegui abrir o navegador daqui — use “Copiar link”."));
       }
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao iniciar o login alternativo");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao iniciar o login alternativo"));
     } finally {
       setBusy(false);
     }
@@ -166,7 +167,7 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
       setPasted("");
       await reload();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao concluir o login");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao concluir o login"));
     } finally {
       setBusy(false);
     }
@@ -181,7 +182,7 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
       setUserCode("");
       await reload();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao desconectar");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao desconectar"));
     }
   }
 
@@ -200,17 +201,18 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
       {!st.connected && !authUrl && (
         <>
           <p className="text-xs leading-4 text-muted">
-            Entra com a sua conta ChatGPT (mesmo login do Codex CLI) e usa os modelos
-            <span className="font-mono text-ink-soft"> codex/*</span> pela assinatura, sem chave de API.
-            Fluxo não oficial: a OpenAI tolera hoje, mas pode mudar — uso por sua conta e risco.
+            
+            {tr("Entra com a sua conta ChatGPT (mesmo login do Codex CLI) e usa os modelos")}
+            <span className="font-mono text-ink-soft"> codex/*</span>  {tr("pela assinatura, sem chave de API. Fluxo não oficial: a OpenAI tolera hoje, mas pode mudar — uso por sua conta e risco.")}
           </p>
           <button onClick={beginDevice} disabled={busy}
             className="rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-            {busy ? "…" : "Conectar"}
+            {busy ? "…" : tr("Conectar")}
           </button>
           <button onClick={beginBrowser} disabled={busy}
             className="ml-2 rounded-full border border-border px-3 py-1.5 text-[11px] text-muted transition-colors hover:bg-hover hover:text-ink disabled:opacity-60">
-            Login alternativo
+            
+            {tr("Login alternativo")}
           </button>
         </>
       )}
@@ -218,36 +220,38 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
       {!st.connected && authUrl && authKind === "device" && (
         <div className="space-y-2.5">
           <p className="text-xs leading-4 text-muted">
-            Entre na OpenAI e informe este código de uso único. A conexão será
-            reconhecida automaticamente aqui, sem callback em localhost.
+            
+            {tr("Entre na OpenAI e informe este código de uso único. A conexão será reconhecida automaticamente aqui, sem callback em localhost.")}
           </p>
           <div className="flex items-center gap-2">
             <code className="rounded-lg border border-accent/40 bg-surface2 px-3 py-2 text-base font-semibold tracking-[0.18em] text-ink">
               {userCode}
             </code>
             <button
-              onClick={async () => { setErr(await copyText(userCode) ? null : "Não consegui copiar o código."); }}
+              onClick={async () => { setErr(await copyText(userCode) ? null : tr("Não consegui copiar o código.")); }}
               className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:bg-hover hover:text-ink">
-              <Copy size={13} /> Copiar código
+              <Copy size={13} />  {tr("Copiar código")}
             </button>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={async () => {
                 if (!(await openExternal(authUrl))) {
-                  setErr("Não consegui abrir o navegador daqui.");
+                  setErr(tr("Não consegui abrir o navegador daqui."));
                 }
               }}
               className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover">
-              <ExternalLink size={13} /> Abrir OpenAI
+              <ExternalLink size={13} />  {tr("Abrir OpenAI")}
             </button>
             <button onClick={() => { setAuthUrl(null); setAuthKind(null); setUserCode(""); }}
               className="rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:bg-hover hover:text-ink">
-              Cancelar
+              
+              {tr("Cancelar")}
             </button>
           </div>
           <p className="text-[11px] leading-4 text-muted">
-            O código expira em 15 minutos. Continue somente se você iniciou este login.
+            
+            {tr("O código expira em 15 minutos. Continue somente se você iniciou este login.")}
           </p>
         </div>
       )}
@@ -255,8 +259,8 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
       {!st.connected && authUrl && authKind === "browser" && (
         <div className="space-y-2">
           <p className="text-xs leading-4 text-muted">
-            Este modo usa o callback fixo do Codex em localhost. Se navegador e
-            servidor estiverem na mesma máquina, a conexão termina automaticamente.
+            
+            {tr("Este modo usa o callback fixo do Codex em localhost. Se navegador e servidor estiverem na mesma máquina, a conexão termina automaticamente.")}
           </p>
           {/* NÃO usar <a target="_blank">: no webview do app desktop isso não faz nada
               (sem handler de nova janela / plugin de shell) e o clique parece morto.
@@ -266,21 +270,21 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
             <button
               onClick={async () => {
                 if (!(await openExternal(authUrl))) {
-                  setErr("Não consegui abrir o navegador daqui — use “Copiar link” e cole no seu navegador.");
+                  setErr(tr("Não consegui abrir o navegador daqui — use “Copiar link” e cole no seu navegador."));
                 }
               }}
               className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-ink transition-colors hover:bg-hover">
-              <ExternalLink size={13} /> Abrir login da OpenAI
+              <ExternalLink size={13} />  {tr("Abrir login da OpenAI")}
             </button>
             <button
-              onClick={async () => { setErr(await copyText(authUrl) ? null : "Não consegui copiar — selecione o link manualmente."); }}
+              onClick={async () => { setErr(await copyText(authUrl) ? null : tr("Não consegui copiar — selecione o link manualmente.")); }}
               className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:bg-hover hover:text-ink">
-              <Copy size={13} /> Copiar link
+              <Copy size={13} />  {tr("Copiar link")}
             </button>
           </div>
           <p className="text-[11px] leading-4 text-muted">
-            Se o AI Workspace estiver em outra máquina e o retorno automático não abrir,
-            copie a URL inteira da barra de endereço e use o campo abaixo.
+            
+            {tr("Se o AI Workspace estiver em outra máquina e o retorno automático não abrir, copie a URL inteira da barra de endereço e use o campo abaixo.")}
           </p>
           <textarea rows={2} value={pasted} onChange={(e) => setPasted(e.target.value)}
             placeholder="http://localhost:1455/auth/callback?code=…&state=…"
@@ -288,11 +292,12 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
           <div className="flex items-center gap-2">
             <button onClick={finish} disabled={busy || !pasted.trim()}
               className="rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-              {busy ? "…" : "Concluir"}
+              {busy ? "…" : tr("Concluir")}
             </button>
             <button onClick={() => { setAuthUrl(null); setAuthKind(null); setPasted(""); }}
               className="rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:bg-hover hover:text-ink">
-              Cancelar
+              
+              {tr("Cancelar")}
             </button>
           </div>
         </div>
@@ -302,7 +307,7 @@ function ChatgptBlock({ st, reload }: { st: ChatgptStatus; reload: () => Promise
         <div className="space-y-2">
           <button onClick={disconnect}
             className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:bg-hover hover:text-red-400">
-            <Trash2 size={13} /> Desconectar
+            <Trash2 size={13} />  {tr("Desconectar")}
           </button>
         </div>
       )}

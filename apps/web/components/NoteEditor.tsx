@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Brain, Eye, Loader2, Pencil, X } from "lucide-react";
 import Markdown from "./Markdown";
+import { tr } from "@/lib/i18n";
 
 /** Converte [[Alvo]], [[Alvo|apelido]] e [[Alvo#seção]] em links `#note:` — o
  *  clique é interceptado no preview e navega para (ou cria) a nota alvo. */
@@ -50,7 +51,7 @@ export default function NoteEditor({
           {isNew ? (
             <input
               value={filename} onChange={(e) => onChange({ filename: e.target.value })}
-              placeholder="Título da nota"
+              placeholder={tr("Título da nota")}
               className="flex-1 bg-transparent text-sm font-medium text-ink outline-none placeholder:text-muted"
             />
           ) : (
@@ -61,13 +62,13 @@ export default function NoteEditor({
               onClick={() => setTab("edit")}
               className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs transition-colors ${tab === "edit" ? "bg-surface2 text-ink" : "text-muted hover:text-ink"}`}
             >
-              <Pencil size={12} /> Editar
+              <Pencil size={12} />  {tr("Editar")}
             </button>
             <button
               onClick={() => setTab("view")}
               className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs transition-colors ${tab === "view" ? "bg-surface2 text-ink" : "text-muted hover:text-ink"}`}
             >
-              <Eye size={12} /> Visualizar
+              <Eye size={12} />  {tr("Visualizar")}
             </button>
           </div>
           <button onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={16} /></button>
@@ -76,7 +77,7 @@ export default function NoteEditor({
         {tab === "edit" ? (
           <textarea
             autoFocus value={content} onChange={(e) => onChange({ content: e.target.value })}
-            placeholder={"Escreva a nota em markdown…\n\nLigue notas relacionadas com [[Título da Outra Nota]]."}
+            placeholder={tr("Escreva a nota em markdown…\n\nLigue notas relacionadas com [[Título da Outra Nota]].")}
             className="min-h-[320px] flex-1 resize-none bg-transparent px-4 py-3 font-mono text-sm leading-relaxed text-ink outline-none placeholder:text-muted"
           />
         ) : (
@@ -84,13 +85,13 @@ export default function NoteEditor({
             {content.trim() ? (
               <Markdown content={wikilinksToMd(content)} />
             ) : (
-              <p className="text-muted">Nota vazia.</p>
+              <p className="text-muted">{tr("Nota vazia.")}</p>
             )}
           </div>
         )}
 
         <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
-          <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-ink">Cancelar</button>
+          <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-ink">{tr("Cancelar")}</button>
           <button onClick={onSave} disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50">
             {saving && <Loader2 size={14} className="animate-spin" />} Salvar e indexar
           </button>

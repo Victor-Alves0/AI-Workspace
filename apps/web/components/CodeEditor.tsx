@@ -11,6 +11,7 @@ import { sql } from "@codemirror/lang-sql";
 import { xml } from "@codemirror/lang-xml";
 import { createTheme } from "@uiw/codemirror-themes";
 import { tags as t } from "@lezer/highlight";
+import { tr } from "@/lib/i18n";
 
 // linguagem do CodeMirror a partir do nome/tipo do artefato (default: python,
 // o original deste editor — usado pelas tools/skills)

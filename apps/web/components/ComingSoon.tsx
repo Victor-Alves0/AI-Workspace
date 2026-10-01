@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
+import { tr } from "@/lib/i18n";
 
 export default function ComingSoon({ title, icon }: { title: string; icon?: React.ReactNode }) {
   const router = useRouter();
@@ -10,13 +11,13 @@ export default function ComingSoon({ title, icon }: { title: string; icon?: Reac
       <div className="text-muted">{icon}</div>
       <div>
         <h1 className="text-2xl font-semibold">{title}</h1>
-        <p className="mt-2 text-sm text-muted">Em breve.</p>
+        <p className="mt-2 text-sm text-muted">{tr("Em breve.")}</p>
       </div>
       <button
         onClick={() => router.push("/chat")}
         className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm text-muted hover:text-ink-soft"
       >
-        <ArrowLeft size={16} /> Voltar ao chat
+        <ArrowLeft size={16} />  {tr("Voltar ao chat")}
       </button>
     </div>
   );

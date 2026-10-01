@@ -1,5 +1,6 @@
 import { FolderGit2, Plug, Wrench } from "lucide-react";
 import type { ReactNode } from "react";
+import { tr } from "@/lib/i18n";
 
 /** Origem de uma ferramenta de sistema (vem do servidor, derivada do path):
  *  nativa do app, do Codespace (só age em chats de projeto) ou de uma
@@ -9,7 +10,7 @@ export type ToolCategory = "native" | "codespace" | "integration";
 
 export function toolCategoryTitle(category?: ToolCategory, integration?: string): string {
   if (category === "codespace") return "Codespace";
-  if (category === "integration") return integration ? `Integração: ${integration}` : "Integração";
+  if (category === "integration") return integration ? tr("Integração: {integration}", { integration: integration }) : tr("Integração");
   return "Nativo";
 }
 

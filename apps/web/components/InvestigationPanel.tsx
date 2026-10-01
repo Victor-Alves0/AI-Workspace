@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { useConfirm } from "./ConfirmDialog";
 import type { InvestigationGraphMeta } from "@/lib/types";
 import InvestigationGraphView from "./InvestigationGraphView";
+import { tr } from "@/lib/i18n";
 
 const KIND_LABEL: Record<string, string> = {
   recon: "Recon", re: "Eng. reversa", behavior: "Comportamento", generic: "Geral",
@@ -34,24 +35,24 @@ export default function InvestigationPanel() {
   }, [graphs, selected]);
 
   async function remove(id: string) {
-    if (!(await confirm({ title: "Apagar este grafo?", body: "Não dá para desfazer.", confirmLabel: "Apagar", danger: true }))) return;
+    if (!(await confirm({ title: tr("Apagar este grafo?"), body: tr("Não dá para desfazer."), confirmLabel: tr("Apagar"), danger: true }))) return;
     await api.del(`/investigation/graphs/${id}`).catch(() => {});
     if (selected === id) setSelected(null);
     load();
   }
 
   if (graphs === null) {
-    return <p className="grid h-40 place-items-center text-sm text-muted">Carregando…</p>;
+    return <p className="grid h-40 place-items-center text-sm text-muted">{tr("Carregando…")}</p>;
   }
   if (graphs.length === 0) {
     return (
       <div className="grid h-56 place-items-center px-8 text-center">
         <div className="max-w-md">
           <Radar size={30} className="mx-auto mb-3 text-muted" />
-          <p className="text-sm text-ink">Nenhum grafo ainda.</p>
+          <p className="text-sm text-ink">{tr("Nenhum grafo ainda.")}</p>
           <p className="mt-1 text-xs text-muted">
-            Num chat, peça à IA para estruturar informações como grafo. Os dados ficam
-            organizados aqui em nós e relações, de forma consultável e visual.
+            
+            {tr("Num chat, peça à IA para estruturar informações como grafo. Os dados ficam organizados aqui em nós e relações, de forma consultável e visual.")}
           </p>
         </div>
       </div>
@@ -74,17 +75,17 @@ export default function InvestigationPanel() {
               >
                 <Radar size={16} className={`mt-0.5 shrink-0 ${active ? "text-accent" : "text-muted"}`} />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-ink">{g.name || "Grafo sem nome"}</p>
+                  <p className="truncate text-sm text-ink">{g.name || tr("Grafo sem nome")}</p>
                   {g.target && <p className="truncate font-mono text-[11px] text-muted">{g.target}</p>}
                   <p className="mt-0.5 text-[10px] text-muted">
-                    {KIND_LABEL[g.kind] ?? g.kind} · {g.nodes} nós · {g.edges} arestas
+                    {KIND_LABEL[g.kind] ?? g.kind} · {g.nodes}  {tr("nós ·")} {g.edges} arestas
                   </p>
                 </div>
                 <span
                   role="button" tabIndex={0}
                   onClick={(e) => { e.stopPropagation(); remove(g.graph_id); }}
                   onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); remove(g.graph_id); } }}
-                  title="Apagar"
+                  title={tr("Apagar")}
                   className="shrink-0 rounded p-1 text-muted touch-reveal opacity-0 hover:text-red-500 group-hover:opacity-100"
                 >
                   <Trash2 size={13} />
@@ -99,7 +100,7 @@ export default function InvestigationPanel() {
       <div className="min-w-0">
         {selected
           ? <InvestigationGraphView key={selected} graphId={selected} />
-          : <p className="grid h-40 place-items-center text-sm text-muted">Selecione um grafo.</p>}
+          : <p className="grid h-40 place-items-center text-sm text-muted">{tr("Selecione um grafo.")}</p>}
       </div>
     </div>
   );

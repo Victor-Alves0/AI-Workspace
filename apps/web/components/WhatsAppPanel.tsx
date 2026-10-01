@@ -21,6 +21,7 @@ import type { Model, ModelConfig, WhatsAppConnection, WhatsAppFilters } from "@/
 import ModelField from "./ModelField";
 import ContextWindowSelect from "./ContextWindowSelect";
 import { Select } from "@/components/ui";
+import { tr } from "@/lib/i18n";
 
 const inputCls =
   "mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent placeholder:text-muted";
@@ -78,7 +79,7 @@ export default function WhatsAppPanel({ onBack }: { onBack: () => void }) {
   return (
     <div className="pt-1">
       <button onClick={onBack} className="mb-3 flex items-center gap-1 text-sm text-muted transition-colors hover:text-ink">
-        <ChevronLeft size={16} /> Voltar
+        <ChevronLeft size={16} />  {tr("Voltar")}
       </button>
 
       <div className="flex items-center justify-between">
@@ -88,7 +89,7 @@ export default function WhatsAppPanel({ onBack }: { onBack: () => void }) {
           </span>
           <div>
             <p className="text-sm font-semibold text-ink">WhatsApp</p>
-            <p className="text-xs text-muted">Cada número conectado é atendido por um modelo de IA</p>
+            <p className="text-xs text-muted">{tr("Cada número conectado é atendido por um modelo de IA")}</p>
           </div>
         </div>
         <div className="relative">
@@ -102,7 +103,8 @@ export default function WhatsAppPanel({ onBack }: { onBack: () => void }) {
         <div className="flex justify-center py-10"><Loader2 size={18} className="animate-spin text-muted" /></div>
       ) : conns.length === 0 && !adding ? (
         <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted">
-          Nenhum número conectado.
+          
+          {tr("Nenhum número conectado.")}
         </div>
       ) : (
         <div className="mt-4 space-y-3">
@@ -137,11 +139,7 @@ export default function WhatsAppPanel({ onBack }: { onBack: () => void }) {
       {qrConn && <QrModal conn={qrConn} onClose={() => { setQrConn(null); load(); }} />}
 
       <p className="mt-4 text-[11px] leading-4 text-muted">
-        <span className="text-yellow-500/90">Número pessoal (QR Code)</span>: caminho não oficial —
-        viola os termos do WhatsApp e pode levar ao banimento do número; prefira um número
-        secundário. <span className="text-ink-soft">API Oficial (Meta)</span>: crie um app WhatsApp
-        Business no Meta for Developers e registre o webhook mostrado na conexão (o servidor precisa
-        de uma URL pública https).
+        <span className="text-yellow-500/90">{tr("Número pessoal (QR Code)")}</span>{tr(": caminho não oficial — viola os termos do WhatsApp e pode levar ao banimento do número; prefira um número secundário.")} <span className="text-ink-soft">{tr("API Oficial (Meta)")}</span>{tr(": crie um app WhatsApp Business no Meta for Developers e registre o webhook mostrado na conexão (o servidor precisa de uma URL pública https).")}
       </p>
     </div>
   );
@@ -159,7 +157,7 @@ function AddMenu({ evoAvailable, onPick }: { evoAvailable: boolean; onPick: (p: 
     <div className="relative" ref={ref}>
       <button onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1.5 rounded-full bg-accent px-3.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover">
-        <Plus size={14} /> Conectar número
+        <Plus size={14} />  {tr("Conectar número")}
       </button>
       {open && (
         <div className="absolute right-0 top-9 z-30 w-64 overflow-hidden rounded-xl border border-border bg-surface shadow-menu">
@@ -170,9 +168,9 @@ function AddMenu({ evoAvailable, onPick }: { evoAvailable: boolean; onPick: (p: 
           >
             <QrCode size={16} className="mt-0.5 shrink-0 text-accent-hover" />
             <span>
-              <span className="block text-sm text-ink">Número pessoal (QR Code)</span>
+              <span className="block text-sm text-ink">{tr("Número pessoal (QR Code)")}</span>
               <span className="block text-[11px] leading-4 text-muted">
-                {evoAvailable ? "Escaneie como no WhatsApp Web (não oficial)" : "Indisponível nesta instalação"}
+                {evoAvailable ? tr("Escaneie como no WhatsApp Web (não oficial)") : tr("Indisponível nesta instalação")}
               </span>
             </span>
           </button>
@@ -182,8 +180,8 @@ function AddMenu({ evoAvailable, onPick }: { evoAvailable: boolean; onPick: (p: 
           >
             <SiWhatsapp size={15} className="mt-0.5 shrink-0 text-accent-hover" />
             <span>
-              <span className="block text-sm text-ink">API Oficial (Meta)</span>
-              <span className="block text-[11px] leading-4 text-muted">WhatsApp Business Cloud API</span>
+              <span className="block text-sm text-ink">{tr("API Oficial (Meta)")}</span>
+              <span className="block text-[11px] leading-4 text-muted">{tr("WhatsApp Business Cloud API")}</span>
             </span>
           </button>
         </div>
@@ -216,7 +214,7 @@ function ConnectionCard({
       await api.patch(`/integrations/whatsapp/${conn.id}`, body);
       await onChanged();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao salvar");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao salvar"));
     }
   }
   const setFilters = (p: Partial<WhatsAppFilters>) => patch({ filters: { ...f, ...p } });
@@ -227,7 +225,7 @@ function ConnectionCard({
       await api.del(`/integrations/whatsapp/${conn.id}`);
       await onChanged();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao excluir");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao excluir"));
     }
   }
 
@@ -240,17 +238,17 @@ function ConnectionCard({
         <span title={dot.label} className={`h-2.5 w-2.5 shrink-0 rounded-full ${dot.color}`} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-ink">
-            {conn.label || conn.phone || "Sem nome"}
+            {conn.label || conn.phone || tr("Sem nome")}
             {conn.phone && conn.label && <span className="ml-1.5 font-normal text-muted">+{conn.phone}</span>}
           </p>
           <p className="text-[11px] text-muted">
-            {conn.provider === "official" ? "API Oficial (Meta)" : "Não oficial (QR)"} · {conn.threads} conversa{conn.threads === 1 ? "" : "s"}
+            {conn.provider === "official" ? tr("API Oficial (Meta)") : tr("Não oficial (QR)")} · {conn.threads} conversa{conn.threads === 1 ? "" : "s"}
             {conn.state?.last_error && <span className="text-red-400"> · {String(conn.state.last_error).slice(0, 80)}</span>}
           </p>
         </div>
         {conn.provider === "evolution" && dot.label !== "conectada" && conn.enabled && (
           <button onClick={onQr} className="flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink">
-            <QrCode size={13} /> Conectar
+            <QrCode size={13} />  {tr("Conectar")}
           </button>
         )}
         <Toggle on={conn.enabled} onClick={() => patch({ enabled: !conn.enabled })} />
@@ -263,24 +261,24 @@ function ConnectionCard({
         <div className="space-y-3 border-t border-border px-3 py-3">
           <div className="grid grid-cols-2 gap-2">
             <label className="block text-sm">
-              <span className="text-xs text-muted">Nome</span>
+              <span className="text-xs text-muted">{tr("Nome")}</span>
               <input defaultValue={conn.label} onBlur={(e) => { if (e.target.value !== conn.label) patch({ label: e.target.value }); }} placeholder="Ex.: Atendimento" className={inputCls} />
             </label>
             <label className="block text-sm">
-              <span className="text-xs text-muted">Memória</span>
+              <span className="text-xs text-muted">{tr("Memória")}</span>
               <Select value={conn.memory} onChange={(e) => patch({ memory: e.target.value })} className={inputCls}>
-                <option value="local">Local (isolada por conversa)</option>
-                <option value="global">Global (compartilhada do modelo)</option>
+                <option value="local">{tr("Local (isolada por conversa)")}</option>
+                <option value="global">{tr("Global (compartilhada do modelo)")}</option>
               </Select>
             </label>
             <label className="block text-sm">
-              <span className="text-xs text-muted">Contexto (mensagens que a IA enxerga)</span>
+              <span className="text-xs text-muted">{tr("Contexto (mensagens que a IA enxerga)")}</span>
               <ContextWindowSelect value={conn.context_window} onChange={(v) => patch({ context_window: v })} className={inputCls} />
             </label>
           </div>
 
           <div>
-            <span className="text-xs text-muted">Modelo que atende este número</span>
+            <span className="text-xs text-muted">{tr("Modelo que atende este número")}</span>
             <div className="mt-1">
               <ModelField
                 models={extModels} custom={models} includeCustom
@@ -299,25 +297,25 @@ function ConnectionCard({
 
           {/* filtros */}
           <div className="space-y-2 rounded-lg border border-border bg-surface2/40 px-2.5 py-2">
-            <p className="text-xs font-semibold text-ink">Filtros</p>
+            <p className="text-xs font-semibold text-ink">{tr("Filtros")}</p>
             <div className="grid grid-cols-2 gap-2">
               <label className="block text-sm">
-                <span className="text-xs text-muted">Contatos</span>
+                <span className="text-xs text-muted">{tr("Contatos")}</span>
                 <Select value={f.policy} onChange={(e) => setFilters({ policy: e.target.value as WhatsAppFilters["policy"] })} className={inputCls}>
-                  <option value="all">Todos podem interagir</option>
-                  <option value="allow">Somente lista de permissão</option>
-                  <option value="block">Todos, exceto bloqueados</option>
+                  <option value="all">{tr("Todos podem interagir")}</option>
+                  <option value="allow">{tr("Somente lista de permissão")}</option>
+                  <option value="block">{tr("Todos, exceto bloqueados")}</option>
                 </Select>
               </label>
               <label className="block text-sm">
                 <span className="text-xs text-muted">Prefixo-gatilho (opcional)</span>
-                <input defaultValue={f.trigger} onBlur={(e) => { if (e.target.value !== f.trigger) setFilters({ trigger: e.target.value }); }} placeholder='Ex.: "!ia" — só responde se começar assim' className={inputCls} />
+                <input defaultValue={f.trigger} onBlur={(e) => { if (e.target.value !== f.trigger) setFilters({ trigger: e.target.value }); }} placeholder={tr("Ex.: \"!ia\" — só responde se começar assim")} className={inputCls} />
               </label>
             </div>
             {f.policy !== "all" && (
               <label className="block text-sm">
                 <span className="text-xs text-muted">
-                  {f.policy === "allow" ? "Números permitidos" : "Números bloqueados"} (um por linha ou separados por vírgula)
+                  {f.policy === "allow" ? tr("Números permitidos") : tr("Números bloqueados")}  {tr("(um por linha ou separados por vírgula)")}
                 </span>
                 <textarea
                   rows={2}
@@ -332,28 +330,28 @@ function ConnectionCard({
               </label>
             )}
             <div className="flex items-center justify-between">
-              <span className="text-sm text-ink-soft">Responder em grupos</span>
+              <span className="text-sm text-ink-soft">{tr("Responder em grupos")}</span>
               <Toggle on={!!f.groups} onClick={() => setFilters({ groups: !f.groups })} />
             </div>
           </div>
 
           {/* prompt adicional deste número (concatenado ao do modelo) */}
           <label className="block text-sm">
-            <span className="text-xs text-muted">Prompt adicional deste número (junta-se ao System Prompt do modelo)</span>
+            <span className="text-xs text-muted">{tr("Prompt adicional deste número (junta-se ao System Prompt do modelo)")}</span>
             <textarea
               rows={3}
               defaultValue={conn.system_prompt}
               onBlur={(e) => { if (e.target.value !== conn.system_prompt) patch({ system_prompt: e.target.value }); }}
-              placeholder={'Ex.: "Responda sempre curto, como mensagem de WhatsApp. Nunca use Markdown. Seja informal."'}
+              placeholder={tr("Ex.: \"Responda sempre curto, como mensagem de WhatsApp. Nunca use Markdown. Seja informal.\"")}
               className={`${inputCls} resize-y`}
             />
           </label>
 
           {/* limites de uso por contato */}
           <div className="space-y-2 rounded-lg border border-border bg-surface2/40 px-2.5 py-2">
-            <p className="text-xs font-semibold text-ink">Limites de uso <span className="font-normal text-muted">— mensagens por contato (0 = sem limite)</span></p>
+            <p className="text-xs font-semibold text-ink">{tr("Limites de uso")} <span className="font-normal text-muted">{tr("— mensagens por contato (0 = sem limite)")}</span></p>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {([["total", "Permanente"], ["per_hour", "Por hora"], ["per_day", "Por dia"], ["per_month", "Por mês"]] as const).map(([k, lbl]) => (
+              {([["total", tr("Permanente")], ["per_hour", tr("Por hora")], ["per_day", tr("Por dia")], ["per_month", tr("Por mês")]] as const).map(([k, lbl]) => (
                 <label key={k} className="block text-sm">
                   <span className="text-xs text-muted">{lbl}</span>
                   <input
@@ -368,24 +366,24 @@ function ConnectionCard({
                 </label>
               ))}
             </div>
-            <p className="text-[11px] leading-4 text-muted">Ao atingir o limite, novas mensagens do contato são ignoradas até a janela renovar (o permanente zera apagando o chat da conversa).</p>
+            <p className="text-[11px] leading-4 text-muted">{tr("Ao atingir o limite, novas mensagens do contato são ignoradas até a janela renovar (o permanente zera apagando o chat da conversa).")}</p>
           </div>
 
           {/* contexto/roles por número */}
           <ContactRoles contacts={conn.contacts ?? []} onChange={(contacts) => patch({ contacts })} />
 
           {/* Agrupar mensagens fragmentadas do contato num único turno */}
-          <label className="block text-xs text-muted">Agrupar mensagens seguidas
+          <label className="block text-xs text-muted">{tr("Agrupar mensagens seguidas")}
             <Select
               value={conn.debounce_seconds ?? 0}
               onChange={(e) => patch({ debounce_seconds: Number(e.target.value) })}
               className="mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent"
             >
-              <option value={0}>Desligado (responde cada mensagem)</option>
-              <option value={3}>Esperar 3s de silêncio</option>
-              <option value={5}>Esperar 5s de silêncio</option>
-              <option value={8}>Esperar 8s de silêncio</option>
-              <option value={15}>Esperar 15s de silêncio</option>
+              <option value={0}>{tr("Desligado (responde cada mensagem)")}</option>
+              <option value={3}>{tr("Esperar 3s de silêncio")}</option>
+              <option value={5}>{tr("Esperar 5s de silêncio")}</option>
+              <option value={8}>{tr("Esperar 8s de silêncio")}</option>
+              <option value={15}>{tr("Esperar 15s de silêncio")}</option>
             </Select>
           </label>
 
@@ -397,13 +395,13 @@ function ConnectionCard({
           <div className="flex items-center justify-end">
             {confirmDel ? (
               <span className="flex items-center gap-2 text-xs">
-                <span className="text-muted">Excluir esta conexão?</span>
-                <button onClick={remove} className="rounded-full bg-red-500/90 px-3 py-1 font-medium text-white hover:bg-red-500">Excluir</button>
-                <button onClick={() => setConfirmDel(false)} className="rounded-full border border-border px-3 py-1 text-muted hover:text-ink">Cancelar</button>
+                <span className="text-muted">{tr("Excluir esta conexão?")}</span>
+                <button onClick={remove} className="rounded-full bg-red-500/90 px-3 py-1 font-medium text-white hover:bg-red-500">{tr("Excluir")}</button>
+                <button onClick={() => setConfirmDel(false)} className="rounded-full border border-border px-3 py-1 text-muted hover:text-ink">{tr("Cancelar")}</button>
               </span>
             ) : (
               <button onClick={() => setConfirmDel(true)} className="flex items-center gap-1 text-xs text-muted transition-colors hover:text-red-400">
-                <Trash2 size={13} /> Excluir conexão
+                <Trash2 size={13} />  {tr("Excluir conexão")}
               </button>
             )}
           </div>
@@ -431,33 +429,34 @@ function ContactRoles({ contacts, onChange }: {
   return (
     <div className="space-y-2 rounded-lg border border-border bg-surface2/40 px-2.5 py-2">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-semibold text-ink">Contatos <span className="font-normal text-muted">— contexto/role por número</span></p>
+        <p className="text-xs font-semibold text-ink">{tr("Contatos")} <span className="font-normal text-muted">{tr("— contexto/role por número")}</span></p>
         {!draft && (
           <button
             onClick={() => setDraft({ number: "", name: "", role: "", context: "" })}
             className="flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-[11px] text-ink-soft transition-colors hover:bg-hover hover:text-ink"
           >
-            <Plus size={12} /> Adicionar
+            <Plus size={12} />  {tr("Adicionar")}
           </button>
         )}
       </div>
 
       {contacts.length === 0 && !draft && (
         <p className="text-[11px] leading-4 text-muted">
-          Ex.: &quot;+55 83 9…&quot; → &quot;Este número é o dono da empresa.&quot; O modelo recebe isso sempre que o número conversar.
+          
+          {tr("Ex.: \"+55 83 9…\" → \"Este número é o dono da empresa.\" O modelo recebe isso sempre que o número conversar.")}
         </p>
       )}
 
       {contacts.map((c, i) => (
         <div key={`${c.number}-${i}`} className="space-y-1.5 rounded-lg border border-border bg-surface px-2.5 py-2">
           <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-            <input defaultValue={c.number} onBlur={(e) => { if (e.target.value !== c.number) save(i, { number: e.target.value }); }} placeholder="Número" className={`${inputCls} mt-0 font-mono text-xs`} />
+            <input defaultValue={c.number} onBlur={(e) => { if (e.target.value !== c.number) save(i, { number: e.target.value }); }} placeholder={tr("Número")} className={`${inputCls} mt-0 font-mono text-xs`} />
             <input defaultValue={c.name} onBlur={(e) => { if (e.target.value !== c.name) save(i, { name: e.target.value }); }} placeholder="Nome (opcional)" className={`${inputCls} mt-0`} />
-            <input defaultValue={c.role} onBlur={(e) => { if (e.target.value !== c.role) save(i, { role: e.target.value }); }} placeholder="Role/Função" className={`${inputCls} mt-0`} />
+            <input defaultValue={c.role} onBlur={(e) => { if (e.target.value !== c.role) save(i, { role: e.target.value }); }} placeholder={tr("Role/Função")} className={`${inputCls} mt-0`} />
           </div>
           <div className="flex items-start gap-1.5">
-            <textarea rows={1} defaultValue={c.context} onBlur={(e) => { if (e.target.value !== c.context) save(i, { context: e.target.value }); }} placeholder="Contexto/prompt adicional (ex.: este número é o dono da empresa)" className={`${inputCls} mt-0 flex-1 resize-y`} />
-            <button onClick={() => onChange(contacts.filter((_, j) => j !== i))} title="Remover" className="mt-1 shrink-0 rounded p-1 text-muted transition-colors hover:text-red-400">
+            <textarea rows={1} defaultValue={c.context} onBlur={(e) => { if (e.target.value !== c.context) save(i, { context: e.target.value }); }} placeholder={tr("Contexto/prompt adicional (ex.: este número é o dono da empresa)")} className={`${inputCls} mt-0 flex-1 resize-y`} />
+            <button onClick={() => onChange(contacts.filter((_, j) => j !== i))} title={tr("Remover")} className="mt-1 shrink-0 rounded p-1 text-muted transition-colors hover:text-red-400">
               <Trash2 size={14} />
             </button>
           </div>
@@ -467,19 +466,20 @@ function ContactRoles({ contacts, onChange }: {
       {draft && (
         <div className="space-y-1.5 rounded-lg border border-accent/40 bg-surface px-2.5 py-2">
           <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-            <input autoFocus value={draft.number} onChange={(e) => setDraft({ ...draft, number: e.target.value })} placeholder="Número (ex.: 5583999999999)" className={`${inputCls} mt-0 font-mono text-xs`} />
+            <input autoFocus value={draft.number} onChange={(e) => setDraft({ ...draft, number: e.target.value })} placeholder={tr("Número (ex.: 5583999999999)")} className={`${inputCls} mt-0 font-mono text-xs`} />
             <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Nome (opcional)" className={`${inputCls} mt-0`} />
-            <input value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })} placeholder="Role/Função" className={`${inputCls} mt-0`} />
+            <input value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })} placeholder={tr("Role/Função")} className={`${inputCls} mt-0`} />
           </div>
-          <textarea rows={2} value={draft.context} onChange={(e) => setDraft({ ...draft, context: e.target.value })} placeholder="Contexto/prompt adicional" className={`${inputCls} mt-0 resize-y`} />
+          <textarea rows={2} value={draft.context} onChange={(e) => setDraft({ ...draft, context: e.target.value })} placeholder={tr("Contexto/prompt adicional")} className={`${inputCls} mt-0 resize-y`} />
           <div className="flex items-center justify-end gap-2">
-            <button onClick={() => setDraft(null)} className="rounded-full border border-border px-3 py-1 text-xs text-muted transition-colors hover:text-ink">Cancelar</button>
+            <button onClick={() => setDraft(null)} className="rounded-full border border-border px-3 py-1 text-xs text-muted transition-colors hover:text-ink">{tr("Cancelar")}</button>
             <button
               disabled={!draft.number.trim()}
               onClick={() => { onChange([...contacts, draft]); setDraft(null); }}
               className="rounded-full bg-accent px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50"
             >
-              Salvar contato
+              
+              {tr("Salvar contato")}
             </button>
           </div>
         </div>
@@ -501,8 +501,8 @@ function Humanizer({ humanize, onChange }: { humanize: Humanize; onChange: (h: H
     <div className="space-y-2 rounded-lg border border-border bg-surface2/40 px-2.5 py-2">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs font-semibold text-ink">Modo humanizador</p>
-          <p className="text-[11px] leading-4 text-muted">Simula uma pessoa: mostra “digitando…”, espera um tempo e pode responder em várias mensagens.</p>
+          <p className="text-xs font-semibold text-ink">{tr("Modo humanizador")}</p>
+          <p className="text-[11px] leading-4 text-muted">{tr("Simula uma pessoa: mostra “digitando…”, espera um tempo e pode responder em várias mensagens.")}</p>
         </div>
         <Toggle on={on} onClick={() => set({ enabled: !on })} />
       </div>
@@ -514,26 +514,26 @@ function Humanizer({ humanize, onChange }: { humanize: Humanize; onChange: (h: H
           </div>
           <div className="flex items-center justify-between">
             <div>
-              <span className="text-sm text-ink-soft">Cortar em várias mensagens</span>
-              <p className="text-[11px] text-muted">Quebra respostas longas em mensagens naturais</p>
+              <span className="text-sm text-ink-soft">{tr("Cortar em várias mensagens")}</span>
+              <p className="text-[11px] text-muted">{tr("Quebra respostas longas em mensagens naturais")}</p>
             </div>
             <Toggle on={!!h.split} onClick={() => set({ split: !h.split })} />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <label className="block text-sm">
-              <span className="text-xs text-muted">Atraso mínimo (s)</span>
+              <span className="text-xs text-muted">{tr("Atraso mínimo (s)")}</span>
               <input type="number" min={0} max={120} defaultValue={minS}
                 onBlur={(e) => { const v = Math.max(0, Math.min(120, parseInt(e.target.value || "0", 10) || 0)); if (v !== minS) set({ min_seconds: v }); }}
                 className={inputCls} />
             </label>
             <label className="block text-sm">
-              <span className="text-xs text-muted">Atraso máximo (s)</span>
+              <span className="text-xs text-muted">{tr("Atraso máximo (s)")}</span>
               <input type="number" min={0} max={120} defaultValue={maxS}
                 onBlur={(e) => { const v = Math.max(0, Math.min(120, parseInt(e.target.value || "0", 10) || 0)); if (v !== maxS) set({ max_seconds: v }); }}
                 className={inputCls} />
             </label>
           </div>
-          <p className="text-[11px] leading-4 text-muted">O tempo real varia com o tamanho da mensagem, entre o mínimo e o máximo.</p>
+          <p className="text-[11px] leading-4 text-muted">{tr("O tempo real varia com o tamanho da mensagem, entre o mínimo e o máximo.")}</p>
         </div>
       )}
     </div>
@@ -561,12 +561,12 @@ function CopyField({ label, value }: { label: string; value: string }) {
 function OfficialWebhookInfo({ conn }: { conn: WhatsAppConnection }) {
   return (
     <div className="space-y-2 rounded-lg border border-border bg-surface2/40 px-2.5 py-2">
-      <p className="text-xs font-semibold text-ink">Webhook (Meta for Developers)</p>
-      <CopyField label="URL de callback" value={`${API_URL}${conn.webhook_path}`} />
-      <CopyField label="Verify token" value={conn.verify_token} />
+      <p className="text-xs font-semibold text-ink">{tr("Webhook (Meta for Developers)")}</p>
+      <CopyField label={tr("URL de callback")} value={`${API_URL}${conn.webhook_path}`} />
+      <CopyField label={tr("Verify token")} value={conn.verify_token} />
       <p className="text-[11px] leading-4 text-muted">
-        Registre em WhatsApp → Configuration → Webhook e assine o campo <code>messages</code>. A URL
-        precisa ser pública (https) — atrás de túnel/proxy, defina WHATSAPP_WEBHOOK_BASE no .env.
+        
+        {tr("Registre em WhatsApp → Configuration → Webhook e assine o campo")} <code>messages</code>{tr(". A URL precisa ser pública (https) — atrás de túnel/proxy, defina WHATSAPP_WEBHOOK_BASE no .env.")}
       </p>
     </div>
   );
@@ -620,7 +620,7 @@ function NewQrForm({
   const [err, setErr] = useState<string | null>(null);
 
   async function create() {
-    if (!m.value) return setErr("Selecione o modelo que vai atender este número");
+    if (!m.value) return setErr(tr("Selecione o modelo que vai atender este número"));
     setSaving(true);
     setErr(null);
     try {
@@ -629,30 +629,31 @@ function NewQrForm({
       });
       onCreated(c);
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao criar a conexão");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao criar a conexão"));
       setSaving(false);
     }
   }
 
   return (
-    <ModalShell title="Conectar número pessoal (QR Code)" onClose={onClose}>
+    <ModalShell title={tr("Conectar número pessoal (QR Code)")} onClose={onClose}>
       <label className="block text-sm">
         <span className="text-xs text-muted">Nome (opcional)</span>
-        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Ex.: Meu número secundário" className={inputCls} />
+        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={tr("Ex.: Meu número secundário")} className={inputCls} />
       </label>
       <div>
-        <span className="text-xs text-muted">Modelo que atende este número</span>
+        <span className="text-xs text-muted">{tr("Modelo que atende este número")}</span>
         <div className="mt-1"><ModelField models={extModels} custom={models} includeCustom value={m.value} onChange={m.pick} /></div>
       </div>
       <p className="flex items-start gap-1.5 text-[11px] leading-4 text-yellow-500/90">
         <TriangleAlert size={13} className="mt-0.5 shrink-0" />
-        Caminho não oficial: viola os termos do WhatsApp e pode banir o número. Use por sua conta e risco.
+        
+        {tr("Caminho não oficial: viola os termos do WhatsApp e pode banir o número. Use por sua conta e risco.")}
       </p>
       {err && <p className="text-xs text-red-400">{err}</p>}
       <div className="flex justify-end gap-2 pt-1">
-        <button onClick={onClose} className="rounded-full border border-border px-4 py-1.5 text-xs text-muted hover:text-ink">Cancelar</button>
+        <button onClick={onClose} className="rounded-full border border-border px-4 py-1.5 text-xs text-muted hover:text-ink">{tr("Cancelar")}</button>
         <button onClick={create} disabled={saving} className="rounded-full bg-accent px-5 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-60">
-          {saving ? "…" : "Criar e gerar QR"}
+          {saving ? "…" : tr("Criar e gerar QR")}
         </button>
       </div>
     </ModalShell>
@@ -675,8 +676,8 @@ function NewOfficialForm({
   const [err, setErr] = useState<string | null>(null);
 
   async function create() {
-    if (!pnid.trim() || !token.trim()) return setErr("Phone Number ID e Access Token são obrigatórios");
-    if (!m.value) return setErr("Selecione o modelo que vai atender este número");
+    if (!pnid.trim() || !token.trim()) return setErr(tr("Phone Number ID e Access Token são obrigatórios"));
+    if (!m.value) return setErr(tr("Selecione o modelo que vai atender este número"));
     setSaving(true);
     setErr(null);
     try {
@@ -686,44 +687,44 @@ function NewOfficialForm({
       });
       onCreated();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao criar a conexão");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao criar a conexão"));
       setSaving(false);
     }
   }
 
   return (
-    <ModalShell title="Conectar via API Oficial (Meta)" onClose={onClose}>
+    <ModalShell title={tr("Conectar via API Oficial (Meta)")} onClose={onClose}>
       <div className="grid grid-cols-2 gap-2">
         <label className="block text-sm">
           <span className="text-xs text-muted">Nome (opcional)</span>
           <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Ex.: Atendimento" className={inputCls} />
         </label>
         <label className="block text-sm">
-          <span className="text-xs text-muted">Número (opcional)</span>
+          <span className="text-xs text-muted">{tr("Número (opcional)")}</span>
           <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="5511999999999" className={inputCls} />
         </label>
       </div>
       <label className="block text-sm">
-        <span className="text-xs text-muted">Phone Number ID</span>
-        <input value={pnid} onChange={(e) => setPnid(e.target.value)} placeholder="do painel WhatsApp → API Setup" className={`${inputCls} font-mono text-xs`} />
+        <span className="text-xs text-muted">{tr("Phone Number ID")}</span>
+        <input value={pnid} onChange={(e) => setPnid(e.target.value)} placeholder={tr("do painel WhatsApp → API Setup")} className={`${inputCls} font-mono text-xs`} />
       </label>
       <label className="block text-sm">
-        <span className="text-xs text-muted">Access Token (permanente)</span>
+        <span className="text-xs text-muted">{tr("Access Token (permanente)")}</span>
         <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="EAAG…" className={`${inputCls} font-mono text-xs`} />
       </label>
       <label className="block text-sm">
-        <span className="text-xs text-muted">App Secret (opcional — valida a assinatura dos webhooks)</span>
+        <span className="text-xs text-muted">{tr("App Secret (opcional — valida a assinatura dos webhooks)")}</span>
         <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} className={`${inputCls} font-mono text-xs`} />
       </label>
       <div>
-        <span className="text-xs text-muted">Modelo que atende este número</span>
+        <span className="text-xs text-muted">{tr("Modelo que atende este número")}</span>
         <div className="mt-1"><ModelField models={extModels} custom={models} includeCustom value={m.value} onChange={m.pick} /></div>
       </div>
       {err && <p className="text-xs text-red-400">{err}</p>}
       <div className="flex justify-end gap-2 pt-1">
-        <button onClick={onClose} className="rounded-full border border-border px-4 py-1.5 text-xs text-muted hover:text-ink">Cancelar</button>
+        <button onClick={onClose} className="rounded-full border border-border px-4 py-1.5 text-xs text-muted hover:text-ink">{tr("Cancelar")}</button>
         <button onClick={create} disabled={saving} className="rounded-full bg-accent px-5 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-60">
-          {saving ? "…" : "Conectar"}
+          {saving ? "…" : tr("Conectar")}
         </button>
       </div>
     </ModalShell>
@@ -745,7 +746,7 @@ function QrModal({ conn, onClose }: { conn: WhatsAppConnection; onClose: () => v
       if (r.base64) setQr(r.base64);
       setErr(null);
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao obter o QR");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao obter o QR"));
     }
   }, [conn.id]);
 
@@ -766,18 +767,18 @@ function QrModal({ conn, onClose }: { conn: WhatsAppConnection; onClose: () => v
 
   const connected = status === "open";
   return (
-    <ModalShell title={connected ? "Número conectado" : "Escaneie o QR Code"} onClose={onClose}>
+    <ModalShell title={connected ? tr("Número conectado") : tr("Escaneie o QR Code")} onClose={onClose}>
       {connected ? (
         <div className="flex flex-col items-center gap-2 py-4 text-center">
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-green-500/15 text-green-500"><Check size={24} /></span>
-          <p className="text-sm text-ink">{phone ? `+${phone}` : "Sessão aberta"}</p>
-          <p className="text-xs text-muted">Este número agora é atendido pelo modelo configurado.</p>
+          <p className="text-sm text-ink">{phone ? `+${phone}` : tr("Sessão aberta")}</p>
+          <p className="text-xs text-muted">{tr("Este número agora é atendido pelo modelo configurado.")}</p>
         </div>
       ) : (
         <div className="flex flex-col items-center gap-3 py-2">
           {qr ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={qr} alt="QR Code do WhatsApp" className="h-56 w-56 rounded-xl border border-border bg-white p-2" />
+            <img src={qr} alt={tr("QR Code do WhatsApp")} className="h-56 w-56 rounded-xl border border-border bg-white p-2" />
           ) : (
             <div className="flex h-56 w-56 items-center justify-center rounded-xl border border-border bg-surface">
               {err ? <TriangleAlert size={20} className="text-red-400" /> : <Loader2 size={20} className="animate-spin text-muted" />}
@@ -785,10 +786,11 @@ function QrModal({ conn, onClose }: { conn: WhatsAppConnection; onClose: () => v
           )}
           {err && <p className="max-w-xs text-center text-xs text-red-400">{err}</p>}
           <p className="max-w-xs text-center text-xs text-muted">
-            WhatsApp → Configurações → Aparelhos conectados → Conectar aparelho
+            
+            {tr("WhatsApp → Configurações → Aparelhos conectados → Conectar aparelho")}
           </p>
           <button onClick={fetchQr} className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink">
-            <RefreshCw size={12} /> Gerar novo QR
+            <RefreshCw size={12} />  {tr("Gerar novo QR")}
           </button>
         </div>
       )}

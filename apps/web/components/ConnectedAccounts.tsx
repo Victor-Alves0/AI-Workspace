@@ -16,6 +16,7 @@ import { api, API_URL, ApiError } from "@/lib/api";
 import { openExternal } from "@/lib/desktop";
 import { AnchoredMenu, MenuDivider, MenuItem } from "./ui";
 import { toast } from "./Toaster";
+import { tr } from "@/lib/i18n";
 
 export interface AccountItem {
   id: string;
@@ -50,7 +51,7 @@ export function useOAuthConnect(base: string, onDone: (email: string) => void) {
       r = await api.post<{ url: string; attempt: string }>(`${base}/connect`, { origin: API_URL });
     } catch (e) {
       setWaiting(false);
-      toast(e instanceof ApiError ? e.message : "Falha ao iniciar a conexão.");
+      toast(e instanceof ApiError ? e.message : tr("Falha ao iniciar a conexão."));
       return;
     }
     if (id !== run.current) return;
@@ -72,10 +73,10 @@ export function useOAuthConnect(base: string, onDone: (email: string) => void) {
       setWaiting(false);
       setUrl(null);
       if (a.status === "ok") {
-        toast(a.email ? `Conectada: ${a.email}` : "Conta conectada.", "success");
+        toast(a.email ? `Conectada: ${a.email}` : tr("Conta conectada."), "success");
         done.current(a.email || "");
       } else {
-        toast(a.error || "Não deu para conectar.");
+        toast(a.error || tr("Não deu para conectar."));
       }
       return;
     }
@@ -88,7 +89,7 @@ export function useOAuthConnect(base: string, onDone: (email: string) => void) {
 
 export default function ConnectedAccounts({
   items, connect, connectLabel, connectIcon, disabledReason,
-  onMakePrimary, onTest, onRemove, searchPlaceholder = "Buscar contas…",
+  onMakePrimary, onTest, onRemove, searchPlaceholder = tr("Buscar contas…"),
 }: {
   items: AccountItem[];
   connect: ReturnType<typeof useOAuthConnect>;
@@ -117,7 +118,7 @@ export default function ConnectedAccounts({
       {/* ~3 contas à vista; o resto rola aqui dentro */}
       <div className="max-h-[144px] overflow-y-auto p-1.5">
         {lista.length === 0 ? (
-          <p className="px-3 py-3.5 text-center text-xs text-muted">{items.length ? "Nada encontrado." : "Nenhuma conta."}</p>
+          <p className="px-3 py-3.5 text-center text-xs text-muted">{items.length ? tr("Nada encontrado.") : tr("Nenhuma conta.")}</p>
         ) : lista.map((a) => (
           <Linha key={a.id} a={a} connect={connect} onMakePrimary={onMakePrimary} onTest={onTest} onRemove={onRemove} />
         ))}
@@ -126,14 +127,15 @@ export default function ConnectedAccounts({
         {connect.waiting ? (
           <div className="flex h-9 items-center gap-2 px-2.5 text-sm text-ink-soft">
             <Loader2 size={15} className="shrink-0 animate-spin text-muted" />
-            <span className="min-w-0 flex-1 truncate">{connect.blocked ? "Abra o login para continuar" : "Aguardando o login…"}</span>
+            <span className="min-w-0 flex-1 truncate">{connect.blocked ? tr("Abra o login para continuar") : "Aguardando o login…"}</span>
             <button type="button" onClick={connect.reopen}
               className={`flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors ${connect.blocked ? "bg-accent text-white hover:bg-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}>
-              <ExternalLink size={13} /> Abrir
+              <ExternalLink size={13} />  {tr("Abrir")}
             </button>
             <button type="button" onClick={connect.cancel}
               className="shrink-0 rounded-lg px-2 py-1 text-xs text-muted transition-colors hover:bg-hover hover:text-ink">
-              Cancelar
+              
+              {tr("Cancelar")}
             </button>
           </div>
         ) : (
@@ -167,7 +169,7 @@ function Linha({ a, connect, onMakePrimary, onTest, onRemove }: {
     setTestando(true);
     try {
       const ok = await onTest(a.id);
-      toast(ok ? `${a.label}: acesso OK.` : `${a.label}: sem acesso. Reconecte.`, ok ? "success" : "error");
+      toast(ok ? tr("{label}: acesso OK.", { label: a.label }) : tr("{label}: sem acesso. Reconecte.", { label: a.label }), ok ? "success" : "error");
     } finally {
       setTestando(false);
     }
@@ -180,18 +182,18 @@ function Linha({ a, connect, onMakePrimary, onTest, onRemove }: {
       </span>
       <span className="min-w-0 flex-1 truncate text-sm text-ink">{a.label}</span>
       {a.primary && (
-        <span className="shrink-0 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-medium text-accent-hover">Principal</span>
+        <span className="shrink-0 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-medium text-accent-hover">{tr("Principal")}</span>
       )}
       {a.broken && (
         <button type="button" onClick={() => void connect.start()} disabled={connect.waiting}
           className="flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-400 transition-colors hover:bg-amber-500/25 disabled:opacity-60">
-          <RefreshCw size={11} /> Reconectar
+          <RefreshCw size={11} />  {tr("Reconectar")}
         </button>
       )}
       {testando ? (
         <Loader2 size={15} className="shrink-0 animate-spin text-muted" />
       ) : (
-        <button ref={btn} type="button" onClick={() => setMenu((m) => !m)} aria-label={`Opções de ${a.label}`}
+        <button ref={btn} type="button" onClick={() => setMenu((m) => !m)} aria-label={tr("Opções de {label}", { label: a.label })}
           className="shrink-0 rounded-md p-1 text-muted transition-colors hover:bg-surface2 hover:text-ink">
           <MoreHorizontal size={15} />
         </button>
@@ -199,11 +201,11 @@ function Linha({ a, connect, onMakePrimary, onTest, onRemove }: {
       {menu && (
         <AnchoredMenu anchorRef={btn} onClose={fechar}>
           {onMakePrimary && !a.primary && (
-            <MenuItem icon={<Star size={14} />} onClick={() => { setMenu(false); void onMakePrimary(a.id); }}>Tornar principal</MenuItem>
+            <MenuItem icon={<Star size={14} />} onClick={() => { setMenu(false); void onMakePrimary(a.id); }}>{tr("Tornar principal")}</MenuItem>
           )}
-          {onTest && <MenuItem icon={<Wifi size={14} />} onClick={() => void testar()}>Testar acesso</MenuItem>}
+          {onTest && <MenuItem icon={<Wifi size={14} />} onClick={() => void testar()}>{tr("Testar acesso")}</MenuItem>}
           <MenuDivider />
-          <MenuItem icon={<Trash2 size={14} />} danger onClick={() => { setMenu(false); void onRemove(a); }}>Remover</MenuItem>
+          <MenuItem icon={<Trash2 size={14} />} danger onClick={() => { setMenu(false); void onRemove(a); }}>{tr("Remover")}</MenuItem>
         </AnchoredMenu>
       )}
     </div>

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ChevronLeft, Info, Lock } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import type { Prompt } from "@/lib/types";
+import { tr } from "@/lib/i18n";
 
 function slugify(s: string) {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -30,11 +31,11 @@ export default function PromptEditor({
     setErr(null);
     const cmd = command.trim();
     if (!title.trim()) {
-      setErr("Dê um nome ao prompt");
+      setErr(tr("Dê um nome ao prompt"));
       return;
     }
     if (!cmd) {
-      setErr("Defina um comando");
+      setErr(tr("Defina um comando"));
       return;
     }
     const body = { command: cmd, title: title.trim(), content, enabled: prompt?.enabled ?? true };
@@ -44,7 +45,7 @@ export default function PromptEditor({
       else await api.patch(`/prompts/${prompt!.id}`, body);
       onSaved();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao salvar");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao salvar"));
     } finally {
       setSaving(false);
     }
@@ -57,7 +58,7 @@ export default function PromptEditor({
         <button onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink">
           <ChevronLeft size={22} />
         </button>
-        <span className="text-sm text-muted">Voltar</span>
+        <span className="text-sm text-muted">{tr("Voltar")}</span>
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -69,11 +70,11 @@ export default function PromptEditor({
                 setTitle(e.target.value);
                 if (!commandDirty) setCommand(slugify(e.target.value));
               }}
-              placeholder="Nome"
+              placeholder={tr("Nome")}
               className="w-full bg-transparent text-3xl font-bold text-ink outline-none placeholder:text-muted"
             />
             <button className="flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted hover:text-ink">
-              <Lock size={13} /> Acesso
+              <Lock size={13} />  {tr("Acesso")}
             </button>
           </div>
 
@@ -91,16 +92,16 @@ export default function PromptEditor({
           </div>
 
           <div className="space-y-1 pt-3">
-            <p className="text-xs text-muted">Conteúdo do Prompt</p>
+            <p className="text-xs text-muted">{tr("Conteúdo do Prompt")}</p>
             <textarea
               rows={10}
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder="Escreva um resumo em 50 palavras que resuma {{topic}}."
+              placeholder={tr("Escreva um resumo em 50 palavras que resuma {{topic}}.")}
               className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent placeholder:text-muted"
             />
             <p className="flex items-center gap-1 text-xs text-muted">
-              <Info size={12} /> Usar <span className="font-mono text-ink-soft">{"{{variável}}"}</span> para espaços reservados
+              <Info size={12} />  {tr("Usar")} <span className="font-mono text-ink-soft">{"{{variável}}"}</span>  {tr("para espaços reservados")}
             </p>
           </div>
         </div>

@@ -3,6 +3,7 @@
 import { Children, isValidElement, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronDown, X } from "lucide-react";
+import { tr } from "@/lib/i18n";
 
 /** Ponteiro fino (mouse)? Em telas de toque, autoFocus abre o teclado na hora — o
  *  iOS desloca a viewport p/ revelar o input e o scroll interno de menus fica
@@ -214,7 +215,7 @@ export function MenuDivider() {
 export function TagInput({
   tags,
   onChange,
-  placeholder = "Adicionar etiqueta…",
+  placeholder = tr("Adicionar etiqueta…"),
 }: {
   tags: string[];
   onChange: (t: string[]) => void;

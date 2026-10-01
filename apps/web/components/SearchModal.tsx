@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Search, X } from "lucide-react";
 import type { Chat } from "@/lib/types";
 import { useClickOutside } from "./ui";
+import { tr } from "@/lib/i18n";
 
 export default function SearchModal({
   chats,
@@ -30,10 +31,10 @@ export default function SearchModal({
             autoFocus
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Pesquisar chats…"
+            placeholder={tr("Pesquisar chats…")}
             className="w-full bg-transparent text-sm outline-none placeholder:text-muted"
           />
-          <button onClick={onClose} title="Fechar" className="shrink-0 rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink"><X size={18} /></button>
+          <button onClick={onClose} title={tr("Fechar")} className="shrink-0 rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink"><X size={18} /></button>
         </div>
         <div className="max-h-80 overflow-y-auto p-2">
           {results.map((c) => (
@@ -48,7 +49,7 @@ export default function SearchModal({
               {c.title}
             </button>
           ))}
-          {results.length === 0 && <p className="px-3 py-4 text-center text-sm text-muted">Nada encontrado.</p>}
+          {results.length === 0 && <p className="px-3 py-4 text-center text-sm text-muted">{tr("Nada encontrado.")}</p>}
         </div>
       </div>
     </div>

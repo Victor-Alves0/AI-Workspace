@@ -9,6 +9,7 @@ import ContextWindowSelect from "./ContextWindowSelect";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { Select } from "@/components/ui";
 import { toast } from "@/components/Toaster";
+import { tr } from "@/lib/i18n";
 
 const inputCls = "mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent placeholder:text-muted";
 
@@ -86,7 +87,7 @@ export default function SlackChannelPanel({ onBack }: { onBack: () => void }) {
       setAdding(false); setBotToken(""); setAppToken(""); setNewLabel(""); setNewModel("");
       load();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao conectar");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao conectar"));
     } finally { setBusy(false); }
   }
 
@@ -96,54 +97,54 @@ export default function SlackChannelPanel({ onBack }: { onBack: () => void }) {
   }
   async function toggle(c: SlackChannelConn) { await api.post(`/integrations/slack-channel/connections/${c.id}/toggle`).catch(() => {}); load(); }
   async function remove(c: SlackChannelConn) {
-    if (!(await confirm({ title: "Remover conexão?", body: <>{c.label || c.team} deixará de responder.</>, confirmLabel: "Remover", danger: true }))) return;
+    if (!(await confirm({ title: tr("Remover conexão?"), body: <>{c.label || c.team}  {tr("deixará de responder.")}</>, confirmLabel: tr("Remover"), danger: true }))) return;
     await api.del(`/integrations/slack-channel/connections/${c.id}`).catch(() => {});
     load();
   }
   async function test(c: SlackChannelConn) {
     try {
       const r = await api.post<{ ok: boolean; channel_id?: string }>(`/integrations/slack-channel/connections/${c.id}/test`, {});
-      setErr(r.ok ? null : "Falha no teste");
-      if (r.ok) toast("Mensagem de teste enviada.", "success");
-    } catch (e) { setErr(e instanceof ApiError ? e.message : "Falha ao testar"); }
+      setErr(r.ok ? null : tr("Falha no teste"));
+      if (r.ok) toast(tr("Mensagem de teste enviada."), "success");
+    } catch (e) { setErr(e instanceof ApiError ? e.message : tr("Falha ao testar")); }
   }
 
   return (
     <div className="pt-1">
       <button onClick={onBack} className="mb-3 flex items-center gap-1 text-sm text-muted transition-colors hover:text-ink">
-        <ChevronLeft size={16} /> Voltar
+        <ChevronLeft size={16} />  {tr("Voltar")}
       </button>
 
       <div className="flex items-center justify-between">
         <h3 className="text-base font-semibold text-ink">Slack · Canal</h3>
         {!adding && (
           <button onClick={() => setAdding(true)} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover">
-            <Plus size={15} /> Conectar
+            <Plus size={15} />  {tr("Conectar")}
           </button>
         )}
       </div>
-      <p className="mt-1 text-xs text-muted">Crie um app em <span className="text-ink-soft">api.slack.com/apps</span>, ative o <span className="text-ink-soft">Socket Mode</span>, gere um <span className="text-ink-soft">App-Level Token</span> (xapp-, escopo connections:write), assine os eventos <span className="text-ink-soft">message.im</span>/<span className="text-ink-soft">message.channels</span> e adicione os escopos de bot <span className="text-ink-soft">chat:write</span>, <span className="text-ink-soft">files:write</span>, <span className="text-ink-soft">users:read</span>. Instale o app: as mensagens do Slack viram Chats e a IA responde (com anexos) no Slack.</p>
+      <p className="mt-1 text-xs text-muted">{tr("Crie um app em")} <span className="text-ink-soft">api.slack.com/apps</span>, ative o <span className="text-ink-soft">{tr("Socket Mode")}</span>{tr(", gere um")} <span className="text-ink-soft">{tr("App-Level Token")}</span>  {tr("(xapp-, escopo connections:write), assine os eventos")} <span className="text-ink-soft">message.im</span>/<span className="text-ink-soft">message.channels</span>  {tr("e adicione os escopos de bot")} <span className="text-ink-soft">chat:write</span>, <span className="text-ink-soft">files:write</span>, <span className="text-ink-soft">users:read</span>{tr(". Instale o app: as mensagens do Slack viram Chats e a IA responde (com anexos) no Slack.")}</p>
 
       {err && <p className="mt-2 flex items-center gap-1.5 text-xs text-red-400"><TriangleAlert size={13} /> {err}</p>}
 
       {adding && (
         <div className="mt-3 space-y-2 rounded-xl border border-border bg-surface p-3">
-          <label className="block text-xs text-muted">Bot User OAuth Token (OAuth &amp; Permissions)
+          <label className="block text-xs text-muted">{tr("Bot User OAuth Token (OAuth & Permissions)")}
             <input value={botToken} onChange={(e) => setBotToken(e.target.value)} placeholder="xoxb-…" className={inputCls} />
           </label>
-          <label className="block text-xs text-muted">App-Level Token (Basic Information → App-Level Tokens)
+          <label className="block text-xs text-muted">{tr("App-Level Token (Basic Information → App-Level Tokens)")}
             <input value={appToken} onChange={(e) => setAppToken(e.target.value)} placeholder="xapp-…" className={inputCls} />
           </label>
           <label className="block text-xs text-muted">Nome (opcional)
-            <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Ex.: Assistente do time" className={inputCls} />
+            <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder={tr("Ex.: Assistente do time")} className={inputCls} />
           </label>
-          <div className="text-xs text-muted">Modelo
+          <div className="text-xs text-muted">{tr("Modelo")}
             <ModelField models={extModels} custom={models} includeCustom value={newModel} onChange={setNewModel} className="mt-1" />
           </div>
           <div className="flex justify-end gap-2 pt-1">
-            <button onClick={() => setAdding(false)} className="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-ink">Cancelar</button>
+            <button onClick={() => setAdding(false)} className="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-ink">{tr("Cancelar")}</button>
             <button onClick={connect} disabled={busy || !botToken.trim() || !appToken.trim()} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50">
-              {busy && <Loader2 size={14} className="animate-spin" />} Conectar
+              {busy && <Loader2 size={14} className="animate-spin" />}  {tr("Conectar")}
             </button>
           </div>
         </div>
@@ -151,9 +152,9 @@ export default function SlackChannelPanel({ onBack }: { onBack: () => void }) {
 
       <div className="mt-4 space-y-2">
         {conns === null ? (
-          <p className="py-6 text-center text-sm text-muted">Carregando…</p>
+          <p className="py-6 text-center text-sm text-muted">{tr("Carregando…")}</p>
         ) : conns.length === 0 && !adding ? (
-          <p className="py-8 text-center text-sm text-muted">Nenhuma conexão de canal ainda.</p>
+          <p className="py-8 text-center text-sm text-muted">{tr("Nenhuma conexão de canal ainda.")}</p>
         ) : (
           conns.map((c) => (
             <div key={c.id} className="rounded-xl border border-border bg-surface">
@@ -166,51 +167,51 @@ export default function SlackChannelPanel({ onBack }: { onBack: () => void }) {
                     <p className="truncate text-xs text-muted">{c.team} · {c.threads} conversa(s){c.state?.last_error ? ` · erro: ${c.state.last_error}` : ""}</p>
                   </div>
                 </button>
-                <button onClick={() => test(c)} title="Enviar teste" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Send size={14} /></button>
+                <button onClick={() => test(c)} title={tr("Enviar teste")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Send size={14} /></button>
                 <Toggle on={c.enabled} onClick={() => toggle(c)} />
-                <button onClick={() => remove(c)} title="Remover" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-red-400"><Trash2 size={14} /></button>
+                <button onClick={() => remove(c)} title={tr("Remover")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-red-400"><Trash2 size={14} /></button>
               </div>
 
               {openId === c.id && (
                 <div className="space-y-3 border-t border-border p-3">
-                  <div className="text-xs text-muted">Modelo
+                  <div className="text-xs text-muted">{tr("Modelo")}
                     <ModelField models={extModels} custom={models} includeCustom value={joinModel(c)} onChange={(v) => patch(c.id, splitModel(v))} className="mt-1" />
                   </div>
-                  <div className="text-xs text-muted">Memória
+                  <div className="text-xs text-muted">{tr("Memória")}
                     <Select value={c.memory} onChange={(e) => patch(c.id, { memory: e.target.value as "local" | "global" })} className={inputCls}>
-                      <option value="local">Local (isolada por conversa)</option>
-                      <option value="global">Global (memória do modelo)</option>
+                      <option value="local">{tr("Local (isolada por conversa)")}</option>
+                      <option value="global">{tr("Global (memória do modelo)")}</option>
                     </Select>
                   </div>
-                  <div className="text-xs text-muted">Contexto (mensagens que a IA enxerga)
+                  <div className="text-xs text-muted">{tr("Contexto (mensagens que a IA enxerga)")}
                     <ContextWindowSelect value={c.context_window} onChange={(v) => patch(c.id, { context_window: v })} className={inputCls} />
                   </div>
-                  <label className="block text-xs text-muted">Prompt adicional desta conexão
-                    <textarea defaultValue={c.system_prompt} onBlur={(e) => e.target.value !== c.system_prompt && patch(c.id, { system_prompt: e.target.value })} rows={2} placeholder="Ex.: responda curto e informal" className={inputCls} />
+                  <label className="block text-xs text-muted">{tr("Prompt adicional desta conexão")}
+                    <textarea defaultValue={c.system_prompt} onBlur={(e) => e.target.value !== c.system_prompt && patch(c.id, { system_prompt: e.target.value })} rows={2} placeholder={tr("Ex.: responda curto e informal")} className={inputCls} />
                   </label>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-ink">Responder em canais</span>
+                    <span className="text-xs text-ink">{tr("Responder em canais")}</span>
                     <Toggle on={c.filters?.channels !== false} onClick={() => patch(c.id, { filters: { ...(c.filters || {}), channels: c.filters?.channels === false } })} />
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-ink">Em canais, só quando @mencionado</span>
+                    <span className="text-xs text-ink">{tr("Em canais, só quando @mencionado")}</span>
                     <Toggle on={c.filters?.mention_only !== false} onClick={() => patch(c.id, { filters: { ...(c.filters || {}), mention_only: c.filters?.mention_only === false } })} />
                   </div>
-                  <label className="block text-xs text-muted">Agrupar mensagens seguidas
+                  <label className="block text-xs text-muted">{tr("Agrupar mensagens seguidas")}
                     <Select value={c.debounce_seconds ?? 0} onChange={(e) => patch(c.id, { debounce_seconds: Number(e.target.value) })} className={inputCls}>
-                      <option value={0}>Desligado (responde cada mensagem)</option>
-                      <option value={3}>Esperar 3s de silêncio</option>
-                      <option value={5}>Esperar 5s de silêncio</option>
-                      <option value={8}>Esperar 8s de silêncio</option>
+                      <option value={0}>{tr("Desligado (responde cada mensagem)")}</option>
+                      <option value={3}>{tr("Esperar 3s de silêncio")}</option>
+                      <option value={5}>{tr("Esperar 5s de silêncio")}</option>
+                      <option value={8}>{tr("Esperar 8s de silêncio")}</option>
                     </Select>
                   </label>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs text-ink">Modo humanizador (atraso + quebra)</span>
+                    <span className="text-xs text-ink">{tr("Modo humanizador (atraso + quebra)")}</span>
                     <Toggle on={!!c.humanize?.enabled} onClick={() => patch(c.id, { humanize: { ...(c.humanize || {}), enabled: !c.humanize?.enabled } })} />
                   </div>
                   {!!c.humanize?.enabled && (
                     <div className="flex items-center justify-between pl-1">
-                      <span className="text-xs text-muted">Quebrar em várias mensagens</span>
+                      <span className="text-xs text-muted">{tr("Quebrar em várias mensagens")}</span>
                       <Toggle on={!!c.humanize?.split} onClick={() => patch(c.id, { humanize: { ...(c.humanize || {}), split: !c.humanize?.split } })} />
                     </div>
                   )}

@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Cpu, Link2, Search } from "lucide-react";
 import type { Model, ModelConfig } from "@/lib/types";
 import { AnchoredMenu, dismissKeyboard, finePointer } from "./ui";
+import { tr } from "@/lib/i18n";
 
 interface Row {
   key: string; // id externo, ou "custom:<id>"
@@ -24,7 +25,7 @@ export default function ModelField({
   custom = [],
   value,
   onChange,
-  placeholder = "Selecionar modelo",
+  placeholder = tr("Selecionar modelo"),
   includeCustom = false,
   className = "",
 }: {
@@ -65,8 +66,8 @@ export default function ModelField({
   }, [value, models, custom]);
 
   const tabs: [typeof tab, string][] = includeCustom
-    ? [["all", "Tudo"], ["providers", "Providers"], ["custom", "Custom"], ["local", "Local"]]
-    : [["all", "Tudo"], ["providers", "Providers"], ["local", "Local"]];
+    ? [["all", tr("Tudo")], ["providers", tr("Providers")], ["custom", tr("Custom")], ["local", "Local"]]
+    : [["all", tr("Tudo")], ["providers", tr("Providers")], ["local", "Local"]];
 
   return (
     <>
@@ -93,7 +94,7 @@ export default function ModelField({
               autoFocus={finePointer()}
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Pesquisar um modelo"
+              placeholder={tr("Pesquisar um modelo")}
               className="w-full bg-transparent text-sm text-ink outline-none placeholder:text-muted"
             />
           </div>
@@ -143,7 +144,7 @@ export default function ModelField({
             ))}
             {rows.length === 0 && (
               <p className="px-3 py-6 text-center text-sm text-muted">
-                {tab === "local" ? "Nenhum modelo local. Configure o Ollama em Conexões." : "Nenhum modelo."}
+                {tab === "local" ? tr("Nenhum modelo local. Configure o Ollama em Conexões.") : tr("Nenhum modelo.")}
               </p>
             )}
           </div>

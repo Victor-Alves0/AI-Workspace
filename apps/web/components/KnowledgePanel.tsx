@@ -13,6 +13,7 @@ import { AnchoredMenu, MenuDivider, MenuItem, TagInput } from "./ui";
 import NoteEditor from "./NoteEditor";
 import BrainGraph from "./BrainGraph";
 import EnrichModal from "./EnrichModal";
+import { tr } from "@/lib/i18n";
 
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -48,20 +49,20 @@ function DocIcon({ d, size = 18 }: { d: KnowledgeDoc; size?: number }) {
 
 // filtro por tipo dentro de uma base
 const TYPE_FILTERS: { key: "all" | "folder" | DocKind; label: string }[] = [
-  { key: "all", label: "Tudo" },
-  { key: "folder", label: "Pastas" },
+  { key: "all", label: tr("Tudo") },
+  { key: "folder", label: tr("Pastas") },
   { key: "pdf", label: "PDF" },
-  { key: "text", label: "Texto" },
-  { key: "image", label: "Imagens" },
-  { key: "video", label: "Vídeos" },
-  { key: "other", label: "Outros" },
+  { key: "text", label: tr("Texto") },
+  { key: "image", label: tr("Imagens") },
+  { key: "video", label: tr("Vídeos") },
+  { key: "other", label: tr("Outros") },
 ];
 
 const STATUS: Record<KnowledgeDoc["status"], { label: string; cls: string }> = {
-  pending: { label: "Na fila", cls: "text-muted" },
-  indexing: { label: "Indexando", cls: "text-amber-500" },
-  ready: { label: "Pronto", cls: "text-emerald-500" },
-  error: { label: "Erro", cls: "text-rose-500" },
+  pending: { label: tr("Na fila"), cls: "text-muted" },
+  indexing: { label: tr("Indexando"), cls: "text-amber-500" },
+  ready: { label: tr("Pronto"), cls: "text-emerald-500" },
+  error: { label: tr("Erro"), cls: "text-rose-500" },
 };
 
 function StatusBadge({ d }: { d: KnowledgeDoc }) {
@@ -95,7 +96,7 @@ function MoveMenu({
   const list = [...folders].filter((f) => f.id !== excludeId);
   return (
     <AnchoredMenu anchorRef={anchorRef} onClose={onClose} align="right" className="max-h-72 overflow-y-auto">
-      <MenuItem icon={<Home size={14} />} onClick={() => { onMove(null); onClose(); }}>Raiz da base</MenuItem>
+      <MenuItem icon={<Home size={14} />} onClick={() => { onMove(null); onClose(); }}>{tr("Raiz da base")}</MenuItem>
       {list.length > 0 && <MenuDivider />}
       {list.map((f) => (
         <button
@@ -193,9 +194,9 @@ export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
   }
   async function deleteBase(b: KnowledgeBase) {
     if (!(await confirm({
-      title: isBrain ? "Excluir cérebro?" : "Excluir base?",
-      body: <span className="text-muted">“{b.name}” e {isBrain ? "todas as suas notas serão removidas" : "todos os seus documentos serão removidos"}.</span>,
-      confirmLabel: "Excluir", danger: true,
+      title: isBrain ? tr("Excluir cérebro?") : tr("Excluir base?"),
+      body: <span className="text-muted">“{b.name}” e {isBrain ? tr("todas as suas notas serão removidas") : tr("todos os seus documentos serão removidos")}.</span>,
+      confirmLabel: tr("Excluir"), danger: true,
     }))) return;
     try { await api.del(`/knowledge/bases/${b.id}`); } catch {}
     if (sel === b.id) setSel(null);
@@ -314,9 +315,9 @@ export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
   }
   async function deleteFolder(f: KnowledgeFolder) {
     if (!(await confirm({
-      title: "Excluir pasta?",
-      body: <span className="text-muted">“{f.name}” será removida. Os arquivos e subpastas sobem para o nível acima.</span>,
-      confirmLabel: "Excluir", danger: true,
+      title: tr("Excluir pasta?"),
+      body: <span className="text-muted">“{f.name}{tr("” será removida. Os arquivos e subpastas sobem para o nível acima.")}</span>,
+      confirmLabel: tr("Excluir"), danger: true,
     }))) return;
     try { await api.del(`/knowledge/folders/${f.id}`); } catch {}
     if (sel) { loadFolders(sel); loadDocs(sel); }
@@ -401,7 +402,7 @@ export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
   const current = bases.find((b) => b.id === sel);
 
   // botão de criar na linha do título: só na lista de bases (dentro de uma base, não)
-  const newLabel = isBrain ? "Novo cérebro" : "Nova base";
+  const newLabel = isBrain ? tr("Novo cérebro") : tr("Nova base");
   useEffect(() => {
     if (!setHeaderAction) return;
     setHeaderAction(current || creating ? null : (
@@ -444,7 +445,7 @@ export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
         {/* breadcrumb + tags da base */}
         <div className="flex flex-wrap items-center gap-2">
           <button onClick={() => setSel(null)} className="flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-ink">
-            <ArrowLeft size={16} /> {isBrain ? "Cérebros" : "Bases"}
+            <ArrowLeft size={16} /> {isBrain ? tr("Cérebros") : tr("Bases")}
           </button>
           <span className="text-muted">/</span>
           <button onClick={() => setCwd(null)} className="text-sm font-semibold text-ink transition-colors hover:text-accent-hover">{current.name}</button>
@@ -460,13 +461,13 @@ export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
                 onClick={() => setBrainView("files")}
                 className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs transition-colors ${brainView === "files" ? "bg-surface2 text-ink" : "text-muted hover:text-ink"}`}
               >
-                <FileText size={12} /> Notas
+                <FileText size={12} />  {tr("Notas")}
               </button>
               <button
                 onClick={() => setBrainView("graph")}
                 className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs transition-colors ${brainView === "graph" ? "bg-surface2 text-ink" : "text-muted hover:text-ink"}`}
               >
-                <Waypoints size={12} /> Grafo
+                <Waypoints size={12} />  {tr("Grafo")}
               </button>
             </div>
           )}
@@ -477,27 +478,27 @@ export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
         ) : (
         <>
         <div className="rounded-xl border border-border bg-surface p-3">
-          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted"><Tag size={12} /> {isBrain ? "Etiquetas do cérebro" : "Etiquetas da base"}</p>
+          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted"><Tag size={12} /> {isBrain ? tr("Etiquetas do cérebro") : tr("Etiquetas da base")}</p>
           <TagInput tags={current.tags || []} onChange={saveBaseTags} placeholder={isBrain ? "Ex.: projetos, estudos…" : "Ex.: manuais, fiscal…"} />
         </div>
 
         {/* barra de ações */}
         <div className="flex flex-wrap items-center gap-2">
           <button onClick={() => setNewFolder(true)} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-ink transition-colors hover:bg-hover">
-            <FolderPlus size={15} /> Nova pasta
+            <FolderPlus size={15} />  {tr("Nova pasta")}
           </button>
           <button onClick={() => setEditor({ filename: isBrain ? "" : "novo.txt", content: "" })} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-ink transition-colors hover:bg-hover">
-            <FilePlus2 size={15} /> {isBrain ? "Nova nota" : "Novo arquivo de texto"}
+            <FilePlus2 size={15} /> {isBrain ? tr("Nova nota") : tr("Novo arquivo de texto")}
           </button>
           <button onClick={() => fileRef.current?.click()} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-ink transition-colors hover:bg-hover">
-            <Upload size={15} /> Enviar arquivos
+            <Upload size={15} />  {tr("Enviar arquivos")}
           </button>
-          <button onClick={() => folderRef.current?.click()} title="Enviar uma pasta inteira (mantém a estrutura)" className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-ink transition-colors hover:bg-hover">
-            <FolderInput size={15} /> Enviar pasta
+          <button onClick={() => folderRef.current?.click()} title={tr("Enviar uma pasta inteira (mantém a estrutura)")} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-ink transition-colors hover:bg-hover">
+            <FolderInput size={15} />  {tr("Enviar pasta")}
           </button>
           {!isBrain && (
-            <button onClick={() => setEnrichOpen(true)} title="Gerar tags e descrições com IA" className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-accent-hover transition-colors hover:bg-hover">
-              <Sparkles size={15} /> Enriquecer
+            <button onClick={() => setEnrichOpen(true)} title={tr("Gerar tags e descrições com IA")} className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm text-accent-hover transition-colors hover:bg-hover">
+              <Sparkles size={15} />  {tr("Enriquecer")}
             </button>
           )}
           {uploading && <span className="flex items-center gap-1.5 text-xs text-amber-500"><Loader2 size={12} className="animate-spin" /> enviando…</span>}
@@ -514,10 +515,10 @@ export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
             <input
               autoFocus value={folderName} onChange={(e) => setFolderName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") createFolder(); if (e.key === "Escape") { setNewFolder(false); setFolderName(""); } }}
-              placeholder="Nome da pasta" className="flex-1 bg-transparent px-1 text-sm text-ink outline-none placeholder:text-muted"
+              placeholder={tr("Nome da pasta")} className="flex-1 bg-transparent px-1 text-sm text-ink outline-none placeholder:text-muted"
             />
-            <button onClick={createFolder} className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover">Criar</button>
-            <button onClick={() => { setNewFolder(false); setFolderName(""); }} className="rounded-lg px-2 py-1.5 text-sm text-muted hover:text-ink">Cancelar</button>
+            <button onClick={createFolder} className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover">{tr("Criar")}</button>
+            <button onClick={() => { setNewFolder(false); setFolderName(""); }} className="rounded-lg px-2 py-1.5 text-sm text-muted hover:text-ink">{tr("Cancelar")}</button>
           </div>
         )}
 
@@ -527,7 +528,7 @@ export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
             <Search size={15} className="shrink-0 text-muted" />
             <input
               value={query} onChange={(e) => setQuery(e.target.value)}
-              placeholder={isBrain ? "Buscar notas nesta base…" : "Buscar arquivos e pastas nesta base…"}
+              placeholder={isBrain ? tr("Buscar notas nesta base…") : tr("Buscar arquivos e pastas nesta base…")}
               className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
             />
             {query && <button onClick={() => setQuery("")} className="shrink-0 text-muted hover:text-ink"><X size={14} /></button>}
@@ -563,7 +564,7 @@ export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
         >
           {shownFolders.length === 0 && shownDocs.length === 0 ? (
             <p className="py-14 text-center text-sm text-muted">
-              {searching ? "Nenhum resultado para esta busca." : isBrain ? "Nenhuma nota aqui. Crie uma nota — ou peça à IA para anotar algo no cérebro." : "Pasta vazia. Arraste arquivos ou uma pasta inteira aqui, crie uma subpasta ou um arquivo de texto."}
+              {searching ? tr("Nenhum resultado para esta busca.") : isBrain ? tr("Nenhuma nota aqui. Crie uma nota — ou peça à IA para anotar algo no cérebro.") : tr("Pasta vazia. Arraste arquivos ou uma pasta inteira aqui, crie uma subpasta ou um arquivo de texto.")}
             </p>
           ) : (
             <ul className="flex flex-col gap-1 p-2">
@@ -583,9 +584,9 @@ export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
                         <span className="truncate text-sm text-ink">{f.name}</span>
                       </button>
                       <div className="flex items-center gap-1 touch-reveal opacity-0 transition-opacity group-hover:opacity-100">
-                        <button ref={moveFor?.id === f.id ? moveAnchor : undefined} onClick={() => setMoveFor({ kind: "folder", id: f.id })} title="Mover" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><FolderInput size={15} /></button>
-                        <button onClick={() => { setRenaming(f.id); setRenameVal(f.name); }} title="Renomear" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Pencil size={15} /></button>
-                        <button onClick={() => deleteFolder(f)} title="Excluir" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-rose-500"><Trash2 size={15} /></button>
+                        <button ref={moveFor?.id === f.id ? moveAnchor : undefined} onClick={() => setMoveFor({ kind: "folder", id: f.id })} title={tr("Mover")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><FolderInput size={15} /></button>
+                        <button onClick={() => { setRenaming(f.id); setRenameVal(f.name); }} title={tr("Renomear")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Pencil size={15} /></button>
+                        <button onClick={() => deleteFolder(f)} title={tr("Excluir")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-rose-500"><Trash2 size={15} /></button>
                       </div>
                     </>
                   )}
@@ -609,17 +610,17 @@ export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
                   </div>
                   <div className="flex items-center gap-1 touch-reveal opacity-0 transition-opacity group-hover:opacity-100">
                     {!(isBrain && isTextDoc(d)) && (
-                      <button onClick={() => setViewDoc(d)} title="Visualizar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Eye size={15} /></button>
+                      <button onClick={() => setViewDoc(d)} title={tr("Visualizar")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Eye size={15} /></button>
                     )}
                     {isTextDoc(d) && (
-                      <button onClick={() => openTextEditor(d)} title="Editar texto" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Pencil size={15} /></button>
+                      <button onClick={() => openTextEditor(d)} title={tr("Editar texto")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Pencil size={15} /></button>
                     )}
-                    <button onClick={() => setMetaDoc(d)} title="Metadados" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Tag size={15} /></button>
-                    <button ref={moveFor?.id === d.id ? moveAnchor : undefined} onClick={() => setMoveFor({ kind: "doc", id: d.id })} title="Mover" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><FolderInput size={15} /></button>
+                    <button onClick={() => setMetaDoc(d)} title={tr("Metadados")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Tag size={15} /></button>
+                    <button ref={moveFor?.id === d.id ? moveAnchor : undefined} onClick={() => setMoveFor({ kind: "doc", id: d.id })} title={tr("Mover")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><FolderInput size={15} /></button>
                     {d.status === "error" && (
-                      <button onClick={() => reindexDoc(d)} title="Reindexar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><RotateCcw size={15} /></button>
+                      <button onClick={() => reindexDoc(d)} title={tr("Reindexar")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><RotateCcw size={15} /></button>
                     )}
-                    <button onClick={() => deleteDoc(d)} title="Excluir" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-rose-500"><Trash2 size={15} /></button>
+                    <button onClick={() => deleteDoc(d)} title={tr("Excluir")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-rose-500"><Trash2 size={15} /></button>
                   </div>
                 </li>
               ))}
@@ -694,11 +695,11 @@ export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
           <input
             autoFocus value={newName} onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") createBase(); if (e.key === "Escape") { setCreating(false); setNewName(""); } }}
-            placeholder={isBrain ? "Nome do cérebro (ex.: Projetos, Estudos…)" : "Nome da base (ex.: Manuais, Contratos…)"}
+            placeholder={isBrain ? tr("Nome do cérebro (ex.: Projetos, Estudos…)") : tr("Nome da base (ex.: Manuais, Contratos…)")}
             className="flex-1 bg-transparent px-1.5 text-sm text-ink outline-none placeholder:text-muted"
           />
-          <button onClick={createBase} className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover">Criar</button>
-          <button onClick={() => { setCreating(false); setNewName(""); }} className="rounded-lg px-2 py-1.5 text-sm text-muted hover:text-ink">Cancelar</button>
+          <button onClick={createBase} className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover">{tr("Criar")}</button>
+          <button onClick={() => { setCreating(false); setNewName(""); }} className="rounded-lg px-2 py-1.5 text-sm text-muted hover:text-ink">{tr("Cancelar")}</button>
         </div>
       )}
 
@@ -707,7 +708,7 @@ export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
           <Search size={15} className="shrink-0 text-muted" />
           <input
             value={baseQuery} onChange={(e) => setBaseQuery(e.target.value)}
-            placeholder={isBrain ? "Buscar cérebros…" : "Buscar bases de conhecimento…"}
+            placeholder={isBrain ? tr("Buscar cérebros…") : tr("Buscar bases de conhecimento…")}
             className="min-w-0 flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
           />
           {baseQuery && <button onClick={() => setBaseQuery("")} className="shrink-0 text-muted hover:text-ink"><X size={14} /></button>}
@@ -717,15 +718,15 @@ export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
       {bases.length === 0 && !creating ? (
         <div className="flex flex-col items-center gap-2 py-12 text-center">
           {isBrain ? <Brain size={26} className="text-muted" /> : <BookOpen size={26} className="text-muted" />}
-          <p className="text-sm text-ink">{isBrain ? "Nenhum cérebro ainda" : "Nenhuma base ainda"}</p>
+          <p className="text-sm text-ink">{isBrain ? tr("Nenhum cérebro ainda") : tr("Nenhuma base ainda")}</p>
           <p className="max-w-sm text-xs text-muted">
             {isBrain
-              ? "Crie um cérebro e acople-o a um modelo: a IA passa a guardar e ligar o que aprende em notas [[interligadas]]."
-              : "Crie uma base, suba seus documentos e a IA poderá consultá-los nas conversas (RAG)."}
+              ? tr("Crie um cérebro e acople-o a um modelo: a IA passa a guardar e ligar o que aprende em notas [[interligadas]].")
+              : tr("Crie uma base, suba seus documentos e a IA poderá consultá-los nas conversas (RAG).")}
           </p>
         </div>
       ) : shownBases.length === 0 ? (
-        <p className="py-10 text-center text-sm text-muted">Nenhum resultado para “{baseQuery}”.</p>
+        <p className="py-10 text-center text-sm text-muted">{tr("Nenhum resultado para “")}{baseQuery}”.</p>
       ) : (
         <ul className="grid gap-2 sm:grid-cols-2">
           {shownBases.map((b) => (
@@ -759,10 +760,10 @@ export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
               )}
               {renamingBase !== b.id && (
                 <>
-                  <button onClick={() => { setRenamingBase(b.id); setBaseRenameVal(b.name); }} title="Renomear" className="rounded-lg p-1.5 text-muted touch-reveal opacity-0 transition-all hover:bg-hover hover:text-ink group-hover:opacity-100">
+                  <button onClick={() => { setRenamingBase(b.id); setBaseRenameVal(b.name); }} title={tr("Renomear")} className="rounded-lg p-1.5 text-muted touch-reveal opacity-0 transition-all hover:bg-hover hover:text-ink group-hover:opacity-100">
                     <Pencil size={15} />
                   </button>
-                  <button onClick={() => deleteBase(b)} title="Excluir base" className="rounded-lg p-1.5 text-muted touch-reveal opacity-0 transition-all hover:bg-hover hover:text-rose-500 group-hover:opacity-100">
+                  <button onClick={() => deleteBase(b)} title={tr("Excluir base")} className="rounded-lg p-1.5 text-muted touch-reveal opacity-0 transition-all hover:bg-hover hover:text-rose-500 group-hover:opacity-100">
                     <Trash2 size={15} />
                   </button>
                 </>
@@ -803,11 +804,11 @@ function TextEditorModal({
         </div>
         <textarea
           autoFocus value={content} onChange={(e) => onChange({ content: e.target.value })}
-          placeholder="Escreva o conteúdo do documento…"
+          placeholder={tr("Escreva o conteúdo do documento…")}
           className="min-h-[300px] flex-1 resize-none bg-transparent px-4 py-3 font-mono text-sm text-ink outline-none placeholder:text-muted"
         />
         <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
-          <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-ink">Cancelar</button>
+          <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-ink">{tr("Cancelar")}</button>
           <button onClick={onSave} disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50">
             {saving && <Loader2 size={14} className="animate-spin" />} Salvar e indexar
           </button>
@@ -862,7 +863,7 @@ function DocViewerModal({ doc, onClose }: { doc: KnowledgeDoc; onClose: () => vo
           <DocIcon d={doc} size={16} />
           <span className="flex-1 truncate text-sm font-semibold text-ink">{doc.meta?.title || doc.filename}</span>
           {url && (
-            <a href={url} download={doc.filename} target="_blank" rel="noreferrer noopener" title="Baixar" className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><Download size={16} /></a>
+            <a href={url} download={doc.filename} target="_blank" rel="noreferrer noopener" title={tr("Baixar")} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><Download size={16} /></a>
           )}
           <button onClick={onClose} className="rounded-lg p-1 text-muted hover:bg-hover hover:text-ink"><X size={16} /></button>
         </div>
@@ -885,8 +886,8 @@ function DocViewerModal({ doc, onClose }: { doc: KnowledgeDoc; onClose: () => vo
             <Centered>
               <div className="flex flex-col items-center gap-3 text-center text-sm text-muted">
                 <FileText size={28} />
-                <p>Sem pré-visualização para este tipo de arquivo.</p>
-                {url && <a href={url} download={doc.filename} target="_blank" rel="noreferrer noopener" className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover"><Download size={15} /> Baixar</a>}
+                <p>{tr("Sem pré-visualização para este tipo de arquivo.")}</p>
+                {url && <a href={url} download={doc.filename} target="_blank" rel="noreferrer noopener" className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover"><Download size={15} />  {tr("Baixar")}</a>}
               </div>
             </Centered>
           )}
@@ -933,25 +934,25 @@ function MetaModal({
             <video src={mediaUrl} controls preload="metadata" className="max-h-56 w-full rounded-lg border border-border" />
           )}
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-muted">Título</span>
-            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título descritivo (opcional)"
+            <span className="text-xs font-medium text-muted">{tr("Título")}</span>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={tr("Título descritivo (opcional)")}
               className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent/50 placeholder:text-muted" />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-muted">Descrição</span>
-            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder="Do que trata este documento (opcional)"
+            <span className="text-xs font-medium text-muted">{tr("Descrição")}</span>
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder={tr("Do que trata este documento (opcional)")}
               className="resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none focus:border-accent/50 placeholder:text-muted" />
           </label>
           <div className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-muted">Etiquetas</span>
+            <span className="text-xs font-medium text-muted">{tr("Etiquetas")}</span>
             <TagInput tags={tags} onChange={setTags} />
           </div>
-          <p className="text-[11px] text-muted">Título e etiquetas são incluídos no índice para a IA encontrar melhor. Salvar reindexa o documento.</p>
+          <p className="text-[11px] text-muted">{tr("Título e etiquetas são incluídos no índice para a IA encontrar melhor. Salvar reindexa o documento.")}</p>
         </div>
         <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
-          <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-ink">Cancelar</button>
+          <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-ink">{tr("Cancelar")}</button>
           <button onClick={() => onSave({ title, description, tags })} disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50">
-            {saving && <Loader2 size={14} className="animate-spin" />} Salvar
+            {saving && <Loader2 size={14} className="animate-spin" />}  {tr("Salvar")}
           </button>
         </div>
       </div>

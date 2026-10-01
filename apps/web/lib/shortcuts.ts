@@ -1,3 +1,4 @@
+import { tr } from "@/lib/i18n";
 // Atalhos de teclado do sistema — registro central de ações + helpers de captura
 // e exibição. Os bindings padrão podem ser personalizados pelo usuário (salvos em
 // profile.shortcuts) na aba Configurações → Atalhos.
@@ -9,26 +10,26 @@ export type ShortcutGroup = { title: string; actions: ShortcutAction[] };
 
 export const SHORTCUT_GROUPS: ShortcutGroup[] = [
   {
-    title: "Navegação",
+    title: tr("Navegação"),
     actions: [
-      { id: "command_palette", label: "Paleta de comandos", default: "mod+k" },
-      { id: "new_chat", label: "Novo chat", default: "mod+shift+o" },
-      { id: "toggle_sidebar", label: "Mostrar/ocultar barra lateral", default: "mod+b" },
-      { id: "toggle_controls", label: "Mostrar/ocultar painel de controles", default: "mod+j" },
-      { id: "workspace", label: "Abrir Espaço de Trabalho", default: "mod+shift+e" },
-      { id: "automations", label: "Abrir Automações", default: "mod+shift+u" },
-      { id: "settings", label: "Abrir Configurações", default: "mod+," },
-      { id: "archived", label: "Chats arquivados", default: "mod+shift+a" },
+      { id: "command_palette", label: tr("Paleta de comandos"), default: "mod+k" },
+      { id: "new_chat", label: tr("Novo chat"), default: "mod+shift+o" },
+      { id: "toggle_sidebar", label: tr("Mostrar/ocultar barra lateral"), default: "mod+b" },
+      { id: "toggle_controls", label: tr("Mostrar/ocultar painel de controles"), default: "mod+j" },
+      { id: "workspace", label: tr("Abrir Espaço de Trabalho"), default: "mod+shift+e" },
+      { id: "automations", label: tr("Abrir Automações"), default: "mod+shift+u" },
+      { id: "settings", label: tr("Abrir Configurações"), default: "mod+," },
+      { id: "archived", label: tr("Chats arquivados"), default: "mod+shift+a" },
     ],
   },
   {
-    title: "Chat",
+    title: tr("Chat"),
     actions: [
-      { id: "focus_input", label: "Focar no campo de mensagem", default: "mod+/" },
+      { id: "focus_input", label: tr("Focar no campo de mensagem"), default: "mod+/" },
       { id: "dictate", label: "Ditar (microfone)", default: "mod+shift+m" },
-      { id: "voice_mode", label: "Modo voz (assistente)", default: "mod+shift+v" },
-      { id: "compact", label: "Compactar contexto", default: "mod+shift+k" },
-      { id: "context_graph", label: "Grafo de contexto", default: "mod+shift+g" },
+      { id: "voice_mode", label: tr("Modo voz (assistente)"), default: "mod+shift+v" },
+      { id: "compact", label: tr("Compactar contexto"), default: "mod+shift+k" },
+      { id: "context_graph", label: tr("Grafo de contexto"), default: "mod+shift+g" },
     ],
   },
 ];
@@ -72,7 +73,7 @@ const SPECIAL: Record<string, string> = {
   mod: IS_MAC ? "⌘" : "Ctrl",
   shift: IS_MAC ? "⇧" : "Shift",
   alt: IS_MAC ? "⌥" : "Alt",
-  space: "Espaço",
+  space: tr("Espaço"),
   escape: "Esc",
   arrowup: "↑", arrowdown: "↓", arrowleft: "←", arrowright: "→",
   enter: "Enter", backspace: "⌫", delete: "Del", tab: "Tab",

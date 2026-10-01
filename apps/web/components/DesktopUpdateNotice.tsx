@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Download, Loader2, RefreshCw } from "lucide-react";
 import { checkDesktopUpdate, installDesktopUpdate, isDesktop, openExternal } from "@/lib/desktop";
+import { tr } from "@/lib/i18n";
 
 /** Aviso de nova versão em Configurações → Sobre.
  *
@@ -47,23 +48,23 @@ export default function DesktopUpdateNotice({
             className="inline-flex items-center gap-1.5 rounded-full bg-accent px-3.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60"
           >
             {busy ? <Loader2 size={13} className="animate-spin" /> : <RefreshCw size={13} />}
-            {busy ? "Atualizando…" : `Atualizar para ${version ?? "a nova versão"}`}
+            {busy ? tr("Atualizando…") : tr("Atualizar para {0}", { "0": version ?? "a nova versão" })}
           </button>
         )}
         <button
           onClick={() => openExternal(releaseUrl)}
           className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink"
         >
-          <Download size={13} /> {canAutoUpdate ? "Baixar manualmente" : "Baixar instalador"}
+          <Download size={13} /> {canAutoUpdate ? tr("Baixar manualmente") : tr("Baixar instalador")}
         </button>
       </div>
       {isDesktop() && !canAutoUpdate && (
         <p className="text-xs text-muted">
-          Rode o instalador por cima da instalação atual — ele atualiza no lugar e mantém
-          seus dados.
+          
+          {tr("Rode o instalador por cima da instalação atual — ele atualiza no lugar e mantém seus dados.")}
         </p>
       )}
-      {err && <p className="text-xs text-red-400">Não consegui atualizar sozinho ({err}). Use “Baixar”.</p>}
+      {err && <p className="text-xs text-red-400">{tr("Não consegui atualizar sozinho (")}{err}). Use “Baixar”.</p>}
     </div>
   );
 }

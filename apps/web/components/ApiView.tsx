@@ -17,25 +17,26 @@ import { api, API_URL } from "@/lib/api";
 import { copyText } from "@/lib/clipboard";
 import { Toggle, Select } from "@/components/ui";
 import type { ApiKey, ApiKeyMeta, ApiKeyRequest } from "@/lib/types";
+import { dateLocale, tr } from "@/lib/i18n";
 
 const SCOPE_LABELS: Record<string, string> = {
-  chat: "Conversar (usar modelos)",
-  "models:read": "Listar modelos",
-  "memory:read": "Ler memória",
-  "memory:write": "Gravar memória",
-  "files:read": "Listar arquivos",
-  "files:write": "Enviar e apagar arquivos",
-  "usage:read": "Ver consumo",
-  actions: "Agir sem pedir aprovação (enviar, criar, apagar)",
+  chat: tr("Conversar (usar modelos)"),
+  "models:read": tr("Listar modelos"),
+  "memory:read": tr("Ler memória"),
+  "memory:write": tr("Gravar memória"),
+  "files:read": tr("Listar arquivos"),
+  "files:write": tr("Enviar e apagar arquivos"),
+  "usage:read": tr("Ver consumo"),
+  actions: tr("Agir sem pedir aprovação (enviar, criar, apagar)"),
 };
 
 const MEMORY_LABELS: Record<string, string> = {
-  none: "Sem memória",
-  request: "Temporária (só na requisição)",
-  persistent: "Persistente (memória do app)",
-  shared: "Compartilhada entre aplicações",
+  none: tr("Sem memória"),
+  request: tr("Temporária (só na requisição)"),
+  persistent: tr("Persistente (memória do app)"),
+  shared: tr("Compartilhada entre aplicações"),
   key: "Isolada por chave",
-  end_user: "Isolada por usuário final",
+  end_user: tr("Isolada por usuário final"),
 };
 
 const STATE_STYLE: Record<string, string> = {
@@ -46,16 +47,16 @@ const STATE_STYLE: Record<string, string> = {
 };
 
 const STATE_LABEL: Record<string, string> = {
-  active: "Ativa", disabled: "Desativada", revoked: "Revogada", expired: "Expirada",
+  active: tr("Ativa"), disabled: tr("Desativada"), revoked: tr("Revogada"), expired: tr("Expirada"),
 };
 
 const LIMIT_FIELDS: { key: string; label: string; hint: string }[] = [
-  { key: "rpm", label: "Requisições por minuto", hint: "0 = sem limite" },
-  { key: "rpd", label: "Requisições por dia", hint: "0 = sem limite" },
-  { key: "monthly_requests", label: "Requisições por mês", hint: "0 = sem limite" },
-  { key: "tokens_in", label: "Tokens de entrada / mês", hint: "0 = sem limite" },
-  { key: "tokens_out", label: "Tokens de saída / mês", hint: "0 = sem limite" },
-  { key: "concurrency", label: "Requisições simultâneas", hint: "0 = sem limite" },
+  { key: "rpm", label: tr("Requisições por minuto"), hint: tr("0 = sem limite") },
+  { key: "rpd", label: tr("Requisições por dia"), hint: tr("0 = sem limite") },
+  { key: "monthly_requests", label: tr("Requisições por mês"), hint: tr("0 = sem limite") },
+  { key: "tokens_in", label: tr("Tokens de entrada / mês"), hint: tr("0 = sem limite") },
+  { key: "tokens_out", label: tr("Tokens de saída / mês"), hint: tr("0 = sem limite") },
+  { key: "concurrency", label: tr("Requisições simultâneas"), hint: tr("0 = sem limite") },
 ];
 
 const BTN_PRIMARY =
@@ -71,7 +72,7 @@ function fmtUsd(v: number): string {
 
 function fmtDate(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  return new Date(iso).toLocaleString(dateLocale(), { dateStyle: "short", timeStyle: "short" });
 }
 
 function Field({ label, hint, children }: {
@@ -99,7 +100,7 @@ function CopyButton({ text, label = "Copiar" }: { text: string; label?: string }
       className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs text-ink-soft transition-colors hover:bg-hover"
     >
       {done ? <Check size={13} className="text-emerald-500" /> : <Copy size={13} />}
-      {done ? "Copiado" : label}
+      {done ? tr("Copiado") : label}
     </button>
   );
 }
@@ -218,18 +219,18 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
 
   return (
     <div className="space-y-5">
-      <Field label="Nome">
+      <Field label={tr("Nome")}>
         <input
           value={f.name}
           onChange={(e) => set("name", e.target.value)}
-          placeholder="Ex.: App do site, n8n, bot interno"
+          placeholder={tr("Ex.: App do site, n8n, bot interno")}
           className={INPUT}
           autoFocus
         />
       </Field>
 
       <div>
-        <p className="mb-2 text-xs font-medium text-ink-soft">Permissões</p>
+        <p className="mb-2 text-xs font-medium text-ink-soft">{tr("Permissões")}</p>
         <div className="grid gap-1.5 sm:grid-cols-2">
           {(meta?.scopes ?? []).map((s) => (
             <label key={s} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-ink transition-colors hover:bg-hover">
@@ -248,7 +249,7 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
       <div className="h-px bg-border" />
 
       <div>
-        <p className="mb-2 text-xs font-medium text-ink-soft">Modelos</p>
+        <p className="mb-2 text-xs font-medium text-ink-soft">{tr("Modelos")}</p>
         <div className="mb-2 flex gap-2">
           {(["all", "allow"] as const).map((m) => (
             <button
@@ -258,7 +259,7 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
                 f.modelMode === m ? "bg-accent text-white" : "border border-border text-ink-soft hover:bg-hover"
               }`}
             >
-              {m === "all" ? "Todos os modelos" : "Somente os escolhidos"}
+              {m === "all" ? tr("Todos os modelos") : tr("Somente os escolhidos")}
             </button>
           ))}
         </div>
@@ -279,13 +280,13 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
           </div>
         )}
         <div className="mt-2">
-          <Field label="Modelo padrão" hint="Usado quando a requisição não informa 'model'.">
+          <Field label={tr("Modelo padrão")} hint={tr("Usado quando a requisição não informa 'model'.")}>
             <Select
               value={f.defaultModel}
               onChange={(e) => set("defaultModel", e.target.value)}
               className={INPUT}
             >
-              <option value="">Nenhum</option>
+              <option value="">{tr("Nenhum")}</option>
               {(meta?.models ?? []).map((m) => (
                 <option key={m.id} value={m.id}>{m.name}</option>
               ))}
@@ -297,7 +298,7 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
       <div className="h-px bg-border" />
 
       <div>
-        <p className="mb-2 text-xs font-medium text-ink-soft">Limites de uso</p>
+        <p className="mb-2 text-xs font-medium text-ink-soft">{tr("Limites de uso")}</p>
         <div className="grid gap-3 sm:grid-cols-2">
           {LIMIT_FIELDS.map((lf) => (
             <Field key={lf.key} label={lf.label} hint={lf.hint}>
@@ -311,7 +312,7 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
               />
             </Field>
           ))}
-          <Field label="Orçamento mensal (US$)" hint="Ao atingir, a chave é bloqueada até o mês virar.">
+          <Field label={tr("Orçamento mensal (US$)")} hint={tr("Ao atingir, a chave é bloqueada até o mês virar.")}>
             <input
               type="number"
               min={0}
@@ -328,7 +329,7 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
       <div className="h-px bg-border" />
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Memória">
+        <Field label={tr("Memória")}>
           <Select
             value={f.memoryMode}
             onChange={(e) => set("memoryMode", e.target.value)}
@@ -339,7 +340,7 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
             ))}
           </Select>
         </Field>
-        <Field label="Máximo de memórias" hint="0 = sem teto.">
+        <Field label={tr("Máximo de memórias")} hint={tr("0 = sem teto.")}>
           <input
             type="number"
             min={0}
@@ -352,7 +353,7 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="IPs autorizados" hint="Separados por vírgula. Aceita CIDR (10.0.0.0/8). Vazio = qualquer origem.">
+        <Field label={tr("IPs autorizados")} hint={tr("Separados por vírgula. Aceita CIDR (10.0.0.0/8). Vazio = qualquer origem.")}>
           <input
             value={f.ips}
             onChange={(e) => set("ips", e.target.value)}
@@ -361,7 +362,7 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
           />
         </Field>
         {!editing && (
-          <Field label="Expira em (dias)" hint="Vazio = não expira.">
+          <Field label={tr("Expira em (dias)")} hint={tr("Vazio = não expira.")}>
             <input
               type="number"
               min={0}
@@ -377,7 +378,7 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
       <div className="h-px bg-border" />
 
       <div className="space-y-3">
-        <Field label="Webhook" hint="Recebe eventos assinados com HMAC-SHA256.">
+        <Field label={tr("Webhook")} hint={tr("Recebe eventos assinados com HMAC-SHA256.")}>
           <input
             value={f.webhookUrl}
             onChange={(e) => set("webhookUrl", e.target.value)}
@@ -388,8 +389,8 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
         {f.webhookUrl.trim() && (
           <>
             <Field
-              label="Segredo do webhook"
-              hint={editing ? "Vazio mantém o segredo atual." : "Usado para assinar o corpo."}
+              label={tr("Segredo do webhook")}
+              hint={editing ? tr("Vazio mantém o segredo atual.") : tr("Usado para assinar o corpo.")}
             >
               <input
                 value={f.webhookSecret}
@@ -418,7 +419,7 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
       </div>
 
       <div className="flex justify-end gap-2 pt-1">
-        <button onClick={onCancel} className={BTN_GHOST}>Cancelar</button>
+        <button onClick={onCancel} className={BTN_GHOST}>{tr("Cancelar")}</button>
         <button
           disabled={busy || !f.name.trim()}
           onClick={async () => {
@@ -431,7 +432,7 @@ function KeyForm({ meta, initial, editing, onCancel, onSubmit }: {
           }}
           className={BTN_PRIMARY}
         >
-          {editing ? "Salvar" : "Criar chave"}
+          {editing ? tr("Salvar") : tr("Criar chave")}
         </button>
       </div>
     </div>
@@ -510,21 +511,21 @@ console.log(resp.choices[0].message.content);`,
   ];
 
   const endpoints = [
-    ["POST", "/v1/chat/completions", "Conversa. Aceita stream:true e background:true."],
-    ["GET", "/v1/chat/completions/{id}", "Resultado de uma chamada assíncrona."],
-    ["GET", "/v1/models", "Modelos disponíveis para a chave."],
-    ["GET", "/v1/models/{id}", "Detalhes e capacidades de um modelo."],
-    ["GET", "/v1/memories", "Memórias no escopo da chave."],
-    ["POST", "/v1/memories", "Grava uma memória."],
-    ["DELETE", "/v1/memories/{id}", "Apaga uma memória."],
-    ["POST", "/v1/memories/clear", "Limpa o escopo inteiro."],
-    ["GET", "/v1/memories/export", "Exporta a memória."],
-    ["POST", "/v1/memories/import", "Importa memórias."],
-    ["GET", "/v1/files", "Documentos indexados."],
-    ["POST", "/v1/files", "Envia um documento (multipart)."],
-    ["DELETE", "/v1/files/{id}", "Remove um documento."],
-    ["GET", "/v1/usage", "Consumo da chave."],
-    ["GET", "/v1/account", "Limites, consumo e saldo restante."],
+    ["POST", "/v1/chat/completions", tr("Conversa. Aceita stream:true e background:true.")],
+    ["GET", "/v1/chat/completions/{id}", tr("Resultado de uma chamada assíncrona.")],
+    ["GET", "/v1/models", tr("Modelos disponíveis para a chave.")],
+    ["GET", "/v1/models/{id}", tr("Detalhes e capacidades de um modelo.")],
+    ["GET", "/v1/memories", tr("Memórias no escopo da chave.")],
+    ["POST", "/v1/memories", tr("Grava uma memória.")],
+    ["DELETE", "/v1/memories/{id}", tr("Apaga uma memória.")],
+    ["POST", "/v1/memories/clear", tr("Limpa o escopo inteiro.")],
+    ["GET", "/v1/memories/export", tr("Exporta a memória.")],
+    ["POST", "/v1/memories/import", tr("Importa memórias.")],
+    ["GET", "/v1/files", tr("Documentos indexados.")],
+    ["POST", "/v1/files", tr("Envia um documento (multipart).")],
+    ["DELETE", "/v1/files/{id}", tr("Remove um documento.")],
+    ["GET", "/v1/usage", tr("Consumo da chave.")],
+    ["GET", "/v1/account", tr("Limites, consumo e saldo restante.")],
   ];
 
   const [tab, setTab] = useState(0);
@@ -532,14 +533,14 @@ console.log(resp.choices[0].message.content);`,
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-border bg-surface p-4">
-        <p className="text-xs font-medium text-ink-soft">URL base</p>
+        <p className="text-xs font-medium text-ink-soft">{tr("URL base")}</p>
         <div className="mt-1.5 flex items-center gap-2">
           <code className="flex-1 truncate rounded-lg bg-surface2 px-3 py-2 text-sm text-ink">{base}</code>
           <CopyButton text={base} />
         </div>
         <p className="mt-2 text-xs text-muted">
-          Compatível com a API da OpenAI: qualquer SDK oficial funciona trocando só a
-          URL base e a chave.
+          
+          {tr("Compatível com a API da OpenAI: qualquer SDK oficial funciona trocando só a URL base e a chave.")}
         </p>
       </div>
 
@@ -564,7 +565,7 @@ console.log(resp.choices[0].message.content);`,
       </div>
 
       <div>
-        <p className="mb-2 text-xs font-medium text-ink-soft">Endpoints</p>
+        <p className="mb-2 text-xs font-medium text-ink-soft">{tr("Endpoints")}</p>
         <div className="overflow-x-auto rounded-xl border border-border">
           <table className="w-full text-left text-sm">
             <tbody>
@@ -590,7 +591,7 @@ console.log(resp.choices[0].message.content);`,
 function Playground({ meta }: { meta: ApiKeyMeta | null }) {
   const [key, setKey] = useState("");
   const [model, setModel] = useState(meta?.models?.[0]?.id ?? "");
-  const [prompt, setPrompt] = useState("Olá! Quem é você?");
+  const [prompt, setPrompt] = useState(tr("Olá! Quem é você?"));
   const [out, setOut] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -616,7 +617,7 @@ function Playground({ meta }: { meta: ApiKeyMeta | null }) {
 
   return (
     <div className="space-y-4">
-      <Field label="Chave" hint="Cole a chave completa. Ela não é salva.">
+      <Field label={tr("Chave")} hint={tr("Cole a chave completa. Ela não é salva.")}>
         <input
           value={key}
           onChange={(e) => setKey(e.target.value)}
@@ -624,14 +625,14 @@ function Playground({ meta }: { meta: ApiKeyMeta | null }) {
           className={`${INPUT} font-mono`}
         />
       </Field>
-      <Field label="Modelo">
+      <Field label={tr("Modelo")}>
         <Select value={model} onChange={(e) => setModel(e.target.value)} className={INPUT}>
           {(meta?.models ?? []).map((m) => (
             <option key={m.id} value={m.id}>{m.name}</option>
           ))}
         </Select>
       </Field>
-      <Field label="Mensagem">
+      <Field label={tr("Mensagem")}>
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
@@ -640,7 +641,7 @@ function Playground({ meta }: { meta: ApiKeyMeta | null }) {
         />
       </Field>
       <button disabled={busy || !key.trim() || !model} onClick={run} className={BTN_PRIMARY}>
-        <Play size={15} /> {busy ? "Enviando…" : "Enviar"}
+        <Play size={15} /> {busy ? tr("Enviando…") : tr("Enviar")}
       </button>
       {out && (
         <pre className="max-h-80 overflow-auto rounded-xl border border-border bg-surface p-4 text-xs leading-relaxed text-ink-soft">
@@ -683,10 +684,10 @@ function KeyDetail({ apiKey }: { apiKey: ApiKey }) {
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
-          ["Requisições (mês)", String(apiKey.requests_month)],
-          ["Custo (mês)", fmtUsd(apiKey.cost_month)],
-          ["Latência média", `${stats.latency} ms`],
-          ["Erros recentes", String(stats.errors)],
+          [tr("Requisições (mês)"), String(apiKey.requests_month)],
+          [tr("Custo (mês)"), fmtUsd(apiKey.cost_month)],
+          [tr("Latência média"), `${stats.latency} ms`],
+          [tr("Erros recentes"), String(stats.errors)],
         ].map(([label, value]) => (
           <div key={label} className="rounded-xl border border-border bg-surface p-3">
             <p className="text-[11px] text-muted">{label}</p>
@@ -696,27 +697,28 @@ function KeyDetail({ apiKey }: { apiKey: ApiKey }) {
       </div>
 
       <div className="flex items-center justify-between">
-        <p className="text-xs font-medium text-ink-soft">Requisições recentes</p>
+        <p className="text-xs font-medium text-ink-soft">{tr("Requisições recentes")}</p>
         <label className="flex items-center gap-2 text-xs text-ink-soft">
-          Só erros <Toggle on={onlyErrors} onChange={setOnlyErrors} />
+          
+          {tr("Só erros")} <Toggle on={onlyErrors} onChange={setOnlyErrors} />
         </label>
       </div>
 
       {loading ? (
-        <p className="py-6 text-center text-sm text-muted">Carregando…</p>
+        <p className="py-6 text-center text-sm text-muted">{tr("Carregando…")}</p>
       ) : reqs.length === 0 ? (
-        <p className="py-6 text-center text-sm text-muted">Nenhuma requisição registrada.</p>
+        <p className="py-6 text-center text-sm text-muted">{tr("Nenhuma requisição registrada.")}</p>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border">
           <table className="w-full text-left text-xs">
             <thead className="bg-surface2 text-muted">
               <tr>
-                <th className="px-3 py-2 font-medium">Quando</th>
-                <th className="px-3 py-2 font-medium">Endpoint</th>
-                <th className="px-3 py-2 font-medium">Status</th>
-                <th className="px-3 py-2 font-medium">Tokens</th>
-                <th className="px-3 py-2 font-medium">Custo</th>
-                <th className="px-3 py-2 font-medium">Latência</th>
+                <th className="px-3 py-2 font-medium">{tr("Quando")}</th>
+                <th className="px-3 py-2 font-medium">{tr("Endpoint")}</th>
+                <th className="px-3 py-2 font-medium">{tr("Status")}</th>
+                <th className="px-3 py-2 font-medium">{tr("Tokens")}</th>
+                <th className="px-3 py-2 font-medium">{tr("Custo")}</th>
+                <th className="px-3 py-2 font-medium">{tr("Latência")}</th>
               </tr>
             </thead>
             <tbody>
@@ -817,8 +819,8 @@ export default function ApiView() {
     <div className="space-y-5">
       <div className="flex gap-1.5">
         {([
-          ["keys", "Chaves", <KeyRound key="i" size={14} />],
-          ["docs", "Documentação", <BookOpen key="i" size={14} />],
+          ["keys", tr("Chaves"), <KeyRound key="i" size={14} />],
+          ["docs", tr("Documentação"), <BookOpen key="i" size={14} />],
           ["playground", "Playground", <Play key="i" size={14} />],
         ] as const).map(([id, label, icon]) => (
           <button
@@ -833,7 +835,7 @@ export default function ApiView() {
         ))}
         {tab === "keys" && (
           <button onClick={() => setCreating(true)} className={`${BTN_PRIMARY} ml-auto`}>
-            <Plus size={15} /> Nova chave
+            <Plus size={15} />  {tr("Nova chave")}
           </button>
         )}
       </div>
@@ -842,9 +844,9 @@ export default function ApiView() {
         <>
           <div className="grid grid-cols-3 gap-3">
             {[
-              ["Chaves ativas", String(totals.active)],
-              ["Requisições no mês", String(totals.requests)],
-              ["Custo no mês", fmtUsd(totals.cost)],
+              [tr("Chaves ativas"), String(totals.active)],
+              [tr("Requisições no mês"), String(totals.requests)],
+              [tr("Custo no mês"), fmtUsd(totals.cost)],
             ].map(([label, value]) => (
               <div key={label} className="rounded-xl border border-border bg-surface p-3.5">
                 <p className="text-[11px] text-muted">{label}</p>
@@ -854,16 +856,17 @@ export default function ApiView() {
           </div>
 
           {loading ? (
-            <p className="py-10 text-center text-sm text-muted">Carregando…</p>
+            <p className="py-10 text-center text-sm text-muted">{tr("Carregando…")}</p>
           ) : keys.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-border py-14 text-center">
               <KeyRound size={26} className="mx-auto text-muted" />
-              <p className="mt-3 text-sm font-medium text-ink">Nenhuma chave ainda</p>
+              <p className="mt-3 text-sm font-medium text-ink">{tr("Nenhuma chave ainda")}</p>
               <p className="mt-1 text-xs text-muted">
-                Crie uma chave para usar seus modelos a partir de qualquer aplicação.
+                
+                {tr("Crie uma chave para usar seus modelos a partir de qualquer aplicação.")}
               </p>
               <button onClick={() => setCreating(true)} className={`${BTN_PRIMARY} mx-auto mt-4`}>
-                <Plus size={15} /> Nova chave
+                <Plus size={15} />  {tr("Nova chave")}
               </button>
             </div>
           ) : (
@@ -885,30 +888,30 @@ export default function ApiView() {
                       </div>
                       <code className="mt-1 block font-mono text-xs text-muted">{k.masked}</code>
                       <p className="mt-1.5 text-[11px] text-muted">
-                        {k.requests_month} req · {fmtUsd(k.cost_month)} no mês · último uso {fmtDate(k.last_used_at)}
+                        {k.requests_month} req · {fmtUsd(k.cost_month)}  {tr("no mês · último uso")} {fmtDate(k.last_used_at)}
                         {k.expires_at && ` · expira ${fmtDate(k.expires_at)}`}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
-                      <button onClick={() => setDetail(k)} title="Detalhes e histórico"
+                      <button onClick={() => setDetail(k)} title={tr("Detalhes e histórico")}
                         className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
                         <Activity size={15} />
                       </button>
-                      <button onClick={() => setEditing(k)} title="Editar"
+                      <button onClick={() => setEditing(k)} title={tr("Editar")}
                         className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
                         <Pencil size={15} />
                       </button>
-                      <button onClick={() => void regenerate(k)} title="Regenerar segredo"
+                      <button onClick={() => void regenerate(k)} title={tr("Regenerar segredo")}
                         className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink">
                         <RefreshCw size={15} />
                       </button>
                       {k.state !== "revoked" && (
-                        <button onClick={() => setConfirmRevoke(k)} title="Revogar"
+                        <button onClick={() => setConfirmRevoke(k)} title={tr("Revogar")}
                           className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-red-500">
                           <ShieldOff size={15} />
                         </button>
                       )}
-                      <button onClick={() => void remove(k)} title="Excluir"
+                      <button onClick={() => void remove(k)} title={tr("Excluir")}
                         className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-red-500">
                         <Trash2 size={15} />
                       </button>
@@ -925,7 +928,7 @@ export default function ApiView() {
       {tab === "playground" && <Playground meta={meta} />}
 
       {creating && (
-        <Modal title="Nova chave de API" wide onClose={() => setCreating(false)}>
+        <Modal title={tr("Nova chave de API")} wide onClose={() => setCreating(false)}>
           <KeyForm meta={meta} initial={emptyForm(meta)} editing={false}
             onCancel={() => setCreating(false)} onSubmit={create} />
         </Modal>
@@ -945,13 +948,13 @@ export default function ApiView() {
       )}
 
       {freshKey && (
-        <Modal title="Chave criada" onClose={() => setFreshKey(null)}>
+        <Modal title={tr("Chave criada")} onClose={() => setFreshKey(null)}>
           <div className="space-y-4">
             <div className="flex gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
               <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-500" />
               <p className="text-xs leading-relaxed text-ink-soft">
-                Copie agora: esta é a única vez que a chave aparece. O servidor guarda
-                apenas um hash — se você perdê-la, será preciso regenerar.
+                
+                {tr("Copie agora: esta é a única vez que a chave aparece. O servidor guarda apenas um hash — se você perdê-la, será preciso regenerar.")}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -962,7 +965,7 @@ export default function ApiView() {
             </div>
             <div className="flex justify-end">
               <button onClick={() => setFreshKey(null)} className={BTN_PRIMARY}>
-                <Eye size={15} /> Já copiei
+                <Eye size={15} />  {tr("Já copiei")}
               </button>
             </div>
           </div>
@@ -970,19 +973,18 @@ export default function ApiView() {
       )}
 
       {confirmRevoke && (
-        <Modal title="Revogar chave" onClose={() => setConfirmRevoke(null)}>
+        <Modal title={tr("Revogar chave")} onClose={() => setConfirmRevoke(null)}>
           <p className="text-sm leading-relaxed text-ink-soft">
-            A chave <strong className="text-ink">{confirmRevoke.name}</strong> para de
-            funcionar imediatamente e não pode ser reativada. As aplicações que a usam
-            passarão a receber erro 401.
+            A chave <strong className="text-ink">{confirmRevoke.name}</strong>  {tr("para de funcionar imediatamente e não pode ser reativada. As aplicações que a usam passarão a receber erro 401.")}
           </p>
           <div className="mt-5 flex justify-end gap-2">
-            <button onClick={() => setConfirmRevoke(null)} className={BTN_GHOST}>Cancelar</button>
+            <button onClick={() => setConfirmRevoke(null)} className={BTN_GHOST}>{tr("Cancelar")}</button>
             <button
               onClick={() => void revoke(confirmRevoke)}
               className="rounded-full bg-red-500 px-4 py-1.5 text-sm font-medium text-white transition-colors hover:bg-red-600"
             >
-              Revogar
+              
+              {tr("Revogar")}
             </button>
           </div>
         </Modal>

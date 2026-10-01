@@ -21,6 +21,7 @@ import {
 import type { Chat } from "@/lib/types";
 import { useLongPress } from "@/lib/useLongPress";
 import { AnchoredMenu, MenuDivider, MenuItem } from "./ui";
+import { tr } from "@/lib/i18n";
 
 /** id do projeto do Codespace -> nome, para o hover do ícone no item de chat.
  *  É contexto (e não prop) porque o ChatItem é renderizado em dois caminhos —
@@ -98,7 +99,7 @@ export default function ChatItem({
       {/* chat de projeto: marca no INÍCIO do item; o hover diz de qual projeto é */}
       {chat.project_id && (
         <span
-          title={projectName ? `Projeto: ${projectName}` : "Chat de projeto (Codespace)"}
+          title={projectName ? `Projeto: ${projectName}` : tr("Chat de projeto (Codespace)")}
           className="shrink-0 cursor-default text-accent-hover"
         >
           <Code2 size={12} />
@@ -106,7 +107,7 @@ export default function ChatItem({
       )}
       {/* mesa de RPG: selo no INÍCIO do item, como o do Codespace */}
       {chat.mini_app === "imaginai" && (
-        <span title="Mesa de RPG (Imaginai)" className="shrink-0 cursor-default text-violet-300">
+        <span title={tr("Mesa de RPG (Imaginai)")} className="shrink-0 cursor-default text-violet-300">
           <Dices size={12} />
         </span>
       )}
@@ -121,7 +122,7 @@ export default function ChatItem({
         className={`shrink-0 rounded-md p-0.5 text-muted transition-colors hover:bg-hover hover:text-ink ${
           menuOpen ? "opacity-100" : "opacity-0 group-hover:opacity-100"
         }`}
-        title="Mais"
+        title={tr("Mais")}
       >
         <MoreHorizontal size={16} />
       </button>
@@ -134,7 +135,7 @@ export default function ChatItem({
               className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm text-ink transition-colors hover:bg-hover"
             >
               <Download size={15} className="shrink-0 text-muted" />
-              <span className="flex-1">Baixar</span>
+              <span className="flex-1">{tr("Baixar")}</span>
               <ChevronRight size={14} className={`text-muted transition-transform ${dlOpen ? "rotate-90" : ""}`} />
             </button>
             {dlOpen && (
@@ -151,26 +152,30 @@ export default function ChatItem({
               </div>
             )}
             <MenuItem icon={<Info size={15} />} onClick={() => { actions.onInfo(chat); setMenuOpen(false); }}>
-              Informações
+              
+              {tr("Informações")}
             </MenuItem>
             <MenuItem icon={<Pencil size={15} />} onClick={() => { setRenaming(true); setMenuOpen(false); }}>
-              Renomear
+              
+              {tr("Renomear")}
             </MenuItem>
             <MenuItem
               icon={chat.pinned ? <PinOff size={15} /> : <Pin size={15} />}
               onClick={() => { actions.onPin(chat); setMenuOpen(false); }}
             >
-              {chat.pinned ? "Desafixar" : "Fixar"}
+              {chat.pinned ? tr("Desafixar") : tr("Fixar")}
             </MenuItem>
             <MenuItem icon={<Copy size={15} />} onClick={() => { actions.onClone(chat.id); setMenuOpen(false); }}>
-              Clonar
+              
+              {tr("Clonar")}
             </MenuItem>
             <MenuItem icon={<Archive size={15} />} onClick={() => { actions.onArchive(chat); setMenuOpen(false); }}>
-              {chat.archived ? "Desarquivar" : "Arquivar"}
+              {chat.archived ? tr("Desarquivar") : tr("Arquivar")}
             </MenuItem>
             <MenuDivider />
             <MenuItem danger icon={<Trash2 size={15} />} onClick={() => { actions.onDelete(chat.id); setMenuOpen(false); }}>
-              Excluir
+              
+              {tr("Excluir")}
             </MenuItem>
         </AnchoredMenu>
       )}

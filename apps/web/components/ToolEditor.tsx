@@ -18,6 +18,7 @@ import { api, ApiError } from "@/lib/api";
 import type { Tool } from "@/lib/types";
 import CodeEditor from "./CodeEditor";
 import { Select } from "@/components/ui";
+import { tr } from "@/lib/i18n";
 
 const NEW_TEMPLATE = `VALVES = {
     # Configurações ajustáveis pela engrenagem (opcional). Ex.:
@@ -111,7 +112,7 @@ function TagsInput({ tags, onChange }: { tags: string[]; onChange: (t: string[])
             onChange(tags.slice(0, -1));
           }
         }}
-        placeholder={tags.length ? "" : "adicionar tag…"}
+        placeholder={tags.length ? "" : tr("adicionar tag…")}
         className="min-w-[90px] flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-muted"
       />
     </div>
@@ -159,11 +160,11 @@ export default function ToolEditor({
     try {
       headers = JSON.parse(mcpHeadersStr || "{}");
     } catch {
-      setTestResult({ ok: false, error: "Headers devem ser JSON válido" });
+      setTestResult({ ok: false, error: tr("Headers devem ser JSON válido") });
       return;
     }
     if (!mcpUrl.trim()) {
-      setTestResult({ ok: false, error: "Informe a URL do servidor MCP" });
+      setTestResult({ ok: false, error: tr("Informe a URL do servidor MCP") });
       return;
     }
     setTesting(true);
@@ -174,7 +175,7 @@ export default function ToolEditor({
       >("/tools/mcp/test", { url: mcpUrl.trim(), transport: mcpTransport, headers });
       setTestResult(res);
     } catch (e) {
-      setTestResult({ ok: false, error: e instanceof ApiError ? e.message : "Falha ao testar" });
+      setTestResult({ ok: false, error: e instanceof ApiError ? e.message : tr("Falha ao testar") });
     } finally {
       setTesting(false);
     }
@@ -187,22 +188,22 @@ export default function ToolEditor({
       params = JSON.parse(paramsStr || "{}");
       returns = JSON.parse(returnsStr || "[]");
     } catch {
-      setErr("params/returns devem ser JSON válido (seção Avançado)");
+      setErr(tr("params/returns devem ser JSON válido (seção Avançado)"));
       return;
     }
     try {
       mcpHeaders = JSON.parse(mcpHeadersStr || "{}");
     } catch {
-      setErr("Headers da integração devem ser JSON válido");
+      setErr(tr("Headers da integração devem ser JSON válido"));
       return;
     }
     const id = (path || slugify(name)).trim();
     if (!id) {
-      setErr("Defina um ID para a ferramenta");
+      setErr(tr("Defina um ID para a ferramenta"));
       return;
     }
     if (toolType === "mcp" && !mcpUrl.trim()) {
-      setErr("Informe a URL do servidor MCP");
+      setErr(tr("Informe a URL do servidor MCP"));
       return;
     }
     const body = {
@@ -226,7 +227,7 @@ export default function ToolEditor({
       else await api.patch(`/tools/${tool!.id}`, body);
       onSaved();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao salvar");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao salvar"));
     } finally {
       setSaving(false);
     }
@@ -245,7 +246,7 @@ export default function ToolEditor({
             setName(e.target.value);
             if (isNew && !path) setPath(slugify(e.target.value));
           }}
-          placeholder={isNew ? "Nova ferramenta" : "Nome da ferramenta"}
+          placeholder={isNew ? tr("Nova ferramenta") : tr("Nome da ferramenta")}
           className="min-w-0 flex-1 bg-transparent text-xl font-semibold tracking-tight text-ink outline-none placeholder:text-muted"
         />
         {err && <span className="max-w-[320px] truncate text-xs text-red-400">{err}</span>}
@@ -254,7 +255,7 @@ export default function ToolEditor({
           disabled={saving}
           className="rounded-full bg-accent px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60"
         >
-          {saving ? "…" : "Salvar"}
+          {saving ? "…" : tr("Salvar")}
         </button>
       </div>
 
@@ -262,20 +263,20 @@ export default function ToolEditor({
         {/* coluna do formulário */}
         <aside className="w-full shrink-0 space-y-5 border-b border-border p-5 md:w-[340px] md:overflow-y-auto md:border-b-0 md:border-r">
           <div>
-            <FieldLabel>Tipo</FieldLabel>
+            <FieldLabel>{tr("Tipo")}</FieldLabel>
             <div className="grid grid-cols-2 gap-2">
               <TypeCard
                 active={toolType === "code"}
                 icon={<Code2 size={16} />}
-                title="Código"
-                desc="Python executado em sandbox local"
+                title={tr("Código")}
+                desc={tr("Python executado em sandbox local")}
                 onClick={() => setToolType("code")}
               />
               <TypeCard
                 active={toolType === "mcp"}
                 icon={<Plug size={16} />}
-                title="Integração"
-                desc="Conecta a um servidor MCP externo"
+                title={tr("Integração")}
+                desc={tr("Conecta a um servidor MCP externo")}
                 onClick={() => setToolType("mcp")}
               />
             </div>
@@ -292,39 +293,40 @@ export default function ToolEditor({
           </div>
 
           <div>
-            <FieldLabel>Descrição</FieldLabel>
+            <FieldLabel>{tr("Descrição")}</FieldLabel>
             <textarea
               rows={3}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="O que a ferramenta faz — o modelo usa isto para decidir quando chamá-la"
+              placeholder={tr("O que a ferramenta faz — o modelo usa isto para decidir quando chamá-la")}
               className={`${inputCls} resize-y leading-5`}
             />
           </div>
 
           <div>
             <FieldLabel>
-              <span className="flex items-center gap-1"><Tag size={11} /> Tags</span>
+              <span className="flex items-center gap-1"><Tag size={11} />  {tr("Tags")}</span>
             </FieldLabel>
             <TagsInput tags={tags} onChange={setTags} />
             <p className="mt-1.5 text-xs leading-5 text-muted">
-              Organize suas ferramentas — as tags viram filtros na aba Ferramentas.
+              
+              {tr("Organize suas ferramentas — as tags viram filtros na aba Ferramentas.")}
             </p>
           </div>
 
           {toolType === "code" && (
             <div>
               <button onClick={() => setAdvanced((v) => !v)} className="flex items-center gap-1 text-xs font-medium text-muted transition-colors hover:text-ink">
-                {advanced ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Avançado (parâmetros)
+                {advanced ? <ChevronDown size={13} /> : <ChevronRight size={13} />}  {tr("Avançado (parâmetros)")}
               </button>
               {advanced && (
                 <div className="mt-3 space-y-3">
                   <label className="block">
-                    <FieldLabel>params — JSON no formato SIFT &quot;tipo:o:default:desc&quot;</FieldLabel>
+                    <FieldLabel>{tr("params — JSON no formato SIFT \"tipo:o:default:desc\"")}</FieldLabel>
                     <textarea rows={4} value={paramsStr} onChange={(e) => setParamsStr(e.target.value)} className={`${inputCls} resize-y font-mono text-xs leading-5`} />
                   </label>
                   <label className="block">
-                    <FieldLabel>returns — JSON array de campos</FieldLabel>
+                    <FieldLabel>{tr("returns — JSON array de campos")}</FieldLabel>
                     <textarea rows={2} value={returnsStr} onChange={(e) => setReturnsStr(e.target.value)} className={`${inputCls} resize-y font-mono text-xs leading-5`} />
                   </label>
                 </div>
@@ -334,8 +336,8 @@ export default function ToolEditor({
 
           {toolType === "code" && (
             <p className="border-t border-border pt-4 text-xs leading-5 text-muted">
-              Ferramentas executam código no servidor — não cole código de origens
-              nas quais você não confia.
+              
+              {tr("Ferramentas executam código no servidor — não cole código de origens nas quais você não confia.")}
             </p>
           )}
         </aside>
@@ -348,11 +350,11 @@ export default function ToolEditor({
             <div className="mx-auto max-w-xl space-y-5">
               <div className="rounded-2xl border border-border bg-surface p-5">
                 <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold text-ink">
-                  <Plug size={15} className="text-accent-hover" /> Servidor MCP
+                  <Plug size={15} className="text-accent-hover" />  {tr("Servidor MCP")}
                 </h2>
                 <div className="space-y-4">
                   <div>
-                    <FieldLabel>URL do servidor</FieldLabel>
+                    <FieldLabel>{tr("URL do servidor")}</FieldLabel>
                     <input
                       value={mcpUrl}
                       onChange={(e) => setMcpUrl(e.target.value)}
@@ -361,13 +363,13 @@ export default function ToolEditor({
                     />
                   </div>
                   <div>
-                    <FieldLabel>Transporte</FieldLabel>
+                    <FieldLabel>{tr("Transporte")}</FieldLabel>
                     <Select
                       value={mcpTransport}
                       onChange={(e) => setMcpTransport(e.target.value)}
                       className={inputCls}
                     >
-                      <option value="http">Streamable HTTP</option>
+                      <option value="http">{tr("Streamable HTTP")}</option>
                       <option value="sse">SSE (legado)</option>
                     </Select>
                   </div>
@@ -390,7 +392,7 @@ export default function ToolEditor({
                       className="flex items-center gap-2 rounded-full border border-border px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-hover disabled:opacity-60"
                     >
                       {testing ? <Loader2 size={15} className="animate-spin" /> : <Plug size={15} />}
-                      {testing ? "Testando…" : "Testar conexão"}
+                      {testing ? tr("Testando…") : tr("Testar conexão")}
                     </button>
                   </div>
 
@@ -405,17 +407,18 @@ export default function ToolEditor({
                       {testResult.ok ? (
                         <div className="space-y-1.5">
                           <p className="flex items-center gap-2 font-medium text-green-400">
-                            <CheckCircle2 size={15} /> Conexão bem-sucedida
+                            <CheckCircle2 size={15} />  {tr("Conexão bem-sucedida")}
                           </p>
                           {testResult.server?.name && (
                             <p className="text-xs">
-                              Servidor: <span className="text-ink">{testResult.server.name}</span>
+                              
+                              {tr("Servidor:")} <span className="text-ink">{testResult.server.name}</span>
                               {testResult.server.version ? ` v${testResult.server.version}` : ""}
                             </p>
                           )}
                           {typeof testResult.tools_count === "number" && (
                             <p className="text-xs">
-                              {testResult.tools_count} ferramenta{testResult.tools_count === 1 ? "" : "s"} disponível
+                              {testResult.tools_count} ferramenta{testResult.tools_count === 1 ? "" : "s"}  {tr("disponível")}
                               {testResult.tools_count === 1 ? "" : "is"}
                               {testResult.tools?.length ? ": " : ""}
                               <span className="font-mono text-muted">{(testResult.tools ?? []).join(", ")}</span>
@@ -436,9 +439,8 @@ export default function ToolEditor({
               <div className="flex items-start gap-2.5 rounded-xl border border-accent/25 bg-accent/10 px-4 py-3 text-xs leading-5 text-ink-soft">
                 <Info size={14} className="mt-0.5 shrink-0 text-accent-hover" />
                 <span>
-                  A configuração fica salva desde já. A conexão com o servidor e a
-                  importação das ferramentas dele serão ativadas em uma próxima
-                  atualização — até lá, integrações não aparecem para o modelo.
+                  
+                  {tr("A configuração fica salva desde já. A conexão com o servidor e a importação das ferramentas dele serão ativadas em uma próxima atualização — até lá, integrações não aparecem para o modelo.")}
                 </span>
               </div>
             </div>

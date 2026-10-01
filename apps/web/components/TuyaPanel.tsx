@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Check, ChevronDown, ChevronLeft, Home, Lightbulb, Loader2, Plug, RefreshCw, Snowflake, ToggleLeft, TriangleAlert, Wifi } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
+import { tr } from "@/lib/i18n";
 
 interface Device { id: string; name: string; category: string; online: boolean }
 interface Scene { id: string; name: string }
@@ -36,7 +37,7 @@ export default function TuyaPanel({ onBack }: { onBack: () => void }) {
   return (
     <div className="pt-1">
       <button onClick={onBack} className="mb-3 flex items-center gap-1 text-sm text-muted transition-colors hover:text-ink">
-        <ChevronLeft size={16} /> Voltar
+        <ChevronLeft size={16} />  {tr("Voltar")}
       </button>
 
       <div className="flex items-center gap-2.5">
@@ -44,7 +45,7 @@ export default function TuyaPanel({ onBack }: { onBack: () => void }) {
           <Home size={17} />
         </span>
         <div>
-          <p className="text-sm font-semibold text-ink">Tuya Smart Home</p>
+          <p className="text-sm font-semibold text-ink">{tr("Tuya Smart Home")}</p>
           <p className="text-xs text-muted">Luzes, tomadas, ar-condicionado e cenas Smart Life</p>
         </div>
       </div>
@@ -92,7 +93,7 @@ function TuyaBody({ st, reload, setSt }: { st: TuyaStatus; reload: () => Promise
       setTimeout(() => setSaved(false), 1500);
       await reload();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao salvar");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao salvar"));
     } finally {
       setSaving(false);
     }
@@ -118,7 +119,7 @@ function TuyaBody({ st, reload, setSt }: { st: TuyaStatus; reload: () => Promise
       const r = await api.post<{ devices: Device[]; scenes: Scene[] }>("/integrations/tuya/sync");
       setSt({ ...st, devices: r.devices, scenes: r.scenes });
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao sincronizar");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao sincronizar"));
     } finally {
       setSyncing(false);
     }
@@ -129,39 +130,40 @@ function TuyaBody({ st, reload, setSt }: { st: TuyaStatus; reload: () => Promise
       {/* credenciais */}
       <div className="space-y-2 rounded-xl border border-border bg-surface p-3">
         <p className="flex items-center gap-1.5 text-xs font-semibold text-ink">
-          Conexão
+          
+          {tr("Conexão")}
           {st.configured && <span className="inline-flex items-center gap-0.5 text-[10px] font-normal text-green-500"><Check size={11} /> configurada</span>}
         </p>
         <label className="block text-sm">
-          <span className="text-ink-soft">Data center (Base URL)</span>
+          <span className="text-ink-soft">{tr("Data center (Base URL)")}</span>
           <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder={DEFAULT_BASE}
             className="mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-xs text-ink outline-none focus:border-accent" />
         </label>
         <label className="block text-sm">
-          <span className="text-ink-soft">Access ID</span>
-          <input value={accessId} onChange={(e) => setAccessId(e.target.value)} placeholder="Client ID do projeto Tuya"
+          <span className="text-ink-soft">{tr("Access ID")}</span>
+          <input value={accessId} onChange={(e) => setAccessId(e.target.value)} placeholder={tr("Client ID do projeto Tuya")}
             className="mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-xs text-ink outline-none focus:border-accent" />
         </label>
         <label className="block text-sm">
-          <span className="text-ink-soft">Access Secret</span>
+          <span className="text-ink-soft">{tr("Access Secret")}</span>
           <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)}
-            placeholder={st.has_secret ? "•••••••• (deixe em branco p/ manter)" : "Client Secret do projeto Tuya"}
+            placeholder={st.has_secret ? tr("•••••••• (deixe em branco p/ manter)") : tr("Client Secret do projeto Tuya")}
             className="mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-xs text-ink outline-none focus:border-accent" />
         </label>
         <div className="flex items-center gap-2 pt-0.5">
           <button onClick={save} disabled={saving || !accessId.trim()}
             className="rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-            {saving ? "…" : saved ? "Salvo ✓" : "Salvar"}
+            {saving ? "…" : saved ? "Salvo ✓" : tr("Salvar")}
           </button>
           <button onClick={testConn} disabled={test === "loading" || !st.configured}
-            title={st.configured ? "Testar conexão" : "Salve as credenciais primeiro"}
+            title={st.configured ? tr("Testar conexão") : tr("Salve as credenciais primeiro")}
             className={`flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs transition-colors disabled:opacity-50 ${
               test === "ok" ? "text-green-500" : test === "fail" ? "text-red-400" : "text-ink-soft hover:bg-hover hover:text-ink"
             }`}>
             {test === "loading" ? <Loader2 size={13} className="animate-spin" />
               : test === "ok" ? <Check size={13} />
               : test === "fail" ? <TriangleAlert size={13} /> : <Wifi size={13} />}
-            {test === "ok" ? "Conectado" : test === "fail" ? "Falhou" : "Testar"}
+            {test === "ok" ? tr("Conectado") : test === "fail" ? tr("Falhou") : tr("Testar")}
           </button>
         </div>
         {test === "fail" && testMsg && <p className="text-[11px] text-red-400/90">{testMsg}</p>}
@@ -173,18 +175,19 @@ function TuyaBody({ st, reload, setSt }: { st: TuyaStatus; reload: () => Promise
       <div>
         <div className="mb-1 flex items-center justify-between">
           <p className="text-xs font-semibold text-ink">
-            Dispositivos {st.devices.length > 0 && <span className="text-muted">{st.devices.length}</span>}
+            
+            {tr("Dispositivos")} {st.devices.length > 0 && <span className="text-muted">{st.devices.length}</span>}
           </p>
           <button onClick={syncDevices} disabled={syncing || !st.configured}
-            title={st.configured ? "Buscar dispositivos na conta Tuya" : "Salve as credenciais primeiro"}
+            title={st.configured ? tr("Buscar dispositivos na conta Tuya") : tr("Salve as credenciais primeiro")}
             className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-50">
-            <RefreshCw size={12} className={syncing ? "animate-spin" : ""} /> {syncing ? "Sincronizando…" : "Sincronizar"}
+            <RefreshCw size={12} className={syncing ? "animate-spin" : ""} /> {syncing ? tr("Sincronizando…") : tr("Sincronizar")}
           </button>
         </div>
         <div className="rounded-xl border border-border bg-surface">
           {st.devices.length === 0 ? (
             <p className="px-3 py-3 text-xs text-muted">
-              {st.configured ? "Clique em Sincronizar para buscar os dispositivos da sua conta Smart Life." : "Salve as credenciais e sincronize."}
+              {st.configured ? tr("Clique em Sincronizar para buscar os dispositivos da sua conta Smart Life.") : tr("Salve as credenciais e sincronize.")}
             </p>
           ) : (
             st.devices.map((d, i) => (
@@ -197,20 +200,21 @@ function TuyaBody({ st, reload, setSt }: { st: TuyaStatus; reload: () => Promise
           )}
         </div>
         {st.scenes.length > 0 && (
-          <p className="mt-1.5 text-[11px] text-muted">Cenas encontradas: {st.scenes.map((s) => s.name).join(", ")}</p>
+          <p className="mt-1.5 text-[11px] text-muted">{tr("Cenas encontradas:")} {st.scenes.map((s) => s.name).join(", ")}</p>
         )}
       </div>
 
       {/* avançado: apelidos em linguagem natural */}
       <div>
         <button onClick={() => setAdvanced((v) => !v)} className="flex items-center gap-1 text-[11px] font-medium text-muted transition-colors hover:text-ink">
-          <ChevronDown size={13} className={`transition-transform ${advanced ? "" : "-rotate-90"}`} /> Avançado — apelidos
+          <ChevronDown size={13} className={`transition-transform ${advanced ? "" : "-rotate-90"}`} />  {tr("Avançado — apelidos")}
         </button>
         {advanced && <AliasEditor st={st} reload={reload} setErr={setErr} />}
       </div>
 
       <p className="text-[11px] leading-4 text-muted">
-        Crie um projeto Cloud em iot.tuya.com, vincule sua conta Smart Life (Devices → Link App Account) e cole o Access ID/Secret. Depois é só Sincronizar — os códigos de cada aparelho são detectados automaticamente. Quais dispositivos/ações cada modelo usa fica na engrenagem da ferramenta <span className="text-ink-soft">Tuya Smart Home</span>.
+        
+        {tr("Crie um projeto Cloud em iot.tuya.com, vincule sua conta Smart Life (Devices → Link App Account) e cole o Access ID/Secret. Depois é só Sincronizar — os códigos de cada aparelho são detectados automaticamente. Quais dispositivos/ações cada modelo usa fica na engrenagem da ferramenta")} <span className="text-ink-soft">{tr("Tuya Smart Home")}</span>.
       </p>
     </div>
   );
@@ -229,7 +233,7 @@ function AliasEditor({ st, reload, setErr }: { st: TuyaStatus; reload: () => Pro
       if (typeof v !== "object" || v === null || Array.isArray(v)) throw new Error();
       aliases = v;
     } catch {
-      setErr('JSON de apelidos inválido.');
+      setErr(tr("JSON de apelidos inválido."));
       return;
     }
     setErr(null);
@@ -240,7 +244,7 @@ function AliasEditor({ st, reload, setErr }: { st: TuyaStatus; reload: () => Pro
       setTimeout(() => setSaved(false), 1500);
       await reload();
     } catch (e) {
-      setErr(e instanceof ApiError ? e.message : "Falha ao salvar apelidos");
+      setErr(e instanceof ApiError ? e.message : tr("Falha ao salvar apelidos"));
     } finally {
       setSaving(false);
     }
@@ -253,7 +257,7 @@ function AliasEditor({ st, reload, setErr }: { st: TuyaStatus; reload: () => Pro
       <div className="flex items-center gap-2">
         <button onClick={save} disabled={saving || !st.configured}
           className="rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-50">
-          {saving ? "…" : saved ? "Salvo ✓" : "Salvar apelidos"}
+          {saving ? "…" : saved ? "Salvo ✓" : tr("Salvar apelidos")}
         </button>
         <span className="text-[11px] text-muted">Ex.: {`{"quarto": "Luz do Quarto", "servidor": "Tomada PC"}`}</span>
       </div>

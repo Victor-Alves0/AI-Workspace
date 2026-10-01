@@ -2,6 +2,7 @@
 // As preferências ficam num módulo simples (não em contexto React) porque os
 // formatadores são chamados de funções utilitárias fora da árvore de componentes.
 // `setFormatPrefs` é chamado quando o perfil carrega.
+import { getLocale } from "@/lib/i18n";
 
 type TimeFmt = "24h" | "12h";
 type DateFmt = "dmy" | "mdy" | "ymd";
@@ -17,7 +18,7 @@ export function setFormatPrefs(p: { time_format?: string; date_format?: string }
 
 /** HH:MM no formato escolhido (24h → "14:30"; 12h → "2:30 PM"). */
 export function fmtHM(d: Date): string {
-  return d.toLocaleTimeString(timeFmt === "12h" ? "en-US" : "pt-BR", {
+  return d.toLocaleTimeString(timeFmt === "12h" ? "en-US" : getLocale() === "pt" ? "pt-BR" : "en-GB", {
     hour: timeFmt === "12h" ? "numeric" : "2-digit",
     minute: "2-digit",
     hour12: timeFmt === "12h",

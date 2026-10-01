@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Clipboard, Copy, ExternalLink, Link2, Scissors, TextSelect } from "lucide-react";
 import { copyText } from "@/lib/clipboard";
 import { isDesktop, openExternal, readClipboard } from "@/lib/desktop";
+import { tr } from "@/lib/i18n";
 
 type Editavel = HTMLInputElement | HTMLTextAreaElement | HTMLElement;
 
@@ -165,24 +166,24 @@ export default function DesktopContextMenu() {
   if (alvo.editavel) {
     const somenteLeitura = ehInput(alvo.editavel) && (alvo.editavel.readOnly || alvo.editavel.disabled);
     itens.push(
-      { icon: <Scissors size={14} />, label: "Recortar", atalho: "Ctrl+X", onClick: acoes.recortar, disabled: !alvo.selecao || somenteLeitura },
-      { icon: <Copy size={14} />, label: "Copiar", atalho: "Ctrl+C", onClick: acoes.copiar, disabled: !alvo.selecao },
-      { icon: <Clipboard size={14} />, label: "Colar", atalho: "Ctrl+V", onClick: acoes.colar, disabled: somenteLeitura },
-      { icon: <TextSelect size={14} />, label: "Selecionar tudo", atalho: "Ctrl+A", onClick: acoes.selecionarTudo },
+      { icon: <Scissors size={14} />, label: tr("Recortar"), atalho: "Ctrl+X", onClick: acoes.recortar, disabled: !alvo.selecao || somenteLeitura },
+      { icon: <Copy size={14} />, label: tr("Copiar"), atalho: "Ctrl+C", onClick: acoes.copiar, disabled: !alvo.selecao },
+      { icon: <Clipboard size={14} />, label: tr("Colar"), atalho: "Ctrl+V", onClick: acoes.colar, disabled: somenteLeitura },
+      { icon: <TextSelect size={14} />, label: tr("Selecionar tudo"), atalho: "Ctrl+A", onClick: acoes.selecionarTudo },
     );
   } else if (alvo.selecao) {
-    itens.push({ icon: <Copy size={14} />, label: "Copiar", atalho: "Ctrl+C", onClick: acoes.copiar });
+    itens.push({ icon: <Copy size={14} />, label: tr("Copiar"), atalho: "Ctrl+C", onClick: acoes.copiar });
   }
   if (alvo.link) {
     itens.push(
-      { icon: <ExternalLink size={14} />, label: "Abrir no navegador", onClick: () => { void openExternal(alvo.link!); }, sep: itens.length > 0 },
-      { icon: <Link2 size={14} />, label: "Copiar link", onClick: () => { void copyText(alvo.link!); } },
+      { icon: <ExternalLink size={14} />, label: tr("Abrir no navegador"), onClick: () => { void openExternal(alvo.link!); }, sep: itens.length > 0 },
+      { icon: <Link2 size={14} />, label: tr("Copiar link"), onClick: () => { void copyText(alvo.link!); } },
     );
   }
   if (alvo.imagem && alvo.imagem !== alvo.link) {
     itens.push(
-      { icon: <ExternalLink size={14} />, label: "Abrir imagem no navegador", onClick: () => { void openExternal(alvo.imagem!); }, sep: itens.length > 0 },
-      { icon: <Link2 size={14} />, label: "Copiar endereço da imagem", onClick: () => { void copyText(alvo.imagem!); } },
+      { icon: <ExternalLink size={14} />, label: tr("Abrir imagem no navegador"), onClick: () => { void openExternal(alvo.imagem!); }, sep: itens.length > 0 },
+      { icon: <Link2 size={14} />, label: tr("Copiar endereço da imagem"), onClick: () => { void copyText(alvo.imagem!); } },
     );
   }
 

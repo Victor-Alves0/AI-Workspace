@@ -5,6 +5,7 @@ import { ArrowRight, FileCode2, Maximize2, Minus, Plus, RotateCcw, Search } from
 import { api } from "@/lib/api";
 import type { CodespaceViz, CodespaceVizNode } from "@/lib/types";
 import { Select } from "@/components/ui";
+import { tr } from "@/lib/i18n";
 
 type XY = { x: number; y: number };
 type View = { x: number; y: number; k: number };
@@ -201,11 +202,11 @@ const radius = (nd: CodespaceVizNode) => 4 + Math.min(16, Math.sqrt(nd.n || 1) *
 type VizMode = "file" | "symbol" | "neighborhood" | "callers" | "callees" | "impact" | "domains";
 const SEEDED = new Set<VizMode>(["neighborhood", "callers", "callees", "impact"]);
 const MODE_LABEL: Record<VizMode, string> = {
-  file: "Arquivos", symbol: "Símbolos", neighborhood: "Vizinhança",
-  callers: "Chamadores", callees: "Chamados", impact: "Impacto", domains: "Domínios",
+  file: tr("Arquivos"), symbol: tr("Símbolos"), neighborhood: tr("Vizinhança"),
+  callers: tr("Chamadores"), callees: tr("Chamados"), impact: tr("Impacto"), domains: tr("Domínios"),
 };
 type Conf = "" | "inferred" | "certain";
-const CONF_LABEL: Record<Conf, string> = { "": "Todas", inferred: "Inferidas+", certain: "Só certas" };
+const CONF_LABEL: Record<Conf, string> = { "": tr("Todas"), inferred: "Inferidas+", certain: tr("Só certas") };
 // tracejado da aresta por confiança (o v0.1.0 diferencia certain/inferred/possible)
 const DASH: Record<string, number[]> = { certain: [], inferred: [5, 4], possible: [2, 4] };
 const EMPTY: CodespaceViz = { level: "file", nodes: [], links: [], domains: [], warnings: [] };
@@ -499,35 +500,35 @@ export default function CodespaceGraphView({
     <div className="relative h-[58vh] min-h-[360px] overflow-hidden rounded-xl border border-border bg-[radial-gradient(circle,rgb(var(--c-border))_1px,transparent_1px)] [background-size:22px_22px]">
       <div className="absolute left-3 top-3 z-10 flex max-w-[calc(100%-1.5rem)] flex-wrap items-center gap-1.5 rounded-lg border border-border bg-surface/90 px-2 py-1.5 backdrop-blur">
         <Select value={mode} onChange={(e) => setMode(e.target.value as VizMode)}
-          title="Modo de visualização" className="rounded-md bg-surface2 px-1.5 py-1 text-xs text-ink outline-none">
+          title={tr("Modo de visualização")} className="rounded-md bg-surface2 px-1.5 py-1 text-xs text-ink outline-none">
           {(Object.keys(MODE_LABEL) as VizMode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
         </Select>
         {SEEDED.has(mode) && (
           <div className="flex items-center gap-1 rounded-md bg-surface2 px-1.5 py-1">
             <input value={seedInput} onChange={(e) => setSeedInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && setSeed(seedInput.trim())}
-              placeholder="função/classe…" className="w-32 bg-transparent text-xs text-ink outline-none placeholder:text-muted" />
-            <button onClick={() => setSeed(seedInput.trim())} title="Semear" className="rounded p-0.5 text-muted hover:text-ink"><ArrowRight size={12} /></button>
+              placeholder={tr("função/classe…")} className="w-32 bg-transparent text-xs text-ink outline-none placeholder:text-muted" />
+            <button onClick={() => setSeed(seedInput.trim())} title={tr("Semear")} className="rounded p-0.5 text-muted hover:text-ink"><ArrowRight size={12} /></button>
           </div>
         )}
         <Select value={minConf} onChange={(e) => setMinConf(e.target.value as Conf)}
-          title="Filtrar arestas por confiança" className="rounded-md bg-surface2 px-1.5 py-1 text-xs text-ink outline-none">
+          title={tr("Filtrar arestas por confiança")} className="rounded-md bg-surface2 px-1.5 py-1 text-xs text-ink outline-none">
           {(Object.keys(CONF_LABEL) as Conf[]).map((c) => <option key={c} value={c}>{CONF_LABEL[c]}</option>)}
         </Select>
         <div className="flex items-center gap-1 rounded-md bg-surface2 px-1.5 py-1">
           <Search size={12} className="text-muted" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Realçar…"
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tr("Realçar…")}
             className="w-24 bg-transparent text-xs text-ink outline-none placeholder:text-muted" />
         </div>
       </div>
 
       {graph === null ? (
-        <p className="grid h-full place-items-center text-sm text-muted">Carregando…</p>
+        <p className="grid h-full place-items-center text-sm text-muted">{tr("Carregando…")}</p>
       ) : graph.nodes.length === 0 ? (
         <p className="grid h-full place-items-center px-8 text-center text-sm text-muted">
           {SEEDED.has(mode) && !seed.trim()
-            ? "Digite uma função/classe acima para semear o grafo (ex.: run_turn)."
-            : "Sem dados suficientes ainda."}
+            ? tr("Digite uma função/classe acima para semear o grafo (ex.: run_turn).")
+            : tr("Sem dados suficientes ainda.")}
         </p>
       ) : (
         <div
@@ -549,18 +550,20 @@ export default function CodespaceGraphView({
             <div className="min-w-0 flex-1">
               <p className="truncate font-mono text-[11px] text-ink">{selected.label}</p>
               <p className="text-[10px] text-muted">
-                {isFileLabel(selected.label) ? `${selected.n} símbolo(s)` : (selected.kind || "símbolo")}
+                {isFileLabel(selected.label) ? tr("{n} símbolo(s)", { n: selected.n }) : (selected.kind || tr("símbolo"))}
               </p>
             </div>
             {isFileLabel(selected.label) ? (
               <button onClick={() => onOpenFile(selected.label)}
                 className="shrink-0 rounded-full bg-accent px-2.5 py-1 text-[11px] font-medium text-white hover:bg-accent-hover">
-                Abrir
+                
+                {tr("Abrir")}
               </button>
             ) : (
               <button onClick={() => { setMode("neighborhood"); setSeedInput(selected.label); setSeed(selected.label); }}
                 className="shrink-0 rounded-full bg-accent px-2.5 py-1 text-[11px] font-medium text-white hover:bg-accent-hover">
-                Vizinhança
+                
+                {tr("Vizinhança")}
               </button>
             )}
           </div>
@@ -568,12 +571,12 @@ export default function CodespaceGraphView({
       )}
 
       <div className="absolute bottom-3 right-3 flex flex-col gap-1 rounded-xl border border-border bg-surface/90 p-1 shadow-menu backdrop-blur">
-        <button onClick={() => zoom(1)} title="Aproximar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Plus size={15} /></button>
-        <button onClick={() => zoom(-1)} title="Afastar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Minus size={15} /></button>
-        <button onClick={() => { offsetsRef.current.clear(); setSelected(null); fit(); }} title="Ajustar à tela" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Maximize2 size={15} /></button>
+        <button onClick={() => zoom(1)} title={tr("Aproximar")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Plus size={15} /></button>
+        <button onClick={() => zoom(-1)} title={tr("Afastar")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Minus size={15} /></button>
+        <button onClick={() => { offsetsRef.current.clear(); setSelected(null); fit(); }} title={tr("Ajustar à tela")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Maximize2 size={15} /></button>
         {/* pós-reindexação os ids dos nós podem mudar — limpa offsets/seleção junto,
             senão o arrasto antigo (e o destaque) cai em cima do nó errado */}
-        <button onClick={() => { didFit.current = false; offsetsRef.current.clear(); setSelected(null); load(); }} title="Recarregar" className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><RotateCcw size={15} /></button>
+        <button onClick={() => { didFit.current = false; offsetsRef.current.clear(); setSelected(null); load(); }} title={tr("Recarregar")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><RotateCcw size={15} /></button>
       </div>
     </div>
   );

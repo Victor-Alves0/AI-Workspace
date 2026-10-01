@@ -11,6 +11,7 @@ import { startRecording, transcribe } from "@/lib/voice";
 import { describeStep } from "@/lib/activity";
 import Markdown from "./Markdown";
 import { toast } from "@/components/Toaster";
+import { tr } from "@/lib/i18n";
 
 /** Conversa direta com o agente pelo painel dele (depois que ele terminou). */
 export type AgentFollowup = { role: "user" | "assistant"; content: string; timeline?: SubagentTimelineItem[] };
@@ -148,14 +149,14 @@ function SidePanel({
     >
       <div
         onPointerDown={startDrag}
-        title="Arraste para redimensionar"
+        title={tr("Arraste para redimensionar")}
         className="group absolute inset-y-0 -left-1 z-10 hidden w-2.5 cursor-col-resize items-stretch justify-center md:flex"
       >
         <span className="my-auto h-10 w-1 rounded-full bg-border transition-colors group-hover:bg-accent" />
       </div>
       <div className="flex items-center gap-2 border-b border-border px-4 py-3">
         {onBack && (
-          <button onClick={onBack} title="Voltar" className="shrink-0 rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink">
+          <button onClick={onBack} title={tr("Voltar")} className="shrink-0 rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink">
             <ArrowLeft size={16} />
           </button>
         )}
@@ -164,7 +165,7 @@ function SidePanel({
           <p className="truncate text-sm font-semibold text-ink" title={title}>{title}</p>
           {subtitle && <p className="truncate text-xs text-muted" title={subtitle}>{subtitle}</p>}
         </div>
-        <button onClick={onClose} title="Fechar" className="shrink-0 rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink">
+        <button onClick={onClose} title={tr("Fechar")} className="shrink-0 rounded-lg p-1 text-muted transition-colors hover:bg-hover hover:text-ink">
           <X size={18} />
         </button>
       </div>
@@ -176,8 +177,8 @@ function SidePanel({
           {!atBottom && (
             <button
               onClick={() => { stick.current = true; toBottom(); }}
-              title="Ir para o fim"
-              aria-label="Ir para o fim"
+              title={tr("Ir para o fim")}
+              aria-label={tr("Ir para o fim")}
               className="animate-pop absolute -top-11 left-1/2 z-20 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-surface text-ink-soft shadow-menu transition-colors hover:bg-hover hover:text-ink"
             >
               <ArrowDown size={18} />
@@ -229,7 +230,7 @@ function resumo(call: ToolEvent | undefined, result: ToolEvent | undefined, live
   const args = (call?.data ?? {}) as { agent?: string; name?: string; task?: string };
   const res = (result?.data && typeof result.data === "object" ? result.data : undefined) as SubagentResult | undefined;
   const now = call?.live;
-  const name = res?.agent || now?.name || args.name || (args.agent && args.agent !== "new" ? args.agent : "") || "Agente";
+  const name = res?.agent || now?.name || args.name || (args.agent && args.agent !== "new" ? args.agent : "") || tr("Agente");
   const task = res?.task || now?.task || args.task || "";
   const started = res?.kind === "subagent_started";
   const background = started || !!now?.background;
@@ -243,12 +244,12 @@ function resumo(call: ToolEvent | undefined, result: ToolEvent | undefined, live
   const lastItem = timeline[timeline.length - 1];
   const queued = !res && now?.state === "queued";
   const status = running
-    ? (started ? "em segundo plano · " : "") + (lastItem?.kind === "tool" ? describeStep(lastItem.tool, lastItem.detail, lastItem.args) : lastItem?.kind === "reasoning" ? "pensando…" : lastItem?.kind === "text" ? "escrevendo…" : "começando…")
+    ? (started ? tr("em segundo plano · ") : "") + (lastItem?.kind === "tool" ? describeStep(lastItem.tool, lastItem.detail, lastItem.args) : lastItem?.kind === "reasoning" ? "pensando…" : lastItem?.kind === "text" ? "escrevendo…" : tr("começando…"))
     : queued ? "na fila"
-    : started ? "em segundo plano"
+    : started ? tr("em segundo plano")
     : error ? "falhou"
-    : res?.status === "needs_input" && res.needs?.need ? `precisa de: ${res.needs.need}`
-    : tools.length === 0 ? "concluído" : tools.length === 1 ? "1 passo" : `${tools.length} passos`;
+    : res?.status === "needs_input" && res.needs?.need ? tr("precisa de: {need}", { need: res.needs.need })
+    : tools.length === 0 ? tr("concluído") : tools.length === 1 ? "1 passo" : `${tools.length} passos`;
   return { name, task, background, running, timeline, failed, error, adhoc, queued, status, res };
 }
 
@@ -257,7 +258,7 @@ function UserBubble({ text, pending }: { text: string; pending?: boolean }) {
     <div className="flex flex-col items-end gap-0.5">
       <div className="max-w-[92%] whitespace-pre-wrap rounded-2xl bg-accent/15 px-3 py-1.5 text-ink">{text}</div>
       {pending && (
-        <span className="flex items-center gap-1 text-[11px] text-muted"><Clock size={10} /> entra no próximo passo do agente</span>
+        <span className="flex items-center gap-1 text-[11px] text-muted"><Clock size={10} />  {tr("entra no próximo passo do agente")}</span>
       )}
     </div>
   );
@@ -269,7 +270,7 @@ function AgentTimeline({ r, after }: { r: ReturnType<typeof resumo>; after?: Rea
     <ol className="ml-1.5 space-y-3 border-l border-border pb-1 pl-5 text-sm leading-6 text-muted">
       {task && (
         <Item dot="bg-accent">
-          <p className="text-[11px] font-medium uppercase tracking-wider text-muted">Tarefa</p>
+          <p className="text-[11px] font-medium uppercase tracking-wider text-muted">{tr("Tarefa")}</p>
           <p className="whitespace-pre-wrap text-ink-soft">{task}</p>
         </Item>
       )}
@@ -287,27 +288,27 @@ function AgentTimeline({ r, after }: { r: ReturnType<typeof resumo>; after?: Rea
         </Item>
       ))}
       {running && timeline.length === 0 && (
-        <Item dot="bg-accent"><p className="flex items-center gap-2 text-xs"><Loader2 size={12} className="animate-spin text-accent-hover" /> começando…</p></Item>
+        <Item dot="bg-accent"><p className="flex items-center gap-2 text-xs"><Loader2 size={12} className="animate-spin text-accent-hover" />  {tr("começando…")}</p></Item>
       )}
       {error ? (
         <Item dot="bg-red-400"><p className="text-red-400">{error}</p></Item>
       ) : res?.output && !background ? (
         <Item dot="bg-accent">
-          <p className="text-[11px] font-medium uppercase tracking-wider text-muted">Relatório</p>
+          <p className="text-[11px] font-medium uppercase tracking-wider text-muted">{tr("Relatório")}</p>
           <div className="text-ink"><Markdown content={res.output} /></div>
         </Item>
       ) : null}
       {res?.status === "needs_input" && res.needs?.need && (
         <Item dot="bg-amber-400">
           <p className="text-[11px] font-medium uppercase tracking-wider text-muted">
-            {res.needs.kind === "tool" ? "Pediu uma ferramenta" : "Pediu informação"}
+            {res.needs.kind === "tool" ? tr("Pediu uma ferramenta") : tr("Pediu informação")}
           </p>
           <p className="whitespace-pre-wrap text-ink-soft">{res.needs.need}</p>
         </Item>
       )}
       {res?.task_id && (
         <Item dot="bg-muted">
-          <p className="flex items-center gap-1.5 text-xs"><GitBranch size={12} /> Worktree isolado, aguardando revisão em Tarefas.</p>
+          <p className="flex items-center gap-1.5 text-xs"><GitBranch size={12} />  {tr("Worktree isolado, aguardando revisão em Tarefas.")}</p>
         </Item>
       )}
       {after}
@@ -381,7 +382,7 @@ function AgentComposer({ name, running, busy, onSend }: {
         const t = await transcribe(await rec.stop());
         if (t) setText((v) => (v ? `${v} ${t}` : t));
       } catch (e) {
-        toast((e as Error).message || "Transcrição falhou.");
+        toast((e as Error).message || tr("Transcrição falhou."));
       } finally {
         setTranscribing(false);
         ta.current?.focus();
@@ -391,7 +392,7 @@ function AgentComposer({ name, running, busy, onSend }: {
     try {
       setRec(await startRecording());
     } catch (e) {
-      toast("Sem acesso ao microfone.");
+      toast(tr("Sem acesso ao microfone."));
     }
   }
   const btn = "flex h-8 w-8 items-center justify-center rounded-full transition-colors";
@@ -403,24 +404,24 @@ function AgentComposer({ name, running, busy, onSend }: {
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); enviar(); } }}
-        placeholder={running ? `Instrua ${name}…` : `Continue com ${name}…`}
-        aria-label={`Mensagem para ${name}`}
+        placeholder={running ? `Instrua ${name}…` : tr("Continue com {name}…", { name: name })}
+        aria-label={tr("Mensagem para {name}", { name: name })}
         className="block max-h-[180px] w-full resize-none bg-transparent px-1 py-1 text-sm leading-6 text-ink outline-none placeholder:text-muted"
       />
       <div className="mt-1 flex items-center gap-1">
         <button type="button" onClick={() => setThink((v) => !v)} aria-pressed={think}
-          title={think ? "Pensar mais: ligado" : "Pensar mais"} aria-label="Pensar mais"
+          title={think ? tr("Pensar mais: ligado") : tr("Pensar mais")} aria-label={tr("Pensar mais")}
           className={`${btn} ${think ? "bg-accent/15 text-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}>
           <Brain size={16} />
         </button>
         <div className="flex-1" />
         <button type="button" onClick={() => void mic()} disabled={transcribing}
-          title={rec ? "Parar e transcrever" : "Ditar"} aria-label={rec ? "Parar e transcrever" : "Ditar"}
+          title={rec ? "Parar e transcrever" : tr("Ditar")} aria-label={rec ? "Parar e transcrever" : tr("Ditar")}
           className={`${btn} ${rec ? "animate-pulse bg-red-500/20 text-red-300" : "text-muted hover:bg-hover hover:text-ink"} disabled:opacity-50`}>
           {transcribing ? <Loader2 size={16} className="animate-spin" /> : rec ? <Square size={14} fill="currentColor" /> : <Mic size={16} />}
         </button>
         <button type="button" onClick={enviar} disabled={!text.trim() || busy}
-          title="Enviar" aria-label="Enviar"
+          title={tr("Enviar")} aria-label={tr("Enviar")}
           className={`${btn} bg-accent text-white hover:bg-accent-hover disabled:bg-surface2 disabled:text-muted`}>
           <ArrowUp size={16} />
         </button>
@@ -480,7 +481,7 @@ function AgentPanel({ r, agentRef, icon, subtitle, onClose, onBack }: {
       if (modo === "steer") setLocal((cur) => (cur && cur.live && cur.live.timeline.length === 0 ? null : cur));
       if (modo === "steer" && !r.running) setSteers((s) => [...s, text]);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Não foi possível falar com o agente");
+      setErr(e instanceof Error ? e.message : tr("Não foi possível falar com o agente"));
       setLocal(null);
       setSteers((s) => s.filter((x) => x !== text));
     } finally {
@@ -542,9 +543,9 @@ function ToolStepRow({ step, spinning }: {
       </button>
       {open && (
         <div className="mt-1.5 space-y-1.5">
-          {step.call && <StepBlock label="Chamada" text={step.call} />}
+          {step.call && <StepBlock label={tr("Chamada")} text={step.call} />}
           {step.preview
-            ? <StepBlock label={step.ok === false ? "Erro" : "Resultado"} text={step.preview} />
+            ? <StepBlock label={step.ok === false ? tr("Erro") : tr("Resultado")} text={step.preview} />
             : spinning && <p className="text-[11px] text-muted">aguardando o resultado…</p>}
         </div>
       )}
@@ -578,7 +579,7 @@ function Chip({ running, icon, name, status, failed, background, open, onClick }
       <span className={`min-w-0 truncate ${running ? "text-accent-hover/75" : "text-muted"}`}>
         {background && <Clock size={11} className="-mt-px mr-1 inline" />}
         {status}
-        {failed > 0 && !running && <span className="text-amber-400"> · {failed} com erro</span>}
+        {failed > 0 && !running && <span className="text-amber-400"> · {failed}  {tr("com erro")}</span>}
       </span>
       <ChevronRight size={13} className="shrink-0 text-muted" />
     </button>
@@ -640,12 +641,12 @@ export function TeamStep({ call, result, live = false }: { call?: ToolEvent; res
   const res = (result?.data && typeof result.data === "object" ? result.data : undefined) as TeamResult | undefined;
   const job = useBgJob(res?.kind === "subagent_team_started" ? res.job_id : undefined);
   const bgLive: TeamLive | undefined = job?.members && res?.kind === "subagent_team_started" ? {
-    name: res?.team || args.team_name || "Equipe", goal: res?.goal, size: job.members.length,
+    name: res?.team || args.team_name || tr("Equipe"), goal: res?.goal, size: job.members.length,
     running: job.status === "running", background: true, synthesizing: job.synthesizing,
     members: job.members.map((m) => ({ name: m.name, task: m.task, adhoc: true, running: m.state === "running", state: m.state, timeline: m.timeline })),
   } : undefined;
   const now = call?.team ?? bgLive;
-  const name = res?.team || now?.name || args.team_name || "Equipe";
+  const name = res?.team || now?.name || args.team_name || tr("Equipe");
   const goal = res?.goal || now?.goal || args.goal || "";
   const background = res?.kind === "subagent_team_started" || !!now?.background;
   const bgRunning = res?.kind === "subagent_team_started" && job?.status === "running";
@@ -670,9 +671,9 @@ export function TeamStep({ call, result, live = false }: { call?: ToolEvent; res
 
   const chain = res?.chained ?? now?.chain ?? false;
   const status = error ? "falhou"
-    : bgRunning ? (now?.synthesizing ? "em segundo plano · consolidando…" : `em segundo plano · ${done}/${size} · ${working} trabalhando`)
-    : res?.kind === "subagent_team_started" ? `em segundo plano · ${size} agentes`
-    : running ? (now?.synthesizing ? "consolidando relatórios…"
+    : bgRunning ? (now?.synthesizing ? tr("em segundo plano · consolidando…") : tr("em segundo plano · {done}/{size} · {working} trabalhando", { done: done, size: size, working: working }))
+    : res?.kind === "subagent_team_started" ? tr("em segundo plano · {size} agentes", { size: size })
+    : running ? (now?.synthesizing ? tr("consolidando relatórios…")
       : chain ? `etapa ${Math.min(done + 1, size)} de ${size}` : `${done}/${size} · ${working} trabalhando`)
     : chain ? `${size} etapas` : `${size} agentes`;
 
@@ -692,7 +693,7 @@ export function TeamStep({ call, result, live = false }: { call?: ToolEvent; res
           <div className="space-y-5 text-sm">
             {goal && (
               <div>
-                <p className="text-[11px] font-medium uppercase tracking-wider text-muted">Objetivo</p>
+                <p className="text-[11px] font-medium uppercase tracking-wider text-muted">{tr("Objetivo")}</p>
                 <p className="mt-1 whitespace-pre-wrap text-ink-soft">{goal}</p>
               </div>
             )}
@@ -701,12 +702,12 @@ export function TeamStep({ call, result, live = false }: { call?: ToolEvent; res
                 <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-border">
                   <div className="h-full rounded-full bg-accent transition-[width] duration-300" style={{ width: `${Math.round((done / size) * 100)}%` }} />
                 </div>
-                <span className="shrink-0 tabular-nums">{done}/{size} concluídos</span>
+                <span className="shrink-0 tabular-nums">{done}/{size}  {tr("concluídos")}</span>
               </div>
             )}
             {members.length > 0 && (
               <div>
-                <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">{chain ? "Etapas, em ordem" : "Agentes"}</p>
+                <p className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-muted">{chain ? tr("Etapas, em ordem") : tr("Agentes")}</p>
                 <div className="space-y-1">
                   {members.slice(0, shown).map((m, i) => {
                     const rm = resumo(m.call, m.result, false);
@@ -731,7 +732,8 @@ export function TeamStep({ call, result, live = false }: { call?: ToolEvent; res
                 </div>
                 {members.length > shown && (
                   <button type="button" onClick={() => setShown((n) => n + PAGE * 3)} className="mt-2 text-xs text-accent-hover hover:underline">
-                    Mostrar mais {Math.min(PAGE * 3, members.length - shown)} de {members.length - shown}
+                    
+                    {tr("Mostrar mais")} {Math.min(PAGE * 3, members.length - shown)} de {members.length - shown}
                   </button>
                 )}
               </div>
@@ -741,7 +743,8 @@ export function TeamStep({ call, result, live = false }: { call?: ToolEvent; res
             ) : res?.report && !background ? (
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-wider text-muted">
-                  Relatório final{res.synthesized ? ` · consolidado de ${size} relatórios` : ""}
+                  
+                  {tr("Relatório final")}{res.synthesized ? tr(" · consolidado de {size} relatórios", { size: size }) : ""}
                 </p>
                 <div className="mt-1 text-ink"><Markdown content={res.report} /></div>
               </div>
@@ -785,7 +788,7 @@ function NotePart({ text }: { text: string }) {
         className="flex w-full items-center gap-2 px-3.5 py-2 text-left transition-colors hover:bg-hover"
       >
         {agente ? <Users size={14} className="shrink-0 text-accent-hover" /> : <Clock size={14} className="shrink-0 text-accent-hover" />}
-        <span className="shrink-0 text-xs text-muted">{agente ? "Agente concluído" : "Comando concluído"}</span>
+        <span className="shrink-0 text-xs text-muted">{agente ? tr("Agente concluído") : tr("Comando concluído")}</span>
         <span className="min-w-0 flex-1 truncate text-sm text-ink">{titulo}</span>
         {open ? <ChevronDown size={14} className="shrink-0 text-muted" /> : <ChevronRight size={14} className="shrink-0 text-muted" />}
       </button>

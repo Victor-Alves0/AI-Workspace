@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Copy, Minus, Square, X } from "lucide-react";
+import { tr } from "@/lib/i18n";
 
 /** Barra de título do app DESKTOP, embutida na interface (como no VS Code): a janela
  *  não tem a moldura do Windows, então aqui ficam a área de arrastar (duplo clique
@@ -53,16 +54,16 @@ export default function DesktopTitleBar() {
       <div data-tauri-drag-region className="flex min-w-0 flex-1 items-center gap-2 pl-3">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img data-tauri-drag-region src="/logo.png" alt="" className="h-4 w-4 rounded" draggable={false} />
-        <span data-tauri-drag-region className="truncate text-xs text-muted">AI Workspace</span>
+        <span data-tauri-drag-region className="truncate text-xs text-muted">{tr("AI Workspace")}</span>
       </div>
       <div className="flex h-full">
-        <button type="button" title="Minimizar" aria-label="Minimizar" onClick={() => void win.minimize()} className={`${btn} hover:bg-hover`}>
+        <button type="button" title={tr("Minimizar")} aria-label={tr("Minimizar")} onClick={() => void win.minimize()} className={`${btn} hover:bg-hover`}>
           <Minus size={15} strokeWidth={1.5} />
         </button>
-        <button type="button" title={max ? "Restaurar" : "Maximizar"} aria-label={max ? "Restaurar" : "Maximizar"} onClick={() => void win.toggleMaximize()} className={`${btn} hover:bg-hover`}>
+        <button type="button" title={max ? tr("Restaurar") : tr("Maximizar")} aria-label={max ? tr("Restaurar") : tr("Maximizar")} onClick={() => void win.toggleMaximize()} className={`${btn} hover:bg-hover`}>
           {max ? <Copy size={13} strokeWidth={1.5} className="-scale-x-100" /> : <Square size={12} strokeWidth={1.5} />}
         </button>
-        <button type="button" title="Fechar" aria-label="Fechar" onClick={() => void win.close()} className={`${btn} hover:bg-[#c42b1c] hover:text-white`}>
+        <button type="button" title={tr("Fechar")} aria-label={tr("Fechar")} onClick={() => void win.close()} className={`${btn} hover:bg-[#c42b1c] hover:text-white`}>
           <X size={16} strokeWidth={1.5} />
         </button>
       </div>
