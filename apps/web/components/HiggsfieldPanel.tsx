@@ -122,7 +122,7 @@ function HiggsfieldBody({ st, reload }: { st: HiggsfieldStatus; reload: () => Pr
         <label className="block text-sm">
           <span className="text-ink-soft">{tr("API Key")}</span>
           <input value={apiKey} onChange={(e) => setApiKey(e.target.value)}
-            placeholder={st.connected ? "•••••••• (preencha p/ trocar)" : "hf_..."}
+            placeholder={st.connected ? tr("•••••••• (preencha p/ trocar)") : "hf_..."}
             className="mt-1 w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-xs text-ink outline-none focus:border-accent" />
         </label>
         <label className="block text-sm">
@@ -134,7 +134,7 @@ function HiggsfieldBody({ st, reload }: { st: HiggsfieldStatus; reload: () => Pr
         <div className="flex flex-wrap items-center gap-2 pt-0.5">
           <button onClick={save} disabled={saving || !apiKey.trim()}
             className="rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-            {saving ? "…" : saved ? "Salvo ✓" : tr("Salvar")}
+            {saving ? "…" : saved ? tr("Salvo ✓") : tr("Salvar")}
           </button>
           <button onClick={testConn} disabled={test === "loading" || !st.connected}
             title={st.connected ? tr("Testar conexão") : tr("Salve as credenciais primeiro")}

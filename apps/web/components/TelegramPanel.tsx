@@ -114,7 +114,7 @@ export default function TelegramPanel({ onBack }: { onBack: () => void }) {
           <label className="block text-xs text-muted">{tr("Token do bot (@BotFather)")}
             <input value={newToken} onChange={(e) => setNewToken(e.target.value)} placeholder="123456:ABC-DEF..." className={inputCls} />
           </label>
-          <label className="block text-xs text-muted">Nome (opcional)
+          <label className="block text-xs text-muted">{tr("Nome (opcional)")}
             <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder={tr("Ex.: Assistente pessoal")} className={inputCls} />
           </label>
           <div className="text-xs text-muted">{tr("Modelo")}
@@ -143,7 +143,7 @@ export default function TelegramPanel({ onBack }: { onBack: () => void }) {
                   {openId === c.id ? <ChevronDown size={15} className="text-muted" /> : <ChevronRight size={15} className="text-muted" />}
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-ink">{c.label || `@${c.bot_username}`}</p>
-                    <p className="truncate text-xs text-muted">@{c.bot_username} · {c.threads} conversa(s){c.state?.last_error ? ` · erro: ${c.state.last_error}` : ""}</p>
+                    <p className="truncate text-xs text-muted">@{c.bot_username} · {tr("{n} conversa(s)", { n: c.threads })}{c.state?.last_error ? ` · ${tr("erro:")} ${c.state.last_error}` : ""}</p>
                   </div>
                 </button>
                 <button onClick={() => test(c)} title={tr("Enviar teste")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Send size={14} /></button>
@@ -173,7 +173,7 @@ export default function TelegramPanel({ onBack }: { onBack: () => void }) {
                     <Toggle on={!!c.filters?.groups} onClick={() => patch(c.id, { filters: { ...(c.filters || {}), groups: !c.filters?.groups } })} />
                   </div>
                   <label className="block text-xs text-muted">{tr("Prefixo-gatilho (opcional — só responde se a mensagem começar com ele)")}
-                    <input defaultValue={c.filters?.trigger || ""} onBlur={(e) => (e.target.value !== (c.filters?.trigger || "")) && patch(c.id, { filters: { ...(c.filters || {}), trigger: e.target.value } })} placeholder="Ex.: /ia" className={inputCls} />
+                    <input defaultValue={c.filters?.trigger || ""} onBlur={(e) => (e.target.value !== (c.filters?.trigger || "")) && patch(c.id, { filters: { ...(c.filters || {}), trigger: e.target.value } })} placeholder={tr("Ex.: /ia")} className={inputCls} />
                   </label>
                   <label className="block text-xs text-muted">{tr("Agrupar mensagens seguidas")}
                     <Select value={c.debounce_seconds ?? 0} onChange={(e) => patch(c.id, { debounce_seconds: Number(e.target.value) })} className={inputCls}>

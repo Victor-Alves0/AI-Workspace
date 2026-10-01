@@ -108,7 +108,7 @@ function BenchmarkEditor({ id, onBack, onSaved }: { id: string | null; onBack: (
                 <option value="none">{tr("Sem regra")}</option>
                 <option value="contains">{tr("Deve conter")}</option>
                 <option value="regex">{tr("Regex")}</option>
-                <option value="tool_called">Chamou a tool</option>
+                <option value="tool_called">{tr("Chamou a tool")}</option>
                 <option value="tool_not_called">{tr("NÃO chamou a tool")}</option>
                 <option value="no_tool">{tr("Sem nenhuma tool")}</option>
               </Select>
@@ -292,7 +292,7 @@ function RunPanel({ bench, onBack }: { bench: BenchmarkSummary; onBack: () => vo
       <p className="text-xs text-muted">{bench.case_count} caso(s){bench.judge_model ? ` · juiz: ${bench.judge_model}` : ""}</p>
 
       <div className="mt-3 rounded-2xl border border-border bg-surface p-4">
-        <p className="mb-2 text-xs text-muted">Modelos a testar</p>
+        <p className="mb-2 text-xs text-muted">{tr("Modelos a testar")}</p>
         <div className="space-y-2">
           {slots.map((s, i) => (
             <div key={i} className="flex items-center gap-2">

@@ -127,7 +127,7 @@ export default function ConnectedAccounts({
         {connect.waiting ? (
           <div className="flex h-9 items-center gap-2 px-2.5 text-sm text-ink-soft">
             <Loader2 size={15} className="shrink-0 animate-spin text-muted" />
-            <span className="min-w-0 flex-1 truncate">{connect.blocked ? tr("Abra o login para continuar") : "Aguardando o login…"}</span>
+            <span className="min-w-0 flex-1 truncate">{connect.blocked ? tr("Abra o login para continuar") : tr("Aguardando o login…")}</span>
             <button type="button" onClick={connect.reopen}
               className={`flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors ${connect.blocked ? "bg-accent text-white hover:bg-accent-hover" : "text-muted hover:bg-hover hover:text-ink"}`}>
               <ExternalLink size={13} />  {tr("Abrir")}

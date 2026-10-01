@@ -471,7 +471,7 @@ export default function ChatPage() {
       const truncated = !!r.total_lines && !!r.end_line && r.end_line < r.total_lines;
       const body = stripLineNumbers(r.content)
         + (truncated ? tr("\n… (arquivo truncado — {total_lines} linhas no total)", { total_lines: r.total_lines }) : "");
-      const prefill = `Sobre o arquivo \`${payload.path}\`:\n\n\`\`\`${extLang(payload.path)}\n${body}\n\`\`\`\n\n`;
+      const prefill = tr("Sobre o arquivo `{path}`:\n\n```{1}\n{body}\n```\n\n", { path: payload.path, "1": extLang(payload.path), body: body });
       setInput((v) => (v ? `${v}\n\n${prefill}` : prefill));
     } catch { /* falha ao ler — ignora, o usuário pode tentar de novo */ }
   }
@@ -1553,7 +1553,7 @@ export default function ChatPage() {
       const c = chats.find((x) => x.id === id);
       const ok = await confirm({
         title: tr("Excluir chat?"),
-        body: <>{tr("Isso vai excluir")} <span className="font-medium text-ink">{c?.title || "este chat"}</span>.</>,
+        body: <>{tr("Isso vai excluir")} <span className="font-medium text-ink">{c?.title || tr("este chat")}</span>.</>,
         confirmLabel: tr("Excluir"),
         danger: true,
       });
@@ -2560,26 +2560,26 @@ export default function ChatPage() {
 
   // itens da paleta de comandos (Ctrl/⌘ K): ações + chats + modelos
   const paletteItems: PaletteItem[] = [
-    { id: "act-new", group: tr("Ações"), label: tr("Novo chat"), keywords: "conversa nova", icon: <MessageSquareDashed size={16} />, run: () => newChat() },
+    { id: "act-new", group: tr("Ações"), label: tr("Novo chat"), keywords: tr("conversa nova"), icon: <MessageSquareDashed size={16} />, run: () => newChat() },
     { id: "act-temp", group: tr("Ações"), label: tr("Chat temporário"), keywords: tr("privado incógnito não salvar"), icon: <MessageSquareDashed size={16} />, run: () => { if (!temporary) toggleTemporary(); } },
     { id: "act-round", group: tr("Ações"), label: "Mesa-redonda", keywords: "multi modelo debate", icon: <Users size={16} />, run: () => enterRoundtable() },
-    { id: "act-ws", group: tr("Ações"), label: tr("Espaço de Trabalho"), keywords: "modelos ferramentas prompts skills", icon: <Wrench size={16} />, run: () => openWorkspace(null) },
+    { id: "act-ws", group: tr("Ações"), label: tr("Espaço de Trabalho"), keywords: tr("modelos ferramentas prompts skills"), icon: <Wrench size={16} />, run: () => openWorkspace(null) },
     { id: "act-auto", group: tr("Ações"), label: tr("Automações"), keywords: "agendar monitor", icon: <Bell size={16} />, run: () => openWorkspace("Automacoes") },
-    { id: "act-play", group: tr("Ações"), label: tr("Playground"), keywords: "benchmark comparar modelos debug ferramentas tools", icon: <FlaskConical size={16} />, run: () => openWorkspace("Playground") },
+    { id: "act-play", group: tr("Ações"), label: tr("Playground"), keywords: tr("benchmark comparar modelos debug ferramentas tools"), icon: <FlaskConical size={16} />, run: () => openWorkspace("Playground") },
     { id: "act-archived", group: tr("Ações"), label: tr("Chats arquivados"), keywords: "arquivo", icon: <Search size={16} />, run: () => setShowArchived(true) },
     ...(user.role === "admin" ? [{ id: "act-admin", group: tr("Ações"), label: tr("Painel do Admin"), keywords: "usuarios rede backup", icon: <ShieldAlert size={16} />, run: () => router.push("/admin") } as PaletteItem] : []),
     { id: "act-logout", group: tr("Ações"), label: tr("Sair"), keywords: "logout desconectar sair", icon: <X size={16} />, run: () => logout() },
     { id: "set-general", group: tr("Configurações"), label: tr("Configurações"), sublabel: tr("Geral"), icon: <SlidersHorizontal size={16} />, run: () => openSettings("general") },
-    { id: "set-status", group: tr("Configurações"), label: tr("Status do sistema"), keywords: "saude chave conexao", icon: <SlidersHorizontal size={16} />, run: () => openSettings("status") },
+    { id: "set-status", group: tr("Configurações"), label: tr("Status do sistema"), keywords: tr("saude chave conexao"), icon: <SlidersHorizontal size={16} />, run: () => openSettings("status") },
     { id: "set-budget", group: tr("Configurações"), label: tr("Orçamento mensal"), keywords: "conta gasto limite custo", icon: <SlidersHorizontal size={16} />, run: () => openSettings("account") },
-    { id: "set-conn", group: tr("Configurações"), label: tr("Conexões (APIs, Web, Voz)"), keywords: "openrouter chave busca metabusca", icon: <SlidersHorizontal size={16} />, run: () => openSettings("connections") },
+    { id: "set-conn", group: tr("Configurações"), label: tr("Conexões (APIs, Web, Voz)"), keywords: tr("openrouter chave busca metabusca"), icon: <SlidersHorizontal size={16} />, run: () => openSettings("connections") },
     { id: "set-integ", group: tr("Configurações"), label: tr("Integrações (WhatsApp, Google)"), keywords: "whatsapp google tuya", icon: <SlidersHorizontal size={16} />, run: () => openSettings("integrations") },
     ...customModels.map((mc): PaletteItem => ({
       id: `model-${mc.id}`, group: tr("Modelos"), label: mc.name, sublabel: mc.base_model,
       keywords: "usar modelo trocar", icon: <Wrench size={16} />, run: () => selectCustom(mc),
     })),
     ...chats.slice(0, 60).map((c): PaletteItem => ({
-      id: `chat-${c.id}`, group: tr("Chats"), label: c.title, keywords: "conversa abrir", run: () => selectChat(c.id),
+      id: `chat-${c.id}`, group: tr("Chats"), label: c.title, keywords: tr("conversa abrir"), run: () => selectChat(c.id),
     })),
   ];
 
@@ -2713,7 +2713,7 @@ export default function ChatPage() {
                   view_once, apagada ao sair). */}
               <button
                 onClick={() => { if (isRoundtable) setRtBarOpen((v) => !v); else { enterRoundtable(); setRtBarOpen(true); } }}
-                title={isRoundtable ? (rtBarOpen ? "Ocultar a mesa" : "Mostrar a mesa") : temporary ? tr("Mesa-redonda temporária (não será salva)") : tr("Mesa-redonda: fazer os modelos conversarem entre si")}
+                title={isRoundtable ? (rtBarOpen ? tr("Ocultar a mesa") : tr("Mostrar a mesa")) : temporary ? tr("Mesa-redonda temporária (não será salva)") : tr("Mesa-redonda: fazer os modelos conversarem entre si")}
                 className={`rounded-lg p-1.5 transition-colors max-md:p-2.5 max-md:[&_svg]:size-[22px] ${isRoundtable && rtBarOpen ? "bg-accent/15 text-accent-hover" : isRoundtable ? "text-accent-hover hover:bg-hover" : "text-muted hover:bg-hover hover:text-ink"}`}
               >
                 <Users size={18} />
@@ -3145,7 +3145,7 @@ export default function ChatPage() {
                   dense
                   useLabel={tr("Inserir no chat")}
                   onUse={(path, content) => {
-                    const prefill = `Sobre o arquivo \`${path}\`:\n\n\`\`\`${extLang(path)}\n${content}\n\`\`\`\n\n`;
+                    const prefill = tr("Sobre o arquivo `{path}`:\n\n```{1}\n{content}\n```\n\n", { path: path, "1": extLang(path), content: content });
                     setInput((v) => (v ? `${v}\n\n${prefill}` : prefill));
                     setCsFilesOpen(false);
                   }}
@@ -3318,7 +3318,7 @@ const ACTION_LABELS: Record<string, string> = {
   expand_world: tr("expandindo o mundo"), build_world: tr("criando o mundo"), set_concept: tr("registrando o conceito"),
   set_character: tr("registrando a ficha"), roll_abilities: tr("rolando os atributos"), begin_adventure: tr("abrindo a aventura"),
   spellbook: tr("escrevendo magias"), entity_image: tr("guardando a imagem"), resolve: tr("resolvendo a ação"),
-  roll: tr("rolando o teste"), adjudicate: tr("decidindo a consequência"), roleplay: "interpretando o NPC",
+  roll: tr("rolando o teste"), adjudicate: tr("decidindo a consequência"), roleplay: tr("interpretando o NPC"),
   saving_throw: tr("rolando a resistência"), apply_effect: tr("aplicando o efeito"), ally: tr("chamando um aliado"),
   fate: tr("decidindo o destino"), new_character: tr("preparando um novo personagem"), dice: tr("rolando dados"),
 };
@@ -3431,7 +3431,7 @@ function SpeechController({
         type="button"
         onClick={() => seekSpeaking(-15)}
         disabled={!progress.seekable}
-        title={progress.seekable ? "Voltar 15 segundos" : tr("Indisponível na voz do navegador")}
+        title={progress.seekable ? tr("Voltar 15 segundos") : tr("Indisponível na voz do navegador")}
         className="relative flex h-9 w-9 items-center justify-center rounded-xl text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-35"
       >
         <RotateCcw size={19} />
@@ -3450,7 +3450,7 @@ function SpeechController({
       <button
         type="button"
         onClick={onClose}
-        title="Parar e fechar"
+        title={tr("Parar e fechar")}
         className="flex h-9 w-9 items-center justify-center rounded-xl text-muted transition-colors hover:bg-red-500/15 hover:text-red-400"
       >
         <X size={18} />

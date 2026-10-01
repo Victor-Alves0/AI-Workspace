@@ -68,7 +68,7 @@ export default function ElevenLabsPanel({ onBack, onChanged }: { onBack: () => v
   }
 
   async function disconnect() {
-    if (!(await confirm({ title: "Desconectar a ElevenLabs?", body: tr("A voz premium e a ferramenta de áudio deixarão de funcionar."), confirmLabel: tr("Desconectar"), danger: true }))) return;
+    if (!(await confirm({ title: tr("Desconectar a ElevenLabs?"), body: tr("A voz premium e a ferramenta de áudio deixarão de funcionar."), confirmLabel: tr("Desconectar"), danger: true }))) return;
     try { await api.del("/integrations/elevenlabs"); await load(); onChanged?.(); }
     catch (e) { toast(e instanceof ApiError ? e.message : tr("Falha ao desconectar")); }
   }
@@ -133,7 +133,7 @@ export default function ElevenLabsPanel({ onBack, onChanged }: { onBack: () => v
                    : <p className="min-w-0 flex-1 text-[11px] text-muted">{tr("Pegue a chave em elevenlabs.io → perfil → API Keys.")}</p>}
               <button onClick={() => save()} disabled={busy || (!st.connected && !apiKey.trim())}
                 className="shrink-0 rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-                {busy ? "…" : saved ? "Salvo ✓" : tr("Salvar")}
+                {busy ? "…" : saved ? tr("Salvo ✓") : tr("Salvar")}
               </button>
             </div>
           </div>

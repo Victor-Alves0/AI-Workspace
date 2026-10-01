@@ -86,7 +86,7 @@ export default function PromptEditor({
                 setCommandDirty(true);
                 setCommand(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"));
               }}
-              placeholder="comando"
+              placeholder={tr("comando")}
               className="w-full bg-transparent font-mono text-ink-soft outline-none placeholder:text-muted"
             />
           </div>
@@ -111,7 +111,7 @@ export default function PromptEditor({
       <div className="flex items-center justify-end gap-3 border-t border-border px-6 py-3">
         {err && <span className="text-xs text-red-400">{err}</span>}
         <button onClick={save} disabled={saving} className="rounded-full bg-white px-6 py-2 text-sm font-medium text-black hover:opacity-90 disabled:opacity-60">
-          {saving ? "…" : "Salvar e Criar"}
+          {saving ? "…" : tr("Salvar e Criar")}
         </button>
       </div>
     </div>

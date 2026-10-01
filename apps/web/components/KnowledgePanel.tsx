@@ -71,7 +71,7 @@ function StatusBadge({ d }: { d: KnowledgeDoc }) {
     <span className={`flex items-center gap-1 text-xs ${s.cls}`} title={d.error || undefined}>
       {d.status === "indexing" || d.status === "pending" ? <Loader2 size={12} className="animate-spin" /> :
         d.status === "ready" ? <Check size={12} /> : <AlertTriangle size={12} />}
-      {s.label}{d.status === "ready" && d.chunk_count ? ` · ${d.chunk_count} trechos` : ""}
+      {s.label}{d.status === "ready" && d.chunk_count ? ` · ${tr("{n} trechos", { n: d.chunk_count })}` : ""}
     </span>
   );
 }
@@ -479,7 +479,7 @@ export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
         <>
         <div className="rounded-xl border border-border bg-surface p-3">
           <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted"><Tag size={12} /> {isBrain ? tr("Etiquetas do cérebro") : tr("Etiquetas da base")}</p>
-          <TagInput tags={current.tags || []} onChange={saveBaseTags} placeholder={isBrain ? "Ex.: projetos, estudos…" : "Ex.: manuais, fiscal…"} />
+          <TagInput tags={current.tags || []} onChange={saveBaseTags} placeholder={isBrain ? tr("Ex.: projetos, estudos…") : tr("Ex.: manuais, fiscal…")} />
         </div>
 
         {/* barra de ações */}
@@ -747,7 +747,7 @@ export default function KnowledgeView({ kind = "kb", setHeaderAction }: {
                 <button onClick={() => setSel(b.id)} className="flex min-w-0 flex-1 items-center text-left">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-ink">{b.name}</p>
-                    <p className="text-xs text-muted">{isBrain ? `${b.doc_count} nota(s)` : `${b.doc_count} doc(s) · ${b.chunk_count} trechos`}</p>
+                    <p className="text-xs text-muted">{isBrain ? `${b.doc_count} nota(s)` : tr("{doc_count} doc(s) · {chunk_count} trechos", { doc_count: b.doc_count, chunk_count: b.chunk_count })}</p>
                     {(b.tags || []).length > 0 && (
                       <div className="mt-1 flex flex-wrap gap-1">
                         {(b.tags || []).slice(0, 4).map((t) => (
@@ -810,7 +810,7 @@ function TextEditorModal({
         <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
           <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-ink">{tr("Cancelar")}</button>
           <button onClick={onSave} disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50">
-            {saving && <Loader2 size={14} className="animate-spin" />} Salvar e indexar
+            {saving && <Loader2 size={14} className="animate-spin" />}  {tr("Salvar e indexar")}
           </button>
         </div>
       </div>

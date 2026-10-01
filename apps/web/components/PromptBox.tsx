@@ -103,7 +103,7 @@ function ContextMeter({
         onMouseDown={(e) => e.stopPropagation()}
         onClick={() => setOpen((v) => !v)}
         disabled={busy}
-        title={`Contexto: ${fmt(tokens)}${limit ? ` / ${fmt(limit)}` : ""} tokens`}
+        title={tr("Contexto: {0}{1} tokens", { "0": fmt(tokens), "1": limit ? ` / ${fmt(limit)}` : "" })}
         className="relative flex h-8 w-8 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-hover disabled:opacity-60 max-md:h-10 max-md:w-10"
       >
         {busy ? (
@@ -992,7 +992,7 @@ export default function PromptBox({
             </div>
             <button
               onClick={onToggleMic}
-              title="Concluir (transcrever)"
+              title={tr("Concluir (transcrever)")}
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent text-white transition-colors hover:bg-accent-hover"
             >
               <Check size={20} />
@@ -1195,7 +1195,7 @@ export default function PromptBox({
                       {/* min-w-0: sem ele o nome longo ("Texto colado 23/09/2026, 14:30.txt")
                           não encolhe e empurra o ✕ para fora do chip — onde a lista o corta */}
                       {isTextAttachment(a) ? (
-                        <button onClick={() => setViewing(i)} title="Ver e editar" className="min-w-0 truncate text-left hover:underline">
+                        <button onClick={() => setViewing(i)} title={tr("Ver e editar")} className="min-w-0 truncate text-left hover:underline">
                           {a.name}
                         </button>
                       ) : (

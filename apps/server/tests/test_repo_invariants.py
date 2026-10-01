@@ -325,3 +325,38 @@ def test_engrenagem_de_tool_nao_tem_confirmacao_por_modelo():
     por modelo na engrenagem da tool não fazia nada — falha silenciosa."""
     painel = (_WEB / "components" / "toolPanels.tsx").read_text(encoding="utf-8")
     assert '"require_confirm"' not in painel
+
+
+def _chaves_tr() -> dict[str, str]:
+    """Chaves tr("…") literais do front → primeiro local de uso."""
+    import json as _json
+
+    lit = re.compile(r'\btr\(\s*"((?:[^"\\]|\\.)*)"')
+    achadas: dict[str, str] = {}
+    for path in [*_tsx(), *(_WEB / "lib").rglob("*.ts"), *(_WEB / "app").rglob("*.ts")]:
+        for m in lit.finditer(path.read_text(encoding="utf-8")):
+            achadas.setdefault(_json.loads(f'"{m.group(1)}"'), str(path.relative_to(_REPO)))
+    return achadas
+
+
+def test_todo_texto_da_interface_tem_traducao_em_ingles():
+    """Texto novo na interface entra com tr("em português") E a versão em inglês em
+    apps/web/locales/en.json — senão quem usa o app em inglês vê português no meio.
+    Só cobra o que tem cara de português (marcas e siglas ficam iguais)."""
+    import json as _json
+
+    en = _json.loads((_WEB / "locales" / "en.json").read_text(encoding="utf-8"))
+    pt = re.compile(r"[ãõçáéíóúâêô]|\b(de|da|do|para|com|sem|não|uma|um|os|as|ao|no|na|em|ou|e)\b", re.I)
+    faltando = [f"{onde}: {k[:60]!r}" for k, onde in _chaves_tr().items()
+                if k not in en and pt.search(k) and k != "Português (Brasil)"]
+    assert not faltando, "sem tradução em locales/en.json:\n" + "\n".join(faltando[:40])
+
+
+def test_traducao_nao_inventa_nem_perde_variavel():
+    """`{nome}` da tradução tem de existir no original (senão sai `{nome}` cru na tela)."""
+    import json as _json
+
+    en = _json.loads((_WEB / "locales" / "en.json").read_text(encoding="utf-8"))
+    ph = re.compile(r"\{(\w+)\}")
+    ruins = [k for k, v in en.items() if not set(ph.findall(v)) <= set(ph.findall(k))]
+    assert not ruins, f"placeholders inventados: {ruins[:10]}"

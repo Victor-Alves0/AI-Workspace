@@ -9,7 +9,7 @@ import InvestigationGraphView from "./InvestigationGraphView";
 import { tr } from "@/lib/i18n";
 
 const KIND_LABEL: Record<string, string> = {
-  recon: "Recon", re: "Eng. reversa", behavior: "Comportamento", generic: "Geral",
+  recon: tr("Recon"), re: tr("Eng. reversa"), behavior: tr("Comportamento"), generic: tr("Geral"),
 };
 
 /** Painel do Espaço → Grafaria: lista os grafos estruturados que a IA montou e

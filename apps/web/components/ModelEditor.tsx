@@ -32,9 +32,9 @@ const TOOL_CFG: Record<string, { key: string; Panel: (p: any) => React.JSX.Eleme
  * e executar no projeto), mas o seletor deixa de parecer uma lista solta de APIs. */
 function systemToolCapabilityGroup(tool: SystemTool): string {
   const path = tool.path;
-  if (path.startsWith("github.public.")) return "Web e pesquisa";
+  if (path.startsWith("github.public.")) return tr("Web e pesquisa");
   if (path.startsWith("web.") || path.startsWith("research.") || path.startsWith("security.") || path.startsWith("finance.")) {
-    return "Web e pesquisa";
+    return tr("Web e pesquisa");
   }
   if (path.startsWith("code.") || path.startsWith("http.")) return tr("Projeto e código");
   if (path.startsWith("investigation.")) return tr("Investigação");
@@ -42,7 +42,7 @@ function systemToolCapabilityGroup(tool: SystemTool): string {
     return tr("Criação e mídia");
   }
   if (tool.category === "integration") return tr("Integrações");
-  return "Produtividade e contexto";
+  return tr("Produtividade e contexto");
 }
 
 type ToolCapabilityItem = TransferItem & { members: string[]; defaultMembers: string[] };
@@ -53,7 +53,7 @@ type ToolCapabilityItem = TransferItem & { members: string[]; defaultMembers: st
 function systemToolCapability(tool: SystemTool): Pick<ToolCapabilityItem, "key" | "label" | "sublabel" | "group"> {
   const path = tool.path;
   if (path.startsWith("web.")) {
-    return { key: "cap:web", label: tr("Web"), sublabel: tr("Pesquisar, ler fontes e navegar páginas"), group: "Web e pesquisa" };
+    return { key: "cap:web", label: tr("Web"), sublabel: tr("Pesquisar, ler fontes e navegar páginas"), group: tr("Web e pesquisa") };
   }
   if (path.startsWith("github.")) {
     return { key: "cap:github", label: "GitHub", sublabel: tr("Pesquisa pública e repositórios conectados"), group: tr("Integrações") };
@@ -65,16 +65,16 @@ function systemToolCapability(tool: SystemTool): Pick<ToolCapabilityItem, "key" 
     return { key: "cap:workspace", label: tr("Workspace de código"), sublabel: tr("Ler, editar, executar, pré-visualizar e gerenciar tarefas"), group: tr("Projeto e código") };
   }
   if (path.startsWith("automation.")) {
-    return { key: "cap:automation", label: tr("Automações"), sublabel: "Monitores e lembretes", group: "Produtividade e contexto" };
+    return { key: "cap:automation", label: tr("Automações"), sublabel: tr("Monitores e lembretes"), group: tr("Produtividade e contexto") };
   }
   if (path.startsWith("skills.") || path.startsWith("prompts.")) {
-    return { key: "cap:libraries", label: tr("Bibliotecas"), sublabel: tr("Skills e prompts reutilizáveis"), group: "Produtividade e contexto" };
+    return { key: "cap:libraries", label: tr("Bibliotecas"), sublabel: tr("Skills e prompts reutilizáveis"), group: tr("Produtividade e contexto") };
   }
   if (path.startsWith("utils.")) {
-    return { key: "cap:utilities", label: tr("Utilitários"), sublabel: tr("Data, hora e cálculos"), group: "Produtividade e contexto" };
+    return { key: "cap:utilities", label: tr("Utilitários"), sublabel: tr("Data, hora e cálculos"), group: tr("Produtividade e contexto") };
   }
   if (path.startsWith("security.")) {
-    return { key: "cap:security", label: tr("Segurança"), sublabel: "CVEs e Exploit-DB", group: "Web e pesquisa" };
+    return { key: "cap:security", label: tr("Segurança"), sublabel: tr("CVEs e Exploit-DB"), group: tr("Web e pesquisa") };
   }
   return {
     key: `builtin:${path}`,
@@ -230,11 +230,11 @@ type ModelVoiceConfig = {
 const API_TTS_MODELS: AudioChoice[] = [
   { id: "gpt-4o-mini-tts", name: tr("GPT-4o mini TTS"), provider: "API de voz" },
   { id: "tts-1", name: "TTS-1", provider: "API de voz" },
-  { id: "tts-1-hd", name: "TTS-1 HD", provider: "API de voz" },
+  { id: "tts-1-hd", name: tr("TTS-1 HD"), provider: "API de voz" },
 ];
 const API_STT_MODELS: AudioChoice[] = [
   { id: "whisper-1", name: tr("Whisper"), provider: "API de voz" },
-  { id: "gpt-4o-transcribe", name: "GPT-4o Transcribe", provider: "API de voz" },
+  { id: "gpt-4o-transcribe", name: tr("GPT-4o Transcribe"), provider: "API de voz" },
   { id: "gpt-4o-mini-transcribe", name: tr("GPT-4o mini Transcribe"), provider: "API de voz" },
 ];
 const OPENROUTER_STT_FALLBACK: AudioChoice = {
@@ -489,7 +489,7 @@ function VoiceStudio({
           <div className="flex items-start gap-2.5">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-accent/15 text-accent-hover"><Volume2 size={16} /></span>
             <span>
-              <span className="block text-sm font-semibold text-ink">Fala · TTS</span>
+              <span className="block text-sm font-semibold text-ink">{tr("Fala · TTS")}</span>
               <span className="block text-[11px] text-muted">{tr("Transforma a resposta do modelo em áudio.")}</span>
             </span>
           </div>
@@ -511,7 +511,7 @@ function VoiceStudio({
           <div className="flex items-start gap-2.5">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-surface2 text-ink-soft"><Mic2 size={16} /></span>
             <span>
-              <span className="block text-sm font-semibold text-ink">Escuta · STT</span>
+              <span className="block text-sm font-semibold text-ink">{tr("Escuta · STT")}</span>
               <span className="block text-[11px] text-muted">{tr("Transcreve o microfone antes de enviar a mensagem.")}</span>
             </span>
           </div>
@@ -561,7 +561,7 @@ function OutputGuards({ value, onChange, baseModels }: { value: any; onChange: (
                 <option value="refusal">{tr("O modelo recusar")}</option>
                 <option value="empty">{tr("Resposta vazia")}</option>
                 <option value="regex">{tr("Casar um padrão (regex)")}</option>
-                <option value="judge">Juiz (LLM) avaliar</option>
+                <option value="judge">{tr("Juiz (LLM) avaliar")}</option>
               </Select>
             </label>
             <label className="space-y-1">
@@ -1488,7 +1488,7 @@ export default function ModelEditor({
                 rows={4}
                 value={systemPrompt}
                 onChange={(e) => setSystemPrompt(e.target.value)}
-                placeholder={tr("Como este modelo deve se comportar.&#10;ex.: Você é o Mario do Super Mario Bros e atua como assistente.")}
+                placeholder={tr("Como este modelo deve se comportar.\nex.: Você é o Mario do Super Mario Bros e atua como assistente.")}
                 className="h-[128px] w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm text-ink outline-none transition-colors focus:border-accent placeholder:text-muted"
               />
               <button onClick={() => setShowAdvanced((v) => !v)} className="flex items-center gap-1 pt-1 text-sm text-muted transition-colors hover:text-ink">
@@ -1523,7 +1523,7 @@ export default function ModelEditor({
                           const order = e.target.value.split(",").map((value) => value.trim()).filter(Boolean);
                           updateProviderPrefs({ order: order.length ? order : undefined });
                         }}
-                        placeholder="ex.: deepinfra/turbo, together"
+                        placeholder={tr("ex.: deepinfra/turbo, together")}
                         className="mt-1 w-full rounded-md border border-border bg-bg px-2 py-1.5 font-mono text-xs text-ink outline-none focus:border-accent placeholder:text-muted"
                       />
                     </label>
@@ -1561,7 +1561,7 @@ export default function ModelEditor({
 
             <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
               <span className="min-w-0">
-                <span className="block text-sm font-medium text-ink">Fala · TTS</span>
+                <span className="block text-sm font-medium text-ink">{tr("Fala · TTS")}</span>
                 <span className="block text-xs text-muted">{tr("Transforma respostas do modelo em áudio.")}</span>
               </span>
               <div className="flex shrink-0 items-center gap-1.5">
@@ -1598,7 +1598,7 @@ export default function ModelEditor({
 
             <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3">
               <span className="min-w-0">
-                <span className="block text-sm font-medium text-ink">Escuta · STT</span>
+                <span className="block text-sm font-medium text-ink">{tr("Escuta · STT")}</span>
                 <span className="block text-xs text-muted">{tr("Transcreve o microfone antes de enviar a mensagem.")}</span>
               </span>
               <div className="flex shrink-0 items-center gap-1.5">
@@ -1640,7 +1640,7 @@ export default function ModelEditor({
               <span className="text-muted"><Ear size={15} /></span>
               
               {tr("Assistente")}
-              <InfoHint text={tr("Fale com este modelo e ouça a resposta — pelo botão 🎙️/atalho no chat, ou por wake word (&quot;hey nome&quot;) sempre-ativa.")} />
+              <InfoHint text={tr("Fale com este modelo e ouça a resposta — pelo botão 🎙️/atalho no chat, ou por wake word (\"hey nome\") sempre-ativa.")} />
             </h2>
 
             {/* Card: o toggle liga; a engrenagem revela as opções (padrão do SIFT) */}
@@ -1673,10 +1673,10 @@ export default function ModelEditor({
                   <input
                     value={listenCfg.call_name ?? ""}
                     onChange={(e) => setListenCfg({ call_name: e.target.value })}
-                    placeholder="ex.: Max"
+                    placeholder={tr("ex.: Max")}
                     className="w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-ink outline-none focus:border-accent"
                   />
-                  <span className="mt-1 block text-[11px] text-muted">{tr("O que você diz para chamar. Com")} <strong>{tr("Vosk")}</strong>  {tr("já ativa direto; com")} <strong>{"Porcupine"}</strong>{tr(", escolha a palavra na seção Wake word.")}</span>
+                  <span className="mt-1 block text-[11px] text-muted">{tr("O que você diz para chamar. Com")} <strong>{tr("Vosk")}</strong>  {tr("já ativa direto; com")} <strong>{tr("Porcupine")}</strong>{tr(", escolha a palavra na seção Wake word.")}</span>
                 </label>
                 <div>
                   <span className="mb-1 block text-xs font-medium text-muted">{tr("Chat do modo voz")}</span>
@@ -1696,7 +1696,7 @@ export default function ModelEditor({
                   )}
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm text-ink">Falar a resposta (TTS)</p>
+                  <p className="text-sm text-ink">{tr("Falar a resposta (TTS)")}</p>
                   <Toggle on={listenCfg.auto_speak !== false} onChange={(v) => setListenCfg({ auto_speak: v })} />
                 </div>
                 <div className="flex items-center justify-between gap-3">
@@ -1740,7 +1740,7 @@ export default function ModelEditor({
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-sm text-ink">{tr("Wake word (\"hey nome\")")}</p>
-                      <p className="text-[11px] text-muted">Escuta sempre-ativa (on-device) que abre o modo voz ao ouvir a palavra. O mic fica ligado enquanto ativado no chat.</p>
+                      <p className="text-[11px] text-muted">{tr("Escuta sempre-ativa (on-device) que abre o modo voz ao ouvir a palavra. O mic fica ligado enquanto ativado no chat.")}</p>
                     </div>
                     <Toggle on={!!listenCfg.wake_enabled} onChange={(v) => setListenCfg({ wake_enabled: v })} />
                   </div>
@@ -1749,7 +1749,7 @@ export default function ModelEditor({
                       <div>
                         <span className="mb-1 block text-xs font-medium text-muted">{tr("Provedor")}</span>
                         <div className="flex rounded-lg border border-border bg-surface2 p-0.5">
-                          {([["porcupine", "Porcupine"], ["whisper", tr("Whisper")], ["vosk", tr("Vosk")], ["openwakeword", "OpenWakeWord"]] as [string, string][]).map(([val, lbl]) => (
+                          {([["porcupine", tr("Porcupine")], ["whisper", tr("Whisper")], ["vosk", tr("Vosk")], ["openwakeword", "OpenWakeWord"]] as [string, string][]).map(([val, lbl]) => (
                             <button
                               key={val}
                               onClick={() => setListenCfg({ wake_engine: val })}
@@ -1781,7 +1781,7 @@ export default function ModelEditor({
                         <>
                           <p className="text-[11px] text-muted">{tr("Modelo que")} <strong>{tr("você treina")}</strong>  {tr("(Colab do openWakeWord) para uma palavra/nome próprio, rodando on-device (ONNX). Cadastre a URL do seu")} <span className="text-ink-soft">.onnx</span>  {tr("em Conexões → Assistente. Não usa a \"Palavra de ativação\" acima.")}</p>
                           <label className="block">
-                            <span className="mb-1 block text-xs font-medium text-muted">Sensibilidade (limiar {(listenCfg.oww_threshold ?? 0.5).toFixed(2)})</span>
+                            <span className="mb-1 block text-xs font-medium text-muted">{tr("Sensibilidade (limiar")} {(listenCfg.oww_threshold ?? 0.5).toFixed(2)})</span>
                             <input
                               type="range"
                               min={0.05}
@@ -2083,7 +2083,7 @@ export default function ModelEditor({
               manageIcon={<BookOpen size={13} />}
               items={kbAttached}
               labelOf={kbNameOf}
-              badgeOf={(id) => `${kbModeOf(id) === "tool" ? "Ferramenta" : "Auto"} · ${kbKOf(id)} trechos`}
+              badgeOf={(id) => `${kbModeOf(id) === "tool" ? tr("Ferramenta") : tr("Auto")} · ${tr("{n} trechos", { n: kbKOf(id) })}`}
               leadingOf={() => <BookOpen size={13} className="shrink-0 text-accent-hover" />}
               hasConfig={() => true}
               onConfig={(id) => setKbCfgBase(id)}
@@ -2231,7 +2231,7 @@ export default function ModelEditor({
                         <div className="space-y-1.5 border-t border-border px-3 py-2.5">
                           <p className="text-xs text-muted">
                             
-                            {tr("Modelo de visão que vai")} <span className="text-ink-soft">enxergar as imagens</span>  {tr("e descrevê-las para o modelo em uso (útil quando o modelo base não tem visão).")}
+                            {tr("Modelo de visão que vai")} <span className="text-ink-soft">{tr("enxergar as imagens")}</span>  {tr("e descrevê-las para o modelo em uso (útil quando o modelo base não tem visão).")}
                           </p>
                           <ModelField
                             models={baseModels}
@@ -2274,7 +2274,7 @@ export default function ModelEditor({
                         <div className="space-y-2 border-t border-border px-3 py-2.5">
                           <p className="text-xs text-muted">
                             
-                            {tr("Modelo que")} <span className="text-ink-soft">gera as imagens</span>  {tr("quando o usuário pedir — o modelo em uso delega a geração para ele.")}
+                            {tr("Modelo que")} <span className="text-ink-soft">{tr("gera as imagens")}</span>  {tr("quando o usuário pedir — o modelo em uso delega a geração para ele.")}
                           </p>
                           <div className="flex items-center gap-2 text-sm">
                             <span className="shrink-0 text-ink-soft">{tr("Provedor")}</span>
@@ -2336,7 +2336,7 @@ export default function ModelEditor({
       <div className="flex shrink-0 items-center justify-end gap-3 border-t border-border px-4 py-3 md:px-6">
         {err && <span className="text-xs text-red-400">{err}</span>}
         <button onClick={save} disabled={saving} className="rounded-full bg-accent px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-          {saving ? "…" : "Salvar e Atualizar"}
+          {saving ? "…" : tr("Salvar e Atualizar")}
         </button>
       </div>
 

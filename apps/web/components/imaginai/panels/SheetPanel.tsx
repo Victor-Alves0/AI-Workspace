@@ -189,7 +189,7 @@ export function ImaginaiCharacterEditor({
               <label className="text-xs font-medium text-ink-soft sm:col-span-2">{tr("Classe")}<Select required value={characterClass} onChange={(event) => setCharacterClass(event.target.value)} className={field}><option value="" disabled>{tr("Selecione")}</option>{DND5E_CLASSES.map((item) => <option key={item} value={item}>{item}</option>)}</Select></label>
               <label className="text-xs font-medium text-ink-soft sm:col-span-2">{tr("Ancestralidade")}<input maxLength={120} value={ancestry} onChange={(event) => setAncestry(event.target.value)} placeholder={tr("Humano")} className={field} /></label>
               <label className="text-xs font-medium text-ink-soft sm:col-span-2">{tr("Antecedente")}<input maxLength={120} value={background} onChange={(event) => setBackground(event.target.value)} placeholder={tr("Acólito")} className={field} /></label>
-              <label className="text-xs font-medium text-ink-soft sm:col-span-6">{tr("Tendência")}<input maxLength={80} value={alignment} onChange={(event) => setAlignment(event.target.value)} placeholder="Neutro e Bom" className={field} /></label>
+              <label className="text-xs font-medium text-ink-soft sm:col-span-6">{tr("Tendência")}<input maxLength={80} value={alignment} onChange={(event) => setAlignment(event.target.value)} placeholder={tr("Neutro e Bom")} className={field} /></label>
             </div>
           </section>
 

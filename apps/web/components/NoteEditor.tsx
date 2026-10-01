@@ -93,7 +93,7 @@ export default function NoteEditor({
         <div className="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
           <button onClick={onClose} className="rounded-lg px-3 py-1.5 text-sm text-muted hover:text-ink">{tr("Cancelar")}</button>
           <button onClick={onSave} disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50">
-            {saving && <Loader2 size={14} className="animate-spin" />} Salvar e indexar
+            {saving && <Loader2 size={14} className="animate-spin" />}  {tr("Salvar e indexar")}
           </button>
         </div>
       </div>

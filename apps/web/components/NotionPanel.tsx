@@ -233,7 +233,7 @@ function OAuthAppConfig({ st, reload }: { st: NotionStatus; reload: () => Promis
               </p>
               <button onClick={save} disabled={saving || !clientId.trim()}
                 className="shrink-0 rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-                {saving ? "…" : saved ? "Salvo ✓" : tr("Salvar")}
+                {saving ? "…" : saved ? tr("Salvo ✓") : tr("Salvar")}
               </button>
             </div>
           </div>

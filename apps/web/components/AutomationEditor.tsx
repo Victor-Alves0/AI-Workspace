@@ -11,7 +11,7 @@ import { tr } from "@/lib/i18n";
 
 // mesmas chaves de tools/interaction.py::ACTION_CATEGORIES (teste de invariante no servidor)
 const ACTION_CATEGORIES = [
-  { key: "google", label: "Gmail e Agenda" },
+  { key: "google", label: tr("Gmail e Agenda") },
   { key: "messaging", label: "WhatsApp, Telegram, Discord" },
   { key: "slack", label: tr("Slack") },
   { key: "github", label: "GitHub" },
@@ -315,8 +315,8 @@ export default function AutomationEditor({
   function validateMonitor(): string | null {
     const c = d.watcher_config ?? {};
     if (d.watcher_type === "price" && !(c.symbol || "").trim()) return tr("Informe o ticker do ativo");
-    if (d.watcher_type === "web_search" && !(c.query || "").trim()) return "Informe a busca";
-    if ((d.watcher_type === "page" || d.watcher_type === "rss") && !(c.url || "").trim()) return "Informe a URL";
+    if (d.watcher_type === "web_search" && !(c.query || "").trim()) return tr("Informe a busca");
+    if ((d.watcher_type === "page" || d.watcher_type === "rss") && !(c.url || "").trim()) return tr("Informe a URL");
     return null;
   }
 
@@ -407,7 +407,7 @@ export default function AutomationEditor({
 
           {/* modelo (obrigatório p/ agendada; opcional p/ monitor — só redige o aviso) */}
           <div className="space-y-1">
-            <p className="text-xs text-muted">{tr("Modelo")}{isMonitor ? " (opcional — redige o aviso)" : ""}</p>
+            <p className="text-xs text-muted">{tr("Modelo")}{isMonitor ? tr(" (opcional — redige o aviso)") : ""}</p>
             <ModelField
               models={extModels}
               custom={models}
@@ -593,14 +593,14 @@ export default function AutomationEditor({
               {d.watcher_type === "price" && (
                 <>
                   <div className="space-y-1"><p className="text-xs text-muted">{tr("Ativo (ticker Yahoo)")}</p>
-                    <input value={c.symbol ?? ""} onChange={(e) => wc("symbol", e.target.value)} placeholder="ex.: PETR4.SA, AAPL, BTC-USD" className={inputCls} /></div>
+                    <input value={c.symbol ?? ""} onChange={(e) => wc("symbol", e.target.value)} placeholder={tr("ex.: PETR4.SA, AAPL, BTC-USD")} className={inputCls} /></div>
                   <div className="flex items-center gap-2">
                     <Select value={c.op ?? "above"} onChange={(e) => wc("op", e.target.value)} className="rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent">
                       <option value="above">{tr("Preço acima de")}</option>
                       <option value="below">{tr("Preço abaixo de")}</option>
                       <option value="pct">{tr("Variação % (±) de")}</option>
                     </Select>
-                    <input type="number" value={c.value ?? ""} onChange={(e) => wc("value", Number(e.target.value))} placeholder="valor" className="w-32 rounded-lg border border-border bg-surface2 px-3 py-2 text-right text-sm text-ink outline-none focus:border-accent" />
+                    <input type="number" value={c.value ?? ""} onChange={(e) => wc("value", Number(e.target.value))} placeholder={tr("valor")} className="w-32 rounded-lg border border-border bg-surface2 px-3 py-2 text-right text-sm text-ink outline-none focus:border-accent" />
                   </div>
                 </>
               )}
@@ -619,7 +619,7 @@ export default function AutomationEditor({
               )}
 
               <div className="space-y-1">
-                <p className="text-xs text-muted">Verificar a cada</p>
+                <p className="text-xs text-muted">{tr("Verificar a cada")}</p>
                 <div className="flex items-center gap-2">
                   <input
                     type="number"

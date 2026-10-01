@@ -172,7 +172,7 @@ export default function EnrichModal({
           ) : (
             <>
               <div className="mb-2 flex items-center justify-between px-1">
-                <span className="text-xs text-muted">{items.length} item(ns){readyCount ? ` · ${readyCount} pronto(s)` : ""}</span>
+                <span className="text-xs text-muted">{tr("{n} item(ns)", { n: items.length })}{readyCount ? ` · ${tr("{n} pronto(s)", { n: readyCount })}` : ""}</span>
                 <div className="flex items-center gap-2">
                   <button onClick={approveAll} disabled={!readyCount} className="rounded-lg border border-border px-2.5 py-1 text-xs text-ink transition-colors hover:bg-hover disabled:opacity-40">{tr("Aprovar todos")}</button>
                   <button onClick={dismissAll} className="rounded-lg border border-border px-2.5 py-1 text-xs text-muted transition-colors hover:text-ink">{tr("Cancelar todos")}</button>

@@ -207,7 +207,7 @@ export default function CodespaceFileBrowser({
       if (r.error) setListError(r.error);
       else setEntries((r.entries ?? []).sort((a, b) => (a.kind === b.kind ? a.path.localeCompare(b.path) : a.kind === "dir" ? -1 : 1)));
     }).catch(() => {
-      if (listRequestRef.current === requestId) setListError("falha ao listar");
+      if (listRequestRef.current === requestId) setListError(tr("falha ao listar"));
     });
   }
 

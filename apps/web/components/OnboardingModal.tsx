@@ -68,7 +68,7 @@ export default function OnboardingModal({ user, onClose, onDone }: {
     }
   }
 
-  const steps = ["Boas-vindas", tr("Chave de API"), "Modelo", "Pronto"];
+  const steps = [tr("Boas-vindas"), tr("Chave de API"), tr("Modelo"), tr("Pronto")];
   // passo visível: 0 boas-vindas, 1 chave, 2 modelo, 3 pronto — mas se a chave já
   // existe pulamos direto pro modelo. Normalizo o índice de exibição.
   const view = step === 0 ? "welcome" : !keyOk ? "key" : step >= 3 ? "done" : "model";
@@ -102,7 +102,7 @@ export default function OnboardingModal({ user, onClose, onDone }: {
               <h2 className="text-xl font-semibold text-ink">{tr("Bem-vindo ao AI Workspace 👋")}</h2>
               <p className="text-sm leading-6 text-muted">
                 
-                {tr("É o")} <span className="text-ink-soft">seu</span>  {tr("workspace de IA: você usa a sua própria chave de API e todas as configurações ficam guardadas só na sua conta. Vamos deixar tudo pronto em menos de um minuto.")}
+                {tr("É o")} <span className="text-ink-soft">{tr("seu")}</span>  {tr("workspace de IA: você usa a sua própria chave de API e todas as configurações ficam guardadas só na sua conta. Vamos deixar tudo pronto em menos de um minuto.")}
               </p>
               <button onClick={() => setStep(keyOk ? 2 : 1)} className="mt-2 flex w-full items-center justify-center gap-2 rounded-full bg-accent px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover">
                 
@@ -132,7 +132,7 @@ export default function OnboardingModal({ user, onClose, onDone }: {
               <div className="flex items-center justify-between gap-3">
                 <button onClick={() => finish(true)} className="text-xs text-muted transition-colors hover:text-ink">{tr("Configurar depois")}</button>
                 <button onClick={saveKey} disabled={!key.trim() || savingKey} className="flex items-center gap-2 rounded-full bg-accent px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-                  {savingKey ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Salvar e continuar
+                  {savingKey ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}  {tr("Salvar e continuar")}
                 </button>
               </div>
             </div>

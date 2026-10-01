@@ -47,7 +47,7 @@ const CARD_META: { key: Section; name: string; desc: string; icon: ReactNode; li
   { key: "Automacoes", name: tr("Automações"), desc: tr("Tarefas agendadas e monitores"), icon: <CalendarClock size={22} />, live: true },
   { key: "Playground", name: tr("Playground"), desc: tr("Benchmarks, comparações e debug"), icon: <FlaskConical size={22} />, live: true },
   { key: "Memoria", name: tr("Memória"), desc: tr("O que a IA lembra de você"), icon: <Brain size={22} />, live: true },
-  { key: "Analítica", name: tr("Analítica"), desc: "Uso, custos e desempenho", icon: <BarChart3 size={22} />, live: true },
+  { key: "Analítica", name: tr("Analítica"), desc: tr("Uso, custos e desempenho"), icon: <BarChart3 size={22} />, live: true },
   { key: "API", name: "API", desc: tr("Use modelos em qualquer app"), icon: <Terminal size={22} />, live: true },
 ];
 
@@ -264,7 +264,7 @@ function SuggestionsModal({ proposals, onApprove, onDismiss, onOpenChat, onClose
                     className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-muted transition-colors hover:text-ink"
                     title={tr("Abrir a conversa que originou esta sugestão")}
                   >
-                    <MessageSquare size={13} /> {p.chat_title ? `De: ${p.chat_title}` : tr("Ver conversa de origem")}
+                    <MessageSquare size={13} /> {p.chat_title ? tr("De: {title}", { title: p.chat_title }) : tr("Ver conversa de origem")}
                   </button>
                 )}
                 <div className="ml-auto flex items-center gap-2">
@@ -546,7 +546,7 @@ export default function WorkspaceView({
         } catch { failed += 1; }
       }
       await loadModels();
-      setToast(failed ? tr("{imported} modelo(s) importado(s); {failed} não puderam ser importados.", { imported: imported, failed: failed }) : `${imported} modelo(s) importado(s).`);
+      setToast(failed ? tr("{imported} modelo(s) importado(s); {failed} não puderam ser importados.", { imported: imported, failed: failed }) : tr("{imported} modelo(s) importado(s).", { imported: imported }));
     } catch (error) {
       setToast(error instanceof Error ? error.message : tr("Não foi possível ler o arquivo."));
     } finally {
@@ -645,7 +645,7 @@ export default function WorkspaceView({
         } catch { failed += 1; }
       }
       await loadPrompts();
-      setToast(failed ? tr("{imported} prompt(s) importado(s); {failed} não puderam ser importados.", { imported: imported, failed: failed }) : `${imported} prompt(s) importado(s).`);
+      setToast(failed ? tr("{imported} prompt(s) importado(s); {failed} não puderam ser importados.", { imported: imported, failed: failed }) : tr("{imported} prompt(s) importado(s).", { imported: imported }));
     } catch (error) {
       setToast(error instanceof Error ? error.message : tr("Não foi possível ler o arquivo."));
     } finally {
@@ -771,7 +771,7 @@ export default function WorkspaceView({
                     name={c.name}
                     desc={c.desc}
                     count={cardCount[c.key]}
-                    unit={c.key === "Codespace" ? "projetos" : "modelos"}
+                    unit={c.key === "Codespace" ? tr("projetos") : tr("modelos")}
                     onClick={() => openSection(c.key)}
                   />
                 ))}

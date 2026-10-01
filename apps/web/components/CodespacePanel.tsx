@@ -215,7 +215,7 @@ function NewProjectModal({
             <label className="flex flex-col gap-1">
               <span className="text-xs font-medium text-muted">{tr("Caminho da pasta (no servidor)")}</span>
               <input value={localPath} onChange={(e) => setLocalPath(e.target.value)}
-                placeholder="/home/voce/meu-projeto  ou  C:\\projetos\\app"
+                placeholder={tr("/home/voce/meu-projeto  ou  C:\\projetos\\app")}
                 className="rounded-lg border border-border bg-surface2 px-3 py-2 font-mono text-xs text-ink outline-none focus:border-accent/50" />
               <span className="text-[11px] text-muted">{tr("Abre um diretório existente (estilo VSCode). Vira um repositório git se ainda não for.")}</span>
             </label>
@@ -283,7 +283,7 @@ function fmtStats(p: CodespaceProject): string {
   const s = p.stats;
   if (!s) return "";
   const parts: string[] = [];
-  if (s.files != null) parts.push(`${s.files} arquivos`);
+  if (s.files != null) parts.push(tr("{files} arquivos", { files: s.files }));
   if (s.symbols != null) parts.push(tr("{symbols} símbolos", { symbols: s.symbols }));
   if (s.edges != null) parts.push(tr("{edges} relações", { edges: s.edges }));
   return parts.join(" · ");
@@ -423,7 +423,7 @@ function EgoColumn({ title, edges }: { title: string; edges: CodespaceEgoEdge[] 
     <div className="flex min-w-0 flex-1 flex-col gap-1.5">
       <span className="px-1 text-[11px] font-medium uppercase tracking-wide text-muted">{title}</span>
       {edges.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border px-2 py-3 text-center text-[11px] text-muted">nenhuma</p>
+        <p className="rounded-lg border border-dashed border-border px-2 py-3 text-center text-[11px] text-muted">{tr("nenhuma")}</p>
       ) : (
         edges.map((e, i) => (
           <div key={i} className="rounded-lg border border-border bg-surface2 px-2 py-1.5 text-[11px]">
@@ -468,7 +468,7 @@ function ProjectGraphTab({ project, onOpenFile }: { project: CodespaceProject; o
       const r = await api.get<CodespaceEgo>(`/codespace/projects/${project.id}/graph/ego?symbol=${encodeURIComponent(fqn)}`);
       setEgo(r);
     } catch {
-      setEgo({ symbol: null, children: [], calls: [], called_by: [], warnings: [], error: "falha ao carregar" });
+      setEgo({ symbol: null, children: [], calls: [], called_by: [], warnings: [], error: tr("falha ao carregar") });
     } finally {
       setLoadingEgo(false);
     }
@@ -742,7 +742,7 @@ function ProjectPreviewTab({ project }: { project: CodespaceProject }) {
           ) : (
             <div className="grid h-[62vh] place-items-center bg-bg px-8 text-center text-sm text-muted">
               {selected.status === "starting" ? (
-                <span className="flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Subindo o servidor…</span>
+                <span className="flex items-center gap-2"><Loader2 size={14} className="animate-spin" />  {tr("Subindo o servidor…")}</span>
               ) : selected.status === "crashed" ? tr("O servidor caiu — abra os logs para ver o erro.") : tr("Parado.")}
             </div>
           )}
@@ -794,7 +794,7 @@ function ProjectDetail({
 
   function reference(path: string, content: string) {
     const fence = extLang(path);
-    const prefill = `Sobre o arquivo \`${path}\`:\n\n\`\`\`${fence}\n${content}\n\`\`\`\n\n`;
+    const prefill = tr("Sobre o arquivo `{path}`:\n\n```{fence}\n{content}\n```\n\n", { path: path, fence: fence, content: content });
     api.get<CodespaceChatLite[]>(`/codespace/projects/${project.id}/chats`).then(async (chats) => {
       if (chats.length > 0) { onOpenChat(chats[0].id, prefill); return; }
       const me = await api.get<User>("/auth/me");
@@ -852,7 +852,7 @@ function ProjectDetail({
             </button>
           )}
           <button onClick={reindex} disabled={busy || project.index_status === "cloning" || project.index_status === "indexing"}
-            title="Reindexar (seguro)" className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink disabled:opacity-60">
+            title={tr("Reindexar (seguro)")} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink disabled:opacity-60">
             <RefreshCw size={15} className={busy ? "animate-spin" : ""} />
           </button>
           <button onClick={del} disabled={busy} title={tr("Excluir")} className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-red-400 disabled:opacity-60">
@@ -960,7 +960,7 @@ function ProjectTasksTab({ project }: { project: CodespaceProject }) {
 
   async function merge(t: CodespaceTask, openPr: boolean) {
     const label = openPr ? tr("abrir um Pull Request no GitHub") : tr("mesclar no branch do projeto");
-    if (!(await confirm({ title: `Aprovar a tarefa?`, body: tr("Isso vai {label}.", { label: label }), confirmLabel: tr("Aprovar") }))) return;
+    if (!(await confirm({ title: tr("Aprovar a tarefa?"), body: tr("Isso vai {label}.", { label: label }), confirmLabel: tr("Aprovar") }))) return;
     setBusy(t.id);
     try {
       const r = await api.post<{ pr?: { html_url?: string } }>(`/codespace/projects/${project.id}/tasks/${t.id}/merge`,
@@ -972,7 +972,7 @@ function ProjectTasksTab({ project }: { project: CodespaceProject }) {
   }
 
   async function discard(t: CodespaceTask) {
-    if (!(await confirm({ title: "Descartar a tarefa?", body: tr("As mudanças não mescladas serão perdidas."), confirmLabel: tr("Descartar"), danger: true }))) return;
+    if (!(await confirm({ title: tr("Descartar a tarefa?"), body: tr("As mudanças não mescladas serão perdidas."), confirmLabel: tr("Descartar"), danger: true }))) return;
     setBusy(t.id);
     try { await api.post(`/codespace/projects/${project.id}/tasks/${t.id}/discard`); await load(); setOpenId(null); }
     finally { setBusy(null); }
@@ -1016,7 +1016,7 @@ function ProjectTasksTab({ project }: { project: CodespaceProject }) {
               </button>
               {canAct && (
                 <div className="flex shrink-0 items-center gap-1">
-                  <button onClick={() => merge(t, false)} disabled={busy === t.id} title="Aprovar e mesclar"
+                  <button onClick={() => merge(t, false)} disabled={busy === t.id} title={tr("Aprovar e mesclar")}
                     className="inline-flex items-center gap-1 rounded-lg bg-accent px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50">
                     {busy === t.id ? <Loader2 size={12} className="animate-spin" /> : <GitMerge size={12} />}  {tr("Mesclar")}
                   </button>
@@ -1182,7 +1182,7 @@ export default function CodespacePanel({ onOpenChat, onBack }: { onOpenChat: (ch
         } catch { failed += 1; }
       }
       await load();
-      setNotice(failed ? tr("{imported} projeto(s) importado(s); {failed} não puderam ser importados.", { imported: imported, failed: failed }) : `${imported} projeto(s) importado(s).`);
+      setNotice(failed ? tr("{imported} projeto(s) importado(s); {failed} não puderam ser importados.", { imported: imported, failed: failed }) : tr("{imported} projeto(s) importado(s).", { imported: imported }));
     } catch (error) {
       setNotice(error instanceof Error ? error.message : tr("Não foi possível ler o arquivo."));
     } finally {

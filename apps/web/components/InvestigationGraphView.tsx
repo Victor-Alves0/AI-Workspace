@@ -274,7 +274,7 @@ export default function InvestigationGraphView({ graphId }: { graphId: string })
                     style={{
                       width: r * 2, height: r * 2,
                       background: typeColor.get(nd.type) ?? "#8a93a3",
-                      outline: isSel ? tr("2px solid rgb(var(--c-ink))") : "none",
+                      outline: isSel ? "2px solid rgb(var(--c-ink))" : "none",
                       outlineOffset: 2,
                       opacity: nd.confidence === "possible" ? 0.6 : 1,
                     }}

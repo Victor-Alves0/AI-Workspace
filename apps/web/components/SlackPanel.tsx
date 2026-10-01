@@ -176,7 +176,7 @@ function TokenConnect({ reload }: { reload: () => Promise<void> }) {
         />
         <div className="flex items-center justify-between gap-2">
           {err ? <p className="min-w-0 flex-1 truncate text-[11px] text-red-400">{err}</p>
-               : <p className="min-w-0 flex-1 text-[11px] text-muted">Crie um app em api.slack.com/apps, adicione os escopos e instale-o no workspace para pegar o Bot User OAuth Token.</p>}
+               : <p className="min-w-0 flex-1 text-[11px] text-muted">{tr("Crie um app em api.slack.com/apps, adicione os escopos e instale-o no workspace para pegar o Bot User OAuth Token.")}</p>}
           <button onClick={connect} disabled={busy || !token.trim()}
             className="shrink-0 rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
             {busy ? "…" : tr("Conectar")}
@@ -238,7 +238,7 @@ function OAuthAppConfig({ st, reload }: { st: SlackStatus; reload: () => Promise
               </p>
               <button onClick={save} disabled={saving || !clientId.trim()}
                 className="shrink-0 rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-                {saving ? "…" : saved ? "Salvo ✓" : tr("Salvar")}
+                {saving ? "…" : saved ? tr("Salvo ✓") : tr("Salvar")}
               </button>
             </div>
           </div>

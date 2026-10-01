@@ -245,7 +245,7 @@ function resumo(call: ToolEvent | undefined, result: ToolEvent | undefined, live
   const queued = !res && now?.state === "queued";
   const status = running
     ? (started ? tr("em segundo plano · ") : "") + (lastItem?.kind === "tool" ? describeStep(lastItem.tool, lastItem.detail, lastItem.args) : lastItem?.kind === "reasoning" ? "pensando…" : lastItem?.kind === "text" ? "escrevendo…" : tr("começando…"))
-    : queued ? "na fila"
+    : queued ? tr("na fila")
     : started ? tr("em segundo plano")
     : error ? "falhou"
     : res?.status === "needs_input" && res.needs?.need ? tr("precisa de: {need}", { need: res.needs.need })
@@ -416,7 +416,7 @@ function AgentComposer({ name, running, busy, onSend }: {
         </button>
         <div className="flex-1" />
         <button type="button" onClick={() => void mic()} disabled={transcribing}
-          title={rec ? "Parar e transcrever" : tr("Ditar")} aria-label={rec ? "Parar e transcrever" : tr("Ditar")}
+          title={rec ? tr("Parar e transcrever") : tr("Ditar")} aria-label={rec ? tr("Parar e transcrever") : tr("Ditar")}
           className={`${btn} ${rec ? "animate-pulse bg-red-500/20 text-red-300" : "text-muted hover:bg-hover hover:text-ink"} disabled:opacity-50`}>
           {transcribing ? <Loader2 size={16} className="animate-spin" /> : rec ? <Square size={14} fill="currentColor" /> : <Mic size={16} />}
         </button>
@@ -546,7 +546,7 @@ function ToolStepRow({ step, spinning }: {
           {step.call && <StepBlock label={tr("Chamada")} text={step.call} />}
           {step.preview
             ? <StepBlock label={step.ok === false ? tr("Erro") : tr("Resultado")} text={step.preview} />
-            : spinning && <p className="text-[11px] text-muted">aguardando o resultado…</p>}
+            : spinning && <p className="text-[11px] text-muted">{tr("aguardando o resultado…")}</p>}
         </div>
       )}
     </div>
@@ -674,7 +674,7 @@ export function TeamStep({ call, result, live = false }: { call?: ToolEvent; res
     : bgRunning ? (now?.synthesizing ? tr("em segundo plano · consolidando…") : tr("em segundo plano · {done}/{size} · {working} trabalhando", { done: done, size: size, working: working }))
     : res?.kind === "subagent_team_started" ? tr("em segundo plano · {size} agentes", { size: size })
     : running ? (now?.synthesizing ? tr("consolidando relatórios…")
-      : chain ? `etapa ${Math.min(done + 1, size)} de ${size}` : `${done}/${size} · ${working} trabalhando`)
+      : chain ? tr("etapa {i} de {size}", { i: Math.min(done + 1, size), size }) : tr("{done}/{size} · {working} trabalhando", { done, size, working }))
     : chain ? `${size} etapas` : `${size} agentes`;
 
   const membro = sel != null && members[sel] ? resumo(members[sel].call, members[sel].result, false) : null;
@@ -733,7 +733,7 @@ export function TeamStep({ call, result, live = false }: { call?: ToolEvent; res
                 {members.length > shown && (
                   <button type="button" onClick={() => setShown((n) => n + PAGE * 3)} className="mt-2 text-xs text-accent-hover hover:underline">
                     
-                    {tr("Mostrar mais")} {Math.min(PAGE * 3, members.length - shown)} de {members.length - shown}
+                    {tr("Mostrar mais")} {tr("{a} de {b}", { a: Math.min(PAGE * 3, members.length - shown), b: members.length - shown })}
                   </button>
                 )}
               </div>

@@ -42,18 +42,18 @@ const SPAN_KIND_LABEL: Record<string, string> = {
 const ATTR_LABEL: Record<string, string> = {
   ttfb_ms: tr("1º byte do provedor"), first_reasoning_ms: tr("começou a pensar"), first_token_ms: "1ª palavra",
   first_tool_call_ms: tr("1ª chamada de ferramenta"), reasoning_ms: tr("tempo pensando"),
-  generation_ms: tr("tempo gerando"), tokens_per_s: tr("tokens por segundo"), prompt_chars: "contexto (caracteres)",
+  generation_ms: tr("tempo gerando"), tokens_per_s: tr("tokens por segundo"), prompt_chars: tr("contexto (caracteres)"),
   prompt_msgs: tr("mensagens no contexto"), tools_n: tr("ferramentas anunciadas"), prompt_tokens: tr("tokens de entrada"),
   completion_tokens: tr("tokens de saída"), total_tokens: tr("tokens no total"), cached_tokens: tr("tokens do cache"),
-  reasoning_tokens: tr("tokens de raciocínio"), cost: "custo (US$)", args_chars: "entrada (caracteres)",
+  reasoning_tokens: tr("tokens de raciocínio"), cost: tr("custo (US$)"), args_chars: tr("entrada (caracteres)"),
   result_chars: tr("saída (caracteres)"), queue_ms: tr("espera por vaga"), steps: tr("passos"), output_chars: tr("saída (caracteres)"),
   pool_queue_ms: tr("fila do pool de busca"), engines_ms: tr("tempo nos motores"), attempts: tr("tentativas"),
   results: tr("resultados"), status_code: tr("status HTTP"), resp_bytes: tr("bytes da resposta"), http_ms: tr("tempo HTTP"),
   depth: tr("profundidade"), attachments: tr("anexos"), lag_ms: tr("atraso do loop"), iteration: tr("iteração"),
-  server_ttft_ms: "1ª palavra (servidor)", llm_ms: tr("tempo no modelo"), llm_iterations: tr("chamadas ao modelo"),
+  server_ttft_ms: tr("1ª palavra (servidor)"), llm_ms: tr("tempo no modelo"), llm_iterations: tr("chamadas ao modelo"),
   tool_calls: tr("ferramentas chamadas"), tool_results: tr("resultados de ferramentas"), tool_executions: tr("ferramentas executadas"),
-  user_chars: "mensagem (caracteres)", outcome: tr("resultado"), turn_kind: tr("tipo de turno"), parent_name: tr("disparado por"),
-  parent_span_name: "na etapa", bg: "2º plano", has_tools: tr("com ferramentas"), background: "2º plano",
+  user_chars: tr("mensagem (caracteres)"), outcome: tr("resultado"), turn_kind: tr("tipo de turno"), parent_name: tr("disparado por"),
+  parent_span_name: tr("na etapa"), bg: tr("2º plano"), has_tools: tr("com ferramentas"), background: tr("2º plano"),
   cache: tr("cache"), backend: tr("motores"), provider: "provedor", inner: tr("ferramenta"), timed_out: tr("estourou o tempo"),
   until: tr("medido até"),
 };
@@ -485,14 +485,14 @@ function RouteDetail({ route, hours, onClose, onTrace, onOperation }: {
   return (
     <Modal wide onClose={onClose}
       title={<span><KindChip kind={route.kind} label={route.method || route.kind} /> <span className="ml-1 font-mono">{route.path}</span></span>}
-      sub={d && d.count > 0 ? `${d.count} chamadas · ${d.errors ?? 0} erros` : undefined}>
+      sub={d && d.count > 0 ? tr("{count} chamadas · {1} erros", { count: d.count, "1": d.errors ?? 0 }) : undefined}>
       {!d ? <Loading /> : d.count === 0 ? <p className="py-8 text-center text-sm text-muted">{tr("Sem chamadas no período.")}</p> : (
         <div className="space-y-5">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Stat label="p50" value={fmtMs(d.p50_ms)} sub={tr("média {0}", { "0": fmtMs(d.avg_ms) })} icon={<Gauge size={13} />} />
-            <Stat label="p95 / p99" value={fmtMs(d.p95_ms)} sub={`p99 ${fmtMs(d.p99_ms)} · máx ${fmtMs(d.max_ms)}`} icon={<Timer size={13} />} />
+            <Stat label="p95 / p99" value={fmtMs(d.p95_ms)} sub={`p99 ${fmtMs(d.p99_ms)} · ${tr("máx")} ${fmtMs(d.max_ms)}`} icon={<Timer size={13} />} />
             <Stat label={tr("Banco por chamada")} value={fmtMs(d.avg_db_ms)} sub={`${d.avg_queries} queries`} icon={<Database size={13} />} />
-            <Stat label="Modelo / rede" value={fmtMs(d.avg_llm_ms)} sub={`externo ${fmtMs(d.avg_http_ms)}`} icon={<Zap size={13} />} />
+            <Stat label={tr("Modelo / rede")} value={fmtMs(d.avg_llm_ms)} sub={`externo ${fmtMs(d.avg_http_ms)}`} icon={<Zap size={13} />} />
           </div>
 
           <section>
@@ -756,10 +756,10 @@ function TraceDetail({ traceId, onClose }: { traceId: string; onClose: () => voi
                 <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-ink-soft"><GitBranch size={13} />  {tr("Cadeia")}</p>
                 {data.parent && (
                   <button onClick={() => abrir(data.parent!.id)} className="mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-xs hover:bg-hover">
-                    <span className="w-24 shrink-0 text-muted">disparado por</span>
+                    <span className="w-24 shrink-0 text-muted">{tr("disparado por")}</span>
                     <KindChip kind={data.parent.kind} label={data.parent.method || data.parent.kind} />
                     <span className="min-w-0 flex-1 truncate text-ink">{data.parent.name}</span>
-                    {typeof t?.attrs?.parent_span_name === "string" && <span className="shrink-0 font-mono text-[10px] text-muted">em {String(t.attrs.parent_span_name)}</span>}
+                    {typeof t?.attrs?.parent_span_name === "string" && <span className="shrink-0 font-mono text-[10px] text-muted">{tr("em {etapa}", { etapa: String(t.attrs.parent_span_name) })}</span>}
                     <span className="shrink-0 font-mono tabular-nums text-muted">{fmtMs(data.parent.duration_ms)}</span>
                   </button>
                 )}
@@ -999,7 +999,7 @@ export default function ObservabilityView() {
         )}
         {config && (
           <span className={`${CHIP} ${tab === "runtime" ? "ml-auto" : ""} ${config.enabled ? "bg-emerald-500/15 text-emerald-500" : "bg-muted/15 text-muted"}`}
-            title={`amostra ${(config.sample_rate * 100).toFixed(0)}% · retenção ${config.retention_days}d · fila ${config.sink.queued} · descartados ${config.sink.dropped}`}>
+            title={tr("amostra {a}% · retenção {r}d · fila {f} · descartados {d}", { a: (config.sample_rate * 100).toFixed(0), r: config.retention_days, f: config.sink.queued, d: config.sink.dropped })}>
             <Clock size={11} className="mr-1 inline" />
             {config.enabled ? "captura ligada" : "desligada"}
           </span>

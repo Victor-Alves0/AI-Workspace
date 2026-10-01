@@ -106,7 +106,7 @@ export default function DebugPage() {
                   <Dot ok={!info.secret_insecure} />
                 </div>
                 <Row k={tr("Provider de busca")} v={info.web_search_provider} />
-                <Row k={tr("Sandbox timeout")} v={`${info.tool_sandbox?.timeout_s}s / ${info.tool_sandbox?.cpu_s}s CPU / ${info.tool_sandbox?.mem_mb}MB`} />
+                <Row k={tr("Sandbox timeout")} v={tr("{timeout_s}s / {cpu_s}s CPU / {mem_mb}MB", { timeout_s: info.tool_sandbox?.timeout_s, cpu_s: info.tool_sandbox?.cpu_s, mem_mb: info.tool_sandbox?.mem_mb })} />
               </div>
             ) : (
               <p className="text-sm text-muted">…</p>
@@ -144,7 +144,7 @@ export default function DebugPage() {
                     <span className="flex items-center gap-2 text-xs">
                       {"key_configured" in v && (
                         <span className={v.key_configured ? "text-green-400" : "text-muted"}>
-                          {v.key_configured ? "chave ✓" : tr("sem chave")}
+                          {v.key_configured ? tr("chave ✓") : tr("sem chave")}
                         </span>
                       )}
                       {"reachable" in v && <Dot ok={v.reachable} />}
@@ -184,7 +184,8 @@ export default function DebugPage() {
                 <span>uptime: {metrics.uptime_seconds}s</span>
                 <span>total: {metrics.total_requests}</span>
                 <span className={metrics.error_requests ? "text-red-400" : ""}>
-                  erros 5xx: {metrics.error_requests}
+                  
+                  {tr("erros 5xx:")} {metrics.error_requests}
                 </span>
               </div>
               <div className="overflow-x-auto">

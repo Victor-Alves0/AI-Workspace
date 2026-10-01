@@ -227,7 +227,7 @@ export default function MemoryView() {
 
   async function deleteBank(b: MemoryBank) {
     const ok = await confirm({
-      title: `Excluir o banco "${b.name}"?`,
+      title: tr("Excluir o banco \"{name}\"?", { name: b.name }),
       body: <span className="text-muted">{tr("Isso apaga o banco e suas")} {b.count}  {tr("memória(s). Modelos acoplados param de compartilhá-lo. Não dá para desfazer.")}</span>,
       confirmLabel: tr("Excluir"), danger: true,
     });

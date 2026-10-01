@@ -345,7 +345,7 @@ export default function ToolEditor({
         {/* área principal: código ou config da integração */}
         <main className="min-w-0 flex-1 p-5 [&>div:first-child]:min-h-[65dvh] md:[&>div:first-child]:min-h-0">
           {toolType === "code" ? (
-            <CodeEditor value={code} onChange={setCode} placeholder="# seu código Python…" />
+            <CodeEditor value={code} onChange={setCode} placeholder={tr("# seu código Python…")} />
           ) : (
             <div className="mx-auto max-w-xl space-y-5">
               <div className="rounded-2xl border border-border bg-surface p-5">
@@ -370,11 +370,11 @@ export default function ToolEditor({
                       className={inputCls}
                     >
                       <option value="http">{tr("Streamable HTTP")}</option>
-                      <option value="sse">SSE (legado)</option>
+                      <option value="sse">{tr("SSE (legado)")}</option>
                     </Select>
                   </div>
                   <div>
-                    <FieldLabel>Headers (opcional, JSON)</FieldLabel>
+                    <FieldLabel>{tr("Headers (opcional, JSON)")}</FieldLabel>
                     <textarea
                       rows={4}
                       value={mcpHeadersStr}

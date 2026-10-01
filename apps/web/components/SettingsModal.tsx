@@ -185,7 +185,7 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: tr("Web"), cat: "connections", view: "web" },
   { label: tr("Metabusca"), cat: "connections", view: "web" },
   { label: tr("Pesquisa na web (mecanismo padrão)"), cat: "connections", view: "web" },
-  { label: "Navegador (Browser)", cat: "connections", view: "web" },
+  { label: tr("Navegador (Browser)"), cat: "connections", view: "web" },
   { label: tr("Testar conexão (web / navegador)"), cat: "connections", view: "web" },
   { label: tr("Importar Chats"), cat: "data" },
   { label: tr("Exportar Chats"), cat: "data" },
@@ -256,7 +256,7 @@ function InfoDot({ text }: { text: string }) {
 
 // rótulos dos escopos de memória (Controle de Dados → engrenagem da Memória)
 const MEM_WRITE_LABEL: Record<string, string> = {
-  global: tr("Global"), model: "Do modelo", chat: tr("Do chat"), off: tr("Não salvar"),
+  global: tr("Global"), model: tr("Do modelo"), chat: tr("Do chat"), off: tr("Não salvar"),
 };
 
 function Row({ label, sub, info, children }: { label: string; sub?: string; info?: string; children?: React.ReactNode }) {
@@ -628,7 +628,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                     cards={[
                       { key: "apis", icon: <KeyRound size={22} />, name: "APIs", desc: tr("Provedores e chaves de APIs") },
                       { key: "subscriptions", icon: <Crown size={22} />, name: tr("Assinaturas"), desc: tr("Suas assinaturas") },
-                      { key: "web", icon: <Globe size={22} />, name: tr("Web"), desc: "Acesso a internet" },
+                      { key: "web", icon: <Globe size={22} />, name: tr("Web"), desc: tr("Acesso a internet") },
                       { key: "ollama", icon: <SiOllama size={22} />, name: tr("Ollama"), desc: tr("Utilize modelos locais") },
                       { key: "voice", icon: <AudioLines size={22} />, name: tr("Voz"), desc: tr("Controlar voz de IA") },
                       { key: "assistant-voice", icon: <Bot size={22} />, name: tr("Assistente"), desc: tr("Usabilidade de agentes") },
@@ -731,7 +731,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                         <SiGithub size={22} />
                       </span>
                       <span className="text-sm font-medium text-ink">GitHub</span>
-                      <span className="text-xs leading-4 text-muted">Repos, issues e PRs</span>
+                      <span className="text-xs leading-4 text-muted">{tr("Repos, issues e PRs")}</span>
                     </button>
                     <button
                       onClick={() => setIntegView("higgsfield")}
@@ -771,7 +771,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                         <Blocks size={22} />
                       </span>
                       <span className="text-sm font-medium text-ink">{tr("Slack")}</span>
-                      <span className="text-xs leading-4 text-muted">Canais e mensagens</span>
+                      <span className="text-xs leading-4 text-muted">{tr("Canais e mensagens")}</span>
                     </button>
                     <button
                       onClick={() => setIntegView("elevenlabs")}
@@ -791,7 +791,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
                         <SiVercel size={22} />
                       </span>
                       <span className="text-sm font-medium text-ink">{tr("Vercel")}</span>
-                      <span className="text-xs leading-4 text-muted">Projetos e deployments</span>
+                      <span className="text-xs leading-4 text-muted">{tr("Projetos e deployments")}</span>
                     </button>
                     <button
                       onClick={() => setIntegView("spotify")}
@@ -837,7 +837,7 @@ export default function SettingsModal({ onClose, onSaved, onConnectionsChanged, 
             {/* rodapé — sob a coluna de conteúdo; mesma altura do divisor do admin */}
             <div className="flex h-14 shrink-0 items-center justify-end gap-3 border-t border-border px-4 md:px-6">
               {saveErr && <span className="text-xs text-red-400">{saveErr}</span>}
-              {savedFlash && <span className="text-xs text-green-400">Salvo ✓</span>}
+              {savedFlash && <span className="text-xs text-green-400">{tr("Salvo ✓")}</span>}
               <button onClick={saveProfile} className="rounded-full bg-accent px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-hover">
                 
                 {tr("Salvar")}
@@ -901,7 +901,7 @@ function InterfaceTab({
       <CardGrid
         cards={[
           { key: "sidebar", icon: <PanelsTopLeft size={22} />, name: tr("Barra Lateral"), desc: tr("Aparência e navegação") },
-          { key: "chat", icon: <MessageSquareText size={22} />, name: tr("Chat"), desc: "Layout e opcionais" },
+          { key: "chat", icon: <MessageSquareText size={22} />, name: tr("Chat"), desc: tr("Layout e opcionais") },
         ]}
         onOpen={setView}
       />
@@ -1328,8 +1328,8 @@ function GeneralTab({ profile, set }: { profile: Record<string, any>; set: (k: s
           }}
           className="rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none"
         >
-          <option value="pt-BR">Português (Brasil)</option>
-          <option value="en">English</option>
+          <option value="pt-BR">{tr("Português (Brasil)")}</option>
+          <option value="en">{tr("English")}</option>
         </Select>
       </Row>
       <Row label={tr("Notificações")}>
@@ -1531,7 +1531,8 @@ function TwoFactorSection() {
         </div>
       ) : (
         <button onClick={startSetup} disabled={busy} className="rounded-lg border border-border bg-surface px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-hover disabled:opacity-50">
-          Ativar 2FA
+          
+          {tr("Ativar 2FA")}
         </button>
       )}
       {msg && <p className="mt-2 text-xs text-ink-soft">{msg}</p>}
@@ -1739,7 +1740,7 @@ function AccountTab({ user, profile, set }: { user: User | null; profile: Record
           className="rounded-lg bg-surface px-3 py-1.5 text-sm text-ink outline-none"
         >
           <option value="24h">24 horas (14:30)</option>
-          <option value="12h">12 horas (2:30 PM)</option>
+          <option value="12h">{tr("12 horas (2:30 PM)")}</option>
         </Select>
       </Row>
       <Row label={tr("Formato de data")}>
@@ -1802,7 +1803,7 @@ function BudgetSettings({ profile, set }: { profile: Record<string, any>; set: (
               {tr("Ao atingir")}
               <Select value={b.mode === "pause" ? "pause" : "warn"} onChange={(e) => setB({ mode: e.target.value })} className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
                 <option value="warn">{tr("Só avisar")}</option>
-                <option value="pause">Avisar e pausar</option>
+                <option value="pause">{tr("Avisar e pausar")}</option>
               </Select>
             </label>
           </div>
@@ -1919,11 +1920,11 @@ function StatusTab({ user, onGoto }: { user: User | null; onGoto: (cat: Cat, vie
           onAction={() => onGoto("integrations", "whatsapp")}
         />
         <StatusRow label={tr("Google")} state={st.google > 0 ? "ok" : "off"} detail={st.google > 0 ? `${st.google} conta(s)` : tr("Não conectado (opcional)")} actionLabel={tr("Gerenciar")} onAction={() => onGoto("integrations", "google")} />
-        <StatusRow label="Casa (Tuya)" state={st.tuya ? "ok" : "off"} detail={st.tuya ? tr("Conectada") : tr("Não conectada (opcional)")} actionLabel={tr("Gerenciar")} onAction={() => onGoto("integrations", "tuya")} />
+        <StatusRow label={tr("Casa (Tuya)")} state={st.tuya ? "ok" : "off"} detail={st.tuya ? tr("Conectada") : tr("Não conectada (opcional)")} actionLabel={tr("Gerenciar")} onAction={() => onGoto("integrations", "tuya")} />
         <StatusRow
           label={tr("Orçamento mensal")}
           state={!b.enabled ? "off" : b.over ? (b.blocked ? "warn" : "warn") : "ok"}
-          detail={!b.enabled ? "Desativado (opcional)" : `US$ ${b.spent.toFixed(2)} de US$ ${b.cap.toFixed(2)}${b.over ? (b.blocked ? " — pausado" : " — acima do teto") : ""}`}
+          detail={!b.enabled ? tr("Desativado (opcional)") : `${tr("US$ {spent} de US$ {cap}", { spent: b.spent.toFixed(2), cap: b.cap.toFixed(2) })}${b.over ? (b.blocked ? tr(" — pausado") : tr(" — acima do teto")) : ""}`}
           actionLabel={tr("Ajustar")}
           onAction={() => onGoto("account")}
         />
@@ -1931,7 +1932,7 @@ function StatusTab({ user, onGoto }: { user: User | null; onGoto: (cat: Cat, vie
 
       {st.admin && (
         <>
-          <Heading>Infraestrutura (admin)</Heading>
+          <Heading>{tr("Infraestrutura (admin)")}</Heading>
           <div className="space-y-2">
             <StatusRow label={tr("Banco de dados")} state={st.admin.db ? "ok" : "off"} detail={st.admin.db ? tr("Respondendo") : tr("Sem resposta")} />
             <StatusRow label={tr("WhatsApp por QR Code")} state={st.admin.evolution_configured ? "ok" : "off"} detail={st.admin.whatsapp_qr_backend === "local" ? tr("Motor local") : st.admin.evolution_configured ? tr("Evolution API") : tr("Não habilitado (opcional)")} />
@@ -2018,7 +2019,7 @@ function ShortcutsTab({ profile, set }: { profile: Record<string, any>; set: (k:
       ))}
       <p className="text-xs text-muted">
         
-        {tr("Clique no atalho e pressione a combinação — precisa incluir")} <span className="text-ink-soft">Ctrl/⌘</span> ou <span className="text-ink-soft">{tr("Alt")}</span>{tr(". Esc cancela. Não disparam enquanto você digita (a menos que use Ctrl/⌘/Alt). Lembre de salvar.")}
+        {tr("Clique no atalho e pressione a combinação — precisa incluir")} <span className="text-ink-soft">Ctrl/⌘</span> {tr("ou")} <span className="text-ink-soft">{tr("Alt")}</span>{tr(". Esc cancela. Não disparam enquanto você digita (a menos que use Ctrl/⌘/Alt). Lembre de salvar.")}
       </p>
     </div>
   );
@@ -2054,7 +2055,7 @@ function DataTab({ fileRef, onArchived, onManageShared }: { fileRef: React.RefOb
     const raw = await prompt({
       title: tr("Exportar chats"),
       body: tr("Defina uma senha para CIFRAR o export, ou deixe em branco para exportar sem criptografia."),
-      placeholder: "Senha (opcional)",
+      placeholder: tr("Senha (opcional)"),
       password: true,
       allowEmpty: true,
       confirmLabel: tr("Exportar"),
@@ -2325,7 +2326,7 @@ function ApisPanel({
         <ApiCategoryCard
           icon={<Server size={20} />}
           title={tr("Provedores")}
-          description="OpenRouter, LiteLLM e personalizados"
+          description={tr("OpenRouter, LiteLLM e personalizados")}
           configured={status?.openrouter ? 1 : 0}
           total={1}
           onOpen={() => setSection("providers")}

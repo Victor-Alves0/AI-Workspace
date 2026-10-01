@@ -163,7 +163,7 @@ export default function RemoteTerminalPanel({ onBack }: { onBack: () => void }) 
       <div className="mt-4 rounded-xl border border-border bg-surface p-4 text-xs leading-5 text-muted">
         <p className="mb-2 font-medium text-ink">{tr("Como instalar o agente")}</p>
         <ol className="ml-4 list-decimal space-y-1">
-          <li>Copie a pasta <code className="text-ink-soft">apps/remote-agent/</code>  {tr("para a máquina.")}</li>
+          <li>{tr("Copie a pasta")} <code className="text-ink-soft">apps/remote-agent/</code>  {tr("para a máquina.")}</li>
           <li>
             
             {tr("Rode lá:")} <code className="text-ink-soft">{tr("sudo ./install.sh --san SEU_IP")}</code>
@@ -307,7 +307,7 @@ function RemoteConsole({ host }: { host: Host }) {
           value={cmd}
           onChange={(e) => setCmd(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") run(); }}
-          placeholder="comando"
+          placeholder={tr("comando")}
           spellCheck={false}
           className="min-w-0 flex-1 bg-transparent font-mono text-xs text-ink outline-none"
         />
@@ -396,7 +396,7 @@ function HostForm({ host, onBack, onSaved }: { host: Host | null; onBack: () => 
           <input value={f.base_url || ""} onChange={(e) => set("base_url", e.target.value)} placeholder="https://203.0.113.10:8791" spellCheck={false} className={`${inputCls} font-mono text-xs`} />
         </Field>
         <Field label={tr("Token")} hint={host?.has_token ? tr("Já configurado — cole um novo só para trocar.") : tr("O token que o instalador imprimiu.")}>
-          <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder={host?.has_token ? "••••••••" : "cole o token"} className={`${inputCls} font-mono text-xs`} />
+          <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder={host?.has_token ? "••••••••" : tr("cole o token")} className={`${inputCls} font-mono text-xs`} />
         </Field>
         <Field label={tr("Verificação de TLS")} hint={tr("'Certificado do agente' valida contra o certificado colado abaixo — é a opção certa para o certificado autoassinado que o instalador gera.")}>
           <Select value={f.tls_mode} onChange={(e) => set("tls_mode", e.target.value)} className={inputCls}>
@@ -425,7 +425,7 @@ function HostForm({ host, onBack, onSaved }: { host: Host | null; onBack: () => 
           <input value={proxy} onChange={(e) => setProxy(e.target.value)} placeholder={host?.has_proxy ? host.proxy : "socks5h://127.0.0.1:9050"} spellCheck={false} className={`${inputCls} font-mono text-xs`} />
         </Field>
         <div className="border-t border-border pt-1">
-          <Row label="Exigir o proxy (killswitch)" sub={tr("Sem proxy utilizável, a conexão NÃO é feita. Nunca há tentativa direta — é ela que exporia o IP do servidor.")}>
+          <Row label={tr("Exigir o proxy (killswitch)")} sub={tr("Sem proxy utilizável, a conexão NÃO é feita. Nunca há tentativa direta — é ela que exporia o IP do servidor.")}>
             <Toggle on={!!f.require_proxy} onChange={(v) => set("require_proxy", v)} />
           </Row>
         </div>

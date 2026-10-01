@@ -86,7 +86,7 @@ export default function LoginPage() {
 
         <div className="space-y-6">
           <AuthField icon={<Mail size={16} />} type="email" required autoFocus autoComplete="email"
-            placeholder="E-mail" value={email} onChange={(e) => setEmail(e.target.value)} />
+            placeholder={tr("E-mail")} value={email} onChange={(e) => setEmail(e.target.value)} />
           <AuthField icon={<KeyRound size={16} />} type="password" required minLength={8}
             autoComplete={mode === "login" ? "current-password" : "new-password"}
             placeholder={mode === "login" ? tr("Senha") : tr("Senha (mín. 8 caracteres)")}

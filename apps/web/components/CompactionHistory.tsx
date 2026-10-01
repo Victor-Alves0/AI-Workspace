@@ -321,7 +321,7 @@ export default function CompactionHistory({
                     {hovered.name || tr("Checkpoint")}
                     {hovered.pinned && <span className="rounded-full bg-accent/20 px-1.5 py-0.5 text-[9px] text-accent-hover">{tr("Atual")}</span>}
                   </p>
-                  <p className="mt-0.5 text-[11px] text-muted">{fmtWhen(hovered.created_at)} · {hovered.message_count} mensagens</p>
+                  <p className="mt-0.5 text-[11px] text-muted">{fmtWhen(hovered.created_at)} · {tr("{n} mensagens", { n: hovered.message_count })}</p>
                   {hovered.last_message && <p className="mt-1.5 line-clamp-3 text-xs text-ink-soft/80">{hovered.last_message}</p>}
                 </div>
               )}

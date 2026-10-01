@@ -141,7 +141,7 @@ export default function ChatManager({
                 </button>
                 {moveOpen && (
                   <div className="absolute right-0 top-10 z-50 max-h-64 w-60 overflow-y-auto rounded-xl border border-border bg-surface p-1 shadow-menu animate-pop">
-                    <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted">Projetos (pastas)</p>
+                    <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted">{tr("Projetos (pastas)")}</p>
                     {folders.length === 0 && <p className="px-2 py-2 text-xs text-muted">{tr("Nenhuma pasta criada.")}</p>}
                     {folders.map((f) => (
                       <button

@@ -14,7 +14,7 @@ export const SUGGESTION_CATEGORIES: SuggestionCategory[] = [
     id: "escrever",
     label: tr("Escrever"),
     prompts: [
-      "Escreva um e-mail pedindo reembolso de uma compra",
+      tr("Escreva um e-mail pedindo reembolso de uma compra"),
       tr("Corrija a gramática deste parágrafo e explique os erros"),
       tr("Escreva uma bio curta e criativa para o meu perfil"),
       tr("Reescreva este texto em um tom mais profissional"),

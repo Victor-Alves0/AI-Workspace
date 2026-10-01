@@ -157,6 +157,33 @@ fixed). So, before committing a migration:
 - never import `aiworkspace.models` in a migration — freeze the columns/SQL in the file;
 - run `pytest tests/db` against a local Postgres (see *Database battery*).
 
+## Interface language (i18n)
+
+The UI ships in Portuguese and English. Strings are gettext-style: the **Portuguese
+text is the key**.
+
+```tsx
+import { tr } from "@/lib/i18n";
+
+<button>{tr("Conectar conta Google")}</button>
+toast(tr("Conectada: {email}", { email }));
+```
+
+- Add the English version to `apps/web/locales/en.json` (`"Portuguese": "English"`).
+  A missing entry falls back to Portuguese — never a raw key — and
+  `test_todo_texto_da_interface_tem_traducao_em_ingles` fails until you add it.
+- `{name}` placeholders must exist in the Portuguese key; the English text may
+  reorder or drop them, never invent new ones.
+- Never wrap **data** in `tr()`: values that are compared (`===`, `case`), sent to
+  the server as identifiers, CSS, code samples or prompts for the model.
+- Dates and numbers: `toLocaleString(dateLocale())`, not a hard-coded `"pt-BR"`.
+- The language is resolved in the browser when `lib/i18n.ts` loads (the desktop app
+  serves a static export, so there is no server to read a cookie). Switching
+  reloads the page; `<I18nRoot>` renders the UI only after mount, so the
+  Portuguese prerender is never hydrated with another language.
+- The choice lives in the device (`localStorage`) and in `profile.language`; a
+  device without its own choice follows the profile.
+
 ## Style and principles
 
 - **Tool descriptions** (the text the model reads) in **English**, direct: what it does + when to

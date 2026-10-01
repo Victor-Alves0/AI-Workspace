@@ -51,7 +51,7 @@ export function ImaginaiInventoryPanel({ campaignId, ownerId, system }: { campai
                 <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-violet-500/10 text-violet-300"><Package size={13} /></span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-medium text-ink">{item.name}</span>
-                  <span className="block truncate text-[10px] text-muted">{item.equipped ? `Equipado${item.slot ? ` · ${item.slot.replaceAll("_", " ")}` : ""}` : item.container ? `Em ${item.container}` : tr("Carregado")}{system?.inventory.weight.supported && item.weight > 0 ? ` · ${item.weight} ${unit}` : ""}</span>
+                  <span className="block truncate text-[10px] text-muted">{item.equipped ? `${tr("Equipado")}${item.slot ? ` · ${item.slot.replaceAll("_", " ")}` : ""}` : item.container ? tr("Em {container}", { container: item.container }) : tr("Carregado")}{system?.inventory.weight.supported && item.weight > 0 ? ` · ${item.weight} ${unit}` : ""}</span>
                 </span>
                 {item.quantity > 1 ? <span className="shrink-0 font-mono text-[10px] text-ink-soft">×{item.quantity}</span> : null}
               </div>

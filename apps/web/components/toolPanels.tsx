@@ -177,7 +177,7 @@ export function WebSearchPanel({ value, onChange, status, scope = "model" }: Pan
                   </Select>
                 </div>
                 <div>
-                  <p className="mb-1.5 text-xs text-muted">{tr("Motores")} {motores.length === 0 && <span className="text-ink-soft">· todos</span>}</p>
+                  <p className="mb-1.5 text-xs text-muted">{tr("Motores")} {motores.length === 0 && <span className="text-ink-soft">{tr("· todos")}</span>}</p>
                   <div className="flex flex-wrap gap-1.5">
                     {META_ENGINES.map(([k, l]) => {
                       const sel = motores.includes(k);
@@ -201,10 +201,10 @@ export function WebSearchPanel({ value, onChange, status, scope = "model" }: Pan
 
       <Heading>{tr("Filtros")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <NumberField label={tr("Resultados por busca")} value={maxResults} onChange={(v) => wsSet("max_results", v)} suffix="itens" />
+        <NumberField label={tr("Resultados por busca")} value={maxResults} onChange={(v) => wsSet("max_results", v)} suffix={tr("itens")} />
         <div className="py-2">
           <p className="mb-1 text-sm text-ink-soft">{tr("Excluir domínios")}</p>
-          <input value={ws.domain_filter ?? ""} onChange={(e) => wsSet("domain_filter", e.target.value)} placeholder="ex.: pinterest.com, exemplo.org"
+          <input value={ws.domain_filter ?? ""} onChange={(e) => wsSet("domain_filter", e.target.value)} placeholder={tr("ex.: pinterest.com, exemplo.org")}
             className="w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 text-sm text-ink outline-none focus:border-accent" />
         </div>
       </div>
@@ -219,7 +219,7 @@ export function BrowserPanel({ value, onChange }: { value: Record<string, any>; 
   const enabled = b.enabled !== false; // padrão: ligado (usa o env se sem ws_url)
   return (
     <div className="mt-6">
-      <Heading>Navegador (Browser)</Heading>
+      <Heading>{tr("Navegador (Browser)")}</Heading>
       <p className="mb-2 text-xs leading-5 text-muted">
         
         {tr("Um Chromium headless que a IA controla (navega com JS, clica, digita, tira screenshot). Requer o serviço")} <code className="rounded bg-surface2 px-1">browser</code>  {tr("(browserless). Deixe a URL em branco para usar a configuração do servidor (BROWSER_WS_URL).")}
@@ -231,9 +231,9 @@ export function BrowserPanel({ value, onChange }: { value: Record<string, any>; 
         <div className="border-t border-border py-2.5">
           <div className="flex items-center gap-2 text-sm font-medium text-ink"><Monitor size={14} className="text-accent-hover" />  {tr("Endpoint CDP")}</div>
           <p className="mb-1 mt-2 text-xs text-muted">{tr("URL WebSocket (ws://host:porta)")}</p>
-          <input value={b.ws_url ?? ""} onChange={(e) => set("ws_url", e.target.value)} placeholder="ws://browser:3000 ou local"
+          <input value={b.ws_url ?? ""} onChange={(e) => set("ws_url", e.target.value)} placeholder={tr("ws://browser:3000 ou local")}
             className="w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-xs text-ink outline-none focus:border-accent" />
-          <p className="mb-1 mt-2 text-xs text-muted">Token (opcional — protege o endpoint)</p>
+          <p className="mb-1 mt-2 text-xs text-muted">{tr("Token (opcional — protege o endpoint)")}</p>
           <input value={b.token ?? ""} onChange={(e) => set("token", e.target.value)} type="password" placeholder="BROWSER_TOKEN"
             className="w-full rounded-lg border border-border bg-surface2 px-3 py-1.5 font-mono text-xs text-ink outline-none focus:border-accent" />
         </div>
@@ -285,7 +285,7 @@ export function FinancePanel({ value, onChange, status }: PanelProps) {
               <div className="pb-2"><KeyStatus label={tr("Chave Finnhub")} configured={status?.finnhub ?? false} hint={tr("finnhub.io — free tier.")} /></div>
             )}
             {enabled.has(p.key) && p.key === "alphavantage" && (
-              <div className="pb-2"><KeyStatus label={tr("Chave Alpha Vantage")} configured={status?.alphavantage ?? false} hint="alphavantage.co — 25 req/dia." /></div>
+              <div className="pb-2"><KeyStatus label={tr("Chave Alpha Vantage")} configured={status?.alphavantage ?? false} hint={tr("alphavantage.co — 25 req/dia.")} /></div>
             )}
           </div>
         ))}
@@ -297,11 +297,11 @@ export function FinancePanel({ value, onChange, status }: PanelProps) {
 
 /* ----------------------------- Extração de Texto -------------------------- */
 const EX_FORMATS = [
-  { key: "pdf", label: "PDF", desc: "Documentos .pdf" },
-  { key: "docx", label: tr("Word"), desc: "Documentos .docx" },
-  { key: "xlsx", label: tr("Excel"), desc: "Planilhas .xlsx/.xlsm" },
+  { key: "pdf", label: "PDF", desc: tr("Documentos .pdf") },
+  { key: "docx", label: tr("Word"), desc: tr("Documentos .docx") },
+  { key: "xlsx", label: tr("Excel"), desc: tr("Planilhas .xlsx/.xlsm") },
   { key: "pptx", label: "PowerPoint", desc: tr("Apresentações .pptx") },
-  { key: "csv", label: "CSV", desc: "Tabelas .csv" },
+  { key: "csv", label: "CSV", desc: tr("Tabelas .csv") },
   { key: "text", label: tr("Texto puro"), desc: tr("Markdown, JSON/YAML, logs, código e texto colado") },
 ];
 
@@ -325,7 +325,7 @@ export function TextExtractionPanel({ value, onChange }: PanelProps) {
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
         <NumberField label={tr("Máx. de caracteres")} value={num("max_chars", 20000)} onChange={(v) => teSet("max_chars", v)} suffix="chars" />
         <NumberField label={tr("Máx. de páginas (PDF)")} value={num("pdf_max_pages", 30)} onChange={(v) => teSet("pdf_max_pages", v)} suffix={tr("págs")} />
-        <NumberField label={tr("Máx. de linhas (Excel/CSV)")} value={num("xlsx_max_rows", 200)} onChange={(v) => teSet("xlsx_max_rows", v)} suffix="linhas" />
+        <NumberField label={tr("Máx. de linhas (Excel/CSV)")} value={num("xlsx_max_rows", 200)} onChange={(v) => teSet("xlsx_max_rows", v)} suffix={tr("linhas")} />
         <Row label={tr("Colapsar espaços em branco")}><Toggle on={te.collapse_whitespace !== false} onClick={() => teSet("collapse_whitespace", te.collapse_whitespace === false)} /></Row>
       </div>
       <Heading>{tr("OCR (imagens e PDFs escaneados)")}</Heading>
@@ -336,7 +336,7 @@ export function TextExtractionPanel({ value, onChange }: PanelProps) {
             <div className="border-t border-border">
               <Row label={tr("Motor")} sub={tr("Tesseract é local/grátis; Visão usa o Roteador de Visão")}>
                 <Select value={te.ocr_engine ?? "tesseract"} onChange={(e) => teSet("ocr_engine", e.target.value)} className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
-                  <option value="tesseract">Tesseract (local)</option>
+                  <option value="tesseract">{tr("Tesseract (local)")}</option>
                   <option value="vision">{tr("Modelo de visão")}</option>
                 </Select>
               </Row>
@@ -374,11 +374,11 @@ export function DeepSearchPanel({ value, onChange, models = [] }: PanelProps) {
         <ModelField models={models} value={ds.model ?? ""} onChange={(v) => dsSet("model", v)} placeholder={tr("Modelo padrão (barato)")} />
         <p className="mt-1 text-xs text-muted">{tr("Modelo do OpenRouter que planeja e resume (use um barato). Vazio = padrão.")}</p>
       </div>
-      <Heading>Amplitude e profundidade</Heading>
+      <Heading>{tr("Amplitude e profundidade")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
         <NumberField label={tr("Sub-perguntas por rodada")} value={num("max_subqueries", 3)} onChange={(v) => dsSet("max_subqueries", v)} suffix={tr("máx.")} />
         <NumberField label={tr("Rodadas (iterações)")} value={num("max_rounds", 2)} onChange={(v) => dsSet("max_rounds", v)} suffix={tr("máx.")} />
-        <NumberField label={tr("Resultados por busca")} value={num("max_results_per_query", 4)} onChange={(v) => dsSet("max_results_per_query", v)} suffix="itens" />
+        <NumberField label={tr("Resultados por busca")} value={num("max_results_per_query", 4)} onChange={(v) => dsSet("max_results_per_query", v)} suffix={tr("itens")} />
       </div>
       <Heading>{tr("Leitura de páginas")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
@@ -441,19 +441,19 @@ export function GooglePanel({ value, onChange }: PanelProps) {
       </div>
       <Heading>{tr("Ativação — Gmail")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <Row label="Buscar e ler"><Toggle on={opOn("gmail_search")} onClick={() => toggleOp("gmail_search")} /></Row>
-        <div className="border-t border-border"><Row label="Enviar e-mails"><Toggle on={opOn("gmail_send")} onClick={() => toggleOp("gmail_send")} /></Row></div>
+        <Row label={tr("Buscar e ler")}><Toggle on={opOn("gmail_search")} onClick={() => toggleOp("gmail_search")} /></Row>
+        <div className="border-t border-border"><Row label={tr("Enviar e-mails")}><Toggle on={opOn("gmail_send")} onClick={() => toggleOp("gmail_send")} /></Row></div>
         <div className="border-t border-border"><Row label={tr("Organizar")} sub={tr("Arquivar, lixeira, marcar lido/não lido")}><Toggle on={opOn("gmail_organize")} onClick={() => toggleOp("gmail_organize")} /></Row></div>
       </div>
       <Heading>{tr("Ativação — Agenda")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <Row label="Ver e buscar"><Toggle on={opOn("cal_view")} onClick={() => toggleOp("cal_view")} /></Row>
-        <div className="border-t border-border"><Row label="Criar e editar"><Toggle on={opOn("cal_create")} onClick={() => toggleOp("cal_create")} /></Row></div>
+        <Row label={tr("Ver e buscar")}><Toggle on={opOn("cal_view")} onClick={() => toggleOp("cal_view")} /></Row>
+        <div className="border-t border-border"><Row label={tr("Criar e editar")}><Toggle on={opOn("cal_create")} onClick={() => toggleOp("cal_create")} /></Row></div>
         <div className="border-t border-border"><Row label={tr("Excluir eventos")}><Toggle on={opOn("cal_delete")} onClick={() => toggleOp("cal_delete")} /></Row></div>
       </div>
       <Heading>{tr("Limites")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
-        <NumberField label={tr("Máx. de resultados")} value={max} onChange={(v) => gSet("max_results", v)} suffix="itens" />
+        <NumberField label={tr("Máx. de resultados")} value={max} onChange={(v) => gSet("max_results", v)} suffix={tr("itens")} />
         <label className="flex items-center justify-between gap-4 border-t border-border py-2 text-sm">
           <span className="text-ink-soft">{tr("Agenda padrão")}</span>
           <input value={g.default_calendar ?? ""} onChange={(e) => gSet("default_calendar", e.target.value)} placeholder="primary"
@@ -514,7 +514,7 @@ export function TuyaToolPanel({ value, onChange }: PanelProps) {
       <Heading>{tr("Ações permitidas")}</Heading>
       <div className="rounded-xl border border-border bg-surface px-3 py-1">
         <Row label={tr("Consultar")} sub={tr("Listar dispositivos e ver status/códigos")}><Toggle on={opOn("tuya_query")} onClick={() => toggleOp("tuya_query")} /></Row>
-        <div className="border-t border-border"><Row label="Ligar / desligar" sub="Luzes, tomadas, interruptores"><Toggle on={opOn("tuya_switch")} onClick={() => toggleOp("tuya_switch")} /></Row></div>
+        <div className="border-t border-border"><Row label={tr("Ligar / desligar")} sub={tr("Luzes, tomadas, interruptores")}><Toggle on={opOn("tuya_switch")} onClick={() => toggleOp("tuya_switch")} /></Row></div>
         <div className="border-t border-border"><Row label="Ar-condicionado" sub={tr("Ligar e ajustar temperatura/modo")}><Toggle on={opOn("tuya_ac")} onClick={() => toggleOp("tuya_ac")} /></Row></div>
         <div className="border-t border-border"><Row label={tr("Disparar cenas")} sub={tr("Tap-to-run configuradas")}><Toggle on={opOn("tuya_scene")} onClick={() => toggleOp("tuya_scene")} /></Row></div>
       </div>

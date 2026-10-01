@@ -64,7 +64,7 @@ export default function DesktopUpdateNotice({
           {tr("Rode o instalador por cima da instalação atual — ele atualiza no lugar e mantém seus dados.")}
         </p>
       )}
-      {err && <p className="text-xs text-red-400">{tr("Não consegui atualizar sozinho (")}{err}). Use “Baixar”.</p>}
+      {err && <p className="text-xs text-red-400">{tr("Não consegui atualizar sozinho (")}{err}{tr("). Use “Baixar”.")}</p>}
     </div>
   );
 }

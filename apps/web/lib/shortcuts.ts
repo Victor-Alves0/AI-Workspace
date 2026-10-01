@@ -26,7 +26,7 @@ export const SHORTCUT_GROUPS: ShortcutGroup[] = [
     title: tr("Chat"),
     actions: [
       { id: "focus_input", label: tr("Focar no campo de mensagem"), default: "mod+/" },
-      { id: "dictate", label: "Ditar (microfone)", default: "mod+shift+m" },
+      { id: "dictate", label: tr("Ditar (microfone)"), default: "mod+shift+m" },
       { id: "voice_mode", label: tr("Modo voz (assistente)"), default: "mod+shift+v" },
       { id: "compact", label: tr("Compactar contexto"), default: "mod+shift+k" },
       { id: "context_graph", label: tr("Grafo de contexto"), default: "mod+shift+g" },

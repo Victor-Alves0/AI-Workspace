@@ -99,11 +99,11 @@ export default function AssistantVoicePanel() {
   const [voskMsg, setVoskMsg] = useState("");
   const confirmVosk = async () => {
     setVoskState("loading");
-    setVoskMsg(`Baixando o modelo "${voskName(effVoskUrl)}"…`);
+    setVoskMsg(tr("Baixando o modelo \"{0}\"…", { "0": voskName(effVoskUrl) }));
     try {
       await loadVoskModel(effVoskUrl);
       setVoskState("ok");
-      setVoskMsg(`✓ Modelo "${voskName(effVoskUrl)}" instalado.`);
+      setVoskMsg(tr("✓ Modelo \"{0}\" instalado.", { "0": voskName(effVoskUrl) }));
       try { localStorage.setItem("aiw_wake_vosk", effVoskUrl); } catch { /* noop */ }
       setVoskInstalledUrl(effVoskUrl);
     } catch (e) {
@@ -215,7 +215,7 @@ export default function AssistantVoicePanel() {
     setState("loading");
     setMsg(
       engine === "vosk"
-        ? `Carregando o modelo "${voskName(effVoskUrl)}"…`
+        ? tr("Carregando o modelo \"{0}\"…", { "0": voskName(effVoskUrl) })
         : engine === "whisper"
         ? tr("Carregando o Whisper… (baixa ~150MB na 1ª vez)")
         : engine === "openwakeword"
@@ -242,8 +242,8 @@ export default function AssistantVoicePanel() {
               engine === "openwakeword"
                 ? tr("Escutando… diga a palavra do seu modelo (veja o score subir).")
                 : engine === "vosk"
-                ? `Modelo "${voskName(effVoskUrl)}" pronto. Escutando… diga "${word}".`
-                : `Escutando… diga "${word}".`,
+                ? tr("Modelo \"{0}\" pronto. Escutando… diga \"{word}\".", { "0": voskName(effVoskUrl), word: word })
+                : tr("Escutando… diga \"{word}\".", { word: word }),
             );
           },
           onError: (m) => { setState("error"); setMsg(m); },
@@ -278,7 +278,7 @@ export default function AssistantVoicePanel() {
       {/* Porcupine */}
       <div className="space-y-3 rounded-xl border border-border bg-surface2/40 p-4">
         <div className="flex items-center gap-2 text-sm font-medium text-ink">
-          <Mic size={15} className="text-muted" /> Porcupine (Picovoice)
+          <Mic size={15} className="text-muted" />  {tr("Porcupine (Picovoice)")}
         </div>
         <label className="block">
           <span className="mb-1 block text-xs font-medium text-muted">AccessKey</span>
@@ -414,7 +414,7 @@ export default function AssistantVoicePanel() {
           <summary className="cursor-pointer text-muted hover:text-ink-soft">{tr("Modelos compartilhados (avançado)")}</summary>
           <div className="mt-2 space-y-2">
             <label className="block">
-              <span className="mb-1 block font-medium text-muted">Melspectrograma (.onnx)</span>
+              <span className="mb-1 block font-medium text-muted">{tr("Melspectrograma (.onnx)")}</span>
               <input
                 value={cfg.oww_melspec_url ?? ""}
                 onChange={(e) => { patch({ oww_melspec_url: e.target.value }); setOwwState("idle"); setOwwMsg(""); }}
@@ -423,7 +423,7 @@ export default function AssistantVoicePanel() {
               />
             </label>
             <label className="block">
-              <span className="mb-1 block font-medium text-muted">Embedding (.onnx)</span>
+              <span className="mb-1 block font-medium text-muted">{tr("Embedding (.onnx)")}</span>
               <input
                 value={cfg.oww_embedding_url ?? ""}
                 onChange={(e) => { patch({ oww_embedding_url: e.target.value }); setOwwState("idle"); setOwwMsg(""); }}

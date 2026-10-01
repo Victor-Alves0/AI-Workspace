@@ -109,7 +109,7 @@ export default function ChatInfoModal({
             {/* tags */}
             <div>
               <p className="mb-1.5 text-xs font-medium text-muted">{tr("Etiquetas")}</p>
-              <TagInput tags={tags} onChange={saveTags} placeholder="Ex.: trabalho, ideias…" />
+              <TagInput tags={tags} onChange={saveTags} placeholder={tr("Ex.: trabalho, ideias…")} />
             </div>
 
             {/* artefatos */}

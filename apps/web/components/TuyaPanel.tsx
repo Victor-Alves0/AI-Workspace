@@ -46,7 +46,7 @@ export default function TuyaPanel({ onBack }: { onBack: () => void }) {
         </span>
         <div>
           <p className="text-sm font-semibold text-ink">{tr("Tuya Smart Home")}</p>
-          <p className="text-xs text-muted">Luzes, tomadas, ar-condicionado e cenas Smart Life</p>
+          <p className="text-xs text-muted">{tr("Luzes, tomadas, ar-condicionado e cenas Smart Life")}</p>
         </div>
       </div>
 
@@ -153,7 +153,7 @@ function TuyaBody({ st, reload, setSt }: { st: TuyaStatus; reload: () => Promise
         <div className="flex items-center gap-2 pt-0.5">
           <button onClick={save} disabled={saving || !accessId.trim()}
             className="rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60">
-            {saving ? "…" : saved ? "Salvo ✓" : tr("Salvar")}
+            {saving ? "…" : saved ? tr("Salvo ✓") : tr("Salvar")}
           </button>
           <button onClick={testConn} disabled={test === "loading" || !st.configured}
             title={st.configured ? tr("Testar conexão") : tr("Salve as credenciais primeiro")}
@@ -257,7 +257,7 @@ function AliasEditor({ st, reload, setErr }: { st: TuyaStatus; reload: () => Pro
       <div className="flex items-center gap-2">
         <button onClick={save} disabled={saving || !st.configured}
           className="rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-50">
-          {saving ? "…" : saved ? "Salvo ✓" : tr("Salvar apelidos")}
+          {saving ? "…" : saved ? tr("Salvo ✓") : tr("Salvar apelidos")}
         </button>
         <span className="text-[11px] text-muted">Ex.: {`{"quarto": "Luz do Quarto", "servidor": "Tomada PC"}`}</span>
       </div>

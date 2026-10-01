@@ -135,7 +135,7 @@ function VoiceBody({ st, reload, onChanged }: { st: VoiceConfig; reload: () => P
           />
         </div>
         <div className="space-y-1.5">
-          <label className="text-sm text-ink-soft">Chave (opcional)</label>
+          <label className="text-sm text-ink-soft">{tr("Chave (opcional)")}</label>
           <input
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
@@ -158,7 +158,7 @@ function VoiceBody({ st, reload, onChanged }: { st: VoiceConfig; reload: () => P
           {busy === "test" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}  {tr("Testar conexão")}
         </button>
         <button onClick={save} disabled={!!busy} className="rounded-full bg-accent px-5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50">
-          {busy === "save" ? tr("Salvando…") : saved ? "Salvo ✓" : tr("Salvar")}
+          {busy === "save" ? tr("Salvando…") : saved ? tr("Salvo ✓") : tr("Salvar")}
         </button>
       </div>
 

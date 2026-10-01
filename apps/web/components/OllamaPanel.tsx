@@ -50,7 +50,7 @@ export default function OllamaPanel({ onBack, onChanged }: { onBack: () => void;
         </span>
         <div>
           <p className="text-sm font-semibold text-ink">{tr("Ollama")}</p>
-          <p className="text-xs text-muted">Rode modelos locais e use-os em todo o sistema</p>
+          <p className="text-xs text-muted">{tr("Rode modelos locais e use-os em todo o sistema")}</p>
         </div>
       </div>
 
@@ -130,14 +130,14 @@ function OllamaBody({ st, reload, onChanged }: { st: OllamaStatus; reload: () =>
           {busy === "test" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}  {tr("Testar conexão")}
         </button>
         <button onClick={save} disabled={!!busy} className="rounded-full bg-accent px-5 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50">
-          {busy === "save" ? tr("Salvando…") : saved ? "Salvo ✓" : tr("Salvar")}
+          {busy === "save" ? tr("Salvando…") : saved ? tr("Salvo ✓") : tr("Salvar")}
         </button>
       </div>
 
       {test && (
         test.ok ? (
           <p className="flex items-center gap-1.5 text-sm text-green-400">
-            <Check size={15} /> Conectado — {test.count ?? 0} modelo(s) encontrado(s).
+            <Check size={15} /> Conectado — {test.count ?? 0}  {tr("modelo(s) encontrado(s).")}
           </p>
         ) : (
           <p className="flex items-start gap-1.5 text-sm text-red-400">

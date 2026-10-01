@@ -242,7 +242,7 @@ function ConnectionCard({
             {conn.phone && conn.label && <span className="ml-1.5 font-normal text-muted">+{conn.phone}</span>}
           </p>
           <p className="text-[11px] text-muted">
-            {conn.provider === "official" ? tr("API Oficial (Meta)") : tr("Não oficial (QR)")} · {conn.threads} conversa{conn.threads === 1 ? "" : "s"}
+            {conn.provider === "official" ? tr("API Oficial (Meta)") : tr("Não oficial (QR)")} · {conn.threads === 1 ? tr("1 conversa") : tr("{n} conversas", { n: conn.threads })}
             {conn.state?.last_error && <span className="text-red-400"> · {String(conn.state.last_error).slice(0, 80)}</span>}
           </p>
         </div>
@@ -262,7 +262,7 @@ function ConnectionCard({
           <div className="grid grid-cols-2 gap-2">
             <label className="block text-sm">
               <span className="text-xs text-muted">{tr("Nome")}</span>
-              <input defaultValue={conn.label} onBlur={(e) => { if (e.target.value !== conn.label) patch({ label: e.target.value }); }} placeholder="Ex.: Atendimento" className={inputCls} />
+              <input defaultValue={conn.label} onBlur={(e) => { if (e.target.value !== conn.label) patch({ label: e.target.value }); }} placeholder={tr("Ex.: Atendimento")} className={inputCls} />
             </label>
             <label className="block text-sm">
               <span className="text-xs text-muted">{tr("Memória")}</span>
@@ -308,7 +308,7 @@ function ConnectionCard({
                 </Select>
               </label>
               <label className="block text-sm">
-                <span className="text-xs text-muted">Prefixo-gatilho (opcional)</span>
+                <span className="text-xs text-muted">{tr("Prefixo-gatilho (opcional)")}</span>
                 <input defaultValue={f.trigger} onBlur={(e) => { if (e.target.value !== f.trigger) setFilters({ trigger: e.target.value }); }} placeholder={tr("Ex.: \"!ia\" — só responde se começar assim")} className={inputCls} />
               </label>
             </div>
@@ -451,7 +451,7 @@ function ContactRoles({ contacts, onChange }: {
         <div key={`${c.number}-${i}`} className="space-y-1.5 rounded-lg border border-border bg-surface px-2.5 py-2">
           <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
             <input defaultValue={c.number} onBlur={(e) => { if (e.target.value !== c.number) save(i, { number: e.target.value }); }} placeholder={tr("Número")} className={`${inputCls} mt-0 font-mono text-xs`} />
-            <input defaultValue={c.name} onBlur={(e) => { if (e.target.value !== c.name) save(i, { name: e.target.value }); }} placeholder="Nome (opcional)" className={`${inputCls} mt-0`} />
+            <input defaultValue={c.name} onBlur={(e) => { if (e.target.value !== c.name) save(i, { name: e.target.value }); }} placeholder={tr("Nome (opcional)")} className={`${inputCls} mt-0`} />
             <input defaultValue={c.role} onBlur={(e) => { if (e.target.value !== c.role) save(i, { role: e.target.value }); }} placeholder={tr("Role/Função")} className={`${inputCls} mt-0`} />
           </div>
           <div className="flex items-start gap-1.5">
@@ -467,7 +467,7 @@ function ContactRoles({ contacts, onChange }: {
         <div className="space-y-1.5 rounded-lg border border-accent/40 bg-surface px-2.5 py-2">
           <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
             <input autoFocus value={draft.number} onChange={(e) => setDraft({ ...draft, number: e.target.value })} placeholder={tr("Número (ex.: 5583999999999)")} className={`${inputCls} mt-0 font-mono text-xs`} />
-            <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Nome (opcional)" className={`${inputCls} mt-0`} />
+            <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder={tr("Nome (opcional)")} className={`${inputCls} mt-0`} />
             <input value={draft.role} onChange={(e) => setDraft({ ...draft, role: e.target.value })} placeholder={tr("Role/Função")} className={`${inputCls} mt-0`} />
           </div>
           <textarea rows={2} value={draft.context} onChange={(e) => setDraft({ ...draft, context: e.target.value })} placeholder={tr("Contexto/prompt adicional")} className={`${inputCls} mt-0 resize-y`} />
@@ -509,7 +509,7 @@ function Humanizer({ humanize, onChange }: { humanize: Humanize; onChange: (h: H
       {on && (
         <div className="space-y-2 border-t border-border pt-2">
           <div className="flex items-center justify-between">
-            <span className="text-sm text-ink-soft">Mostrar “digitando…”</span>
+            <span className="text-sm text-ink-soft">{tr("Mostrar “digitando…”")}</span>
             <Toggle on={h.typing !== false} onClick={() => set({ typing: h.typing === false })} />
           </div>
           <div className="flex items-center justify-between">
@@ -637,7 +637,7 @@ function NewQrForm({
   return (
     <ModalShell title={tr("Conectar número pessoal (QR Code)")} onClose={onClose}>
       <label className="block text-sm">
-        <span className="text-xs text-muted">Nome (opcional)</span>
+        <span className="text-xs text-muted">{tr("Nome (opcional)")}</span>
         <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={tr("Ex.: Meu número secundário")} className={inputCls} />
       </label>
       <div>
@@ -696,8 +696,8 @@ function NewOfficialForm({
     <ModalShell title={tr("Conectar via API Oficial (Meta)")} onClose={onClose}>
       <div className="grid grid-cols-2 gap-2">
         <label className="block text-sm">
-          <span className="text-xs text-muted">Nome (opcional)</span>
-          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Ex.: Atendimento" className={inputCls} />
+          <span className="text-xs text-muted">{tr("Nome (opcional)")}</span>
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={tr("Ex.: Atendimento")} className={inputCls} />
         </label>
         <label className="block text-sm">
           <span className="text-xs text-muted">{tr("Número (opcional)")}</span>

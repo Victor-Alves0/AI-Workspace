@@ -330,7 +330,7 @@ function EmailComposer({ draft }: { draft: EmailDraft }) {
     return (
       <div className="my-2 max-w-xl rounded-xl border border-border bg-surface px-4 py-3">
         <p className="flex items-center gap-2 text-sm text-green-400">
-          <Check size={16} />  {tr("E-mail enviado")}{draft.account_email ? ` de ${draft.account_email}` : ""}.
+          <Check size={16} />  {tr("E-mail enviado")}{draft.account_email ? ` ${tr("de {email}", { email: draft.account_email })}` : ""}.
         </p>
         <p className="mt-1 truncate text-xs text-muted">{tr("Para")} {to} · {subject || tr("(sem assunto)")}</p>
       </div>
@@ -341,8 +341,8 @@ function EmailComposer({ draft }: { draft: EmailDraft }) {
     <div className="my-2 max-w-xl overflow-hidden rounded-xl border border-border bg-surface">
       <div className="flex items-center gap-2 border-b border-border px-4 py-2">
         <Mail size={15} className="text-accent-hover" />
-        <span className="text-sm font-medium text-ink">E-mail</span>
-        {draft.account_email && <span className="ml-auto truncate text-xs text-muted">de {draft.account_email}</span>}
+        <span className="text-sm font-medium text-ink">{tr("E-mail")}</span>
+        {draft.account_email && <span className="ml-auto truncate text-xs text-muted">{tr("de {email}", { email: draft.account_email })}</span>}
       </div>
       <div className="divide-y divide-border">
         <label className="flex items-center gap-2 px-4 py-2 text-sm">
@@ -353,7 +353,7 @@ function EmailComposer({ draft }: { draft: EmailDraft }) {
         {showCc && (
           <label className="flex items-center gap-2 px-4 py-2 text-sm">
             <span className="w-16 shrink-0 text-muted">{tr("Cc")}</span>
-            <input value={cc} onChange={(e) => setCc(e.target.value)} placeholder="opcional" className="flex-1 bg-transparent text-ink outline-none placeholder:text-muted" />
+            <input value={cc} onChange={(e) => setCc(e.target.value)} placeholder={tr("opcional")} className="flex-1 bg-transparent text-ink outline-none placeholder:text-muted" />
           </label>
         )}
         <label className="flex items-center gap-2 px-4 py-2 text-sm">
@@ -464,7 +464,7 @@ function SkillProposalCard({ proposal }: { proposal: SkillProposal }) {
       <div className="flex items-center gap-2 border-b border-border px-4 py-2">
         <BookmarkPlus size={15} className="text-accent-hover" />
         <span className="text-sm font-medium text-ink">{tr("Proposta de skill")}</span>
-        <span className="ml-auto text-xs text-muted">revise e aprove</span>
+        <span className="ml-auto text-xs text-muted">{tr("revise e aprove")}</span>
       </div>
       <div className="divide-y divide-border">
         <label className="flex items-center gap-2 px-4 py-2 text-sm">
@@ -593,7 +593,7 @@ function PromptProposalCard({ proposal }: { proposal: PromptProposal }) {
       <div className="flex items-center gap-2 border-b border-border px-4 py-2">
         <MessageSquarePlus size={15} className="text-accent-hover" />
         <span className="text-sm font-medium text-ink">{tr("Proposta de prompt")}</span>
-        <span className="ml-auto text-xs text-muted">revise e aprove</span>
+        <span className="ml-auto text-xs text-muted">{tr("revise e aprove")}</span>
       </div>
       <div className="divide-y divide-border">
         <label className="flex items-center gap-2 px-4 py-2 text-sm">
@@ -1078,7 +1078,7 @@ function MemoriesUsedPanel({ items }: { items: { id: string; text: string; scope
 const GUARD_DETECT_LABEL: Record<string, string> = {
   refusal: tr("recusa detectada"),
   empty: tr("resposta vazia/curta"),
-  regex: "padrão (regex) casou",
+  regex: tr("padrão (regex) casou"),
   judge: tr("juiz LLM acionou"),
 };
 
@@ -1118,7 +1118,7 @@ function GuardEventRow({ event }: { event: ToolEvent }) {
           <p>
             <span className="text-muted">{tr("Reação:")}</span>{" "}
             {d.action === "fallback_model" ? (
-              <>{tr("trocou para o modelo")} <span className="font-mono text-[11px] text-ink">{d.fallback_model}</span> e refez</>
+              <>{tr("trocou para o modelo")} <span className="font-mono text-[11px] text-ink">{d.fallback_model}</span> {tr("e refez")}</>
             ) : (
               <>{tr("reforçou as instruções e refez")}</>
             )}
@@ -1153,10 +1153,10 @@ function ToolEventRow({ event, running = false }: { event: ToolEvent; running?: 
       imaginai_adjudication: "adjudicate",
     } as Record<string, string>)[kind];
     return ({
-      context: "Mundo · contexto",
-      roleplay: "Mundo · personagem",
+      context: tr("Mundo · contexto"),
+      roleplay: tr("Mundo · personagem"),
       resolve: tr("Mundo · validar ação"),
-      roll: "Mundo · rolagem",
+      roll: tr("Mundo · rolagem"),
       adjudicate: tr("Mundo · consequência"),
     } as Record<string, string>)[operation] ?? tr("Mundo · ação");
   })();
@@ -1427,7 +1427,7 @@ function UsagePanel({ u }: { u: NonNullable<Message["usage"]> }) {
   // detalhe do "extra" por origem (só no modo Extenso, aninhado sob a linha)
   const EXTRA_LABELS: Record<string, string> = {
     artifacts: tr("Artefatos (instruções + conteúdo)"),
-    channel: "Canal (WhatsApp/Telegram)",
+    channel: tr("Canal (WhatsApp/Telegram)"),
     guards: tr("Guardas de saída (reforços acionados)"),
     agent_notes: tr("Conversas diretas com os agentes"),
     sound_effects: tr("Efeitos sonoros (instruções)"),
@@ -1460,7 +1460,7 @@ function UsagePanel({ u }: { u: NonNullable<Message["usage"]> }) {
     { label: tr("Resultados de ferramentas"), value: inb?.tool_results ?? 0 },
     // Extenso: o gasto de cada ferramenta, aninhado sob "Resultados"
     ...(full ? perTool.map(([tool, v]) => ({ label: tool, value: v, sub: true })) : []),
-    { label: "Arquivos e anexos", value: inb?.file ?? 0 },
+    { label: tr("Arquivos e anexos"), value: inb?.file ?? 0 },
   ];
   const outputParts = [
     { label: tr("Resposta"), value: outb?.output ?? Math.max(0, u.completion_tokens - (u.reasoning_tokens ?? 0)) },
@@ -1817,7 +1817,7 @@ function MessageItem({
                   {speaking ? <Square size={14} fill="currentColor" /> : <Volume2 size={15} />}
                 </IconButton>
               )}
-              <IconButton title="Custo / tokens" onClick={() => setShowCost((v) => !v)}>
+              <IconButton title={tr("Custo / tokens")} onClick={() => setShowCost((v) => !v)}>
                 <Info size={15} className={showCost ? "text-accent-hover" : ""} />
               </IconButton>
               <IconButton title={tr("Continuar")} onClick={() => onContinue(message.id)} disabled={busy}>

@@ -84,7 +84,7 @@ export default function SetupPage() {
             <AuthField icon={<UserIcon size={16} />} required autoFocus autoComplete="name" maxLength={80}
               placeholder={tr("Nome")} value={nome} onChange={(e) => setNome(e.target.value)} />
             <AuthField icon={<Mail size={16} />} type="email" required autoComplete="email"
-              placeholder="E-mail" value={email} onChange={(e) => setEmail(e.target.value)} />
+              placeholder={tr("E-mail")} value={email} onChange={(e) => setEmail(e.target.value)} />
             <AuthField icon={<KeyRound size={16} />} type="password" required minLength={8} autoComplete="new-password"
               placeholder={tr("Senha (mín. 8 caracteres)")} value={senha} onChange={(e) => setSenha(e.target.value)} />
             <AuthField icon={<KeyRound size={16} />} type="password" required minLength={8} autoComplete="new-password"

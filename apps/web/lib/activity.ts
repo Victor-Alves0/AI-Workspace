@@ -42,7 +42,7 @@ function describeCode(tool: string, a: Args): string | null {
       if (action === "search") return tr("Procurando {0} no projeto", { "0": q(str(a.query) || "no código") });
       if (action === "log") return tr("Lendo o histórico de commits");
       if (action === "diff") return path ? tr("Conferindo as mudanças em {0}", { "0": base(path) }) : tr("Conferindo as mudanças");
-      if (action === "list") return path ? `Explorando a pasta ${cut(path, 40)}` : tr("Explorando os arquivos do projeto");
+      if (action === "list") return path ? tr("Explorando a pasta {0}", { "0": cut(path, 40) }) : tr("Explorando os arquivos do projeto");
       return path ? `Lendo ${cut(path, 56)}` : tr("Lendo arquivos do projeto");
     case "code.files.write": {
       if (action === "push") return tr("Enviando os commits para o repositório");
@@ -66,14 +66,14 @@ function describeCode(tool: string, a: Args): string | null {
     case "code.exec.jobs":
       return tr("Acompanhando um comando em segundo plano");
     case "code.preview.serve":
-      return action === "stop" ? "Parando o preview" : action === "logs" ? tr("Lendo os logs do preview") : tr("Pondo o app no ar");
+      return action === "stop" ? tr("Parando o preview") : action === "logs" ? tr("Lendo os logs do preview") : tr("Pondo o app no ar");
     case "code.graph.query":
       return a.symbol || a.query ? tr("Analisando {0} no grafo de código", { "0": q(str(a.symbol) || str(a.query), 40) }) : tr("Analisando o grafo de código");
     case "code.flow.analyze":
       return tr("Analisando o fluxo do código");
     case "code.task.manage":
-      if (action === "open") return a.title ? `Abrindo a tarefa ${q(str(a.title), 40)}` : tr("Abrindo uma tarefa isolada");
-      if (action === "merge") return "Mesclando a tarefa";
+      if (action === "open") return a.title ? tr("Abrindo a tarefa {0}", { "0": q(str(a.title), 40) }) : tr("Abrindo uma tarefa isolada");
+      if (action === "merge") return tr("Mesclando a tarefa");
       if (action === "diff") return tr("Revisando o diff da tarefa");
       return tr("Organizando as tarefas do projeto");
   }
@@ -93,10 +93,10 @@ function describePath(tool: string, a: Args): string | null {
       if (action === "goto" && a.url) return tr("Abrindo {0} no navegador", { "0": host(str(a.url)) });
       if (action === "click") return a.target ? tr("Clicando em {0}", { "0": q(str(a.target), 32) }) : tr("Clicando na página");
       if (action === "type") return tr("Preenchendo um campo");
-      if (action === "screenshot") return "Capturando a tela";
+      if (action === "screenshot") return tr("Capturando a tela");
       return tr("Navegando no navegador");
     case "research.deep.run":
-      return a.query || a.topic ? `Pesquisando a fundo ${q(str(a.query) || str(a.topic))}` : tr("Fazendo uma pesquisa profunda");
+      return a.query || a.topic ? tr("Pesquisando a fundo {0}", { "0": q(str(a.query) || str(a.topic)) }) : tr("Fazendo uma pesquisa profunda");
     case "media.video.transcribe":
       return a.url ? tr("Transcrevendo o vídeo de {0}", { "0": host(str(a.url)) }) : tr("Transcrevendo o vídeo");
   }
@@ -105,7 +105,7 @@ function describePath(tool: string, a: Args): string | null {
 
 /** Ferramentas sem regra própria: a ação e, quando há, o alvo da chamada. */
 const GENERIC: Record<string, string> = {
-  "utils.time.now": "Conferindo a data e a hora",
+  "utils.time.now": tr("Conferindo a data e a hora"),
   "utils.math.eval": tr("Fazendo as contas"),
   "user.profile.get": tr("Consultando o seu perfil"),
   "github.public.search": tr("Pesquisando no GitHub"),
@@ -115,20 +115,20 @@ const GENERIC: Record<string, string> = {
   "prompts.library.manage": tr("Organizando os prompts"),
   "task.ledger.track": tr("Atualizando o plano da tarefa"),
   "http.session.use": tr("Fazendo requisições HTTP"),
-  "diagram.excalidraw.render": "Desenhando o diagrama",
+  "diagram.excalidraw.render": tr("Desenhando o diagrama"),
   "chart.render.plot": tr("Montando o gráfico"),
   "finance.quote.get": tr("Consultando a cotação"),
   "automation.monitor.create": tr("Criando um monitor"),
   "automation.reminder.create": tr("Agendando um lembrete"),
-  "google.gmail.mailbox": "Verificando o e-mail",
-  "google.calendar.events": "Consultando a agenda",
-  "smartlife.tuya.devices": "Controlando a casa",
+  "google.gmail.mailbox": tr("Verificando o e-mail"),
+  "google.calendar.events": tr("Consultando a agenda"),
+  "smartlife.tuya.devices": tr("Controlando a casa"),
   "github.repo.manage": tr("Trabalhando no GitHub"),
   "notion.workspace.manage": tr("Trabalhando no Notion"),
   "slack.workspace.manage": tr("Trabalhando no Slack"),
   "messaging.chat.manage": tr("Cuidando das mensagens"),
   "higgsfield.media.generate": tr("Gerando mídia no Higgsfield"),
-  "civitai.media.use": "Usando o Civitai",
+  "civitai.media.use": tr("Usando o Civitai"),
   "elevenlabs.audio.generate": tr("Gerando áudio"),
   "vercel.projects.manage": tr("Trabalhando na Vercel"),
   "spotify.music.search": tr("Buscando no Spotify"),
@@ -154,7 +154,7 @@ export function describeToolCall(name: string, data: unknown, extra?: { agent?: 
   const a = (data && typeof data === "object" ? data : {}) as Args;
   switch (name) {
     case "delegate": {
-      const quem = extra?.agent || str(a.name) || (str(a.agent) !== "new" ? str(a.agent) : "") || "um agente";
+      const quem = extra?.agent || str(a.name) || (str(a.agent) !== "new" ? str(a.agent) : "") || tr("um agente");
       const task = str(a.task);
       return task ? tr("Delegando {0} para {quem}", { "0": q(task, 44), quem: quem }) : tr("Delegando uma tarefa para {quem}", { quem: quem });
     }
@@ -174,13 +174,13 @@ export function describeToolCall(name: string, data: unknown, extra?: { agent?: 
     case "run_code":
       return tr("Executando código");
     case "generate_image":
-      return a.prompt ? `Gerando a imagem ${q(str(a.prompt), 40)}` : tr("Gerando uma imagem");
+      return a.prompt ? tr("Gerando a imagem {0}", { "0": q(str(a.prompt), 40) }) : tr("Gerando uma imagem");
     case "search_knowledge":
       return a.query ? tr("Consultando a base de conhecimento: {0}", { "0": q(str(a.query), 36) }) : tr("Consultando a base de conhecimento");
     case "brain":
       return str(a.action) === "write" || str(a.action) === "create" ? tr("Anotando no segundo cérebro") : tr("Consultando o segundo cérebro");
     case "view_skill":
-      return a.slug || a.name ? `Lendo a skill ${str(a.slug) || str(a.name)}` : tr("Lendo uma skill");
+      return a.slug || a.name ? tr("Lendo a skill {0}", { "0": str(a.slug) || str(a.name) }) : tr("Lendo uma skill");
     case "propose_skill":
       return tr("Propondo uma nova skill");
   }

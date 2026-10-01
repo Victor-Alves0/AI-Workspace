@@ -105,7 +105,7 @@ export default function ProvidersPanel({ onBack, onChanged }: { onBack: () => vo
               <button onClick={() => setEditingOpenrouter(true)} className="min-w-0 flex-1 text-left">
                 <p className="truncate text-sm text-ink">OpenRouter</p>
                 <p className="truncate text-xs text-muted">
-                  {orKey ? "chave configurada" : tr("sem chave · necessária para conversar")}
+                  {orKey ? tr("chave configurada") : tr("sem chave · necessária para conversar")}
                 </p>
               </button>
             </li>
@@ -223,7 +223,7 @@ function OpenrouterForm({ configured, onCancel, onSaved }: {
   }
 
   async function save() {
-    if (!key.trim()) { setErr("Informe a chave."); return; }
+    if (!key.trim()) { setErr(tr("Informe a chave.")); return; }
     setBusy(true); setErr("");
     try {
       await api.put("/settings/secrets/openrouter", { api_key: key.trim() });
@@ -350,7 +350,7 @@ function ProviderForm({
       <div className="space-y-1.5">
         <label className="text-sm text-ink-soft">{tr("Nome")}</label>
         <input
-          value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex.: Kie.ai"
+          value={name} onChange={(e) => setName(e.target.value)} placeholder={tr("Ex.: Kie.ai")}
           className="w-full rounded-lg border border-border bg-surface2 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
         />
       </div>
@@ -372,7 +372,7 @@ function ProviderForm({
         <label className="text-sm text-ink-soft">{tr("Modelos")} {pathModel && <span className="text-muted">{tr("(obrigatório)")}</span>}</label>
         <textarea
           value={modelsText} onChange={(e) => setModelsText(e.target.value)} rows={3}
-          placeholder={"gpt-5-2\ngemini-3-pro"}
+          placeholder={tr("gpt-5-2\ngemini-3-pro")}
           className="w-full resize-y rounded-lg border border-border bg-surface2 px-3 py-2 font-mono text-sm text-ink outline-none focus:border-accent"
         />
         <p className="text-xs text-muted">

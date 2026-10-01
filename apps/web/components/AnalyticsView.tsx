@@ -91,7 +91,7 @@ function Summary({ data, metric, busy, onMetric }: {
   const n = data.per_day.length;
   const step = n <= 12 ? 1 : Math.ceil(n / 8);
   const active = tip ? data.per_day[tip.i] : null;
-  const granLabel = data.granularity === "day" ? "por dia" : data.granularity === "week" ? "por semana" : tr("por mês");
+  const granLabel = data.granularity === "day" ? tr("por dia") : data.granularity === "week" ? tr("por semana") : tr("por mês");
 
   return (
     <div className="relative rounded-2xl border border-border bg-surface p-4">
@@ -200,7 +200,7 @@ function TopModels({ data, metric, onPick }: { data: Overview; metric: Metric; o
       <div className="mb-3 flex items-center gap-2">
         <Cpu size={15} className="text-accent-hover" />
         <h2 className="text-sm font-semibold text-ink">{tr("Top modelos")}</h2>
-        <span className="text-[11px] text-muted">por {METRICS.find((m) => m.key === metric)?.label.toLowerCase()}</span>
+        <span className="text-[11px] text-muted">{tr("por")} {METRICS.find((m) => m.key === metric)?.label.toLowerCase()}</span>
       </div>
       {/* até 10 modelos; ~5 à vista e o resto na rolagem interna do cartão */}
       <div className="max-h-[14rem] space-y-2.5 overflow-y-auto pr-1">
@@ -465,7 +465,7 @@ function ModelDetail({ detail, loading }: { detail: ModelDetail | null; loading:
         <Stat icon={<Sparkles size={15} />} label={tr("Requisições")} value={fmtN(t.messages)} />
         <Stat icon={<Zap size={15} />} label={tr("Tokens")} value={fmtC(t.tokens)} sub={`${fmtN(t.avg_tokens)}/msg`} />
         <Stat icon={<DollarSign size={15} />} label={tr("Custo")} value={fmtUSD(t.cost)} />
-        <Stat icon={<DollarSign size={15} />} label={tr("Custo médio")} value={fmtUSD(t.avg_cost)} sub="por resposta" />
+        <Stat icon={<DollarSign size={15} />} label={tr("Custo médio")} value={fmtUSD(t.avg_cost)} sub={tr("por resposta")} />
       </div>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -499,7 +499,7 @@ function ModelDetail({ detail, loading }: { detail: ModelDetail | null; loading:
             <BarChart3 size={15} className="text-accent-hover" />
             <h3 className="text-sm font-semibold text-ink">{tr("Tokens no período")}</h3>
             <span className="ml-auto text-[11px] text-muted">
-              {detail.granularity === "day" ? "por dia" : detail.granularity === "week" ? "por semana" : tr("por mês")}
+              {detail.granularity === "day" ? tr("por dia") : detail.granularity === "week" ? tr("por semana") : tr("por mês")}
             </span>
           </div>
           <DetailBars days={detail.per_day} />
@@ -512,7 +512,7 @@ function ModelDetail({ detail, loading }: { detail: ModelDetail | null; loading:
           <div className="mb-3 flex items-center gap-2">
             <Wrench size={15} className="text-accent-hover" />
             <h3 className="text-sm font-semibold text-ink">{tr("Por ferramenta")}</h3>
-            <span className="ml-auto text-[11px] text-muted">tokens · chamadas</span>
+            <span className="ml-auto text-[11px] text-muted">{tr("tokens · chamadas")}</span>
           </div>
           {detail.by_tool.length === 0 ? (
             <p className="py-4 text-center text-xs text-muted">{tr("Nenhuma ferramenta usada no período.")}</p>
@@ -539,7 +539,7 @@ function ModelDetail({ detail, loading }: { detail: ModelDetail | null; loading:
           <div className="mb-3 flex items-center gap-2">
             <MessageSquare size={15} className="text-accent-hover" />
             <h3 className="text-sm font-semibold text-ink">{tr("Por conversa")}</h3>
-            <span className="ml-auto text-[11px] text-muted">tokens · custo</span>
+            <span className="ml-auto text-[11px] text-muted">{tr("tokens · custo")}</span>
           </div>
           {detail.by_chat.length === 0 ? (
             <p className="py-4 text-center text-xs text-muted">{tr("Sem conversas no período.")}</p>

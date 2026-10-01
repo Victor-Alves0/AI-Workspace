@@ -19,12 +19,12 @@ import { tr } from "@/lib/i18n";
 type AdminSection = "users" | "network" | "update" | "backup" | "sync" | "observability" | "health";
 
 const ADMIN_CARDS: { key: AdminSection; name: string; desc: string; icon: ReactNode }[] = [
-  { key: "users", name: tr("Usuários"), desc: "Aprovar, remover e cadastros", icon: <Users size={22} /> },
+  { key: "users", name: tr("Usuários"), desc: tr("Aprovar, remover e cadastros"), icon: <Users size={22} /> },
   { key: "health", name: tr("Saúde"), desc: tr("Estado das capacidades do sistema"), icon: <HeartPulse size={22} /> },
   { key: "observability", name: tr("Observabilidade"), desc: tr("Inspecione cada chamada"), icon: <Gauge size={22} /> },
   { key: "network", name: tr("Rede"), desc: tr("IPs permitidos, host e porta"), icon: <Network size={22} /> },
   { key: "update", name: tr("Atualização"), desc: tr("Verificar novas versões"), icon: <RefreshCw size={22} /> },
-  { key: "backup", name: tr("Backup e migração"), desc: "Exportar/importar o sistema", icon: <DatabaseBackup size={22} /> },
+  { key: "backup", name: tr("Backup e migração"), desc: tr("Exportar/importar o sistema"), icon: <DatabaseBackup size={22} /> },
   { key: "sync", name: tr("Sincronização"), desc: tr("Mesmos dados no servidor e no desktop"), icon: <ArrowLeftRight size={22} /> },
 ];
 
@@ -316,13 +316,13 @@ export default function AdminPage() {
             <p className="rounded-lg bg-surface2 px-3 py-2 text-xs leading-5 text-muted">
               
               {tr("Host/porta são aplicados no próximo deploy. Ponha no seu")} <span className="font-mono text-ink-soft">.env</span>:
-              <span className="mt-1 block font-mono text-ink-soft">SERVER_BIND={net.host}  ·  SERVER_PORT={net.port}</span>
-              e rode <span className="font-mono text-ink-soft">./update.sh</span> (ou <span className="font-mono">{tr("docker compose up -d")}</span>).
+              <span className="mt-1 block font-mono text-ink-soft">SERVER_BIND={net.host}    {tr("·  SERVER_PORT=")}{net.port}</span>
+              {tr("e rode")} <span className="font-mono text-ink-soft">./update.sh</span> ({tr("ou")} <span className="font-mono">{tr("docker compose up -d")}</span>).
             </p>
 
             <div className="flex items-center gap-3">
               <button onClick={saveNet} className="rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-hover">{tr("Salvar rede")}</button>
-              {netSaved && <span className="text-xs text-green-400">Salvo ✓</span>}
+              {netSaved && <span className="text-xs text-green-400">{tr("Salvo ✓")}</span>}
             </div>
           </div>
         ) : <p className="text-sm text-muted">{tr("Carregando…")}</p>}
@@ -656,7 +656,7 @@ function BackupCard() {
               <input type="password" value={exportPass} onChange={(e) => setExportPass(e.target.value)}
                 placeholder={tr("Senha (mín. 8 caracteres)")} autoComplete="new-password" className={inputCls} />
               <input type="password" value={exportPass2} onChange={(e) => setExportPass2(e.target.value)}
-                placeholder="Repita a senha" autoComplete="new-password" className={inputCls} />
+                placeholder={tr("Repita a senha")} autoComplete="new-password" className={inputCls} />
               {exportPass2 && exportPass !== exportPass2 && (
                 <p className="text-xs text-red-400 sm:col-span-2">{tr("As senhas não conferem.")}</p>
               )}
@@ -694,7 +694,7 @@ function BackupCard() {
             </button>
             <button onClick={importBackup} disabled={busy || (needsPass && !importPass) || (showLegacy && !legacySecret)}
               className="flex items-center gap-1.5 rounded-full bg-red-500/90 px-4 py-1.5 text-xs font-medium text-white hover:bg-red-500 disabled:opacity-60">
-              {busy && <Loader2 size={13} className="animate-spin" />} Importar e substituir
+              {busy && <Loader2 size={13} className="animate-spin" />}  {tr("Importar e substituir")}
             </button>
           </div>
         </div>

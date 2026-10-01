@@ -975,7 +975,7 @@ export default function ApiView() {
       {confirmRevoke && (
         <Modal title={tr("Revogar chave")} onClose={() => setConfirmRevoke(null)}>
           <p className="text-sm leading-relaxed text-ink-soft">
-            A chave <strong className="text-ink">{confirmRevoke.name}</strong>  {tr("para de funcionar imediatamente e não pode ser reativada. As aplicações que a usam passarão a receber erro 401.")}
+            {tr("A chave")} <strong className="text-ink">{confirmRevoke.name}</strong>  {tr("para de funcionar imediatamente e não pode ser reativada. As aplicações que a usam passarão a receber erro 401.")}
           </p>
           <div className="mt-5 flex justify-end gap-2">
             <button onClick={() => setConfirmRevoke(null)} className={BTN_GHOST}>{tr("Cancelar")}</button>

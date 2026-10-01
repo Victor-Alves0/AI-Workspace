@@ -116,14 +116,14 @@ export default function SlackChannelPanel({ onBack }: { onBack: () => void }) {
       </button>
 
       <div className="flex items-center justify-between">
-        <h3 className="text-base font-semibold text-ink">Slack · Canal</h3>
+        <h3 className="text-base font-semibold text-ink">{tr("Slack · Canal")}</h3>
         {!adding && (
           <button onClick={() => setAdding(true)} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover">
             <Plus size={15} />  {tr("Conectar")}
           </button>
         )}
       </div>
-      <p className="mt-1 text-xs text-muted">{tr("Crie um app em")} <span className="text-ink-soft">api.slack.com/apps</span>, ative o <span className="text-ink-soft">{tr("Socket Mode")}</span>{tr(", gere um")} <span className="text-ink-soft">{tr("App-Level Token")}</span>  {tr("(xapp-, escopo connections:write), assine os eventos")} <span className="text-ink-soft">message.im</span>/<span className="text-ink-soft">message.channels</span>  {tr("e adicione os escopos de bot")} <span className="text-ink-soft">chat:write</span>, <span className="text-ink-soft">files:write</span>, <span className="text-ink-soft">users:read</span>{tr(". Instale o app: as mensagens do Slack viram Chats e a IA responde (com anexos) no Slack.")}</p>
+      <p className="mt-1 text-xs text-muted">{tr("Crie um app em")} <span className="text-ink-soft">api.slack.com/apps</span>{tr(", ative o")} <span className="text-ink-soft">{tr("Socket Mode")}</span>{tr(", gere um")} <span className="text-ink-soft">{tr("App-Level Token")}</span>  {tr("(xapp-, escopo connections:write), assine os eventos")} <span className="text-ink-soft">message.im</span>/<span className="text-ink-soft">message.channels</span>  {tr("e adicione os escopos de bot")} <span className="text-ink-soft">chat:write</span>, <span className="text-ink-soft">files:write</span>, <span className="text-ink-soft">users:read</span>{tr(". Instale o app: as mensagens do Slack viram Chats e a IA responde (com anexos) no Slack.")}</p>
 
       {err && <p className="mt-2 flex items-center gap-1.5 text-xs text-red-400"><TriangleAlert size={13} /> {err}</p>}
 
@@ -135,7 +135,7 @@ export default function SlackChannelPanel({ onBack }: { onBack: () => void }) {
           <label className="block text-xs text-muted">{tr("App-Level Token (Basic Information → App-Level Tokens)")}
             <input value={appToken} onChange={(e) => setAppToken(e.target.value)} placeholder="xapp-…" className={inputCls} />
           </label>
-          <label className="block text-xs text-muted">Nome (opcional)
+          <label className="block text-xs text-muted">{tr("Nome (opcional)")}
             <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder={tr("Ex.: Assistente do time")} className={inputCls} />
           </label>
           <div className="text-xs text-muted">{tr("Modelo")}
@@ -164,7 +164,7 @@ export default function SlackChannelPanel({ onBack }: { onBack: () => void }) {
                   {openId === c.id ? <ChevronDown size={15} className="text-muted" /> : <ChevronRight size={15} className="text-muted" />}
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-ink">{c.label || c.team}</p>
-                    <p className="truncate text-xs text-muted">{c.team} · {c.threads} conversa(s){c.state?.last_error ? ` · erro: ${c.state.last_error}` : ""}</p>
+                    <p className="truncate text-xs text-muted">{c.team} · {tr("{n} conversa(s)", { n: c.threads })}{c.state?.last_error ? ` · ${tr("erro:")} ${c.state.last_error}` : ""}</p>
                   </div>
                 </button>
                 <button onClick={() => test(c)} title={tr("Enviar teste")} className="rounded-lg p-1.5 text-muted hover:bg-hover hover:text-ink"><Send size={14} /></button>

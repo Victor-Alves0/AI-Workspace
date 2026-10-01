@@ -18,7 +18,7 @@ const RANGES: { k: string; l: string }[] = [
 const STAT_LABELS: Record<string, string> = {
   open: tr("Abertura"), high: tr("Alta"), low: tr("Baixa"),
   high_52w: tr("Máx. 52 sem"), low_52w: tr("Mín. 52 sem"),
-  market_cap: "Cap. merc.", pe: tr("Índice P/L"), dividend_yield: tr("Dividendo"), volume: tr("Volume"),
+  market_cap: tr("Cap. merc."), pe: tr("Índice P/L"), dividend_yield: tr("Dividendo"), volume: tr("Volume"),
 };
 const STAT_ORDER = ["open", "high", "low", "market_cap", "pe", "dividend_yield", "high_52w", "low_52w", "volume"];
 

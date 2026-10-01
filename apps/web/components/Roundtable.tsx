@@ -161,7 +161,7 @@ export default function Roundtable({
         <Select value={policy} onChange={(e) => onConfigChange({ turn_policy: e.target.value as RoundtableConfig["turn_policy"] })} className={selCls} title={tr("Quem fala em seguida")}>
           <option value="round_robin">Round-robin</option>
           <option value="manual">{tr("Manual")}</option>
-          <option value="moderator">Moderador (LLM)</option>
+          <option value="moderator">{tr("Moderador (LLM)")}</option>
         </Select>
 
         {policy === "manual" && (
@@ -174,7 +174,7 @@ export default function Roundtable({
           <ModelPicker
             variant="chip"
             title={tr("Modelo moderador")}
-            label={modLabel ? `Moderador: ${modLabel}` : "Moderador: escolha…"}
+            label={modLabel ? `Moderador: ${modLabel}` : tr("Moderador: escolha…")}
             avatar={modCustom?.avatar_url ?? null}
             models={models}
             custom={custom}
@@ -210,7 +210,7 @@ export default function Roundtable({
               <button onClick={onStep} disabled={participants.length < 1} className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-50" title={tr("Um turno")}>
                 <StepForward size={13} />  {tr("Passo")}
               </button>
-              <button onClick={onRun} disabled={participants.length < 1} className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50" title="Rodar a conversa">
+              <button onClick={onRun} disabled={participants.length < 1} className="flex items-center gap-1.5 rounded-full bg-accent px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-50" title={tr("Rodar a conversa")}>
                 <Play size={13} />  {tr("Rodar")}
               </button>
             </>

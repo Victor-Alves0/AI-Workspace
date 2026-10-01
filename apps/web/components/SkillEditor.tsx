@@ -6,12 +6,7 @@ import { api, ApiError } from "@/lib/api";
 import type { Skill, SkillFile } from "@/lib/types";
 import { tr } from "@/lib/i18n";
 
-const NEW_CONTENT = `# Título da skill
-
-Descreva aqui, em detalhe, o passo a passo/instruções que o modelo deve seguir
-quando carregar esta skill. Este conteúdo só é entregue ao modelo sob demanda
-(quando ele chama view_skill) — pode ser longo sem encarecer todo turno.
-`;
+const NEW_CONTENT = tr("# Título da skill\n\nDescreva aqui, em detalhe, o passo a passo/instruções que o modelo deve seguir\nquando carregar esta skill. Este conteúdo só é entregue ao modelo sob demanda\n(quando ele chama view_skill) — pode ser longo sem encarecer todo turno.\n");
 
 function slugify(s: string) {
   return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
@@ -203,7 +198,7 @@ export default function SkillEditor({
                 onClick={addFile}
                 className="flex items-center gap-1 rounded-lg px-1.5 py-0.5 text-xs text-muted transition-colors hover:bg-hover hover:text-ink"
               >
-                <Plus size={12} /> novo
+                <Plus size={12} /> {tr("novo")}
               </button>
             </div>
             <div className="space-y-1">
@@ -259,7 +254,7 @@ export default function SkillEditor({
               <textarea
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
-                placeholder="# Instruções completas da skill…"
+                placeholder={tr("# Instruções completas da skill…")}
                 className="w-full flex-1 resize-none rounded-xl border border-border bg-surface px-4 py-3 font-mono text-sm leading-6 text-ink outline-none transition-colors focus:border-accent/60 placeholder:text-muted"
               />
             </>

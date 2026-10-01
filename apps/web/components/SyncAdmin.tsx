@@ -32,7 +32,7 @@ function quando(iso: string | null): string {
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
   if (s < 60) return tr("agora há pouco");
   if (s < 3600) return tr("há {0} min", { "0": Math.round(s / 60) });
-  if (s < 86400) return `há ${Math.round(s / 3600)} h`;
+  if (s < 86400) return tr("há {0} h", { 0: Math.round(s / 3600) });
   return new Date(iso).toLocaleString();
 }
 

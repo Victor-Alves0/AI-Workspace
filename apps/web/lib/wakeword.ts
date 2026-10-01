@@ -400,7 +400,7 @@ function _session(url: string): Promise<OrtSession> {
     p = (async () => {
       const ort = await getOrt();
       const buf = await fetch(url).then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status} ao baixar ${url}`);
+        if (!r.ok) throw new Error(tr("HTTP {status} ao baixar {url}", { status: r.status, url }));
         return r.arrayBuffer();
       });
       return ort.InferenceSession.create(new Uint8Array(buf));

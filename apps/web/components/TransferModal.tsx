@@ -166,7 +166,7 @@ export default function TransferModal({
   onClose,
   availableLabel = tr("Disponíveis"),
   selectedLabel = "Selecionadas",
-  searchPlaceholder = "Buscar…",
+  searchPlaceholder = tr("Buscar…"),
   pinnedKeys,
   onTogglePin,
   pinHint,

@@ -62,7 +62,7 @@ function scheduleLabel(a: Automation): string {
   if (s.mode === "daily") return tr("Diariamente às {time}", { time: time });
   if (s.mode === "weekly") {
     const days = (s.days ?? []).map((d) => WEEKDAYS[d % 7]).join("/") || "?";
-    return `${days} às ${time}`;
+    return tr("{days} às {time}", { days, time });
   }
   if (s.mode === "monthly") return tr("Dia {0} de cada mês às {time}", { "0": s.day ?? 1, time: time });
   const e = s.every ?? 1;
@@ -210,7 +210,7 @@ export default function AutomationsView({
   async function clearAll() {
     const ok = await confirm({
       title: tr("Limpar notificações?"),
-      body: <>{tr("Isso vai apagar")} <span className="font-medium text-ink">todas as {notes.length}</span>  {tr("notificações.")}</>,
+      body: <>{tr("Isso vai apagar")} <span className="font-medium text-ink">{tr("todas as {n}", { n: notes.length })}</span>  {tr("notificações.")}</>,
       confirmLabel: tr("Apagar todas"),
       danger: true,
     });
@@ -515,7 +515,7 @@ function RunProgressModal({
               )}
             </div>
           ) : (
-            <p className="flex items-center justify-center gap-2 py-10 text-sm text-muted"><Loader2 size={14} className="animate-spin" /> carregando…</p>
+            <p className="flex items-center justify-center gap-2 py-10 text-sm text-muted"><Loader2 size={14} className="animate-spin" /> {tr("carregando…")}</p>
           )}
         </div>
       </div>
@@ -554,7 +554,7 @@ function RunHistoryModal({
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           {runs === null ? (
-            <p className="flex items-center justify-center gap-2 py-10 text-sm text-muted"><Loader2 size={14} className="animate-spin" /> carregando…</p>
+            <p className="flex items-center justify-center gap-2 py-10 text-sm text-muted"><Loader2 size={14} className="animate-spin" /> {tr("carregando…")}</p>
           ) : runs.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted">{tr("Nenhuma execução ainda.")}</p>
           ) : (

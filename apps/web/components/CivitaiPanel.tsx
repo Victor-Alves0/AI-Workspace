@@ -159,7 +159,7 @@ export default function CivitaiPanel({ onBack }: { onBack: () => void }) {
       version_id: version.id,
     }));
     setModels([]);
-    setMessage(`Selecionado: ${model.name} · ${version.name}. Revise a receita e salve o perfil.`);
+    setMessage(tr("Selecionado: {name} · {1}. Revise a receita e salve o perfil.", { name: model.name, "1": version.name }));
   }
 
   async function saveGeneration() {
@@ -260,7 +260,7 @@ export default function CivitaiPanel({ onBack }: { onBack: () => void }) {
           </form>
 
           {models.length > 0 && <div className="mt-2 max-h-64 space-y-1 overflow-y-auto rounded-xl border border-border bg-bg/50 p-1.5">
-            {models.map((model) => <article key={model.id} className="rounded-lg border border-transparent p-2 hover:border-border hover:bg-hover/60"><p className="truncate text-xs font-medium text-ink" title={model.name}>{model.name}</p><p className="mt-0.5 text-[10px] text-muted">{model.creator ? `por ${model.creator}` : tr("Checkpoint")}</p><div className="mt-2 flex flex-wrap gap-1">{model.versions.map((version) => <button key={version.id} type="button" disabled={!version.air || version.can_generate === false} onClick={() => chooseVersion(model, version)} title={version.can_generate === false ? tr("Esta versão não está disponível na API de geração") : `${version.name}${version.base_model ? ` · ${version.base_model}` : ""}`} className="min-h-8 rounded-md border border-violet-400/20 bg-violet-500/10 px-2 text-[10px] text-violet-100 transition-colors hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40">{version.name || tr("Versão")}{version.base_model ? ` · ${version.base_model}` : ""}</button>)}</div></article>)}
+            {models.map((model) => <article key={model.id} className="rounded-lg border border-transparent p-2 hover:border-border hover:bg-hover/60"><p className="truncate text-xs font-medium text-ink" title={model.name}>{model.name}</p><p className="mt-0.5 text-[10px] text-muted">{model.creator ? tr("por {creator}", { creator: model.creator }) : tr("Checkpoint")}</p><div className="mt-2 flex flex-wrap gap-1">{model.versions.map((version) => <button key={version.id} type="button" disabled={!version.air || version.can_generate === false} onClick={() => chooseVersion(model, version)} title={version.can_generate === false ? tr("Esta versão não está disponível na API de geração") : `${version.name}${version.base_model ? ` · ${version.base_model}` : ""}`} className="min-h-8 rounded-md border border-violet-400/20 bg-violet-500/10 px-2 text-[10px] text-violet-100 transition-colors hover:bg-violet-500/20 disabled:cursor-not-allowed disabled:opacity-40">{version.name || tr("Versão")}{version.base_model ? ` · ${version.base_model}` : ""}</button>)}</div></article>)}
           </div>}
 
           <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">

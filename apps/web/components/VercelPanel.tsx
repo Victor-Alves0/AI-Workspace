@@ -61,7 +61,7 @@ export default function VercelPanel({ onBack }: { onBack: () => void }) {
         </span>
         <div>
           <p className="text-sm font-semibold text-ink">{tr("Vercel")}</p>
-          <p className="text-xs text-muted">Projetos e deployments</p>
+          <p className="text-xs text-muted">{tr("Projetos e deployments")}</p>
         </div>
         {connected && <span className="ml-auto flex items-center gap-1 text-xs text-green-400"><Check size={13} />  {tr("Conectado")}</span>}
       </div>
