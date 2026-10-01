@@ -117,7 +117,7 @@ registered in each provider's console — on a public domain all five change. Se
 |---|---|
 | `OAUTH_RELAY_URL` | `https://victor-alves0.github.io/AI-Workspace/oauth/` — the project's static return page (`site/oauth`). Providers send the browser there and it forwards to the instance that started the login, so one registered URI serves LAN IPs, phones, the desktop app and domains |
 | `GOOGLE_APP_CLIENT_ID` / `GOOGLE_APP_CLIENT_SECRET` | empty = the constants in `integrations/google_service.py`. The built-in Google app ("Connect now" with no setup); an admin's own app in the UI overrides it |
-| `GOOGLE_REDIRECT_URI` | `http://localhost:8000/integrations/google/callback` — only for an own Google app saved before the return page existed (direct return) |
+| `GOOGLE_REDIRECT_URI` | `http://localhost:8000/integrations/google/callback` — where Google returns after login with the instance's own OAuth app (register it in the Google Cloud client; Google accepts only `localhost` or HTTPS domains) |
 | `GITHUB_REDIRECT_URI` | `http://localhost:8000/integrations/github/callback` |
 | `NOTION_REDIRECT_URI` | `http://localhost:8000/integrations/notion/callback` |
 | `SLACK_REDIRECT_URI` | `http://localhost:8000/integrations/slack/callback` |

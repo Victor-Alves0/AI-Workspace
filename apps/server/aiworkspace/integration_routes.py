@@ -107,7 +107,7 @@ async def google_status(
         "builtin": emb is not None,
         "is_admin": user.role == "admin",
         "client_id": own["client_id"] if own else "",  # não-secreto; ajuda o admin a conferir
-        "redirect_uri": own["redirect_uri"] if own else google_service.relay_uri(),
+        "redirect_uri": own["redirect_uri"] if own else get_settings().google_redirect_uri,
         "fallback": _fallback_on(user, "google"),
         "accounts": [
             {

@@ -51,10 +51,21 @@ disponível para o caso remoto.
 |---|---|
 | **Notion, Slack** | App registrado pelo admin, secret, callback fixo. Próximos a migrar para o modelo do Google (abaixo). |
 
-### Google Workspace: app embutido + página de retorno
+### Google Workspace: app próprio da instalação (decisão de 01/10/2026)
 
-"Conectar agora" abre o seletor de contas do Google **fora do app** (no desktop, no
-navegador do sistema) e a tela acompanha o resultado sozinha. Três peças:
+Como no OpenClaw e no Hermes Agent, cada instalação usa o **próprio** cliente OAuth
+(o admin cria no Google Cloud e cola Client ID/Secret em Integrações → Google
+Workspace). O retorno é direto para a instalação (`GOOGLE_REDIRECT_URI`, que o
+Google só aceita em `localhost` ou domínio HTTPS). Um app do projeto exigiria
+verificação do Google para os escopos do Gmail (avaliação de segurança paga) — por
+isso ficou de fora.
+
+"Conectar conta Google" abre o seletor de contas **fora do app** (no desktop, no
+navegador do sistema) e a tela acompanha o resultado sozinha.
+
+O que segue abaixo (app embutido + página de retorno) está implementado mas
+**desligado**: só entra em uso se `_BUILTIN_CLIENT_ID/SECRET` (ou
+`GOOGLE_APP_CLIENT_ID/SECRET`) forem preenchidos e o GitHub Pages for ligado.
 
 1. **App embutido** — um cliente OAuth do tipo Web, registrado uma vez pelo projeto
    (`_BUILTIN_CLIENT_ID/SECRET` em `google_service.py`, ou `GOOGLE_APP_CLIENT_ID/SECRET`).

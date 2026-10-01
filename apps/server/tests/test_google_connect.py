@@ -115,17 +115,17 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def test_app_proprio_antigo_mantem_retorno_direto(settings_store, monkeypatch):
+def test_app_proprio_volta_direto_para_a_instalacao(settings_store, monkeypatch):
+    """App próprio (o caminho do OpenClaw/Hermes): retorno direto em GOOGLE_REDIRECT_URI,
+    salvo antes ou depois — nunca a página do projeto, que só serve ao app embutido."""
     from aiworkspace import crypto
+    direto = gs.get_settings().google_redirect_uri
     settings_store[gs.OAUTH_SETTING_KEY] = {"client_id": "velho", "client_secret_enc": crypto.encrypt("s")}
-    own = _run(gs.own_app(None))
-    assert own["redirect_uri"] == gs.get_settings().google_redirect_uri
-    # trocar só o secret não muda o retorno que o admin cadastrou
+    assert _run(gs.own_app(None))["redirect_uri"] == direto
     _run(gs.set_oauth_config(None, "velho", "novo"))
-    assert _run(gs.own_app(None))["redirect_uri"] == gs.get_settings().google_redirect_uri
-    # app novo passa a voltar pela página do projeto
+    assert _run(gs.own_app(None))["redirect_uri"] == direto
     _run(gs.set_oauth_config(None, "outro", "s2"))
-    assert _run(gs.own_app(None))["redirect_uri"] == gs.relay_uri()
+    assert _run(gs.own_app(None))["redirect_uri"] == direto
 
 
 def test_embutido_so_quando_ha_credenciais(settings_store, monkeypatch):

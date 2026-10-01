@@ -103,12 +103,12 @@ async def own_app(db: AsyncSession) -> dict[str, str] | None:
         secret = crypto.decrypt(enc)
     except Exception:  # noqa: BLE001 - APP_SECRET trocado invalida o ciphertext
         return None
-    # salvo antes da página de retorno (sem a chave) = retorno direto, como era
-    redirect = raw["redirect_uri"] if "redirect_uri" in raw else get_settings().google_redirect_uri
+    # app próprio volta DIRETO para esta instalação (GOOGLE_REDIRECT_URI), como o
+    # OpenClaw/Hermes; a página de retorno do projeto é só do app embutido
     return {
         "client_id": client_id,
         "client_secret": secret,
-        "redirect_uri": (redirect or "").strip() or relay_uri(),
+        "redirect_uri": (get_settings().google_redirect_uri or "").strip() or relay_uri(),
         "source": "own",
     }
 
@@ -129,20 +129,13 @@ async def creds_for_client(db: AsyncSession, client_id: str) -> dict[str, str] |
 
 
 async def set_oauth_config(db: AsyncSession, client_id: str, client_secret: str | None) -> None:
-    """Salva o app próprio (secret cifrado). `client_secret` vazio mantém o atual.
-
-    O retorno passa a ser pela página do projeto; um app salvo no formato antigo
-    (retorno direto) mantém o dele enquanto o Client ID não mudar — senão o admin
-    que só trocou o secret perderia o redirect que cadastrou."""
+    """Salva o app próprio (secret cifrado). `client_secret` vazio mantém o atual."""
     cur = await get_setting(db, OAUTH_SETTING_KEY)
     cur = cur if isinstance(cur, dict) else {}
     enc = cur.get("client_secret_enc") or ""
     if client_secret:
         enc = crypto.encrypt(client_secret.strip())
-    novo: dict[str, Any] = {"client_id": client_id.strip(), "client_secret_enc": enc}
-    if "redirect_uri" in cur or (cur.get("client_id") or "").strip() != client_id.strip():
-        novo["redirect_uri"] = cur.get("redirect_uri", "") if "redirect_uri" in cur else ""
-    await set_setting(db, OAUTH_SETTING_KEY, novo)
+    await set_setting(db, OAUTH_SETTING_KEY, {"client_id": client_id.strip(), "client_secret_enc": enc})
 
 
 async def clear_oauth_config(db: AsyncSession) -> None:
