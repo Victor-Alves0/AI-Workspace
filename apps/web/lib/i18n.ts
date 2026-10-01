@@ -79,3 +79,46 @@ export function syncLocaleWithProfile(language: unknown) {
   try { if (window.localStorage.getItem(KEY)) return; } catch { return; }
   setLocale(l);
 }
+
+/* ------------------------------------------------------------------ */
+/* Mensagens que vêm do SERVIDOR (erros da API, eventos de erro do stream).
+ * O servidor fala português; as traduções moram no mesmo en.json. Mensagem com
+ * parte variável ("Token inválido: 401") casa com o modelo "Token inválido: {0}". */
+type Modelo = { re: RegExp; dst: string; nomes: string[]; peso: number };
+let modelos: Modelo[] | null = null;
+
+function compilar(d: Record<string, string>): Modelo[] {
+  const out: Modelo[] = [];
+  for (const [src, dst] of Object.entries(d)) {
+    if (!/\{\w+\}/.test(src)) continue;
+    const nomes: string[] = [];
+    const partes = src.split(/\{(\w+)\}/);
+    let literal = "";
+    let re = "";
+    partes.forEach((p, i) => {
+      if (i % 2) { nomes.push(p); re += "([\\s\\S]+?)"; }
+      else { literal += p; re += p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+    });
+    // modelo quase só de variável casaria qualquer coisa
+    if (literal.trim().length < 4) continue;
+    out.push({ re: new RegExp(`^${re}$`), dst, nomes, peso: literal.length });
+  }
+  return out.sort((a, b) => b.peso - a.peso);
+}
+
+/** Traduz uma mensagem vinda do servidor; sem tradução, devolve como veio. */
+export function trServer(msg: string): string {
+  if (current === "pt" || !msg) return msg;
+  const d = DICTS[current];
+  const exata = d[msg] ?? d[msg.trim()];
+  if (exata) return exata;
+  modelos ??= compilar(d);
+  for (const m of modelos) {
+    const g = msg.match(m.re);
+    if (g) return m.dst.replace(/\{(\w+)\}/g, (x, k: string) => {
+      const i = m.nomes.indexOf(k);
+      return i >= 0 ? g[i + 1] : x;
+    });
+  }
+  return msg;
+}

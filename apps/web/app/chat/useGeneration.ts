@@ -7,7 +7,7 @@ import type { ActivityStep, Chat, SubagentLive, TeamLive, ToolEvent } from "@/li
 import { applySubagentProgress } from "@/lib/subagent";
 import { splitStreamArtifacts, type StreamArtifact } from "@/lib/artifacts";
 import { parseReasoningEffort } from "@/components/PromptBox";
-import { tr } from "@/lib/i18n";
+import { tr, trServer } from "@/lib/i18n";
 
 export interface GuardNote {
   name: string;
@@ -438,7 +438,7 @@ export function useGeneration(getDeps: () => GenerationDeps) {
         }
         flush();
       } else if (ev.type === "error") {
-        state.acc += `\n\n⚠️ Erro: ${ev.message}`;
+        state.acc += `\n\n⚠️ ${tr("Erro:")} ${trServer(ev.message)}`;
         if (paint()) {
           setGeneratingImage(false);
           setConsultingKnowledge(false);

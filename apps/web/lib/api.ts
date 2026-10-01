@@ -1,3 +1,4 @@
+import { trServer } from "@/lib/i18n";
 // Cliente HTTP fino. Sempre envia cookies (credentials: include) p/ a auth via cookie httpOnly.
 
 /** Base da API. Prioridade:
@@ -38,7 +39,8 @@ export function previewHref(href?: string): string | undefined {
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
-    super(message);
+    // o servidor responde em português; aqui sai no idioma da interface
+    super(trServer(message));
   }
 }
 

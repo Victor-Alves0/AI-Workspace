@@ -360,3 +360,56 @@ def test_traducao_nao_inventa_nem_perde_variavel():
     ph = re.compile(r"\{(\w+)\}")
     ruins = [k for k, v in en.items() if not set(ph.findall(v)) <= set(ph.findall(k))]
     assert not ruins, f"placeholders inventados: {ruins[:10]}"
+
+
+def _mensagens_do_servidor() -> dict[str, str]:
+    """`detail` das HTTPException e `{"error": …}` das rotas — o que chega à tela.
+    f-string vira modelo {0}, {1}… (é assim que o front casa a mensagem real)."""
+    import ast
+
+    def modelo(n):
+        if isinstance(n, ast.Constant) and isinstance(n.value, str):
+            return n.value
+        if isinstance(n, ast.JoinedStr):
+            partes, i = [], 0
+            for v in n.values:
+                if isinstance(v, ast.Constant):
+                    partes.append(str(v.value))
+                else:
+                    partes.append("{%d}" % i)
+                    i += 1
+            return "".join(partes)
+        if isinstance(n, ast.BinOp) and isinstance(n.op, ast.Add):
+            a, b = modelo(n.left), modelo(n.right)
+            return a + b if a is not None and b is not None else None
+        return None
+
+    pt = re.compile(r"[ãõçáéíóúâêôà]|\b(de|da|do|para|com|sem|não|uma|um|os|as|ao|no|na|em|ou|e|o|a)\b", re.I)
+    raiz = _REPO / "apps" / "server" / "aiworkspace"
+    achadas: dict[str, str] = {}
+    for p in sorted(raiz.rglob("*.py")):
+        rel = p.relative_to(raiz).as_posix()
+        for n in ast.walk(ast.parse(p.read_text(encoding="utf-8"))):
+            alvos = []
+            if isinstance(n, ast.Call) and getattr(n.func, "id", getattr(n.func, "attr", "")) == "HTTPException":
+                d = n.args[1] if len(n.args) >= 2 else next((k.value for k in n.keywords if k.arg == "detail"), None)
+                alvos = [d] if d is not None else []
+            elif isinstance(n, ast.Dict) and (rel.endswith("_routes.py") or "/routes" in rel or rel.startswith("api/")):
+                alvos = [v for k, v in zip(n.keys, n.values)
+                         if isinstance(k, ast.Constant) and k.value in ("error", "detail", "message", "reason")]
+            for a in alvos:
+                t = modelo(a)
+                if t and pt.search(t) and len(re.sub(r"\{\d+\}", "", t).strip()) >= 4:
+                    achadas.setdefault(t, f"{rel}:{n.lineno}")
+    return achadas
+
+
+def test_erros_do_servidor_tem_traducao_em_ingles():
+    """O servidor responde em português; o front traduz o erro (`trServer`) pelo
+    locales/en.json — exato ou por modelo com {0}. Mensagem nova sem entrada lá
+    aparece em português para quem usa o app em inglês."""
+    import json as _json
+
+    en = _json.loads((_WEB / "locales" / "en.json").read_text(encoding="utf-8"))
+    faltando = [f"{onde}: {k[:70]!r}" for k, onde in _mensagens_do_servidor().items() if k not in en]
+    assert not faltando, "erros do servidor sem tradução:\n" + "\n".join(faltando[:40])
