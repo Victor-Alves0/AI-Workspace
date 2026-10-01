@@ -54,12 +54,12 @@ def ddgs(monkeypatch):
 
 
 async def test_normaliza_resultados_e_repassa_motores_e_regiao(ddgs):
-    ddgs.resposta = [{"title": "T", "href": "https://a.com", "body": "B"}]
+    ddgs.resposta = [{"title": "Gatos", "href": "https://a.com", "body": "B"}]
     cfg = SearchConfig(engines="bing,brave", region="br-pt", max_results=3)
 
     results, errors = await web_search_detailed("gatos", cfg)
 
-    assert results == [{"title": "T", "url": "https://a.com", "content": "B"}] and errors == []
+    assert results == [{"title": "Gatos", "url": "https://a.com", "content": "B"}] and errors == []
     assert ddgs.chamadas[0]["backend"] == "bing,brave" and ddgs.chamadas[0]["region"] == "br-pt"
 
 
@@ -104,7 +104,8 @@ def test_padrao_e_a_metabusca():
 
 
 # ------------------------------ resiliência --------------------------------------
-_OK = [{"title": "T", "href": "https://a.com", "body": "B"}]
+# resultado que fala do que foi buscado (o filtro de relevância descarta o resto)
+_OK = [{"title": "Gatos pretos e o GTA 6", "href": "https://a.com", "body": "B"}]
 
 
 async def test_bloqueio_passageiro_tenta_de_novo(ddgs):
@@ -189,3 +190,67 @@ async def test_sem_navegador_e_sem_chave_explica_tudo_que_tentou(ddgs):
     ddgs.resposta = DDGSException("403 captcha")
     results, errors = await web_search_detailed("q", SearchConfig())
     assert results == [] and errors and "403 captcha" in errors[0]
+
+
+# ------------------------------ relevância ---------------------------------------
+# O caso real (01/10): o Yahoo, com busca cheia de aspas e operadores, devolveu
+# resultados ALEATÓRIOS (férias de verão, Pornhub, fotógrafo de Las Vegas); como os
+# outros motores não achavam nada, o lixo era o único resultado e chegava à IA.
+_FOFA = 'FOFA search "Cisco vManage" query syntax app="Cisco" title'
+_LIXO = [
+    {"title": "20 summer vacation ideas across the U.S.", "href": "https://www.tripadvisor.com/a", "body": "Beaches"},
+    {"title": "Font in Pornhub logo? It's not Arial", "href": "https://www.reddit.com/r/identifythisfont/x", "body": ""},
+    {"title": "Las Vegas Corporate Headshots Photographer", "href": "https://edinstudios.com/x", "body": "NV"},
+]
+_BOM = [{"title": "Cisco vManage — FOFA dork", "href": "https://example.org/fofa", "body": "app=\"Cisco-vManage\""}]
+
+
+async def test_resultado_sem_relacao_com_a_busca_e_descartado(ddgs):
+    ddgs.resposta = _LIXO + _BOM
+    results, errors = await web_search_detailed(_FOFA, SearchConfig())
+    assert [r["url"] for r in results] == ["https://example.org/fofa"] and errors == []
+
+
+async def test_so_lixo_repete_com_a_busca_simplificada(ddgs):
+    ddgs.roteiro = [_LIXO, _BOM]  # a original só traz lixo; a simplificada acha
+    results, _ = await web_search_detailed(_FOFA, SearchConfig())
+    assert results and results[0]["url"] == "https://example.org/fofa"
+    assert ddgs.chamadas[-1]["query"] == "FOFA search Cisco vManage query syntax Cisco title"
+
+
+async def test_so_lixo_em_tudo_nao_entrega_lixo_e_explica(ddgs):
+    ddgs.resposta = _LIXO
+    results, errors = await web_search_detailed(_FOFA, SearchConfig())
+    assert results == [] and errors and "sem relação" in errors[0]
+
+
+async def test_lixo_da_metabusca_cai_no_navegador(ddgs):
+    ddgs.resposta = _LIXO
+    navegador = [{"title": "FOFA syntax: Cisco vManage", "url": "https://fofa.example/doc", "content": ""}]
+    cfg = SearchConfig(browser_search=lambda q, k: navegador)
+    results, _ = await web_search_detailed(_FOFA, cfg)
+    assert [r["url"] for r in results] == ["https://fofa.example/doc"]
+
+
+def test_simplificar_tira_aspas_e_operadores_mas_guarda_o_valor():
+    s = providers._simplify
+    assert s(_FOFA) == "FOFA search Cisco vManage query syntax Cisco title"
+    assert s('"fofa.info" syntax "app=" "product=" cert= operators') == "fofa.info syntax operators"
+    assert s("site:github.com fastapi websocket") == "github.com fastapi websocket"
+    assert s("receita de bolo de cenoura") == "receita de bolo de cenoura"
+
+
+def test_relevancia_aceita_acento_e_idioma_misto():
+    r = [{"title": "Tempo em São Paulo - Climatempo", "content": "", "url": "https://climatempo.com.br"}]
+    assert providers._relevant("previsão do tempo amanhã em São Paulo", r) == r
+    # busca sem termos latinos não é filtrada (não dá para comparar)
+    assert providers._relevant("天气", r) == r
+
+
+def test_paginas_do_navegador_pedem_safesearch():
+    from aiworkspace.tools.sift_service import _BROWSER_SEARCH_PAGES
+
+    urls = [tpl for tpl, _ in _BROWSER_SEARCH_PAGES]
+    assert any("yahoo" in u and "vm=i" in u for u in urls)
+    assert any("duckduckgo" in u and "kp=-1" in u for u in urls)
+    assert any("bing" in u and "adlt=moderate" in u for u in urls)

@@ -992,7 +992,7 @@ async def _library_read(user_id: str | None, kind: str, key: str) -> dict[str, A
 # pesquisando juntos). Os links vêm "embrulhados" em redirecionadores; o JS desembrulha.
 _BROWSER_SEARCH_PAGES = (
     # Yahoo entrega a SERP completa ao headless (o Bing degrada: busca só uma palavra)
-    ("https://search.yahoo.com/search?p={q}", r"""(() => {
+    ("https://search.yahoo.com/search?p={q}&vm=i", r"""(() => {
       const out = [];
       for (const b of document.querySelectorAll('#web .algo')) {
         const h3 = b.querySelector('h3');
@@ -1007,7 +1007,7 @@ _BROWSER_SEARCH_PAGES = (
       }
       return out;
     })()"""),
-    ("https://html.duckduckgo.com/html/?q={q}", r"""(() => {
+    ("https://html.duckduckgo.com/html/?q={q}&kp=-1", r"""(() => {
       const out = [];
       for (const r of document.querySelectorAll('.result')) {
         const a = r.querySelector('.result__a'); if (!a) continue;
@@ -1018,7 +1018,7 @@ _BROWSER_SEARCH_PAGES = (
       }
       return out;
     })()"""),
-    ("https://www.bing.com/search?q={q}", r"""(() => {
+    ("https://www.bing.com/search?q={q}&adlt=moderate", r"""(() => {
       const out = [];
       for (const li of document.querySelectorAll('li.b_algo')) {
         const a = li.querySelector('h2 a'); if (!a) continue;

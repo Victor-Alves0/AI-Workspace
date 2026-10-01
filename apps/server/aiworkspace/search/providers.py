@@ -25,6 +25,13 @@ os motores respondiam CAPTCHA/429 e a chamada voltava vazia):
   - fallback entre providers: metabusca esgotada → Tavily/Brave (se houver chave), e
     Tavily/Brave com erro → metabusca;
   - teto de tempo por busca, bem abaixo do watchdog das tools.
+
+Relevância (o Yahoo, com busca cheia de aspas/operadores como `app="x"`, devolve
+resultados ALEATÓRIOS — férias de verão, Pornhub, fotógrafo de Las Vegas — e, como os
+outros motores não achavam nada, o lixo era o único resultado):
+  - resultado sem NENHUMA palavra significativa da busca (título, trecho ou URL) é
+    descartado; se nada sobra, o provider conta como falho e o próximo é tentado;
+  - sem nada relevante, repete com a busca SIMPLIFICADA (sem aspas nem `chave=`).
 A tool chama isto de dentro de `asyncio.run` numa thread (um loop por chamada), então
 tudo aqui é thread-safe e independe de event loop.
 """
@@ -34,8 +41,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import re
 import threading
 import time
+import unicodedata
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Callable, TypedDict
@@ -187,6 +196,46 @@ def _healthy_backend(engines: str, region: str = "wt-wt") -> str:
     return ",".join(livres)
 
 
+# palavras que não dizem do que a busca trata (e pedaços de URL que todo resultado tem)
+_STOP = frozenset("""
+the and for with from what how why when where which who this that are was were you your
+not but can does into about than then them they there their have has had will would
+www com org net html http https htm php
+que com para por uma uns umas dos das nos nas pelo pela pelos pelas como mais muito
+sobre entre isso esta este essa esse onde qual quais quem quando porque seu sua seus
+""".split())
+
+
+def _terms(text: str) -> set[str]:
+    """Palavras significativas (sem acento, minúsculas, 3+ letras, sem stopwords/números)."""
+    t = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode().lower()
+    return {w for w in re.findall(r"[a-z0-9]{3,}", t) if w not in _STOP and not w.isdigit()}
+
+
+def _relevant(query: str, found: list[SearchResult]) -> list[SearchResult]:
+    """Só os resultados que mencionam ao menos uma palavra significativa da busca.
+    Busca sem termos latinos (ex.: só ideogramas) passa direto."""
+    qt = _terms(query)
+    if not qt:
+        return found
+    out = []
+    for r in found:
+        doc = _terms(f"{r.get('title', '')} {r.get('content', '')} {r.get('url', '')}")
+        if doc & qt:
+            out.append(r)
+    return out
+
+
+def _simplify(query: str) -> str:
+    """Busca sem aspas e sem operadores `chave=valor`/`site:` — é o formato que faz
+    os motores errarem (o Yahoo devolve qualquer coisa). Mantém o valor dos
+    operadores: `app="Cisco"` → `Cisco`."""
+    q = re.sub(r'\b[\w.-]+[=:]\s*"([^"]*)"', r" \1 ", query)   # chave="valor" → valor
+    q = re.sub(r"\b[\w.-]+[=:](\S*)", r" \1 ", q)              # chave=valor → valor; chave= some
+    q = q.replace('"', " ")
+    return " ".join(q.split())
+
+
 def _cache_key(provider: str, query: str, cfg: SearchConfig) -> tuple:
     return (provider, " ".join(query.lower().split()), cfg.max_results, cfg.engines, cfg.region,
             bool(cfg.tavily_api_key), bool(cfg.brave_api_key))
@@ -271,24 +320,36 @@ async def _resilient(provider: str, query: str, cfg: SearchConfig) -> list[Searc
     from .. import tracing
 
     erros: list[str] = []
-    for prov in [provider, *_fallbacks(provider, cfg)]:
-        try:
-            # um span por motor/provedor tentado (com as novas tentativas dentro)
-            with tracing.span(f"search:{prov}", kind="http", provider=prov,
-                              fallback=prov != provider) as _sp:
-                try:
-                    found = await _with_retries(prov, query, cfg)
-                except Exception as exc:  # noqa: BLE001
-                    _sp.status = "error"
-                    _sp.error = (str(exc).strip() or type(exc).__name__)[:300]
-                    raise
-                _sp.set(results=len(found))
-        except Exception as exc:  # noqa: BLE001
-            erros.append(f"{prov}: {(str(exc).strip() or type(exc).__name__)[:200]}")
-            continue
-        if found or prov == provider and not _fallbacks(provider, cfg):
-            return found
-        erros.append(f"{prov}: sem resultados")
+    simples = _simplify(query)
+    # 1º a busca como veio; sem nada RELEVANTE, a versão simplificada
+    for q in dict.fromkeys([query, simples] if simples else [query]):
+        for prov in [provider, *_fallbacks(provider, cfg)]:
+            try:
+                # um span por motor/provedor tentado (com as novas tentativas dentro)
+                with tracing.span(f"search:{prov}", kind="http", provider=prov,
+                                  fallback=prov != provider, simplified=q != query) as _sp:
+                    try:
+                        brutos = await _with_retries(prov, q, cfg)
+                    except Exception as exc:  # noqa: BLE001
+                        _sp.status = "error"
+                        _sp.error = (str(exc).strip() or type(exc).__name__)[:300]
+                        raise
+                    found = _relevant(query, brutos)
+                    _sp.set(results=len(found), dropped=len(brutos) - len(found))
+            except Exception as exc:  # noqa: BLE001
+                erros.append(f"{prov}: {(str(exc).strip() or type(exc).__name__)[:200]}")
+                continue
+            if found:
+                return found
+            if brutos:
+                logger.info("busca: %s devolveu %d resultado(s) sem relação com %r — descartados",
+                            prov, len(brutos), q[:120])
+                erros.append(f"{prov}: resultados sem relação com a busca")
+            else:
+                erros.append(f"{prov}: sem resultados")
+    # nada encontrado e nenhum outro provider para tentar: não é falha (era assim antes)
+    if not _fallbacks(provider, cfg) and erros and all(e.endswith(": sem resultados") for e in erros):
+        return []
     raise SearchProviderError("; ".join(erros) or "sem resultados")
 
 
