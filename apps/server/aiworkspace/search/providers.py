@@ -19,8 +19,9 @@ os motores respondiam CAPTCHA/429 e a chamada voltava vazia):
   - poucas metabuscas simultâneas, num pool de threads PRÓPRIO: o excesso espera na
     fila em vez de martelar os motores (e não rouba as threads do resto do app);
   - cache curto + voo único: agentes com a mesma busca dividem UMA ida aos motores;
-  - motor que respondeu bloqueio (CAPTCHA/429/403/timeout) descansa alguns minutos
-    e as próximas buscas usam os outros;
+  - motor que respondeu bloqueio (CAPTCHA/429/403/timeout) descansa e as próximas
+    buscas usam os outros; bloqueios SEGUIDOS recuam progressivamente (5 min → 6 h),
+    para não sujar o IP insistindo num motor que barra sempre;
   - até 3 tentativas com espera curta, trocando de motores;
   - fallback entre providers: metabusca esgotada → Tavily/Brave (se houver chave), e
     Tavily/Brave com erro → metabusca;
@@ -119,7 +120,8 @@ _ATTEMPTS = 3
 _SEARCH_DEADLINE = 75.0        # segundos, fila inclusa (watchdog das tools = 120s)
 _CACHE_TTL = 600.0
 _CACHE_MAX = 500
-_COOLDOWN_BLOCK = 300.0        # CAPTCHA / 429 / 403
+_COOLDOWN_BLOCK = 300.0        # CAPTCHA / 429 / 403 — o 1º bloqueio; os seguidos crescem ×3
+_COOLDOWN_MAX = 6 * 3600.0     # teto do descanso de um motor que bloqueia SEMPRE
 _COOLDOWN_TIMEOUT = 60.0
 _RETRY_BASE = 0.7              # espera entre tentativas: base × nº da tentativa + jitter
 
@@ -132,6 +134,7 @@ _LOCK = threading.Lock()
 _CACHE: dict[tuple, tuple[float, list[SearchResult]]] = {}
 _INFLIGHT: dict[tuple, Future] = {}
 _COOLING: dict[str, float] = {}   # motor da metabusca → até quando descansa
+_STRIKES: dict[str, int] = {}     # motor → bloqueios SEGUIDOS (zera na 1ª resposta boa)
 
 
 def _classify(err: str) -> float:
@@ -144,10 +147,79 @@ def _classify(err: str) -> float:
 
 
 def _cool(engine: str, err: str) -> None:
+    """Põe o motor para descansar. Bloqueio (CAPTCHA/429/403) RECUA progressivamente:
+    5 min, 15 min, 45 min… até 6 h enquanto ele continuar barrando. Antes era sempre
+    5 min — e motor que barra o IP sempre (na VPS: Brave e Mojeek em 100% das vezes)
+    era cutucado de novo a cada 5 min, e cada cutucada suja mais o IP (do servidor
+    ou, no desktop, o de casa do usuário)."""
     secs = _classify(err)
-    if engine and secs:
-        with _LOCK:
-            _COOLING[engine] = max(_COOLING.get(engine, 0.0), time.monotonic() + secs)
+    if not (engine and secs):
+        return
+    agora = time.monotonic()
+    with _LOCK:
+        if secs >= _COOLDOWN_BLOCK:
+            # o mesmo bloqueio chega por dois caminhos (resposta HTTP + erro da ddgs):
+            # só conta um "strike" por janela de descanso
+            if _COOLING.get(engine, 0.0) > agora:
+                return
+            n = _STRIKES.get(engine, 0) + 1
+            _STRIKES[engine] = n
+            secs = min(_COOLDOWN_BLOCK * 3 ** (n - 1), _COOLDOWN_MAX)
+            if n >= 3:
+                logger.info("busca: motor %s barrado %d vezes seguidas — descansa %d min",
+                            engine, n, int(secs // 60))
+        _COOLING[engine] = max(_COOLING.get(engine, 0.0), agora + secs)
+
+
+def _healthy(engine: str) -> None:
+    """Resposta normal do motor: o recuo volta ao começo."""
+    with _LOCK:
+        _STRIKES.pop(engine, None)
+
+
+_ENGINE_HOSTS: dict[str, str] = {}
+
+
+def _engine_of(url: str) -> str:
+    """Host da requisição → motor da ddgs (pelo endereço de busca de cada motor)."""
+    if not _ENGINE_HOSTS:
+        try:
+            from urllib.parse import urlparse
+
+            from ddgs.engines import ENGINES
+            for nome, cls in ENGINES["text"].items():
+                host = urlparse(str(getattr(cls, "search_url", "") or "")).hostname or ""
+                if host and "{" not in host:
+                    _ENGINE_HOSTS[host] = nome
+        except Exception:  # noqa: BLE001
+            return ""
+    from urllib.parse import urlparse
+    return _ENGINE_HOSTS.get(urlparse(url).hostname or "", "")
+
+
+_RESPONSE = re.compile(r"^response: (\S+) (\d{3})$")
+
+
+class _EngineResponses(logging.Handler):
+    """Cada requisição da ddgs passa pelo cliente HTTP (primp), que loga
+    "response: <url> <status>". É o sinal mais fiel de bloqueio (429/403, e o 202 do
+    DuckDuckGo, que é a página "aguarde" do antirrobô) — e de que o motor voltou."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            m = _RESPONSE.match(record.getMessage())
+            if not m:
+                return
+            engine = _engine_of(m.group(1))
+            if not engine:
+                return
+            status = int(m.group(2))
+            if status in (403, 429) or (status == 202 and engine == "duckduckgo"):
+                _cool(engine, f"blocked {status}")
+            elif 200 <= status < 300:
+                _healthy(engine)
+        except Exception:  # noqa: BLE001 - log nunca derruba a busca
+            pass
 
 
 class _EngineErrors(logging.Handler):
@@ -170,6 +242,13 @@ def _install_engine_watch() -> None:
         lg.addHandler(_EngineErrors())
         lg.setLevel(logging.INFO)
         lg.propagate = False
+    http = logging.getLogger("primp")
+    if not any(isinstance(h, _EngineResponses) for h in http.handlers):
+        http.addHandler(_EngineResponses())
+        if http.getEffectiveLevel() > logging.INFO:
+            # o app não mostra INFO: liga só para o vigia ver, sem passar a imprimir
+            http.setLevel(logging.INFO)
+            http.propagate = False
 
 
 def _all_engines() -> list[str]:
@@ -381,6 +460,9 @@ async def _one(
         return [], f"{_display(provider)}: a busca demorou demais (muitas buscas na fila); tente de novo"
     except Exception as exc:  # noqa: BLE001 - um provider falho não derruba a busca
         motivo = str(exc).strip() or type(exc).__name__
+        # o motivo do _resilient já vem com o nome de cada motor ("web: …")
+        if motivo.startswith(f"{_display(provider)}:"):
+            return [], motivo[:300]
         return [], f"{_display(provider)}: {motivo[:300]}"
 
 

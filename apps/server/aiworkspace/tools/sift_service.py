@@ -1038,16 +1038,25 @@ _BROWSER_SEARCH_PAGES = (
 
 def browser_web_search(endpoint: str, query: str, max_results: int) -> list[dict[str, str]]:
     """Pesquisa abrindo a página de resultados (Yahoo, DuckDuckGo, Bing) no navegador
-    headless e lendo os links do DOM. Levanta erro se nenhuma página render resultados."""
-    from urllib.parse import quote_plus
+    headless e lendo os links do DOM. Levanta erro se nenhuma página render resultados.
 
+    - Sessão FIXA por trabalhador (não uma nova por busca): os cookies ficam (aceite de
+      consentimento, ficha do antirrobô) e o motor vê um "visitante" que volta, não um
+      anônimo novo a cada busca — o que mais provoca CAPTCHA. E as sessões descartáveis
+      se acumulavam até o teto do navegador e expulsavam as abas que a IA usava.
+    - Página que só devolve resultado SEM RELAÇÃO com a busca (o Yahoo com operadores)
+      não encerra a busca: passa para a próxima página."""
+    import threading
+    from urllib.parse import quote_plus, urlparse
+
+    from ..search.providers import _relevant
     from .browser_driver import driver
     driver.url_guard = _public_web_url
+    sessao = f"search:{threading.current_thread().name}"
     erros: list[str] = []
     for tpl, script in _BROWSER_SEARCH_PAGES:
         try:
-            found = driver.extract(endpoint, f"search:{uuid.uuid4().hex[:10]}",
-                                   tpl.format(q=quote_plus(query)), script) or []
+            found = driver.extract(endpoint, sessao, tpl.format(q=quote_plus(query)), script) or []
         except Exception as exc:  # noqa: BLE001 - tenta a próxima página
             erros.append(str(exc)[:120])
             continue
@@ -1056,8 +1065,11 @@ def browser_web_search(endpoint: str, query: str, max_results: int) -> list[dict
              "content": str(r.get("content") or "")[:400]}
             for r in found if isinstance(r, dict) and str(r.get("url") or "").startswith("http")
         ]
+        bons = _relevant(query, out)
+        if bons:
+            return bons[:max_results]
         if out:
-            return out[:max_results]
+            erros.append(f"{urlparse(tpl).hostname}: resultados sem relação")
     raise RuntimeError("navegador sem resultados" + (f": {'; '.join(erros)}" if erros else ""))
 
 

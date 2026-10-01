@@ -38,6 +38,7 @@ def _estado_limpo(monkeypatch):
     providers._CACHE.clear()
     providers._INFLIGHT.clear()
     providers._COOLING.clear()
+    providers._STRIKES.clear()
     monkeypatch.setattr(providers, "_RETRY_BASE", 0.0)
 
 
@@ -256,3 +257,83 @@ def test_paginas_do_navegador_pedem_safesearch():
     assert any("yahoo" in u and "vm=i" in u for u in urls)
     assert any("duckduckgo" in u and "kp=-1" in u for u in urls)
     assert any("bing" in u and "adlt=moderate" in u for u in urls)
+
+
+# ------------------------- recuo progressivo por motor ---------------------------
+# Dados reais da VPS (uma semana): Brave e Mojeek barraram 100% das vezes, e eram
+# cutucados de novo a cada 5 min — cada cutucada suja mais o IP.
+def _relogio(monkeypatch, t0=1000.0):
+    agora = [t0]
+    monkeypatch.setattr(providers.time, "monotonic", lambda: agora[0])
+    return agora
+
+
+def test_bloqueio_seguido_descansa_cada_vez_mais(monkeypatch):
+    agora = _relogio(monkeypatch)
+    esperas = []
+    for _ in range(6):
+        providers._cool("brave", "429 Too Many Requests")
+        esperas.append(providers._COOLING["brave"] - agora[0])
+        agora[0] = providers._COOLING["brave"] + 1  # descansou; tenta de novo e leva outro
+    assert esperas == [300, 900, 2700, 8100, 21600, 21600]  # 5, 15, 45 min… teto de 6 h
+
+
+def test_resposta_boa_volta_o_recuo_ao_comeco(monkeypatch):
+    agora = _relogio(monkeypatch)
+    providers._cool("google", "429")
+    agora[0] += 400
+    providers._cool("google", "429")
+    assert providers._STRIKES["google"] == 2
+    providers._healthy("google")
+    agora[0] = providers._COOLING["google"] + 1
+    providers._cool("google", "429")
+    assert providers._COOLING["google"] - agora[0] == 300
+
+
+def test_mesmo_bloqueio_por_dois_caminhos_conta_uma_vez(monkeypatch):
+    _relogio(monkeypatch)
+    providers._cool("mojeek", "403 Forbidden")       # a resposta HTTP
+    providers._cool("mojeek", "RatelimitException")  # o erro da ddgs, logo depois
+    assert providers._STRIKES["mojeek"] == 1
+
+
+def test_timeout_nao_vira_recuo(monkeypatch):
+    agora = _relogio(monkeypatch)
+    providers._cool("yahoo", "timed out")
+    assert providers._COOLING["yahoo"] - agora[0] == 60 and "yahoo" not in providers._STRIKES
+
+
+def test_vigia_le_as_respostas_http_dos_motores(monkeypatch):
+    import logging
+
+    _relogio(monkeypatch)
+    providers._install_engine_watch()
+    lg = logging.getLogger("primp")
+    lg.info("response: https://search.brave.com/search?q=x&source=web 429")
+    lg.info("response: https://html.duckduckgo.com/html/ 202")   # antirrobô do DDG
+    lg.info("response: https://www.google.com/sorry/index?continue=x 429")
+    lg.info("response: https://www.startpage.com/sp/search 200")
+    assert set(providers._STRIKES) == {"brave", "duckduckgo", "google"}
+    lg.info("response: https://search.brave.com/search?q=y 200")
+    assert "brave" not in providers._STRIKES
+
+
+# ------------------------------ busca pelo navegador -----------------------------
+def test_navegador_pula_pagina_so_com_lixo_e_reusa_a_sessao(monkeypatch):
+    from aiworkspace.tools import browser_driver, sift_service
+
+    sessoes, paginas = [], []
+
+    def fake_extract(endpoint, key, url, script):
+        sessoes.append(key)
+        paginas.append(url)
+        if "yahoo" in url:
+            return [{"title": "Las Vegas Corporate Headshots", "url": "https://edin.com", "content": ""}]
+        return [{"title": "Cisco vManage FOFA syntax", "url": "https://fofa.example/doc", "content": ""}]
+
+    monkeypatch.setattr(browser_driver.driver, "extract", fake_extract)
+    for _ in range(2):
+        out = sift_service.browser_web_search("ws://x", _FOFA, 5)
+        assert [r["url"] for r in out] == ["https://fofa.example/doc"]
+    assert "yahoo" in paginas[0] and "duckduckgo" in paginas[1]
+    assert len(set(sessoes)) == 1  # mesma sessão (cookies ficam), não uma nova por busca
