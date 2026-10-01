@@ -270,6 +270,9 @@ class _CodexResp:
         for ev in _CodexResp.eventos:
             yield "data: " + json.dumps(ev)
 
+    async def aclose(self):
+        pass
+
 
 class _CodexClient:
     def __init__(self, *args, **kwargs):
@@ -281,7 +284,10 @@ class _CodexClient:
     async def __aexit__(self, *args):
         return False
 
-    def stream(self, *args, **kwargs):
+    def build_request(self, *args, **kwargs):
+        return None
+
+    async def send(self, request, stream=False):
         return _CodexResp()
 
 

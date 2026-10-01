@@ -1,9 +1,10 @@
 "use client";
 
-import { Select } from "./ui";
+import { InfoDot, Select } from "./ui";
 import { useEffect, useState } from "react";
-import { Check, Globe, Loader2, Monitor, X } from "lucide-react";
-import { api } from "@/lib/api";
+import { Check, ExternalLink, Globe, Loader2, Monitor, X } from "lucide-react";
+import { api, ApiError } from "@/lib/api";
+import { toast } from "./Toaster";
 import type { Model } from "@/lib/types";
 import ModelField from "./ModelField";
 import { tr } from "@/lib/i18n";
@@ -99,9 +100,46 @@ function KeyStatus({ label, configured, hint }: { label: string; configured: boo
 /* ----------------------------- Pesquisa na Web ---------------------------- */
 const ENGINES: { key: string; label: string; keyed: boolean; note: string }[] = [
   { key: "metasearch", label: tr("Metabusca"), keyed: false, note: tr("Vários motores · sem chave") },
+  { key: "browser", label: tr("Navegador"), keyed: false, note: tr("Seu navegador · sem chave") },
   { key: "tavily", label: tr("Tavily"), keyed: true, note: tr("Requer chave") },
   { key: "brave", label: tr("Brave Search"), keyed: true, note: tr("Requer chave") },
 ];
+
+type SearchBrowser = { available: boolean; name: string; visible: boolean };
+
+/** Navegador de pesquisa: o navegador do usuário nesta máquina, com perfil próprio. */
+function SearchBrowserCard({ sb, onChanged }: { sb: SearchBrowser | null; onChanged: () => void }) {
+  const [opening, setOpening] = useState(false);
+  if (!sb?.available) {
+    return <p className="pt-2 text-xs text-muted">{tr("Nenhum Brave, Chrome ou Edge neste computador.")}</p>;
+  }
+  return (
+    <div className="flex items-center justify-between gap-3 pt-2.5">
+      <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted">
+        <span className="truncate">{sb.name}{sb.visible ? ` · ${tr("aberto")}` : ""}</span>
+        <InfoDot text={tr("Pesquisa no seu navegador, com um perfil só para isso e o IP deste computador. Entre na sua conta Google nele uma vez: o Google quase não pede CAPTCHA para quem está logado.")} />
+      </span>
+      <button
+        disabled={opening}
+        onClick={async () => {
+          setOpening(true);
+          try {
+            await api.post("/settings/search-browser/open", {});
+            onChanged();
+          } catch (e) {
+            toast(e instanceof ApiError ? e.message : tr("Não foi possível abrir o navegador de pesquisa."));
+          } finally {
+            setOpening(false);
+          }
+        }}
+        className="flex shrink-0 items-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs text-ink-soft transition-colors hover:bg-hover hover:text-ink disabled:opacity-60"
+      >
+        {opening ? <Loader2 size={12} className="animate-spin" /> : <ExternalLink size={12} />}
+        {tr("Abrir navegador de pesquisa")}
+      </button>
+    </div>
+  );
+}
 // motores da metabusca (lib ddgs, roda no próprio servidor); nenhum marcado = todos
 const META_ENGINES: [string, string][] = [
   ["bing", tr("Bing")], ["brave", tr("Brave")], ["duckduckgo", "DuckDuckGo"], ["google", tr("Google")],
@@ -126,7 +164,12 @@ export function WebSearchPanel({ value, onChange, status, scope = "model" }: Pan
     wsSet("engines", prox.length ? prox.join(",") : "auto");
   };
   const toggleProv = (k: string) => wsSet("providers", providers.includes(k) ? providers.filter((x) => x !== k) : [...providers, k]);
-  const active = multi ? ENGINES.filter((e) => providers.includes(e.key)) : ENGINES.filter((e) => e.key === primary);
+  const [sb, setSb] = useState<SearchBrowser | null>(null);
+  const loadSb = () => { api.get<SearchBrowser>("/settings/search-browser").then(setSb).catch(() => setSb(null)); };
+  useEffect(loadSb, []);
+  // "Navegador" só aparece onde há um (app desktop) — ou se já estava escolhido
+  const engines = ENGINES.filter((e) => e.key !== "browser" || sb?.available || primary === "browser" || providers.includes("browser"));
+  const active = multi ? engines.filter((e) => providers.includes(e.key)) : engines.filter((e) => e.key === primary);
   const maxResults = ws.max_results === "" ? "" : ws.max_results ?? 5;
   return (
     <div>
@@ -137,7 +180,7 @@ export function WebSearchPanel({ value, onChange, status, scope = "model" }: Pan
       <div className="rounded-xl border border-border bg-surface px-3">
         <Row label={tr("Mecanismo principal")}>
           <Select value={primary} onChange={(e) => wsSet("primary", e.target.value)} className="rounded-lg bg-surface2 px-3 py-1.5 text-sm text-ink outline-none">
-            {ENGINES.map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}
+            {engines.map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}
           </Select>
         </Row>
         <div className="border-t border-border">
@@ -147,7 +190,7 @@ export function WebSearchPanel({ value, onChange, status, scope = "model" }: Pan
         </div>
         {multi && (
           <div className="flex flex-wrap gap-1.5 border-t border-border py-3">
-            {ENGINES.map((e) => {
+            {engines.map((e) => {
               const sel = providers.includes(e.key);
               return (
                 <button key={e.key} onClick={() => toggleProv(e.key)}
@@ -190,6 +233,7 @@ export function WebSearchPanel({ value, onChange, status, scope = "model" }: Pan
                 </div>
               </div>
             )}
+            {e.key === "browser" && <SearchBrowserCard sb={sb} onChanged={loadSb} />}
             {e.key === "tavily" && <KeyStatus label={tr("Chave Tavily")} configured={status?.tavily ?? false} />}
             {e.key === "brave" && <KeyStatus label={tr("Chave Brave Search")} configured={status?.brave ?? false} />}
             <div className="pt-2">

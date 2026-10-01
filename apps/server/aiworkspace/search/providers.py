@@ -389,6 +389,14 @@ async def _with_retries(provider: str, query: str, cfg: SearchConfig) -> list[Se
 
 
 def _fallbacks(provider: str, cfg: SearchConfig) -> list[str]:
+    if provider == "browser":
+        # o navegador de pesquisa é o principal: se ele não achar, os motores
+        out = ["metasearch"]
+        if cfg.tavily_api_key:
+            out.append("tavily")
+        if cfg.brave_api_key:
+            out.append("brave")
+        return out
     if provider in ("tavily", "brave"):
         out = ["metasearch"]
     else:

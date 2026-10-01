@@ -23,6 +23,7 @@ import operator
 import os
 import re
 import shlex
+import time
 import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -990,6 +991,31 @@ async def _library_read(user_id: str | None, kind: str, key: str) -> dict[str, A
 # Busca pela PÁGINA de resultados no navegador de verdade — último recurso quando os
 # motores barram as requisições diretas (CAPTCHA/429 por IP, típico com muitos agentes
 # pesquisando juntos). Os links vêm "embrulhados" em redirecionadores; o JS desembrulha.
+# Google: só no NAVEGADOR DE PESQUISA do usuário (o navegador dele, perfil fixo, IP de
+# casa) — do servidor ele sempre pede CAPTCHA.
+_GOOGLE_SEARCH_PAGE = ("https://www.google.com/search?q={q}&hl=pt-BR&safe=active", r"""(() => {
+      const out = [];
+      for (const h3 of document.querySelectorAll('#search a h3, #rso a h3')) {
+        const a = h3.closest('a'); if (!a || !a.href.startsWith('http')) continue;
+        let url = a.href;
+        try { const u = new URL(url); if (u.hostname.endsWith('google.com') && u.pathname === '/url') url = u.searchParams.get('q') || url; } catch (e) {}
+        if (/^https?:\/\/([a-z0-9-]+\.)*google\.[a-z.]+\//.test(url)) continue;
+        const box = a.closest('div.g, div[data-hveid], div[data-snc]') || a.parentElement;
+        const p = box && box.querySelector('.VwiC3b, [data-sncf], div[style*="-webkit-line-clamp"]');
+        if (!out.some(r => r.url === url))
+          out.push({title: h3.textContent.trim(), url, content: p ? p.textContent.trim() : ''});
+      }
+      return out;
+    })()""")
+
+# a página é um CAPTCHA/"tráfego incomum"/antirrobô em vez de resultados
+_BROWSER_BLOCK_CHECK = (
+    "location.pathname.startsWith('/sorry') || !!document.querySelector("
+    "'#captcha-form, .g-recaptcha, iframe[src*=\"recaptcha\"], iframe[src*=\"captcha\"], "
+    ".anomaly-modal__modal, #challenge-form') || /unusual traffic|tr[aá]fego incomum/i"
+    ".test((document.body && document.body.innerText || '').slice(0, 2000))"
+)
+
 _BROWSER_SEARCH_PAGES = (
     # Yahoo entrega a SERP completa ao headless (o Bing degrada: busca só uma palavra)
     ("https://search.yahoo.com/search?p={q}&vm=i", r"""(() => {
@@ -1049,17 +1075,32 @@ def browser_web_search(endpoint: str, query: str, max_results: int) -> list[dict
     import threading
     from urllib.parse import quote_plus, urlparse
 
+    from ..search import providers as _prov
     from ..search.providers import _relevant
-    from .browser_driver import driver
+    from .browser_driver import LOCAL_SEARCH, driver
     driver.url_guard = _public_web_url
     sessao = f"search:{threading.current_thread().name}"
     erros: list[str] = []
-    for tpl, script in _BROWSER_SEARCH_PAGES:
+    # no navegador do usuário o Google vem primeiro; no do servidor ele nem entra
+    paginas = ((_GOOGLE_SEARCH_PAGE,) + _BROWSER_SEARCH_PAGES[2:] + _BROWSER_SEARCH_PAGES[1:2]
+               + _BROWSER_SEARCH_PAGES[:1]) if endpoint == LOCAL_SEARCH else _BROWSER_SEARCH_PAGES
+    for tpl, script in paginas:
+        host = urlparse(tpl).hostname or ""
+        motor = f"browser-{host}"
+        if _prov._COOLING.get(motor, 0.0) > time.monotonic():
+            continue  # pediu CAPTCHA há pouco: descansa (recuo progressivo, como os motores)
+        guarded = f"(() => {{ if ({_BROWSER_BLOCK_CHECK}) return {{blocked: true}}; return {script}; }})()"
         try:
-            found = driver.extract(endpoint, sessao, tpl.format(q=quote_plus(query)), script) or []
+            found = driver.extract(endpoint, sessao, tpl.format(q=quote_plus(query)), guarded) or []
         except Exception as exc:  # noqa: BLE001 - tenta a próxima página
             erros.append(str(exc)[:120])
             continue
+        if isinstance(found, dict) and found.get("blocked"):
+            _prov._cool(motor, "captcha")
+            erros.append(f"{host}: CAPTCHA")
+            continue
+        if not isinstance(found, list):
+            found = []
         out = [
             {"title": str(r.get("title") or "")[:200], "url": str(r.get("url") or ""),
              "content": str(r.get("content") or "")[:400]}
@@ -1071,6 +1112,24 @@ def browser_web_search(endpoint: str, query: str, max_results: int) -> list[dict
         if out:
             erros.append(f"{urlparse(tpl).hostname}: resultados sem relação")
     raise RuntimeError("navegador sem resultados" + (f": {'; '.join(erros)}" if erros else ""))
+
+
+def with_browser_search(cfg: SearchConfig, browser_cfg: dict | None) -> SearchConfig:
+    """Liga a busca pelo navegador na config. Quem escolheu "Navegador" como mecanismo
+    usa o NAVEGADOR DE PESQUISA dele (Brave/Chrome/Edge desta máquina, perfil fixo) se
+    houver; senão o navegador configurado (browserless do servidor) — que, para os
+    outros mecanismos, é só o último recurso quando os motores barram."""
+    quer = cfg.provider == "browser" or (cfg.multi and "browser" in cfg.providers)
+    if quer:
+        from .browser_driver import LOCAL_SEARCH, find_user_browser
+        if find_user_browser() is not None:
+            return dataclasses.replace(
+                cfg, browser_search=lambda q, k: browser_web_search(LOCAL_SEARCH, q, k))
+    endpoint = _browser_endpoint(browser_cfg)
+    if endpoint:
+        return dataclasses.replace(
+            cfg, browser_search=lambda q, k, _ep=endpoint: browser_web_search(_ep, q, k))
+    return cfg
 
 
 def _browser_endpoint(browser_cfg: dict | None) -> str:
@@ -1280,14 +1339,9 @@ def _register_builtins(
         def _web_search(query: str = "", limit: int = 5) -> dict[str, Any]:
             try:
                 n = max(1, min(int(limit or 5), 10))
-                cfg = search_cfg
-                # último recurso quando os motores barram: a página de resultados no
-                # navegador de verdade (se houver navegador configurado)
-                endpoint = _browser_endpoint(browser_cfg)
-                if endpoint:
-                    cfg = dataclasses.replace(
-                        search_cfg,
-                        browser_search=lambda q, k, _ep=endpoint: browser_web_search(_ep, q, k))
+                # "Navegador" escolhido = o navegador de pesquisa do usuário primeiro; nos
+                # outros mecanismos, a página de resultados no navegador é o último recurso
+                cfg = with_browser_search(search_cfg, browser_cfg)
                 results, errors = asyncio.run(web_search_detailed(query, cfg))
                 if not results and errors:
                     # vazio POR FALHA ≠ vazio de verdade: o modelo precisa saber que a
@@ -2816,7 +2870,7 @@ def _register_builtins(
         fin_cfg = finance_cfg or finance.FinanceConfig()
 
         async def _fin_ws(q: str) -> list[dict]:
-            return await web_search(q, search_cfg)
+            return await web_search(q, with_browser_search(search_cfg, browser_cfg))
 
         fin_cfg.web_search = _fin_ws
 
@@ -2865,7 +2919,7 @@ def _register_builtins(
         d_cfg = deep_cfg or deep_search.DeepSearchConfig()
 
         async def _deep_ws(qq: str) -> list[dict]:
-            return await web_search(qq, search_cfg)
+            return await web_search(qq, with_browser_search(search_cfg, browser_cfg))
 
         d_cfg.web_search = _deep_ws
 

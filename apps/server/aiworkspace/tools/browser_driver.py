@@ -41,6 +41,9 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 LOCAL = "local"
+# o NAVEGADOR DE PESQUISA do usuário: o navegador dele (Brave/Chrome/Edge) com um
+# perfil próprio e FIXO (cookies ficam entre buscas e reinícios). Ver SearchBrowser.
+LOCAL_SEARCH = "local-search"
 
 # tetos anti-abuso
 _MAX_SESSIONS = 8
@@ -194,6 +197,53 @@ def find_local_browser() -> str | None:
     return None
 
 
+_PROGID_NAMES = {"brave": "Brave", "chrome": "Chrome", "msedge": "Edge", "chromium": "Chromium",
+                 "vivaldi": "Vivaldi", "opera": "Opera"}
+
+
+def _default_browser_windows() -> str | None:
+    """Executável do navegador PADRÃO do usuário no Windows (associação de https), se
+    for um Chromium (CDP). Firefox e afins não servem: ficam de fora."""
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\Shell\Associations"
+                            r"\UrlAssociations\https\UserChoice") as k:
+            progid = winreg.QueryValueEx(k, "ProgId")[0]
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, rf"{progid}\shell\open\command") as k:
+            cmd = winreg.QueryValueEx(k, "")[0]
+    except OSError:
+        return None
+    exe = cmd.split('"')[1] if cmd.startswith('"') else cmd.split(" ")[0]
+    nome = Path(exe).stem.lower()
+    return exe if nome in _PROGID_NAMES and Path(exe).is_file() else None
+
+
+def find_user_browser() -> tuple[str, str] | None:
+    """(executável, nome) do navegador que o USUÁRIO usa: o padrão do sistema quando é
+    um Chromium; senão o primeiro instalado (Brave, Chrome, Edge, Chromium)."""
+    forced = (os.environ.get("BROWSER_EXECUTABLE") or "").strip()
+    if forced:
+        return (forced, Path(forced).stem) if Path(forced).is_file() else None
+    if sys.platform == "win32":
+        exe = _default_browser_windows()
+        if not exe:
+            bases = [os.environ.get(v) for v in ("LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)")]
+            for rel in (r"BraveSoftware\Brave-Browser\Application\brave.exe",
+                        r"Google\Chrome\Application\chrome.exe",
+                        r"Microsoft\Edge\Application\msedge.exe", r"Chromium\Application\chrome.exe"):
+                exe = next((str(Path(b) / rel) for b in bases if b and (Path(b) / rel).is_file()), None)
+                if exe:
+                    break
+    else:
+        exe = next((shutil.which(n) for n in ("brave-browser", "brave", "google-chrome", "google-chrome-stable",
+                                              "chromium", "chromium-browser", "microsoft-edge")
+                    if shutil.which(n)), None)
+    if not exe:
+        return None
+    return exe, _PROGID_NAMES.get(Path(exe).stem.lower().replace("-browser", ""), Path(exe).stem.title())
+
+
 class _LocalBrowser:
     """Um Edge/Chrome headless só nosso: perfil temporário, porta aleatória.
 
@@ -203,16 +253,25 @@ class _LocalBrowser:
     aiworkspace.winjob): fechar o job derruba a árvore inteira, e se o app cair o
     Windows fecha o job sozinho — nenhum navegador fica órfão."""
 
-    def __init__(self) -> None:
+    def __init__(self, persistent_profile: str | None = None, user_browser: bool = False) -> None:
         self.proc: subprocess.Popen | None = None
         self.profile: str | None = None
         self.job = None
+        # perfil FIXO (navegador de pesquisa): não é apagado ao parar
+        self.persistent_profile = persistent_profile
+        self.user_browser = user_browser
+        self.visible = False
 
-    async def start(self) -> str:
-        exe = find_local_browser()
+    async def start(self, visible: bool = False) -> str:
+        if self.user_browser:
+            achado = find_user_browser()
+            exe = achado[0] if achado else None
+        else:
+            exe = find_local_browser()
         if not exe:
             raise CDPError("nenhum Edge/Chrome/Chromium encontrado nesta máquina "
                            "(defina BROWSER_EXECUTABLE com o caminho do navegador)")
+        self.visible = visible
         try:
             return await self._launch(exe, sandbox=True)
         except CDPError as exc:
@@ -230,15 +289,23 @@ class _LocalBrowser:
     async def _launch(self, exe: str, *, sandbox: bool) -> str:
         from .. import winjob
 
-        self.profile = tempfile.mkdtemp(prefix="aiw-browser-")
+        if self.persistent_profile:
+            self.profile = self.persistent_profile
+            Path(self.profile).mkdir(parents=True, exist_ok=True)
+            # o arquivo da porta da execução anterior faria ler uma porta morta
+            (Path(self.profile) / "DevToolsActivePort").unlink(missing_ok=True)
+        else:
+            self.profile = tempfile.mkdtemp(prefix="aiw-browser-")
         flags = 0
         if winjob.IS_WINDOWS:
             self.job = winjob.JobObject()
             flags = 0x08000000 | winjob.CREATE_SUSPENDED  # CREATE_NO_WINDOW, suspenso até entrar no job
-        args = [exe, "--headless=new", "--remote-debugging-port=0",
+        args = [exe, "--remote-debugging-port=0",
                 f"--user-data-dir={self.profile}", "--no-first-run", "--no-default-browser-check",
-                "--disable-extensions", "--disable-background-networking", "--disable-sync",
-                "--mute-audio", "--hide-scrollbars"]
+                "--disable-extensions", "--disable-sync"]
+        if not self.visible:
+            args += ["--headless=new", "--disable-background-networking", "--mute-audio",
+                     "--hide-scrollbars"]
         if not sandbox:
             args.append("--no-sandbox")
         # a saída de erro vai para um arquivo: se o navegador cair ao abrir, o motivo
@@ -303,6 +370,9 @@ class _LocalBrowser:
             except subprocess.TimeoutExpired:
                 pass
         self.proc = None
+        if self.profile and self.persistent_profile:
+            self.profile = None  # perfil fixo: fica (é a memória do navegador de pesquisa)
+            return
         if self.profile:
             # os arquivos do perfil ficam presos por um instante depois que o navegador cai
             for _ in range(20):
@@ -386,12 +456,14 @@ class _Conn:
 
 
 class _Session:
-    __slots__ = ("key", "conn", "context_id", "session_id", "last_used", "closed", "_waiters")
+    __slots__ = ("key", "conn", "context_id", "session_id", "last_used", "closed", "_waiters", "target_id")
 
-    def __init__(self, key: str, conn: _Conn, context_id: str, session_id: str) -> None:
+    def __init__(self, key: str, conn: _Conn, context_id: str | None, session_id: str,
+                 target_id: str = "") -> None:
         self.key = key
         self.conn = conn
         self.context_id = context_id
+        self.target_id = target_id
         self.session_id = session_id
         self.last_used = time.time()
         self.closed = False
@@ -445,6 +517,8 @@ class BrowserDriver:
         self._conns: dict[str, _Conn] = {}
         self._local = _LocalBrowser()
         self._local_ws = ""
+        self._search: _LocalBrowser | None = None  # navegador de pesquisa (criado sob demanda)
+        self._search_ua = ""
         self._sessions: dict[str, _Session] = {}
         # guarda anti-SSRF aplicada a TODA requisição da página (a tool injeta a sua)
         self.url_guard: Callable[[str], bool] | None = None
@@ -487,6 +561,11 @@ class BrowserDriver:
             self._local.stop()
             self._local_ws = await self._local.start()
             ws_url = self._local_ws
+        elif endpoint == LOCAL_SEARCH:
+            # caiu (ou o usuário fechou a janela visível): volta em segundo plano
+            sb = self._search_browser()
+            sb.stop()
+            ws_url = await sb.start(visible=False)
         else:
             ws_url = endpoint
         ws = await websockets.connect(ws_url, max_size=2**26, open_timeout=_ACTION_TIMEOUT)
@@ -506,21 +585,83 @@ class BrowserDriver:
         if len(self._sessions) >= _MAX_SESSIONS:
             oldest = min(self._sessions.values(), key=lambda x: x.last_used)
             await self._close_session(oldest.key)
-        ctx = (await conn.call("Target.createBrowserContext", {"disposeOnDetach": True}))["browserContextId"]
-        target = (await conn.call("Target.createTarget",
-                                  {"url": "about:blank", "browserContextId": ctx}))["targetId"]
+        if endpoint == LOCAL_SEARCH:
+            # navegador de pesquisa: aba no contexto PADRÃO (o perfil fixo, com os cookies
+            # e o login que o usuário fez nele), em segundo plano se a janela estiver aberta
+            ctx = None
+            target = (await conn.call("Target.createTarget",
+                                      {"url": "about:blank", "background": True}))["targetId"]
+        else:
+            ctx = (await conn.call("Target.createBrowserContext", {"disposeOnDetach": True}))["browserContextId"]
+            target = (await conn.call("Target.createTarget",
+                                      {"url": "about:blank", "browserContextId": ctx}))["targetId"]
         sid = (await conn.call("Target.attachToTarget", {"targetId": target, "flatten": True}))["sessionId"]
-        sess = _Session(skey, conn, ctx, sid)
+        sess = _Session(skey, conn, ctx, sid, target)
         conn.listen(sid, lambda method, params: self._on_event(sess, method, params))
         await sess.call("Page.enable")
         await sess.call("Runtime.enable")
-        await sess.call("Network.setUserAgentOverride", {"userAgent": _UA})
+        await sess.call("Network.setUserAgentOverride", {"userAgent": await self._ua_for(endpoint, conn)})
         await sess.call("Emulation.setDeviceMetricsOverride",
                         {"width": 1280, "height": 900, "deviceScaleFactor": 1, "mobile": False})
         if self.url_guard is not None:
             await sess.call("Fetch.enable", {"patterns": [{"urlPattern": "*", "requestStage": "Request"}]})
         self._sessions[skey] = sess
         return sess
+
+    async def _ua_for(self, endpoint: str, conn: _Conn) -> str:
+        """User-Agent da aba. No navegador de pesquisa é o DO PRÓPRIO navegador (o
+        Google desconfia de um UA que não bate com o resto), só sem o "Headless"."""
+        if endpoint != LOCAL_SEARCH:
+            return _UA
+        if not self._search_ua:
+            try:
+                ua = (await conn.call("Browser.getVersion")).get("userAgent") or ""
+            except CDPError:
+                ua = ""
+            self._search_ua = ua.replace("HeadlessChrome", "Chrome") or _UA
+        return self._search_ua
+
+    # --------------------------- navegador de pesquisa ------------------------ #
+    def _search_browser(self) -> _LocalBrowser:
+        if self._search is None:
+            self._search = _LocalBrowser(persistent_profile=search_profile_dir(), user_browser=True)
+        return self._search
+
+    async def _reset_search(self) -> None:
+        for key in [k for k in self._sessions if k.startswith(LOCAL_SEARCH + "\x00")]:
+            await self._close_session(key)
+        c = self._conns.pop(LOCAL_SEARCH, None)
+        if c is not None:
+            await c.close()
+        self._search_browser().stop()
+        self._search_ua = ""
+
+    async def _act_open_search(self, url: str) -> dict[str, Any]:
+        """Abre o navegador de pesquisa VISÍVEL (mesmo perfil) para o usuário entrar na
+        conta Google ou resolver um CAPTCHA. As buscas seguem usando esta janela; quando
+        ele fecha, a próxima busca reabre em segundo plano."""
+        await self._reset_search()
+        ws_url = await self._search_browser().start(visible=True)
+        import websockets
+
+        ws = await websockets.connect(ws_url, max_size=2**26, open_timeout=_ACTION_TIMEOUT)
+        conn = _Conn(ws)
+        self._conns[LOCAL_SEARCH] = conn
+        await conn.call("Target.createTarget", {"url": url})
+        return {"ok": True, "visible": True}
+
+    def open_search_browser(self, url: str = "https://www.google.com/") -> dict[str, Any]:
+        return self._submit(self._act_open_search(url), timeout=60)
+
+    def search_browser_status(self) -> dict[str, Any]:
+        achado = find_user_browser()
+        sb = self._search
+        return {
+            "available": achado is not None,
+            "name": achado[1] if achado else "",
+            "visible": bool(sb and sb.visible and sb.running and LOCAL_SEARCH in self._conns
+                            and not self._conns[LOCAL_SEARCH].closed),
+        }
 
     def _on_event(self, sess: _Session, method: str, params: dict) -> None:
         if method == "Fetch.requestPaused":
@@ -565,7 +706,11 @@ class BrowserDriver:
         sess.closed = True
         sess.conn.forget(sess.session_id)
         try:
-            await sess.conn.call("Target.disposeBrowserContext", {"browserContextId": sess.context_id})
+            if sess.context_id is None:
+                # contexto padrão (perfil fixo): fecha só a aba, os cookies ficam
+                await sess.conn.call("Target.closeTarget", {"targetId": sess.target_id})
+            else:
+                await sess.conn.call("Target.disposeBrowserContext", {"browserContextId": sess.context_id})
         except CDPError:
             pass
 
@@ -807,11 +952,27 @@ class BrowserDriver:
             for ep in list(self._conns):
                 await self._conns.pop(ep).close()
             self._local.stop()
+            if self._search is not None:
+                self._search.stop()
         try:
             asyncio.run_coroutine_threadsafe(_teardown(), self._loop).result(timeout=20)
         except Exception:  # noqa: BLE001
             self._local.stop()
+            if self._search is not None:
+                self._search.stop()
         self._loop.call_soon_threadsafe(self._loop.stop)
+
+
+def search_profile_dir() -> str:
+    """Pasta do perfil do navegador de pesquisa — ao lado dos dados do app (no desktop,
+    em %LOCALAPPDATA%; no servidor, no volume de dados)."""
+    from ..config import get_settings
+
+    base = Path(get_settings().uploads_dir).parent
+    if sys.platform == "win32" and str(get_settings().uploads_dir).startswith("/data"):
+        # servidor rodando direto no Windows (dev) sem pasta de dados configurada
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home()) / "AI Workspace"
+    return str(base / "search-browser")
 
 
 # singleton

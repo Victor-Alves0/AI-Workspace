@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import audit_service, budget_service
 from .app_config import ALLOW_SIGNUPS, get_setting
-from .auth.deps import require_approved
+from .auth.deps import require_admin, require_approved
 from .config import get_settings
 from .db import get_db
 from .models import User
@@ -223,6 +223,7 @@ async def test_web_search(
     prefs = {"primary": provider, "providers": [provider], "multi": False,
              "engines": body.engines, "region": body.region}
     cfg = sift_service.search_config_from_secrets(tavily, brave, prefs)
+    cfg = sift_service.with_browser_search(cfg, (user.profile or {}).get("browser"))
     try:
         from .search import web_search_detailed
         results, errors = await web_search_detailed("teste de conexão", cfg)
@@ -232,6 +233,34 @@ async def test_web_search(
         return {"ok": len(results) > 0, "count": len(results), "error": erro and erro[:400]}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "count": 0, "error": str(exc)[:200]}
+
+
+@router.get("/search-browser")
+async def search_browser_status(user: User = Depends(require_approved)):
+    """Navegador de pesquisa (o navegador do usuário NESTA máquina, perfil próprio):
+    se existe, qual é e se a janela está aberta. No servidor Docker não há."""
+    from .tools.browser_driver import driver
+
+    return driver.search_browser_status()
+
+
+@router.post("/search-browser/open")
+async def open_search_browser(user: User = Depends(require_admin)):
+    """Abre o navegador de pesquisa VISÍVEL para entrar na conta Google / resolver um
+    CAPTCHA. Abre uma janela na máquina do servidor — por isso só o admin, e só onde
+    o servidor é o próprio computador do usuário (app desktop)."""
+    import asyncio
+
+    from .tools.browser_driver import driver
+
+    if not driver.search_browser_status()["available"]:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Nenhum navegador compatível (Brave, Chrome ou Edge) neste computador.")
+    try:
+        return await asyncio.get_running_loop().run_in_executor(None, driver.open_search_browser)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY,
+                            f"Não foi possível abrir o navegador de pesquisa: {exc}") from exc
 
 
 class BrowserTestIn(BaseModel):
