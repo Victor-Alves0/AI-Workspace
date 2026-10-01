@@ -46,11 +46,11 @@ _CYBERLAB_TOOL = {
                 "objective": {"type": "string", "description": "scope: the goal of the assessment."},
                 "phase": {
                     "type": "string",
-                    "enum": service.PHASES,
-                    "description": "phase: the phase to move to.",
+                    "enum": service.ALL_PHASES,
+                    "description": "phase: the phase to move to (valid set depends on the case mode).",
                 },
-                "command": {"type": "string", "description": "step: the command you instructed the operator to run."},
-                "output": {"type": "string", "description": "step: the output the operator pasted back (trim huge dumps)."},
+                "command": {"type": "string", "description": "step: the command run (by the operator in blackbox, or by you in the sandbox in autofuzz)."},
+                "output": {"type": "string", "description": "step: the resulting output (trim huge dumps)."},
                 "note": {"type": "string", "description": "step: your short interpretation of the output."},
                 "title": {"type": "string", "description": "finding: short title."},
                 "severity": {
@@ -59,6 +59,14 @@ _CYBERLAB_TOOL = {
                     "description": "finding: severity.",
                 },
                 "detail": {"type": "string", "description": "finding: what it is, the evidence, and the impact."},
+                "crash": {
+                    "type": "string",
+                    "description": "finding (autofuzz): sanitizer crash class, e.g. heap-buffer-overflow READ, use-after-free, stack-overflow.",
+                },
+                "repro": {
+                    "type": "string",
+                    "description": "finding (autofuzz): how to reproduce — the minimized crashing input (path/base64) and the exact command.",
+                },
                 "refs": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -109,13 +117,15 @@ async def apply_action(
             case.authorization = str(args.get("authorization") or "")
         if "objective" in args:
             case.objective = str(args.get("objective") or "")
-        if case.phase == "scoping":
-            case.phase = "recon"  # escopo salvo → começa o recon
+        phases = service.phases_for(case.mode)
+        if case.phase == "scoping" and len(phases) > 1:
+            case.phase = phases[1]  # escopo salvo → próxima fase do modo (recon/harness)
 
     elif action == "phase":
         phase = str(args.get("phase") or "").strip()
-        if phase not in service.PHASES:
-            return {"error": f"Unknown phase. Use one of: {', '.join(service.PHASES)}"}
+        phases = service.phases_for(case.mode)
+        if phase not in phases:
+            return {"error": f"Unknown phase for mode {case.mode}. Use one of: {', '.join(phases)}"}
         case.phase = phase
 
     elif action == "step":
@@ -133,13 +143,18 @@ async def apply_action(
         if not title:
             return {"error": "A finding needs a title."}
         refs = args.get("refs")
-        s["findings"] = list(s["findings"]) + [{
+        finding = {
             "seq": len(s["findings"]) + 1,
             "title": title,
             "severity": str(args.get("severity") or "info"),
             "detail": str(args.get("detail") or ""),
             "refs": [str(r) for r in refs] if isinstance(refs, list) else [],
-        }]
+        }
+        if args.get("crash"):
+            finding["crash"] = str(args.get("crash"))
+        if args.get("repro"):
+            finding["repro"] = str(args.get("repro"))
+        s["findings"] = list(s["findings"]) + [finding]
         case.settings = s
 
     else:

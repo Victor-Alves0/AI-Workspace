@@ -28,17 +28,28 @@ def test_protocolo_blackbox_guia_o_operador_e_nao_executa():
     p = protocol_for("blackbox").lower()
     assert "human operator" in p and "never run anything yourself" in p
     assert "scope" in p and "authorization" in p
-    # modo desconhecido cai no blackbox enquanto só ele existe
+    # modo desconhecido cai no blackbox
     assert protocol_for("inexistente") == protocol_for("blackbox")
 
 
-def test_tool_cyberlab_tem_as_acoes_e_fases_do_servico():
+def test_protocolo_autofuzz_e_autonomo_e_no_sandbox():
+    p = protocol_for("autofuzz").lower()
+    assert "autonomous" in p and "sandbox" in p and "no network" in p
+    assert "sanitizer" in p and "minimize" in p  # triagem real de crash
+    assert "codespace project" in p             # roda sobre o código vinculado
+
+
+def test_tool_cyberlab_tem_as_acoes_e_a_uniao_das_fases():
     fn = _CYBERLAB_TOOL["function"]
     assert fn["name"] == "cyberlab"
     props = fn["parameters"]["properties"]
     assert set(props["action"]["enum"]) == {"scope", "phase", "step", "finding", "state"}
-    # o enum de fase do tool é EXATAMENTE as fases do serviço (não divergem)
-    assert props["phase"]["enum"] == service.PHASES
+    # o enum de fase do tool é a UNIÃO das fases de todos os modos (validação é por modo)
+    assert props["phase"]["enum"] == service.ALL_PHASES
+    assert set(service.phases_for("autofuzz")) <= set(service.ALL_PHASES)
+    assert service.phases_for("blackbox") != service.phases_for("autofuzz")
+    # o finding carrega repro/crash (autofuzz)
+    assert "crash" in props and "repro" in props
 
 
 def test_estado_publico_resume_o_caso_sem_vazar_tudo():

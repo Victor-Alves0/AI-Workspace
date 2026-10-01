@@ -10,8 +10,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import CyberLabCase
 
-VALID_MODES = {"blackbox"}
-PHASES = ["scoping", "recon", "enum", "analysis", "reporting"]
+VALID_MODES = {"blackbox", "autofuzz"}
+
+# Fases por modo. O blackbox é guiado (human-in-the-loop); o autofuzz é AUTÔNOMO:
+# a IA escreve o harness, compila com sanitizers, roda o fuzzer no sandbox e tria os
+# crashes. Roda sempre sobre o código do projeto Codespace vinculado, dentro do
+# sandbox (sem rede) — o isolamento é como fuzzing se faz, não um guard-rail.
+PHASES_BY_MODE = {
+    "blackbox": ["scoping", "recon", "enum", "analysis", "reporting"],
+    "autofuzz": ["scoping", "harness", "build", "fuzz", "triage", "reporting"],
+}
+# união ordenada e deduplicada → enum ÚNICO do tool (a validação é por modo)
+ALL_PHASES = list(dict.fromkeys(p for ps in PHASES_BY_MODE.values() for p in ps))
+
+
+def phases_for(mode: str) -> list[str]:
+    return PHASES_BY_MODE.get(mode, PHASES_BY_MODE["blackbox"])
 
 
 async def get_case(

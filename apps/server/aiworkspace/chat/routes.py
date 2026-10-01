@@ -256,6 +256,32 @@ async def update_chat(
     return chat
 
 
+class CyberLabStart(BaseModel):
+    mode: str = Field(default="blackbox", pattern=r"^(blackbox|autofuzz)$")
+
+
+@router.post("/{chat_id}/cyberlab", response_model=ChatOut)
+async def start_cyberlab(
+    chat_id: uuid.UUID,
+    body: CyberLabStart,
+    user: User = Depends(require_approved),
+    db: AsyncSession = Depends(get_db),
+):
+    """Liga o CyberLab num chat existente (marca o Mini App e cria o caso no modo
+    pedido). O `autofuzz` roda sobre o projeto Codespace vinculado ao chat — é o que
+    dá as tools de código/sandbox; sem projeto, a IA avisa que precisa de um."""
+    from ..cyberlab import service as cyberlab_service
+
+    chat = await _get_owned_chat(db, chat_id, user)
+    chat.mini_app = "cyberlab"
+    case = await cyberlab_service.create_case(db, user.id, chat.id, mode=body.mode)
+    if case.mode != body.mode:  # caso já existia num modo diferente → aplica o pedido
+        case.mode = body.mode
+    await db.commit()
+    await db.refresh(chat)
+    return chat
+
+
 @router.post("/{chat_id}/share")
 async def share_chat(
     chat_id: uuid.UUID, user: User = Depends(require_approved), db: AsyncSession = Depends(get_db)
