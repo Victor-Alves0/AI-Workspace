@@ -12,6 +12,7 @@ import { useLongPress } from "@/lib/useLongPress";
 import ExcalidrawCanvas from "./ExcalidrawCanvas";
 import StockCard from "./StockCard";
 import ChartView from "./ChartView";
+import WidgetView, { type WidgetSpec } from "./WidgetView";
 import DeepResearchCard from "./DeepResearchCard";
 import TextAttachmentModal from "./TextAttachmentModal";
 import DiceRollCard, { parseDiceRoll } from "./DiceRollCard";
@@ -27,6 +28,7 @@ import { dateLocale, tr } from "@/lib/i18n";
 type Artifact =
   | { kind: "excalidraw"; data: { mermaid: string; title?: string } }
   | { kind: "chart"; data: ChartSpec }
+  | { kind: "widget"; data: WidgetSpec }
   | { kind: "stock_card"; data: StockQuote }
   | { kind: "deep_research"; data: DeepResearch }
   | { kind: "image"; data: { url: string; prompt?: string } }
@@ -60,6 +62,18 @@ function collect(node: unknown, out: Artifact[], seen: Set<string>, depth = 0): 
   if (kind === "chart" && Array.isArray(o.series)) {
     const key = "c:" + JSON.stringify(o.series).slice(0, 200);
     if (!seen.has(key)) { seen.add(key); out.push({ kind, data: o as unknown as ChartSpec }); }
+    return;
+  }
+  if (kind === "widget" && typeof o.code === "string" && o.code.trim()) {
+    const key = "w:" + o.code.length + ":" + o.code.slice(0, 200);
+    if (!seen.has(key)) {
+      seen.add(key);
+      out.push({ kind, data: {
+        mode: o.mode === "svg" ? "svg" : "html",
+        code: o.code,
+        title: typeof o.title === "string" ? o.title : undefined,
+      } });
+    }
     return;
   }
   if (kind === "stock_card" && typeof o.symbol === "string") {
@@ -249,6 +263,8 @@ function renderArtifact(a: Artifact, key: React.Key) {
     <PromptProposalCard key={key} proposal={a.data} />
   ) : a.kind === "brain_note" ? (
     <BrainNoteCard key={key} note={a.data} />
+  ) : a.kind === "widget" ? (
+    <WidgetView key={key} spec={a.data} />
   ) : (
     <ChartView key={key} spec={a.data} />
   );
@@ -858,10 +874,11 @@ function ImageCard({ url, prompt }: { url: string; prompt?: string }) {
 
 // A IA pode posicionar um artefato inline escrevendo um marcador no texto:
 //   [[diagram]] (Excalidraw) · [[chart]] (gráfico) · [[quote]]/[[stock]] (card de
-//   ação) · [[canvas]] (qualquer, na ordem). Sem marcador → renderiza no fim.
-const MARKER_SRC = "\\[\\[(canvas|diagram|chart|quote|stock|research|image|email)\\]\\]";
+//   ação) · [[visual]] (SVG/HTML inline) · [[canvas]] (qualquer, na ordem). Sem
+//   marcador → renderiza no fim.
+const MARKER_SRC = "\\[\\[(canvas|diagram|chart|visual|quote|stock|research|image|email)\\]\\]";
 const KIND_OF: Record<string, Artifact["kind"] | null> = {
-  diagram: "excalidraw", chart: "chart", quote: "stock_card", stock: "stock_card",
+  diagram: "excalidraw", chart: "chart", visual: "widget", quote: "stock_card", stock: "stock_card",
   research: "deep_research", image: "image", email: "email_draft", canvas: null,
 };
 

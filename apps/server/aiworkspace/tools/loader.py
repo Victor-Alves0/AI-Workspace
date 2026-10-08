@@ -155,7 +155,7 @@ _WORKSPACE_PINS = ("code.exec.run", "code.files.browse", "code.files.write")
 # Visuais NATIVOS do chat (renderizados pela UI a partir do resultado da tool). Quando
 # liberados, o orchestrator diz ao modelo que são o caminho para "faça um gráfico/diagrama"
 # — antes do sandbox. Não são fixados: a nota nomeia o path, e execute_tool o chama direto.
-_NATIVE_VISUALS = ("chart.render.plot", "diagram.excalidraw.render")
+_NATIVE_VISUALS = ("chart.render.plot", "diagram.excalidraw.render", "visual.widget.show")
 
 
 def _allow_match(path: str, allow: list[str]) -> bool:

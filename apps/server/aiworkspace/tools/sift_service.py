@@ -307,6 +307,8 @@ BUILTIN_TOOLS: list[dict[str, str]] = [
      "model_desc": "Draw an editable diagram from a Mermaid flowchart."},
     {"path": "chart.render.plot", "name": "Gráfico", "description": "Desenha um gráfico (linha, barra, área ou pizza) a partir de dados.",
      "model_desc": "Render a chart (line, bar, area, pie) from data."},
+    {"path": "visual.widget.show", "name": "Visual Inline", "description": "Desenha ilustrações, diagramas explicativos e widgets interativos (SVG/HTML) direto na conversa, com opção de copiar e baixar como imagem.",
+     "model_desc": "Draw an inline SVG illustration/diagram or a small interactive HTML widget in the chat."},
     {"path": "finance.quote.get", "name": "Cotação (Ações)", "description": "Busca cotação real de ações/índices e mostra um card com mini-gráfico.",
      "model_desc": "Get a real stock/index/crypto quote as a card."},
     {"path": "research.deep.run", "name": "Deep Search", "description": "Pesquisa profunda e iterativa (planeja, busca, lê, resume) com fontes. Só quando pedida.",
@@ -719,6 +721,38 @@ def tool_category(path: str) -> dict[str, str]:
 
 def system_tools() -> list[dict[str, str]]:
     return [{**t, **tool_category(t["path"])} for t in BUILTIN_TOOLS]
+
+
+# Visual inline (`visual.widget.show`): o código vai inteiro para o front, que o desenha
+# num iframe isolado. Teto generoso p/ ilustrações ricas, mas que impede um resultado
+# gigante de entupir o histórico do chat.
+WIDGET_MAX_CHARS = 80_000
+_WIDGET_FENCE_RE = re.compile(r"^```[\w-]*\s*\n?|\n?```\s*$")
+
+
+def widget_payload(code: Any, title: Any = "") -> dict[str, Any]:
+    """Valida o código do visual inline e devolve o artefato que o front renderiza.
+
+    `mode` = "svg" quando o código é um <svg> solto (exportável como SVG/PNG); senão
+    "html" (widget com estilos/scripts). Cercas ``` que o modelo às vezes manda saem."""
+    src = str(code or "").strip()
+    if src.startswith("```"):
+        src = _WIDGET_FENCE_RE.sub("", src).strip()
+    if not src:
+        return {"error": "provide `code`: an <svg>…</svg> or an HTML fragment"}
+    if len(src) > WIDGET_MAX_CHARS:
+        return {"error": f"`code` too long ({len(src)} chars, max {WIDGET_MAX_CHARS}); simplify it"}
+    if re.match(r"(?is)^<!doctype|^<html\b", src):
+        return {"error": "send a fragment, not a full page: no <!DOCTYPE>, <html>, <head> or <body>"}
+    low = src.lower()
+    mode = "svg" if low.startswith("<svg") and low.rstrip().endswith("</svg>") else "html"
+    return {
+        "ok": True,
+        "kind": "widget",
+        "mode": mode,
+        "title": str(title or "").strip()[:120],
+        "code": src,
+    }
 
 
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
@@ -2864,6 +2898,38 @@ def _register_builtins(
             if not norm or not any(s["data"] for s in norm):
                 return {"error": "provide `values` (numbers) or `series`, plus optional `labels`"}
             return {"kind": "chart", "type": t, "title": (title or "")[:120], "labels": labs, "series": norm}
+
+    if want("visual.widget.show"):
+        @sift.tool(
+            "visual.widget.show",
+            description=(
+                "Draw a visual INLINE in the chat: an explanatory SVG illustration/diagram "
+                "(how something works, a mechanism, a layout, a comparison) or a small "
+                "interactive HTML widget (calculator, simulator, form). Use it when a picture "
+                "explains better than text; for plain data charts prefer chart.render.plot. "
+                "`code` starting with <svg = SVG (user can copy/download it as SVG/PNG); "
+                "anything else = HTML fragment (no <html>/<head>/<body>; <style> and <script> "
+                "allowed; no external requests except cdnjs.cloudflare.com/cdn.jsdelivr.net "
+                "scripts; a button may call sendPrompt('text') to send the user's follow-up). "
+                "Dark theme: transparent background; colors ONLY via CSS variables: "
+                "var(--ink) text, var(--muted) secondary text, var(--border) lines, "
+                "var(--surface) cards, var(--accent) highlight, and ramps "
+                "var(--fill-X)/var(--stroke-X)/var(--text-X) for X in purple, teal, coral, "
+                "amber, blue, green, red, gray (fill = soft background, stroke = outline). "
+                "SVG: set a viewBox (width ~680), no fixed width/height, font-size 12-14, "
+                "keep a legend/caption inside. Sentence case labels, no emojis. Write prose "
+                "outside the visual; optionally put [[visual]] where it should appear."
+            ),
+            params={
+                "code": "string:r::the <svg>…</svg> or HTML fragment to render",
+                "title": "string:o::short title (used as the download file name)",
+            },
+            # `kind`+`code` precisam sobreviver ao filtro do SIFT: o front desenha a partir
+            # deles; o modelo recebe só uma nota (ver _shape_tool_result no orchestrator).
+            returns=["ok", "kind", "mode", "title", "code", "error"],
+        )
+        def _widget(code: str = "", title: str = "") -> dict[str, Any]:
+            return widget_payload(code, title)
 
     if want("finance.quote.get"):
         # config default + injeta a busca web p/ o fallback (usa a mesma search_cfg)

@@ -94,6 +94,8 @@ desktop app with a tray icon.
 - Web search (built-in metasearch over several engines, Tavily or Brave) and **deep search**
 - Page reading and **headless browser** (AI-controlled Chromium)
 - Charts, diagrams (Mermaid/Excalidraw), financial quotes, date/time
+- **Inline visuals**: SVG illustrations and interactive HTML widgets drawn right in the chat,
+  copyable/downloadable as SVG or PNG
 - **Video/audio transcription** (YouTube + ~1800 sites)
 - **Python code** written by the AI, executed in an **isolated sandbox**
 - **Remote Terminal**: a real shell on **your own machines** (VPS, home server) through an
@@ -283,8 +285,9 @@ AI Workspace is built in the open and contributions of every size are welcome.
 - 🐛 **Bugs and feature requests:** [open an issue](https://github.com/Victor-Alves0/AI-Workspace/issues/new/choose)
 - 🌱 **First contribution?** Look for [`good first issue`](https://github.com/Victor-Alves0/AI-Workspace/labels/good%20first%20issue)
   and read [CONTRIBUTING.md](CONTRIBUTING.md)
-- 🌍 **Language:** the interface is currently in **Portuguese (pt-BR)**; English and other
-  translations are one of the most wanted contributions
+- 🌍 **Language:** the interface ships in **English and Portuguese (pt-BR)**, picked from the
+  browser language (switchable in Settings); translations into other languages are one of the
+  most wanted contributions — strings live in [apps/web/locales](apps/web/locales)
 - ⭐ If AI Workspace is useful to you, a star helps other people find it
 
 Everyone taking part is expected to follow the [Code of Conduct](CODE_OF_CONDUCT.md).

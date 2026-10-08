@@ -41,6 +41,10 @@ desktop/src-tauri/engine/
 desktop/engine/out/
 desktop/engine/out-app/
 
+# Claude Code: worktrees e config local por máquina (agentes criam/descartam aqui)
+.claude/worktrees/
+.claude/settings.local.json
+
 # OS
 .DS_Store
 Thumbs.db

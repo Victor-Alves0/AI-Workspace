@@ -2352,6 +2352,17 @@ export default function ChatPage() {
     return () => window.removeEventListener("aiw:open-settings", onOpen);
   }, [openSettings]);
 
+  // sendPrompt(texto) de um visual inline interativo (WidgetView): envia como mensagem,
+  // pelo mesmo caminho das opções clicáveis (não consome rascunho, anexos nem skills)
+  useEffect(() => {
+    const onPrompt = (e: Event) => {
+      const text = (e as CustomEvent<{ text?: unknown }>).detail?.text;
+      if (typeof text === "string" && text.trim()) void sendRef.current(text);
+    };
+    window.addEventListener("aiw:send-prompt", onPrompt);
+    return () => window.removeEventListener("aiw:send-prompt", onPrompt);
+  }, []);
+
   async function logout() {
     await api.post("/auth/logout");
     router.replace("/login");

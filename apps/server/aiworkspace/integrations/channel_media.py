@@ -8,8 +8,8 @@ gráfico abaixo" — prometendo o que nunca chegava.
 Aqui os `tool_events` do turno viram uma lista de mídias prontas para envio. Cada canal
 só precisa saber mandar bytes (ver `send_media` de cada API).
 
-Diagramas (excalidraw/mermaid) NÃO entram: renderizá-los exigiria um navegador
-headless. Em vez de fingir, o canal simplesmente não oferece a ferramenta (ver
+Diagramas (excalidraw/mermaid) e visuais inline (SVG/HTML) NÃO entram: renderizá-los
+exigiria um navegador headless. Em vez de fingir, o canal simplesmente não oferece a ferramenta (ver
 `unsupported_tool_ids`), então a IA não promete o que não pode cumprir.
 """
 
@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # Ferramentas cujo resultado SÓ existe como desenho no front: nos canais elas são
 # removidas do escopo do modelo (a alternativa seria a IA prometer um diagrama que
 # nunca chega).
-UNSUPPORTED_IN_CHANNELS = ("diagram.excalidraw.render",)
+UNSUPPORTED_IN_CHANNELS = ("diagram.excalidraw.render", "visual.widget.show")
 
 
 def unsupported_tool_ids(tool_ids: list[str] | None) -> list[str]:

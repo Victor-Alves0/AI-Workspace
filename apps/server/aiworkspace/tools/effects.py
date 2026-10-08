@@ -42,7 +42,7 @@ _TABLE: dict[str, str | dict[str, str]] = {
     "security.exploitdb.search": READ, "security.cve.search": READ,
     "code.graph.query": READ, "code.files.browse": READ, "code.exec.jobs": READ,
     "code.flow.analyze": READ, "finance.quote.get": READ, "spotify.music.search": READ,
-    "chart.render.plot": READ, "diagram.excalidraw.render": READ,
+    "chart.render.plot": READ, "diagram.excalidraw.render": READ, "visual.widget.show": READ,
     "vercel.projects.manage": READ,
     "task.ledger.track": {"get": READ, "*": EFFECT},
     "skills.library.manage": {"list": READ, "read": READ, "*": EFFECT},

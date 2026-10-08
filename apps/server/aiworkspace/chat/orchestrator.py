@@ -54,7 +54,8 @@ logger = logging.getLogger(__name__)
 # resposta "vazia de verdade": só espaços e/ou marcadores de posicionamento de
 # artefato ([[research]], [[chart]], …) — usado pela cutucada final do loop
 _MARKER_ONLY_RE = re.compile(
-    r"^(?:\s|\[\[(?:canvas|diagram|chart|quote|stock|research|image|email)\]\])*$", re.IGNORECASE
+    r"^(?:\s|\[\[(?:canvas|diagram|chart|visual|quote|stock|research|image|email)\]\])*$",
+    re.IGNORECASE,
 )
 
 # --------------------------------------------------------------------------- #
@@ -439,7 +440,7 @@ WORKSPACE_DORMANT_NOTE = (
 # aparece no chat — e só usava o gráfico nativo quando o usuário mandava explicitamente.
 NATIVE_VISUALS_NOTE = (
     "VISUALS — the chat renders these natively: {names}. When the user asks for a chart, "
-    "graph or diagram, first get the data you need (e.g. a web search), then call the matching "
+    "graph, diagram or illustration (or a visual would explain better), first get the data you need (e.g. a web search), then call the matching "
     "tool ONCE (directly if it is in your tool list, else via {meta} with its path). Never "
     "build charts by writing or running code (matplotlib, HTML files…) unless the user "
     "explicitly asks for a file or code."
@@ -3400,6 +3401,10 @@ def _shape_tool_result(result: Any) -> tuple[str, Any]:
     elif isinstance(event_result, dict) and event_result.get("kind") == "video":
         content = json.dumps({"ok": True, "note": "Video generated and shown to the user "
                                                   "in a player. Do not paste the url back."})
+    elif isinstance(event_result, dict) and event_result.get("kind") == "widget":
+        # o modelo acabou de escrever o código: devolvê-lo dobraria o custo em tokens
+        content = json.dumps({"ok": True, "note": "Visual rendered inline for the user. "
+                                                  "Do not repeat its code in the reply."})
     elif isinstance(event_result, dict) and event_result.get("kind") == "email_draft":
         content = json.dumps({
             "ok": True,

@@ -117,6 +117,7 @@ const GENERIC: Record<string, string> = {
   "http.session.use": tr("Fazendo requisições HTTP"),
   "diagram.excalidraw.render": tr("Desenhando o diagrama"),
   "chart.render.plot": tr("Montando o gráfico"),
+  "visual.widget.show": tr("Desenhando o visual"),
   "finance.quote.get": tr("Consultando a cotação"),
   "automation.monitor.create": tr("Criando um monitor"),
   "automation.reminder.create": tr("Agendando um lembrete"),

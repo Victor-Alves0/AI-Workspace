@@ -64,6 +64,12 @@ The AI discovers and executes tools on demand. Categories: **native**, **Codespa
   type, screenshot) in a tab that persists per conversation. With an anti-SSRF guard.
 - **Charts** (rendered as images for the channels), **diagrams** (Mermaid/Excalidraw),
   **financial quotes**, **real-time date/time**.
+- **Inline visuals** (`visual.widget.show`): the AI draws an explanatory SVG illustration or a
+  small interactive HTML widget (calculator, simulator) right in the message, styled with the
+  app's dark theme. SVGs can be copied as an image or downloaded as SVG/PNG; HTML widgets as
+  code/HTML. Runs in a sandboxed iframe with no access to the app or the network (only
+  cdnjs/jsdelivr scripts); a widget button can send a follow-up message with `sendPrompt()`.
+  Not offered in channels, where it can't be delivered.
 - **Video/audio transcription**: pulls the spoken content of a link (YouTube + ~1800 sites) via
   captions or STT, with rotating anti-blocking cookies.
 - **Image generation**: native (a model with an image modality) or via a **router** that
