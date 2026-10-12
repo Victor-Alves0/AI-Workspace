@@ -241,8 +241,34 @@ def start_pg(pgdata: Path, data: Path) -> int:
 
 
 def stop_pg(pgdata: Path) -> None:
-    subprocess.run([pg("pg_ctl"), "-D", str(pgdata), "-w", "-s", "-m", "fast", "stop"],
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    """Para o Postgres com SIGINT direto ao postmaster (= `pg_ctl stop -m fast`).
+
+    Sem rodar binário nenhum de propósito: no AppImage, quando o app cai (terminal
+    fechado, kill), a montagem do squashfs some junto e o `pg_ctl` deixa de existir —
+    o banco ficava órfão até a próxima abertura. Sinal e /proc não dependem disso.
+    """
+    try:
+        pid = int((pgdata / "postmaster.pid").read_text().splitlines()[0])
+    except (OSError, ValueError, IndexError):
+        return
+    try:
+        # o pid é mesmo de um postgres? (um postmaster.pid velho pode apontar para outro)
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            if b"postgres" not in f.read():
+                return
+    except OSError:
+        return
+    try:
+        os.kill(pid, signal.SIGINT)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)  # o postmaster não é filho nosso (pg_ctl o desanexa)
+        except ProcessLookupError:
+            return
+        time.sleep(0.2)
 
 
 def ensure_db(port: int) -> None:

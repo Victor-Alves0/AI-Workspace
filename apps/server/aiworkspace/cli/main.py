@@ -294,7 +294,9 @@ def cmd_install() -> int:
     appimage = os.environ.get("AIW_APPIMAGE")
     root = engine_root()
     if appimage:
-        target = f'exec "{appimage}" aiw "$@"'
+        # AppImageLauncher (comum no Arch/Manjaro) intercepta todo AppImage executado e
+        # abre um diálogo de "integrar?" — no terminal, o `aiw` ficaria parado nele
+        target = f'APPIMAGELAUNCHER_DISABLE=1 exec "{appimage}" aiw "$@"'
     elif root is not None:
         target = f'exec "{root / "aiw"}" "$@"'
     else:

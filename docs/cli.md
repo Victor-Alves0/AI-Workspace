@@ -31,7 +31,7 @@ attaches to it live and streams the rest.
 | Package | How you get `aiw` |
 |---|---|
 | `.deb` | installed as `/usr/bin/aiw` |
-| AppImage | `./AI-Workspace.AppImage aiw install` writes `~/.local/bin/aiw`, which runs the AppImage |
+| AppImage | `./AI-Workspace.AppImage aiw install` writes `~/.local/bin/aiw`, which runs the AppImage (with `APPIMAGELAUNCHER_DISABLE=1`, so AppImageLauncher's "integrate?" dialog never blocks the terminal). If AppImageLauncher moves the file to `~/Applications`, run `aiw install` again from the new place |
 | Windows | `aiw.cmd` in the install folder's `engine\` (adding it to PATH is still manual) |
 
 Any `aiworkspace-desktop aiw ...` (or `AI-Workspace.AppImage aiw ...`) call runs the CLI in
