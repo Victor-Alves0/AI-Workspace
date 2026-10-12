@@ -86,7 +86,7 @@ export default function ModelField({
           anchorRef={btnRef}
           onClose={() => setOpen(false)}
           align="left"
-          className="w-[360px] max-w-[calc(100vw-1.5rem)] overflow-hidden !rounded-2xl !p-0"
+          className="flex w-[360px] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden !rounded-2xl !p-0"
         >
           <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
             <Search size={16} className="text-muted" />
@@ -113,8 +113,9 @@ export default function ModelField({
             ))}
           </div>
           {/* dvh + dismissKeyboard: ver ModelPicker — scroll de lista com teclado
-              aberto trava no iOS */}
-          <div onTouchMove={dismissKeyboard} className="max-h-[min(18rem,55dvh)] overflow-y-auto overscroll-contain p-1.5">
+              aberto trava no iOS. min-h-0: com pouco espaço na janela o AnchoredMenu
+              limita a altura, e é a lista que encolhe (busca e abas ficam visíveis) */}
+          <div onTouchMove={dismissKeyboard} className="max-h-[min(18rem,55dvh)] min-h-0 overflow-y-auto overscroll-contain p-1.5">
             {rows.map((r) => (
               <button
                 key={r.key}
