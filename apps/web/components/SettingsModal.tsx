@@ -89,6 +89,7 @@ import AssistantVoicePanel from "./AssistantVoicePanel";
 import { WebSearchPanel, BrowserPanel } from "./toolPanels";
 import { useConfirm, usePrompt } from "./ConfirmDialog";
 import {
+  desktopPlatform,
   getDesktopSettings,
   isDesktop,
   openExternal,
@@ -156,6 +157,7 @@ const SETTINGS_INDEX: { label: string; cat: Cat; view?: string }[] = [
   { label: tr("Status do sistema"), cat: "status" },
   { label: tr("Rodar em segundo plano"), cat: "desktop" },
   { label: tr("Iniciar com o Windows"), cat: "desktop" },
+  { label: tr("Iniciar com o sistema"), cat: "desktop" },
   { label: tr("Bandeja"), cat: "desktop" },
   { label: tr("Orçamento mensal"), cat: "account" },
   { label: tr("Nome"), cat: "account" },
@@ -1184,6 +1186,8 @@ function DesktopTab() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => { getDesktopSettings().then(setS); }, []);
+  // os textos citam o Windows só no Windows; no Linux a bandeja/autostart são "do sistema"
+  const win = desktopPlatform() === "windows";
 
   async function patch(p: DesktopPatch) {
     setBusy(true);
@@ -1206,7 +1210,9 @@ function DesktopTab() {
       <Heading>{tr("Aplicativo")}</Heading>
       <Row
         label={tr("Rodar em segundo plano")}
-        info={tr("Fechar a janela esconde o app na bandeja do Windows em vez de encerrá-lo. Para sair de verdade, use o menu do ícone na bandeja.")}
+        info={win
+          ? tr("Fechar a janela esconde o app na bandeja do Windows em vez de encerrá-lo. Para sair de verdade, use o menu do ícone na bandeja.")
+          : tr("Fechar a janela esconde o app na bandeja do sistema em vez de encerrá-lo. Para sair de verdade, use o menu do ícone na bandeja.")}
       >
         <Toggle
           on={s.minimize_to_tray}
@@ -1214,7 +1220,7 @@ function DesktopTab() {
         />
       </Row>
       <Row
-        label={tr("Iniciar com o Windows")}
+        label={win ? tr("Iniciar com o Windows") : tr("Iniciar com o sistema")}
         info={tr("Abre o AI Workspace automaticamente quando você liga o computador.")}
       >
         <Toggle
@@ -1225,7 +1231,9 @@ function DesktopTab() {
       {s.autostart && (
         <Row
           label={tr("Abrir minimizado na bandeja")}
-          info={tr("Ao iniciar com o Windows, sobe direto para a bandeja sem abrir a janela — não rouba o foco de quem acabou de ligar o PC.")}
+          info={win
+            ? tr("Ao iniciar com o Windows, sobe direto para a bandeja sem abrir a janela — não rouba o foco de quem acabou de ligar o PC.")
+            : tr("Ao iniciar com o sistema, sobe direto para a bandeja sem abrir a janela — não rouba o foco de quem acabou de ligar o PC.")}
         >
           <Toggle
             on={s.start_minimized}

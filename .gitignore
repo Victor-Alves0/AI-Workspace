@@ -40,6 +40,7 @@ desktop/src-tauri/engine/
 # saidas dos builders do motor e do pacote de codigo (auto-update)
 desktop/engine/out/
 desktop/engine/out-app/
+desktop/engine/out-linux/
 
 # Claude Code: worktrees e config local por máquina (agentes criam/descartam aqui)
 .claude/worktrees/

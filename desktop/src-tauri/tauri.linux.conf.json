@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "targets": ["appimage", "deb"],
+    "category": "Productivity",
+    "shortDescription": "Self-hosted AI workspace",
+    "longDescription": "Self-hosted AI workspace: multi-model chat, sub-agents, long-term memory, RAG, automations and messaging channels, running on your own machine. Brings its own database and backend (no Docker)."
+  }
+}

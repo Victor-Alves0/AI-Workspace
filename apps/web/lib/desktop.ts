@@ -49,6 +49,14 @@ export function isDesktop(): boolean {
   return !!(window as unknown as { __AIW_DESKTOP__?: unknown }).__AIW_DESKTOP__;
 }
 
+/** SO do shell ("windows", "linux", ...), injetado pelo Tauri. Shells antigos não
+ *  mandavam o campo e só existiam no Windows. */
+export function desktopPlatform(): string {
+  if (typeof window === "undefined") return "";
+  const d = (window as unknown as { __AIW_DESKTOP__?: { platform?: string } }).__AIW_DESKTOP__;
+  return d ? d.platform || "windows" : "";
+}
+
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T | null> {
   const inv = bridge()?.core?.invoke;
   if (!inv) return null;

@@ -1,0 +1,97 @@
+# Compila o aplicativo desktop (Linux) e anexa o AppImage + .deb a' Release da tag.
+#
+# Roda no `ubuntu-22.04` de proposito: a glibc do build e' a minima exigida no usuario
+# (o motor — Python, Postgres, pgvector — e o shell Tauri sao compilados aqui), entao
+# quanto mais velho o runner, mais distros o AppImage alcanca.
+#
+#   git tag v0.1.0 && git push origin v0.1.0   -> compila e anexa a' Release
+#   (aba Actions -> Run workflow)              -> so' compila e anexa o artefato
+
+name: Desktop (Linux)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write # necessario para anexar a' Release
+    steps:
+      - uses: actions/checkout@v4
+
+      # webkit2gtk/appindicator/rsvg: shell Tauri. bison/flex/zlib/patchelf: Postgres
+      # compilado do fonte com rpath relativo (build-engine-linux.sh).
+      - name: Dependencias do sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev \
+            build-essential bison flex zlib1g-dev patchelf file
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Instalar dependencias do desktop
+        working-directory: desktop
+        run: npm install
+
+      # Motor (Postgres + backend + frontend) DENTRO de src-tauri/engine, que o
+      # tauri.conf.json empacota como recurso ("resources": ["engine/**/*"]).
+      - name: Montar o motor embarcado
+        run: bash desktop/engine/build-engine-linux.sh --work "$RUNNER_TEMP/engine" --out "$GITHUB_WORKSPACE/desktop/src-tauri/engine"
+
+      # mesma logica do Windows: latest.json assinado so' com a chave configurada
+      - name: Configurar artefatos de atualizacao
+        id: updater
+        run: |
+          if [ -n "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" ]; then
+            echo 'args=--config {"bundle":{"createUpdaterArtifacts":true}}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'args=' >> "$GITHUB_OUTPUT"
+          fi
+
+      # --- disparo por TAG: anexa a' Release (o tauri-action junta a entrada linux ao
+      # latest.json que o build do Windows publicou na mesma Release) ---
+      - name: Compilar e anexar a' Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          args: ${{ steps.updater.outputs.args }}
+          projectPath: desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: AI Workspace ${{ github.ref_name }}
+          releaseDraft: false
+          prerelease: false
+
+      # --- disparo manual: so' compila e anexa como artefato ---
+      - name: Compilar (sem publicar)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: desktop
+
+      - name: Anexar pacotes ao run
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: aiworkspace-desktop-linux
+          path: |
+            desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+            desktop/src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error

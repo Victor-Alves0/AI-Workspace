@@ -5,18 +5,19 @@
 //!
 //! O app EMBARCA o "motor" (Postgres + backend Python, que tambem serve a interface
 //! como arquivos estaticos) e o supervisiona: ao abrir, sobe o motor por baixo (via o
-//! launcher PowerShell ja validado), mostra uma tela de "iniciando..." e navega para
-//! a interface local (http://localhost:41414, ou a porta que o launcher escolheu e
+//! launcher do motor: Start-AIWorkspace.ps1 no Windows, launcher.py no Linux), mostra
+//! uma tela de "iniciando..." e navega para a interface local (http://localhost:41414, ou a porta que o launcher escolheu e
 //! gravou em data\port.txt) assim que ela responde. Ao sair, encerra o motor inteiro
 //! (inclusive o Postgres, que o pg_ctl desanexa).
 //!
 //! O shell tambem da o que um navegador nao da: icone na bandeja, "rodar em
-//! segundo plano" e "iniciar com o Windows".
+//! segundo plano" e "iniciar com o Windows" (ou com a sessao, no Linux).
 
 use std::io::{Read, Write};
+#[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Child, Command};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -33,7 +34,13 @@ const SETTINGS_FILE: &str = "desktop-settings.json";
 /// preferida (41414) ou a proxima livre, se ela estiver ocupada.
 const PORT_FILE: &str = "port.txt";
 // esconde o console do powershell/pg/uvicorn (CREATE_NO_WINDOW)
+#[cfg(windows)]
 const NO_WINDOW: u32 = 0x0800_0000;
+/// Binario do pg_ctl dentro do motor (fallback para parar o banco na saida).
+#[cfg(windows)]
+const PG_CTL: &str = "pg_ctl.exe";
+#[cfg(not(windows))]
+const PG_CTL: &str = "pg_ctl";
 
 /// Preferencias **da maquina**, nao da conta.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,8 +70,8 @@ impl Default for DesktopSettings {
 }
 
 struct SettingsState(Mutex<DesktopSettings>);
-/// PID do launcher do motor (para encerrar a arvore de processos ao sair).
-struct EngineState(Mutex<Option<u32>>);
+/// Processo do launcher do motor (para encerrar a arvore de processos ao sair).
+struct EngineState(Mutex<Option<Child>>);
 
 fn settings_path(app: &AppHandle) -> Option<PathBuf> {
     let dir = app.path().app_config_dir().ok()?;
@@ -161,9 +168,9 @@ fn engine_ready(port: u16) -> bool {
     buf.starts_with("HTTP/1.1 200") && buf.contains("\"status\":\"ok\"")
 }
 
-/// Sobe o motor via o launcher PowerShell (mesma sequencia validada a mao):
-/// initdb -> Postgres -> migracoes -> API -> interface. Devolve o PID do launcher.
-fn spawn_engine(app: &AppHandle) -> Option<u32> {
+/// Sobe o motor via o launcher (mesma sequencia validada a mao):
+/// initdb -> Postgres -> migracoes -> API -> interface. Devolve o processo do launcher.
+fn spawn_engine(app: &AppHandle) -> Option<Child> {
     // Ja' ha' um motor no ar (outra instancia, ou uma sobra)? Nao sobe outro nem
     // toma posse — assim uma 2a abertura NAO derruba o motor da 1a ao sair (o
     // stop_engine so' age quando este processo e' o dono, i.e. pid = Some).
@@ -179,6 +186,7 @@ fn spawn_engine(app: &AppHandle) -> Option<u32> {
     // extensao .ps1. Rodamos com o diretorio de trabalho na pasta do motor e
     // passamos o script pelo nome relativo (sem espaco). O -DataDir fica em
     // %APPDATA%\com.aiworkspace.app (sem espaco), entao e' seguro.
+    #[cfg(windows)]
     let child = Command::new("powershell.exe")
         .current_dir(&engine)
         .args([
@@ -194,7 +202,44 @@ fn spawn_engine(app: &AppHandle) -> Option<u32> {
         .creation_flags(NO_WINDOW)
         .spawn()
         .ok()?;
-    Some(child.id())
+    // Linux: o Python do proprio motor roda o launcher.py. Sem shell no meio, entao
+    // espaco no caminho nao importa (argv separado). O launcher pede ao kernel um
+    // SIGTERM se este processo morrer (PR_SET_PDEATHSIG), entao nao fica orfao.
+    #[cfg(not(windows))]
+    let child = {
+        let log = std::fs::File::create(data.join("launcher.log")).ok();
+        let python = engine.join("python").join("bin").join("python3");
+        let mut cmd = Command::new(&python);
+        cmd.current_dir(&engine)
+            .arg(engine.join("launcher.py"))
+            .arg("--data-dir")
+            .arg(&data)
+            .arg("--no-browser")
+            // o AppRun do AppImage aponta estas para as libs/modulos DELE; o Python e o
+            // Postgres do motor sao autocontidos e quebrariam com elas
+            .env_remove("LD_LIBRARY_PATH")
+            .env_remove("PYTHONHOME")
+            .env_remove("PYTHONPATH")
+            .stdin(std::process::Stdio::null());
+        let mut note = log.as_ref().and_then(|f| f.try_clone().ok());
+        if let Some(f) = log {
+            if let Ok(f2) = f.try_clone() {
+                cmd.stdout(f).stderr(f2);
+            }
+        }
+        match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                // sem isto a janela ficaria em "iniciando..." sem pista nenhuma: o
+                // motor fora do lugar (pacote incompleto) aparece no launcher.log
+                if let Some(f) = note.as_mut() {
+                    let _ = writeln!(f, "falha ao iniciar o motor ({}): {e}", python.display());
+                }
+                return None;
+            }
+        }
+    };
+    Some(child)
 }
 
 /// Espera a interface local responder e entao navega a janela para ela. Roda numa
@@ -227,22 +272,45 @@ fn stop_engine(app: &AppHandle) {
     // So' encerra o motor se ESTE processo e' o dono (spawn_engine devolveu um pid).
     // Se nao somos donos (ex.: uma 2a instancia que reusou o motor da 1a), sair NAO
     // pode derrubar o Postgres compartilhado.
-    let Some(pid) = app.state::<EngineState>().0.lock().ok().and_then(|g| *g) else {
+    let Some(mut child) = app.state::<EngineState>().0.lock().ok().and_then(|mut g| g.take())
+    else {
         return;
     };
+    #[cfg(windows)]
     let _ = Command::new("taskkill")
-        .args(["/F", "/T", "/PID", &pid.to_string()])
+        .args(["/F", "/T", "/PID", &child.id().to_string()])
         .creation_flags(NO_WINDOW)
         .status();
+    // Linux: SIGTERM e o launcher faz o desligamento limpo (uvicorn, depois pg_ctl
+    // stop). Espera um pouco por ele antes do fallback abaixo.
+    #[cfg(not(windows))]
+    {
+        let _ = Command::new("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .status();
+        for _ in 0..40 {
+            if !matches!(child.try_wait(), Ok(None)) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        if matches!(child.try_wait(), Ok(None)) {
+            let _ = child.kill();
+        }
+    }
+    let _ = child.try_wait();
     if let Some((engine, data)) = engine_paths(app) {
-        let pgctl = engine.join("pgsql").join("bin").join("pg_ctl.exe");
-        if pgctl.exists() {
-            let _ = Command::new(pgctl)
-                .arg("-D")
+        let pgctl = engine.join("pgsql").join("bin").join(PG_CTL);
+        if pgctl.exists() && data.join("pgdata").join("postmaster.pid").exists() {
+            let mut cmd = Command::new(pgctl);
+            cmd.arg("-D")
                 .arg(data.join("pgdata"))
-                .args(["-w", "stop"])
-                .creation_flags(NO_WINDOW)
-                .status();
+                .args(["-w", "-m", "fast", "stop"]);
+            #[cfg(windows)]
+            cmd.creation_flags(NO_WINDOW);
+            #[cfg(not(windows))]
+            cmd.env_remove("LD_LIBRARY_PATH");
+            let _ = cmd.status();
         }
     }
 }
@@ -313,8 +381,13 @@ fn desktop_open_external(url: String) -> Result<(), String> {
         .spawn();
     #[cfg(target_os = "macos")]
     let res = std::process::Command::new("open").arg(u).spawn();
+    // sem o LD_LIBRARY_PATH do AppImage: o navegador aberto pelo xdg-open carregaria
+    // as libs embarcadas do app em vez das do sistema e poderia nem abrir
     #[cfg(all(unix, not(target_os = "macos")))]
-    let res = std::process::Command::new("xdg-open").arg(u).spawn();
+    let res = std::process::Command::new("xdg-open")
+        .arg(u)
+        .env_remove("LD_LIBRARY_PATH")
+        .spawn();
     res.map(|_| ()).map_err(|e| e.to_string())
 }
 
@@ -369,9 +442,9 @@ fn main() {
             apply_autostart(&handle, settings.autostart);
             apply_voice_hotkey(&handle, &settings.voice_hotkey);
 
-            // sobe o motor embarcado e guarda o PID para encerrar ao sair
-            if let Some(pid) = spawn_engine(&handle) {
-                *app.state::<EngineState>().0.lock().unwrap() = Some(pid);
+            // sobe o motor embarcado e guarda o processo para encerrar ao sair
+            if let Some(child) = spawn_engine(&handle) {
+                *app.state::<EngineState>().0.lock().unwrap() = Some(child);
             }
 
             let launched_hidden = std::env::args().any(|a| a == "--hidden");
@@ -385,7 +458,8 @@ fn main() {
             // enquanto o app já ia em 0.5.0 — a mesma deriva que quebrou a checagem de
             // atualização. O Cargo.toml é sincronizado por scripts/set_version.py.
             let init_script = format!(
-                "window.__AIW_DESKTOP__ = {{ platform: 'windows', version: '{}' }};",
+                "window.__AIW_DESKTOP__ = {{ platform: '{}', version: '{}' }};",
+                std::env::consts::OS,
                 env!("CARGO_PKG_VERSION"),
             );
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
@@ -413,10 +487,14 @@ fn main() {
                 settings.minimize_to_tray,
                 None::<&str>,
             )?;
+            #[cfg(windows)]
+            let boot_label = "Iniciar com o Windows";
+            #[cfg(not(windows))]
+            let boot_label = "Iniciar com o sistema";
             let boot_i = CheckMenuItem::with_id(
                 app,
                 "boot",
-                "Iniciar com o Windows",
+                boot_label,
                 true,
                 settings.autostart,
                 None::<&str>,

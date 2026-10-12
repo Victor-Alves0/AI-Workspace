@@ -134,6 +134,42 @@ For public distribution to strangers (no manual trust step), move to a CA-issued
 certificate — e.g. **Azure Trusted Signing** — and swap the thumbprint/import step; the rest
 of the pipeline stays the same.
 
+## Linux (preview)
+
+The same shell and the same self-contained engine, built for Linux (x86_64) as an
+**AppImage** and a **.deb** by `.github/workflows/desktop-linux.yml`. Tray, "run in the
+background" and "start with the system" (a `.desktop` file in `~/.config/autostart`) work as
+on Windows; on GNOME the tray needs the AppIndicator extension.
+
+What differs from Windows, and why:
+
+| | Windows | Linux |
+|---|---|---|
+| Python | python.org *embeddable* | [python-build-standalone](https://github.com/astral-sh/python-build-standalone) (relocatable CPython) |
+| Postgres + pgvector | EDB binaries + community `vector.dll` | built from source (no portable official build exists; pgvector needs that build's `pg_config`), `rpath=$ORIGIN` so the folder is relocatable |
+| Launcher | `Start-AIWorkspace.ps1` | `desktop/engine/launcher.py` (stdlib only, run by the engine's own Python) |
+| Light code update | mirrored over the engine folder | written to `<data>/appcode/` — the AppImage is a **read-only** squashfs. The overlay remembers which bundled code it was made for and is dropped when a newer AppImage brings newer code |
+| Data | `%APPDATA%\com.aiworkspace.app\data` | `~/.local/share/com.aiworkspace.app/data` |
+
+The light update uses the **same** `app-latest` package as Windows (pure Python + static files
++ migrations), so one code release reaches both.
+
+The launcher asks the kernel to SIGTERM it when the shell dies (`PR_SET_PDEATHSIG`), and the
+API process likewise, so a crashed shell doesn't leave the port taken. A Postgres left running
+by a `kill -9` is adopted (and stopped) on the next launch.
+
+**Build the engine locally** (needs gcc, make, bison, flex, patchelf, zlib headers, Node 20+;
+the work dir must be a real Linux filesystem — `initdb` refuses NTFS/exFAT):
+
+```bash
+bash desktop/engine/build-engine-linux.sh --work ~/aiw-engine   # -> ~/aiw-engine/aiworkspace-engine
+~/aiw-engine/aiworkspace-engine/start-aiworkspace.sh            # runs it, opens the browser
+```
+
+The bundle needs glibc ≥ the build machine's: CI builds on `ubuntu-22.04` (glibc 2.35), so it
+runs on Ubuntu 22.04+, Debian 12+, Fedora 36+ and current Arch. A build made on a newer distro
+only runs on that glibc or newer.
+
 ## Roadmap: embedded backend
 
 Today the app needs the stack running. The path to a **self-contained** installer (no Docker)

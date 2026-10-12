@@ -3766,5 +3766,8 @@
  "✓ Modelo \"{0}\" instalado.": "✓ Model \"{0}\" installed.",
  "✓ Modelos OpenWakeWord carregados. Use o teste abaixo para calibrar a sensibilidade.": "✓ OpenWakeWord models loaded. Use the test below to calibrate the sensitivity.",
  "✓ Ouvi \"{word}\"! A wake word está funcionando.": "✓ I heard \"{word}\"! The wake word is working.",
- "✓ Whisper instalado (offline a partir de agora).": "✓ Whisper installed (works offline from now on)."
+ "✓ Whisper instalado (offline a partir de agora).": "✓ Whisper installed (works offline from now on).",
+ "Iniciar com o sistema": "Start with the system",
+ "Fechar a janela esconde o app na bandeja do sistema em vez de encerrá-lo. Para sair de verdade, use o menu do ícone na bandeja.": "Closing the window hides the app in the system tray instead of quitting it. To really quit, use the tray icon's menu.",
+ "Ao iniciar com o sistema, sobe direto para a bandeja sem abrir a janela — não rouba o foco de quem acabou de ligar o PC.": "When starting with the system, it goes straight to the tray without opening the window — it doesn't steal focus from someone who just turned on the PC."
 }
