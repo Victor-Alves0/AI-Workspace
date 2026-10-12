@@ -6,9 +6,10 @@
 //! O app EMBARCA o "motor" (Postgres + backend Python, que tambem serve a interface
 //! como arquivos estaticos) e o supervisiona: ao abrir, sobe o motor por baixo (via o
 //! launcher do motor: Start-AIWorkspace.ps1 no Windows, launcher.py no Linux), mostra
-//! uma tela de "iniciando..." e navega para a interface local (http://localhost:41414, ou a porta que o launcher escolheu e
-//! gravou em data\port.txt) assim que ela responde. Ao sair, encerra o motor inteiro
-//! (inclusive o Postgres, que o pg_ctl desanexa).
+//! uma tela de "iniciando..." e navega para a interface local (http://localhost:41414,
+//! ou a porta que o launcher escolheu e gravou em data/port.txt) assim que ela
+//! responde. Ao sair, encerra o motor inteiro (inclusive o Postgres, que o pg_ctl
+//! desanexa).
 //!
 //! O shell tambem da o que um navegador nao da: icone na bandeja, "rodar em
 //! segundo plano" e "iniciar com o Windows" (ou com a sessao, no Linux).
