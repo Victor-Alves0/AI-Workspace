@@ -97,7 +97,9 @@ export function Menu({
  * Diferente do <Menu> posicionado por um wrapper `absolute`, este NÃO é
  * recortado por ancestrais com `overflow: hidden/auto` — resolve os menus de
  * "3 pontinhos" que apareciam cortados/dentro de listas roláveis. Reposiciona
- * em scroll/resize e vira para cima quando não há espaço abaixo.
+ * em scroll/resize e vira para cima quando não há espaço abaixo. A altura fica
+ * limitada ao espaço do lado escolhido (rola por dentro): sem isso, um menu mais
+ * alto que o espaço acima do botão passava da borda da janela e perdia o topo.
  */
 export function AnchoredMenu({
   anchorRef,
@@ -121,14 +123,24 @@ export function AnchoredMenu({
       if (!a) return;
       const r = a.getBoundingClientRect();
       const gap = 6;
-      const menuH = menuRef.current?.offsetHeight ?? 0;
-      const menuW = menuRef.current?.offsetWidth ?? 0;
+      const edge = 8; // folga até a borda da janela
+      // altura NATURAL do conteúdo: sem o maxHeight de um place() anterior. Medir com
+      // ele aplicado daria a altura já encolhida (um filho flex com min-h-0 encolhe
+      // para caber) e o menu trocaria de lado na chamada seguinte.
+      const el = menuRef.current;
+      const prevMax = el?.style.maxHeight ?? "";
+      if (el) el.style.maxHeight = "none";
+      const menuH = el?.offsetHeight ?? 0;
+      const menuW = el?.offsetWidth ?? 0;
+      if (el) el.style.maxHeight = prevMax;
       const spaceBelow = window.innerHeight - r.bottom;
       const openUp = spaceBelow < menuH + gap && r.top > spaceBelow;
       const s: React.CSSProperties = { position: "fixed", visibility: "visible", zIndex: 80 };
       // vertical: abaixo por padrão; acima só se não couber embaixo
       if (openUp) s.bottom = window.innerHeight - r.top + gap;
       else s.top = r.bottom + gap;
+      s.maxHeight = Math.max(120, (openUp ? r.top : spaceBelow) - gap - edge);
+      s.overflowY = "auto";
       // horizontal: align="left" abre para a DIREITA (canto inferior-direito do
       // botão); "right" abre para a esquerda. Faz flip se estourar a viewport.
       if (align === "center") {
@@ -147,9 +159,14 @@ export function AnchoredMenu({
     place();
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true); // captura scroll de qualquer ancestral
+    // o conteúdo muda com o menu aberto (submenu que expande, lista filtrada pela
+    // busca): reposiciona, senão um menu aberto para cima cresceria além do topo
+    const mo = new MutationObserver(place);
+    if (menuRef.current) mo.observe(menuRef.current, { childList: true, subtree: true });
     return () => {
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
+      mo.disconnect();
     };
   }, [anchorRef, align]);
 
