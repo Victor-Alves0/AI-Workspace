@@ -170,6 +170,12 @@ The bundle needs glibc ≥ the build machine's: CI builds on `ubuntu-22.04` (gli
 runs on Ubuntu 22.04+, Debian 12+, Fedora 36+ and current Arch. A build made on a newer distro
 only runs on that glibc or newer.
 
+**Packaging** (`cd desktop && npm run build`) produces the `.deb` anywhere. The AppImage step
+(linuxdeploy) is meant for the CI image: on rolling distros such as Arch it fails inside
+linuxdeploy itself — its bundled `strip` doesn't know the `.relr.dyn` section (`NO_STRIP=true`
+gets past that) and its GTK plugin doesn't find the newer gdk-pixbuf layout. Build the AppImage
+in CI or in an `ubuntu:22.04` container.
+
 ## Roadmap: embedded backend
 
 Today the app needs the stack running. The path to a **self-contained** installer (no Docker)
