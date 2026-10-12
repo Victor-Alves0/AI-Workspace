@@ -151,6 +151,8 @@ What differs from Windows, and why:
 | Light code update | mirrored over the engine folder | written to `<data>/appcode/` — the AppImage is a **read-only** squashfs. The overlay remembers which bundled code it was made for and is dropped when a newer AppImage brings newer code |
 | Data | `%APPDATA%\com.aiworkspace.app\data` | `~/.local/share/com.aiworkspace.app/data` |
 
+The terminal client **`aiw`** ships in the same engine — see [`cli.md`](cli.md).
+
 The light update uses the **same** `app-latest` package as Windows (pure Python + static files
 + migrations), so one code release reaches both.
 

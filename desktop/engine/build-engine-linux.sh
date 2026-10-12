@@ -78,7 +78,7 @@ echo "==> instalando o backend e dependencias (pode demorar)"
 "$PY" -m pip install --quiet --upgrade pip
 # [whatsapp-local]: WhatsApp por QR embutido (neonize). --no-compile: so' vira .pyc o
 # que o app importa (pre-compilacao abaixo), nao os ~11 mil modulos instalados.
-"$PY" -m pip install --quiet --no-compile "$SERVER_DIR[whatsapp-local]"
+"$PY" -m pip install --quiet --no-compile "$SERVER_DIR[whatsapp-local,cli]"
 rm -rf "$SERVER_DIR/build"  # sobra do build em arvore do setuptools, nao versionar
 
 SITE="$("$PY" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
@@ -166,8 +166,8 @@ mkdir -p "$OUT/app"
 cp "$SERVER_DIR/alembic.ini" "$OUT/app/"
 cp -r "$SERVER_DIR/alembic" "$OUT/app/alembic"
 find "$OUT/app" -type d -name __pycache__ -prune -exec rm -rf {} +
-cp "$HERE/launcher.py" "$HERE/start-aiworkspace.sh" "$OUT/"
-chmod +x "$OUT/start-aiworkspace.sh"
+cp "$HERE/launcher.py" "$HERE/start-aiworkspace.sh" "$HERE/aiw.py" "$HERE/aiw" "$OUT/"
+chmod +x "$OUT/start-aiworkspace.sh" "$OUT/aiw"
 cp "$HERE/README-linux.txt" "$OUT/README.txt"
 
 # ----------------------------------------------------------------------------- #

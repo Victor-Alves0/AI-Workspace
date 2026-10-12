@@ -17,6 +17,11 @@ Opcoes:  --data-dir DIR   onde ficam banco/caches/segredo (padrao: ./data)
          --no-browser     nao abre o navegador
          --port N         porta preferida
 
+NO TERMINAL
+-----------
+    ./aiw            chat no terminal (os mesmos chats do app)
+    ./aiw -c         continua o ultimo chat;  ./aiw --help  para o resto
+
 O QUE FICA ONDE
 ---------------
 Tudo em ./data/ (ou --data-dir): banco (pgdata), caches de modelo, segredo do app e,

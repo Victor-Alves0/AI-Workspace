@@ -1,0 +1,4 @@
+#!/bin/sh
+# CLI do AI Workspace: `aiw --help`. Resolve links (o .deb instala /usr/bin/aiw -> aqui).
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "$HERE/python/bin/python3" "$HERE/aiw.py" "$@"

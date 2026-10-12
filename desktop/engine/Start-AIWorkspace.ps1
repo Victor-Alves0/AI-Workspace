@@ -152,6 +152,16 @@ if (-not (Test-Path $SecretFile)) {
         Out-File -Encoding ascii -NoNewline $SecretFile
 }
 
+# --- token do CLI `aiw` (POST /auth/local): quem le este arquivo entra como o dono.
+#     Fica em %APPDATA% (so' o proprio usuario le, pela ACL herdada do perfil). ---
+$CliTokenFile = Join-Path $Data "cli-token"
+if (-not (Test-Path $CliTokenFile)) {
+    $tb = New-Object byte[] 32
+    [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($tb)
+    ([Convert]::ToBase64String($tb).TrimEnd('=').Replace('+', '-').Replace('/', '_')) |
+        Out-File -Encoding ascii -NoNewline $CliTokenFile
+}
+
 # --- ambiente do backend: tudo apontando pra dentro de .\data\ ---
 $env:APP_SECRET          = (Get-Content $SecretFile -Raw).Trim()
 $env:DATABASE_URL        = "postgresql+asyncpg://aiworkspace:aiworkspace@$($Loop):$PgPort/aiworkspace"
@@ -172,6 +182,7 @@ $env:WHATSAPP_QR_BACKEND = "local"
 $env:WHATSAPP_LOCAL_DIR  = Join-Path $Data "whatsapp"
 $env:UPLOADS_DIR         = Join-Path $Data "uploads"
 $env:AIW_PORT            = "$AppPort"
+$env:AIW_LOCAL_TOKEN_FILE = $CliTokenFile
 # retornos OAuth: a API mora em /api nesta origem. Precisam bater com o cadastrado no
 # console de cada provedor (docs/desktop.md).
 foreach ($svc in @("google", "github", "notion", "slack")) {

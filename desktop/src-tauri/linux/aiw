@@ -1,0 +1,3 @@
+#!/bin/sh
+# CLI do AI Workspace instalado pelo .deb: `aiw --help`
+exec "/usr/lib/AI Workspace/engine/aiw" "$@"

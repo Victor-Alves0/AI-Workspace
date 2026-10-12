@@ -14,7 +14,7 @@ on:
     tags: ["v*"]
     # TEMPORARIO (preview do porte): o workflow_dispatch so' existe depois que o
     # arquivo chega na main. Tirar antes do merge.
-    branches: [linux-engine]
+    branches: [linux-engine, cli]
   workflow_dispatch:
 
 jobs:

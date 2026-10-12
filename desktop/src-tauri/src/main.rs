@@ -402,7 +402,59 @@ fn desktop_clipboard_read() -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// `aiworkspace-desktop aiw ...` (ou `AI-Workspace.AppImage aiw ...`): roda o CLI do
+/// motor NESTE terminal e sai, sem janela. E' o caminho do AppImage, que nao tem
+/// como por um `aiw` no PATH; `aiw install` cria o atalho em ~/.local/bin.
+/// So' Unix: no Windows o .exe e' de subsistema grafico (sem console) — la' o CLI
+/// e' o aiw.cmd do motor.
+#[cfg(unix)]
+fn run_cli_if_asked() {
+    let mut args = std::env::args_os().skip(1);
+    if args.next().as_deref() != Some(std::ffi::OsStr::new("aiw")) {
+        return;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        eprintln!("aiw: caminho do executavel desconhecido");
+        std::process::exit(1);
+    };
+    let exe_dir = exe.parent().map(PathBuf::from).unwrap_or_default();
+    // mesmos lugares em que o Tauri resolve os recursos no Linux: ../lib/<produto>
+    // (.deb e AppImage) ou ao lado do binario (cargo build)
+    let engine = [
+        exe_dir.join("../lib/AI Workspace/engine"),
+        exe_dir.join("engine"),
+    ]
+    .into_iter()
+    .find(|p| p.join("aiw.py").exists());
+    let Some(engine) = engine else {
+        eprintln!("aiw: motor nao encontrado ao lado de {}", exe.display());
+        std::process::exit(1);
+    };
+    // AppImage: o binario real vive num ponto de montagem temporario; o caminho que
+    // sobrevive (para `aiw ui` e `aiw install`) e' o do arquivo .AppImage
+    let appimage = std::env::var_os("APPIMAGE");
+    let mut cmd = Command::new(engine.join("python").join("bin").join("python3"));
+    cmd.arg(engine.join("aiw.py"))
+        .args(args)
+        .env("AIW_DESKTOP_BIN", appimage.clone().unwrap_or_else(|| exe.clone().into()))
+        .env_remove("LD_LIBRARY_PATH")
+        .env_remove("PYTHONHOME")
+        .env_remove("PYTHONPATH");
+    if let Some(a) = appimage {
+        cmd.env("AIW_APPIMAGE", a);
+    }
+    // exec (substitui este processo) em vez de esperar: o Ctrl+C do terminal vai direto
+    // ao CLI, e nao a um pai que morreria deixando o Python orfao no terminal
+    use std::os::unix::process::CommandExt as _;
+    let err = cmd.exec();
+    eprintln!("aiw: {err}");
+    std::process::exit(1);
+}
+
 fn main() {
+    #[cfg(unix)]
+    run_cli_if_asked();
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,

@@ -259,6 +259,55 @@ async def refresh(
     return user
 
 
+LOCAL_TOKEN_HEADER = "x-aiw-local-token"
+
+
+@router.post("/local", response_model=UserOut)
+async def local_login(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+):
+    """Sessão do CLI `aiw` no app desktop, sem senha: quem lê o token da pasta de dados
+    (arquivo 0600 do usuário do SO, o mesmo que já lê o banco) entra como o DONO da
+    instalação — o 1º admin, criado no assistente de primeiro uso.
+
+    Só existe no motor desktop (o launcher define AIW_LOCAL_TOKEN_FILE; no Docker a
+    rota responde 404) e só aceita conexão do loopback. Emite os mesmos cookies do
+    login, então o resto da API não muda.
+    """
+    import hmac
+    import os
+
+    path = os.environ.get("AIW_LOCAL_TOKEN_FILE")
+    if not path:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not Found")
+    host = request.client.host if request.client else ""
+    if host not in ("127.0.0.1", "::1"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Somente local")
+    try:
+        with open(path, encoding="ascii") as f:
+            expected = f.read().strip()
+    except OSError:
+        expected = ""
+    given = (request.headers.get(LOCAL_TOKEN_HEADER) or "").strip()
+    if not expected or not hmac.compare_digest(given.encode(), expected.encode()):
+        check_login_rate(request, "local")  # conta só as falhas: o aiw chama a cada uso
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token local inválido")
+
+    owner = await db.scalar(
+        select(User)
+        .where(User.role == "admin", User.is_active.is_(True), User.status == "active")
+        .order_by(User.created_at)
+        .limit(1)
+    )
+    if owner is None:
+        # instalação sem conta ainda: o assistente de primeiro uso roda na interface
+        raise HTTPException(status.HTTP_409_CONFLICT, "needs_setup")
+    _set_auth_cookies(response, owner, request)
+    return owner
+
+
 @router.post("/logout")
 async def logout(
     request: Request,

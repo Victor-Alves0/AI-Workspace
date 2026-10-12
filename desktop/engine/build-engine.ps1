@@ -78,7 +78,7 @@ python -m pip install --upgrade pip
 # --no-compile: o pip pré-compila TODO .py (~11 mil __pycache__, 130 MB), inclusive
 # módulos que nunca são importados. Sem isso, o Python compila no 1º uso só o que
 # carrega, dentro da pasta do app (instalação por usuário = gravável).
-python -m pip install --no-compile --target $Site "$($ServerDir)[whatsapp-local]"
+python -m pip install --no-compile --target $Site "$($ServerDir)[whatsapp-local,cli]"
 if ($LASTEXITCODE -ne 0) { throw "pip install do backend falhou" }
 
 # O tempo de instalação é dominado pela QUANTIDADE de arquivos (o instalador e o
@@ -179,6 +179,7 @@ New-Item -ItemType Directory -Force $AppOut | Out-Null
 Copy-Item (Join-Path $ServerDir "alembic.ini") $AppOut
 Copy-Item (Join-Path $ServerDir "alembic") (Join-Path $AppOut "alembic") -Recurse
 Copy-Item (Join-Path $PSScriptRoot "Start-AIWorkspace.ps1") $Out
+Copy-Item (Join-Path $PSScriptRoot "aiw.py"), (Join-Path $PSScriptRoot "aiw.cmd") $Out
 Copy-Item (Join-Path $PSScriptRoot "README.txt") $Out -ErrorAction SilentlyContinue
 
 # ----------------------------------------------------------------------------- #

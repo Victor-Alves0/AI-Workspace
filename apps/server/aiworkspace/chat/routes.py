@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import crypto
@@ -104,12 +104,26 @@ async def list_chats(
     user: User = Depends(require_approved),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await db.scalars(
-        select(Chat)
+    # `last_message_at`: quando o chat foi USADO por último. O updated_at só muda quando
+    # a linha do chat muda (renomear, trocar o modelo...), não a cada mensagem — o CLI
+    # (`aiw -c`) precisa do primeiro. A ordem da lista não muda.
+    last = (
+        select(Message.chat_id, func.max(Message.created_at).label("last_at"))
+        .group_by(Message.chat_id)
+        .subquery()
+    )
+    rows = await db.execute(
+        select(Chat, last.c.last_at)
+        .outerjoin(last, last.c.chat_id == Chat.id)
         .where(Chat.user_id == user.id, Chat.archived == archived)
         .order_by(Chat.pinned.desc(), Chat.updated_at.desc())
     )
-    return list(rows)
+    out = []
+    for chat, last_at in rows:
+        item = ChatOut.model_validate(chat)
+        item.last_message_at = last_at
+        out.append(item)
+    return out
 
 
 async def _owned_workspace(db: AsyncSession, user: User, value: str | None) -> str | None:

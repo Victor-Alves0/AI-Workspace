@@ -270,6 +270,11 @@ def backend_env(data: Path, pg_port: int, app_port: int, site: Path | None, web:
         # deriva a chave que cifra os segredos no banco: gerado 1x, nunca trocado
         secret_file.write_text(secrets.token_urlsafe(48), encoding="ascii")
         secret_file.chmod(0o600)
+    # token do CLI `aiw` (POST /auth/local): quem le este arquivo entra como o dono
+    tok = data / "cli-token"
+    if not tok.exists():
+        tok.write_text(secrets.token_urlsafe(32), encoding="ascii")
+        tok.chmod(0o600)
     url = f"http://localhost:{app_port}"
     env = dict(os.environ)
     env.update({
@@ -286,6 +291,7 @@ def backend_env(data: Path, pg_port: int, app_port: int, site: Path | None, web:
         "WHATSAPP_LOCAL_DIR": str(data / "whatsapp"),
         "UPLOADS_DIR": str(data / "uploads"),
         "AIW_PORT": str(app_port),
+        "AIW_LOCAL_TOKEN_FILE": str(tok),
         "OPENROUTER_REDIRECT_URI": f"{url}/api/integrations/providers/openrouter/callback",
         # pg_dump/psql do motor primeiro (backup pelo painel), depois o PATH do sistema
         "PATH": f"{PG_BIN}{os.pathsep}{os.environ.get('PATH', '')}",

@@ -98,6 +98,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# CLI `aiw`: markdown renderizado no terminal. Opcional de propósito — o CLI chega pela
+# atualização leve e roda sem isto (texto simples) num motor instalado antes do extra.
+cli = [
+    "rich>=13.7",
+]
 # WhatsApp por QR sem a Evolution API: o whatsmeow (Go) embutido. Vai no motor do app
 # desktop (build-engine.ps1); a imagem Docker segue com a Evolution e não instala isto.
 whatsapp-local = [

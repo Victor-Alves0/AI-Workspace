@@ -111,6 +111,8 @@ class ChatOut(BaseModel):
     roundtable_config: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
+    # hora da última mensagem (só na listagem; None = chat sem mensagens)
+    last_message_at: datetime | None = None
 
 
 class ChatDetail(ChatOut):
